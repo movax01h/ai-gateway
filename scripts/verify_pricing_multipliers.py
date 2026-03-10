@@ -1,11 +1,14 @@
 #!/usr/bin/env python
-"""Verify all selectable models have corresponding pricing multipliers in CustomersDot.
+"""Verify all billable models have corresponding pricing multipliers in CustomersDot.
 
 This script prevents shipping new models without billing configuration, which would
 cause unbillable usage events and lost revenue.
 
-It compares models in unit_primitives.yml against pricing_multipliers.yml in CustomersDot
-and fails if any selectable model is missing a pricing multiplier.
+It compares models from two sources against pricing_multipliers.yml in CustomersDot:
+1. Selectable models in unit_primitives.yml (models users can select in the UI)
+2. Proxy models in models.yml (models with proxy_provider set, accessible via proxy endpoint)
+
+The script fails if any billable model is missing a pricing multiplier.
 
 Note: Designed for GitLab CI where CI_JOB_TOKEN is automatically available.
 AI Gateway must be in CustomersDot's CI/CD Job Token Allowlist.
@@ -121,6 +124,39 @@ def get_selectable_models() -> dict[str, str]:
     return result
 
 
+def get_proxy_models() -> dict[str, str]:
+    """Get all proxy model IDs mapped to their gitlab_identifier.
+
+    Reads models.yml to find all models with proxy_provider set. These models
+    are accessible via the proxy endpoint and need pricing multipliers.
+
+    Returns:
+        Dict mapping normalized model IDs to gitlab_identifiers.
+        Example: {"claude-sonnet-4-5-20250929": "claude_sonnet_4_5_20250929"}
+    """
+    config = ModelSelectionConfig.instance()
+    llm_definitions = config.get_llm_definitions()
+
+    result = {}
+    for gitlab_id, llm_def in llm_definitions.items():
+        # Only include models with proxy_provider set
+        if not llm_def.proxy_provider:
+            continue
+
+        model_id = llm_def.params.model
+        if not model_id:
+            print(
+                f"WARNING: No params.model for proxy model '{gitlab_id}'",
+                file=sys.stderr,
+            )
+            continue
+
+        normalized = normalize_model_id(model_id)
+        result[normalized] = gitlab_id
+
+    return result
+
+
 def get_pricing_keys(pricing_config: dict) -> set[str]:
     """Extract model keys that have pricing multipliers defined.
 
@@ -146,12 +182,25 @@ def main() -> int:
     print("Loading selectable models from unit_primitives.yml...")
     selectable_models = get_selectable_models()
 
-    print(f"Checking {len(selectable_models)} selectable models...\n")
+    print("Loading proxy models from models.yml...")
+    proxy_models = get_proxy_models()
+
+    # Combine both sources - proxy models may overlap with selectable models
+    # Use selectable_models as base, then add any proxy-only models
+    all_billable_models = dict(selectable_models)
+    for model_id, gitlab_id in proxy_models.items():
+        if model_id not in all_billable_models:
+            all_billable_models[model_id] = gitlab_id
+
+    print(
+        f"Checking {len(all_billable_models)} billable models "
+        f"({len(selectable_models)} selectable, {len(proxy_models)} proxy)...\n"
+    )
 
     # Find models without pricing multipliers
     missing = [
         (model_id, gitlab_id)
-        for model_id, gitlab_id in sorted(selectable_models.items())
+        for model_id, gitlab_id in sorted(all_billable_models.items())
         if model_id not in pricing_keys
     ]
 
@@ -170,7 +219,7 @@ def main() -> int:
         )
         return 1
 
-    print(f"All {len(selectable_models)} selectable models have pricing multipliers")
+    print(f"All {len(all_billable_models)} billable models have pricing multipliers")
     return 0
 
 

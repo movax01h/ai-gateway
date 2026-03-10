@@ -9,6 +9,7 @@ import pytest
 from ai_gateway.model_selection.models import ChatAnthropicParams, ChatLiteLLMParams
 from scripts.verify_pricing_multipliers import (
     get_pricing_keys,
+    get_proxy_models,
     get_selectable_models,
     normalize_model_id,
 )
@@ -155,3 +156,84 @@ class TestGetSelectableModels:
 
         assert "codestral-2508" not in result
         assert "claude-sonnet-4" in result
+
+
+class TestGetProxyModels:
+    """Test extraction of proxy models from models.yml."""
+
+    def test_extracts_models_with_proxy_provider(self, monkeypatch):
+        """Should extract models that have proxy_provider set."""
+        mock_anthropic_model = MagicMock()
+        mock_anthropic_model.proxy_provider = "anthropic"
+        mock_anthropic_model.params = MagicMock()
+        mock_anthropic_model.params.model = "claude-sonnet-4-5-20250929"
+
+        mock_openai_model = MagicMock()
+        mock_openai_model.proxy_provider = "openai"
+        mock_openai_model.params = MagicMock()
+        mock_openai_model.params.model = "gpt-5-codex"
+
+        mock_config = MagicMock()
+        mock_config.get_llm_definitions.return_value = {
+            "claude_sonnet_4_5_20250929": mock_anthropic_model,
+            "gpt_5_codex": mock_openai_model,
+        }
+
+        from ai_gateway.model_selection import ModelSelectionConfig
+
+        monkeypatch.setattr(ModelSelectionConfig, "instance", lambda: mock_config)
+
+        result = get_proxy_models()
+
+        assert "claude-sonnet-4-5-20250929" in result
+        assert result["claude-sonnet-4-5-20250929"] == "claude_sonnet_4_5_20250929"
+        assert "gpt-5-codex" in result
+        assert result["gpt-5-codex"] == "gpt_5_codex"
+
+    def test_excludes_models_without_proxy_provider(self, monkeypatch):
+        """Should not include models without proxy_provider."""
+        mock_proxy_model = MagicMock()
+        mock_proxy_model.proxy_provider = "anthropic"
+        mock_proxy_model.params = MagicMock()
+        mock_proxy_model.params.model = "claude-proxy"
+
+        mock_non_proxy_model = MagicMock()
+        mock_non_proxy_model.proxy_provider = None
+        mock_non_proxy_model.params = MagicMock()
+        mock_non_proxy_model.params.model = "claude-vertex"
+
+        mock_config = MagicMock()
+        mock_config.get_llm_definitions.return_value = {
+            "claude_proxy": mock_proxy_model,
+            "claude_vertex": mock_non_proxy_model,
+        }
+
+        from ai_gateway.model_selection import ModelSelectionConfig
+
+        monkeypatch.setattr(ModelSelectionConfig, "instance", lambda: mock_config)
+
+        result = get_proxy_models()
+
+        assert "claude-proxy" in result
+        assert "claude-vertex" not in result
+
+    def test_normalizes_vertex_style_model_ids(self, monkeypatch):
+        """Should normalize @ to - in model IDs."""
+        mock_model = MagicMock()
+        mock_model.proxy_provider = "anthropic"
+        mock_model.params = MagicMock()
+        mock_model.params.model = "claude-sonnet-4-5@20250929"
+
+        mock_config = MagicMock()
+        mock_config.get_llm_definitions.return_value = {
+            "claude_sonnet_vertex": mock_model,
+        }
+
+        from ai_gateway.model_selection import ModelSelectionConfig
+
+        monkeypatch.setattr(ModelSelectionConfig, "instance", lambda: mock_config)
+
+        result = get_proxy_models()
+
+        assert "claude-sonnet-4-5-20250929" in result
+        assert "claude-sonnet-4-5@20250929" not in result
