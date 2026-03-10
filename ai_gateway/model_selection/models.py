@@ -46,6 +46,7 @@ class ChatLiteLLMParams(BaseModelParams):
     custom_llm_provider: str | None = None
     """Easily switch to huggingface, replicate, together ai, sagemaker, etc.
     Example - https://litellm.vercel.app/docs/providers/vllm#batch-completion"""
+    identifier: str | None = None
 
 
 class ChatAnthropicParams(BaseModelParams):
@@ -69,6 +70,7 @@ class CompletionLiteLLMParams(BaseModelParams):
     completion_type: CompletionType
     fim_format: str | None = None
     custom_llm_provider: str | None = None
+    identifier: str | None = None
 
     @model_validator(mode="after")
     def validate_fim_format(self) -> "CompletionLiteLLMParams":

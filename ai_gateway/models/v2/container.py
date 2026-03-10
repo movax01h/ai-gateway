@@ -87,7 +87,6 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             ChatLiteLLM,
             model_keys=config.model_keys,
-            model_endpoints=config.model_endpoints,
         ),
         mocked=providers.Factory(mock.FakeModel),
         agentic=providers.Factory(
@@ -107,7 +106,6 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             CompletionLiteLLM,
             model_keys=config.model_keys,
-            model_endpoints=config.model_endpoints,
         ),
         mocked=providers.Factory(mock.FakeCompletionModel),
         agentic=providers.Factory(mock.AgenticFakeModel),

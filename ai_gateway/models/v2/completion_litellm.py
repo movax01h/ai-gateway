@@ -85,7 +85,6 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
 
     def __init__(self, **kwargs: Any) -> None:
         kwargs.pop("model_keys", None)
-        kwargs.pop("model_endpoints", None)
         kwargs.pop("client", None)
         kwargs.pop("streaming", None)
         kwargs.pop("model_kwargs", None)

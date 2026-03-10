@@ -147,25 +147,27 @@ def create_model_metadata(
             )
 
         provider_keys = data.get("provider_keys", {})
-        model_endpoints = data.get("model_endpoints", {})
 
-        region_config = model_endpoints.get("fireworks_current_region_endpoint", {})
-        model_config = region_config.get(fireworks_llm_definition.params.model, {})
+        model_identifier: str | None = getattr(
+            fireworks_llm_definition.params, "identifier", None
+        )
 
-        model_identifier = model_config.get("identifier")
-        if not model_identifier or model_identifier == "":
-            if not mock_model_responses:
-                raise ValueError(
-                    f"Fireworks model identifier is missing for model {data['name']}."
-                )
+        if (
+            not model_identifier or model_identifier == ""
+        ) and not mock_model_responses:
+            raise ValueError(
+                f"Fireworks model identifier is missing for model {data['name']}."
+            )
+
+        if not model_identifier:
             # Allow empty identifier when mock_model_responses is True
             model_identifier = ""
 
         return FireworksModelMetadata(
             provider="fireworks_ai",
             name=data["name"],
-            endpoint=model_config.get("endpoint"),
-            api_key=provider_keys.get("fireworks_api_key"),
+            endpoint=data.get("fireworks_api_base_url"),
+            api_key=provider_keys.get("fireworks_provider_api_key"),
             model_identifier=model_identifier,
             using_cache=data.get("using_cache"),
             session_id=data.get("session_id"),

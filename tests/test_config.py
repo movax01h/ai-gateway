@@ -15,7 +15,6 @@ from ai_gateway.config import (
     ConfigGoogleCloudProfiler,
     ConfigInstrumentator,
     ConfigLogging,
-    ConfigModelEndpoints,
     ConfigModelLimits,
     ConfigProcessLevelFeatureFlags,
     ConfigSnowplow,
@@ -402,45 +401,6 @@ def test_config_vertex_text_model(values: dict, expected: ConfigVertexTextModel)
         config = Config(_env_file=None)
 
         assert config.vertex_text_model == expected
-
-
-@pytest.mark.parametrize(
-    ("values", "expected"),
-    [
-        ({}, ConfigModelEndpoints()),
-        (
-            {
-                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"location": {"model": {"endpoint": "endpoint"}}}',  # pylint: disable=line-too-long
-                "AIGW_GOOGLE_CLOUD_PLATFORM__LOCATION": "location",
-                "RUNWAY_REGION": "test-case1",  # ignored
-            },
-            ConfigModelEndpoints(
-                fireworks_regional_endpoints={
-                    "location": {"model": {"endpoint": "endpoint"}}
-                },
-                fireworks_current_region_endpoint={"model": {"endpoint": "endpoint"}},
-            ),
-        ),
-        (
-            {
-                "AIGW_MODEL_ENDPOINTS__FIREWORKS_REGIONAL_ENDPOINTS": '{"us": {"model": {"endpoint": "endpoint"}}}',
-                "AIGW_GOOGLE_CLOUD_PLATFORM__LOCATION": "unknown",
-                "RUNWAY_REGION": "test-case1",  # ignored
-            },
-            ConfigModelEndpoints(
-                fireworks_regional_endpoints={
-                    "us": {"model": {"endpoint": "endpoint"}}
-                },
-                fireworks_current_region_endpoint={"model": {"endpoint": "endpoint"}},
-            ),
-        ),
-    ],
-)
-def test_config_model_endpoints(values: dict, expected: ConfigVertexTextModel):
-    with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)
-
-        assert config.model_endpoints == expected
 
 
 @pytest.mark.parametrize(
