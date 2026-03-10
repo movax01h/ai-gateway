@@ -384,6 +384,8 @@ class EditFile(DuoBaseTool):
 IMPORTANT:
 - When making similar changes to multiple files, include batches of tool calls in a single response
 - Do not make separate responses for each file - group related files together
+- You must read the file using the read_file tool before attempting to edit it
+- Attempting to edit a file without reading it first will result in an error
 
 Examples of individual file edits:
 - Update a function parameter:
