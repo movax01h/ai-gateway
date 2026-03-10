@@ -84,6 +84,7 @@ class InternalEventsClient:
         log_method(
             message,
             event_name=event_payload.get("se_ac"),
+            event_id=event_payload.get("eid"),
             label=event_payload.get("se_la"),
             property=event_payload.get("se_pr"),
         )
