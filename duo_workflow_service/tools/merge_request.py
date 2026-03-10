@@ -44,8 +44,10 @@ class MergeRequestResourceInput(ProjectResourceInput):
 
 
 class CreateMergeRequestInput(ProjectResourceInput):
-    source_branch: str = Field(description="The source branch name")
-    target_branch: str = Field(description="The target branch name")
+    source_branch: str = Field(
+        description="The remote source branch name. This branch must exist on the remote repository."
+    )
+    target_branch: str = Field(description="The remote target branch name.")
     title: str = Field(description="Title of the merge request")
     description: Optional[str] = Field(
         default=None,
@@ -74,6 +76,10 @@ class CreateMergeRequestInput(ProjectResourceInput):
 class CreateMergeRequest(DuoBaseTool):
     name: str = "create_merge_request"
     description: str = f"""Create a new merge request in the specified project.
+
+    This tool creates a merge request using the REMOTE source and target branches.
+    Make sure the source branch has been pushed to the remote repository before calling this tool,
+    otherwise the merge request will have an empty diff.
 
     IMPORTANT: Do NOT include quick actions in the description field. Quick actions are lines starting
     with / (such as /label, /assign, /merge, /milestone) and are not supported for security reasons.

@@ -1,16 +1,13 @@
+# pylint: disable=too-many-lines
 import hashlib
 import json
-from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from gitlab_cloud_connector import CloudConnectorUser
 from langchain.tools import BaseTool
-from pydantic import Field
 
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
-    _CAPABILITY_DEPENDENT_TOOLS,
     _DEFAULT_TOOLS,
     NO_OP_TOOLS,
     Toolset,
@@ -24,7 +21,6 @@ from duo_workflow_service.tools.code_review import (
     PostDuoCodeReview,
 )
 from duo_workflow_service.tools.command import RunCommand, ShellCommand
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.findings.get_security_finding_details import (
     GetSecurityFindingDetails,
 )
@@ -76,6 +72,8 @@ _outbox = MagicMock(spec=Outbox)
                 "update_task_description",
                 "get_plan",
                 "set_task_status",
+                "think",
+                "todo_write",
                 "handover_tool",
                 "request_user_clarification_tool",
             },
@@ -89,6 +87,8 @@ _outbox = MagicMock(spec=Outbox)
                 "update_task_description",
                 "get_plan",
                 "set_task_status",
+                "think",
+                "todo_write",
                 "run_command",
                 "handover_tool",
                 "request_user_clarification_tool",
@@ -104,6 +104,8 @@ _outbox = MagicMock(spec=Outbox)
                 "update_task_description",
                 "get_plan",
                 "set_task_status",
+                "think",
+                "todo_write",
                 "list_issues",
                 "get_issue",
                 "get_job_logs",
@@ -167,6 +169,8 @@ _outbox = MagicMock(spec=Outbox)
                 "update_vulnerability_severity",
                 "get_plan",
                 "set_task_status",
+                "think",
+                "todo_write",
                 "create_issue",
                 "list_issues",
                 "get_issue",
@@ -248,6 +252,8 @@ _outbox = MagicMock(spec=Outbox)
                 "update_task_description",
                 "get_plan",
                 "set_task_status",
+                "think",
+                "todo_write",
                 "run_git_command",
                 "handover_tool",
                 "request_user_clarification_tool",
@@ -262,6 +268,8 @@ _outbox = MagicMock(spec=Outbox)
                 "update_task_description",
                 "get_plan",
                 "set_task_status",
+                "think",
+                "todo_write",
                 "read_file",
                 "read_files",
                 "create_file_with_contents",
@@ -334,6 +342,8 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "get_plan": tools.GetPlan(),
         "set_task_status": tools.SetTaskStatus(),
+        "think": tools.Think(),
+        "todo_write": tools.TodoWrite(),
         "run_command": tools.RunCommand(metadata=tool_metadata),
         "create_issue": tools.CreateIssue(metadata=tool_metadata),
         "list_issues": tools.ListIssues(metadata=tool_metadata),
@@ -477,6 +487,8 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
         "update_task_description",
         "get_plan",
         "set_task_status",
+        "think",
+        "todo_write",
         "run_command",
         "run_git_command",
         "handover_tool",
@@ -587,6 +599,8 @@ def test_preapproved_tools_initialization(tool_metadata):
         "update_task_description",
         "get_plan",
         "set_task_status",
+        "think",
+        "todo_write",
         "handover_tool",
         "request_user_clarification_tool",
     }
@@ -930,11 +944,8 @@ class TestCapabilityDependentTools:
         """Test that missing required_capability attribute raises RuntimeError."""
         mock_tool_cls = MagicMock(spec=BaseTool)
         mock_tool_cls.__name__ = "MockTool"
-        (
+        if hasattr(mock_tool_cls, "required_capability"):
             delattr(mock_tool_cls, "required_capability")
-            if hasattr(mock_tool_cls, "required_capability")
-            else None
-        )
 
         with patch(
             "duo_workflow_service.components.tools_registry._CAPABILITY_DEPENDENT_TOOLS",
@@ -1169,7 +1180,7 @@ class TestToolCallApprovals:
         )
 
         # Create toolset with tools
-        toolset = registry.toolset(["read_file", "edit_file", "list_dir"])
+        registry.toolset(["read_file", "edit_file", "list_dir"])
 
         # Verify that approval checks work through toolset
         assert not registry.approval_required("read_file", read_file_args)

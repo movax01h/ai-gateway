@@ -27,6 +27,8 @@ from .search import *
 from .search_system import *
 from .security import *
 from .testing import *
+from .think import *
+from .todo_write import *
 from .toolset import *
 from .user import *
 from .vulnerabilities.severity import *
