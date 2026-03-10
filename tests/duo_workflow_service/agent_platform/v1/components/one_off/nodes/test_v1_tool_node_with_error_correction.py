@@ -491,7 +491,7 @@ class TestToolNodeWithErrorCorrectionErrorHandling:
         ]
 
         feedback = tool_node_with_error_correction._create_error_feedback(
-            errors, tool_calls, 1
+            errors, tool_calls, 1, {}
         )
 
         assert isinstance(feedback, HumanMessage)
@@ -508,12 +508,208 @@ class TestToolNodeWithErrorCorrectionErrorHandling:
         tool_calls = [{"name": "tool1", "args": {}, "id": "1"}]
 
         feedback = tool_node_with_error_correction._create_error_feedback(
-            errors, tool_calls, 3
+            errors, tool_calls, 3, {}
         )
 
         assert isinstance(feedback, HumanMessage)
         assert "Attempt 3/3" in feedback.content
         assert "0 attempts remaining" in feedback.content
+
+
+class TestToolNodeWithErrorCorrectionContextTracking:
+    """Test suite for correction_attempts context tracking."""
+
+    @pytest.mark.asyncio
+    async def test_run_error_updates_context_with_correction_attempts(
+        self,
+        tool_node_with_error_correction,
+        flow_state_with_tool_calls_one_off,
+        component_name,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """Test run updates context with correction_attempts on error."""
+        # Configure tool to raise exception
+        mock_tool.ainvoke = AsyncMock(side_effect=Exception("Tool execution failed"))
+        # Mock security to return error message so it's detected as failed
+        mock_prompt_security.return_value = (
+            "Tool runtime exception due to Tool execution failed"
+        )
+
+        result = await tool_node_with_error_correction.run(
+            flow_state_with_tool_calls_one_off
+        )
+
+        # Verify context was updated with correction_attempts
+        assert "context" in result
+        assert component_name in result["context"]
+        assert "correction_attempts" in result["context"][component_name]
+        assert result["context"][component_name]["correction_attempts"] == 1
+
+    @pytest.mark.asyncio
+    async def test_run_error_increments_correction_attempts(
+        self,
+        tool_node_with_error_correction,
+        component_name,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """Test run increments correction_attempts from existing context."""
+        # Create state with existing correction_attempts
+        state = {
+            "status": "execution",
+            "conversation_history": {
+                component_name: [
+                    Mock(
+                        tool_calls=[
+                            {
+                                "name": "test_tool",
+                                "args": {"param": "value"},
+                                "id": "1",
+                            }
+                        ]
+                    )
+                ]
+            },
+            "ui_chat_log": [],
+            "context": {
+                component_name: {"correction_attempts": 1, "other_data": "value"}
+            },
+        }
+
+        # Configure tool to raise exception
+        mock_tool.ainvoke = AsyncMock(side_effect=Exception("Tool execution failed"))
+        # Mock security to return error message so it's detected as failed
+        mock_prompt_security.return_value = (
+            "Tool runtime exception due to Tool execution failed"
+        )
+
+        result = await tool_node_with_error_correction.run(state)
+
+        # Verify correction_attempts was incremented
+        assert result["context"][component_name]["correction_attempts"] == 2
+        # Verify other context data is preserved
+        assert result["context"][component_name]["other_data"] == "value"
+
+    @pytest.mark.asyncio
+    async def test_run_error_feedback_includes_attempt_count(
+        self,
+        tool_node_with_error_correction,
+        flow_state_with_tool_calls_one_off,
+        component_name,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """Test error feedback message includes correct attempt count."""
+        # Configure tool to raise exception
+        mock_tool.ainvoke = AsyncMock(side_effect=Exception("Tool execution failed"))
+        # Mock security to return error message so it's detected as failed
+        mock_prompt_security.return_value = (
+            "Tool runtime exception due to Tool execution failed"
+        )
+
+        result = await tool_node_with_error_correction.run(
+            flow_state_with_tool_calls_one_off
+        )
+
+        # Verify error feedback message includes attempt count
+        conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+        # Find the error feedback message (should be the last one)
+        error_feedback = conversation_messages[-1]
+        assert isinstance(error_feedback, HumanMessage)
+        assert "Attempt 1/3" in error_feedback.content
+        assert "2 attempts remaining" in error_feedback.content
+
+    @pytest.mark.asyncio
+    async def test_run_max_attempts_reached_sets_failed_status(
+        self,
+        component_name,
+        mock_toolset,
+        flow_id,
+        flow_type,
+        ui_history_one_off,
+        mock_internal_event_client,
+        mock_tool_monitoring,
+        mock_prompt_security,
+        mock_logger,
+        tool_calls_key,
+        tool_responses_key,
+    ):
+        """Test run sets execution status to failed when max attempts reached."""
+        execution_result_key = IOKey(
+            target="context", subkeys=[component_name, "execution_result"]
+        )
+
+        tool_node = ToolNodeWithErrorCorrection(
+            name="test_tool_node",
+            component_name=component_name,
+            toolset=mock_toolset,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+            ui_history=ui_history_one_off,
+            max_correction_attempts=3,
+            tool_calls_key=tool_calls_key,
+            tool_responses_key=tool_responses_key,
+            execution_result_key=execution_result_key,
+        )
+
+        # Create state with correction_attempts at max-1
+        state = {
+            "status": "execution",
+            "conversation_history": {
+                component_name: [
+                    Mock(
+                        tool_calls=[
+                            {
+                                "name": "test_tool",
+                                "args": {"param": "value"},
+                                "id": "1",
+                            }
+                        ]
+                    )
+                ]
+            },
+            "ui_chat_log": [],
+            "context": {component_name: {"correction_attempts": 2}},
+        }
+
+        # Configure tool to raise exception
+        mock_toolset["test_tool"].ainvoke = AsyncMock(
+            side_effect=Exception("Tool execution failed")
+        )
+        # Mock security to return error message so it's detected as failed
+        mock_prompt_security.return_value = (
+            "Tool runtime exception due to Tool execution failed"
+        )
+
+        result = await tool_node.run(state)
+
+        # Verify execution_result is set to "failed"
+        assert result["context"][component_name]["execution_result"] == "failed"
+        # Verify correction_attempts was incremented to max
+        assert result["context"][component_name]["correction_attempts"] == 3
+
+    @pytest.mark.asyncio
+    async def test_run_success_does_not_update_correction_attempts(
+        self,
+        tool_node_with_error_correction,
+        flow_state_with_tool_calls_one_off,
+        component_name,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """Test successful run does not update correction_attempts in context."""
+        result = await tool_node_with_error_correction.run(
+            flow_state_with_tool_calls_one_off
+        )
+
+        # Verify context is not updated with correction_attempts on success
+        # (it should only be updated on errors)
+        if "context" in result and component_name in result["context"]:
+            assert "correction_attempts" not in result["context"][component_name]
 
 
 class TestToolNodeWithErrorCorrectionSecurity:
