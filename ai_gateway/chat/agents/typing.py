@@ -43,6 +43,7 @@ class AgentToolAction(AgentBaseEvent):
 class AgentFinalAnswer(AgentBaseEvent):
     type: str = "final_answer_delta"
     text: str
+    finish_reason: Optional[str] = None
 
 
 class AgentUnknownAction(AgentBaseEvent):

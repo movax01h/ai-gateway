@@ -1,3 +1,6 @@
+from typing import Optional
+from unittest.mock import patch
+
 import fastapi
 import pytest
 from langchain_core.messages import SystemMessage
@@ -108,6 +111,137 @@ class TestReActPlainTextParser:
     def test_agent_message(self, text: str, expected: AgentToolAction):
         parser = ReActPlainTextParser()
         actual = parser.parse(text)
+
+        assert actual == expected
+
+    @pytest.mark.parametrize(
+        ("meta_data", "expected_reason"),
+        [
+            # Vertex finish_reason
+            ({"finish_reason": "stop"}, "stop"),
+            ({"finish_reason": "length"}, "length"),
+            # Anthropic stop_reason
+            ({"stop_reason": "end_turn"}, "end_turn"),
+            ({"stop_reason": "max_tokens"}, "length"),  # Converted to Vertex format
+            # Both present (should not happen) (Anthropic takes precedence)
+            (
+                {"finish_reason": "stop", "stop_reason": "max_tokens"},
+                "length",
+            ),
+            # Empty metadata
+            ({}, None),
+            # None values
+            ({"finish_reason": None}, None),
+            ({"stop_reason": None}, None),
+        ],
+    )
+    def test_parse_finish_reason(self, meta_data: dict, expected_reason: str):
+        parser = ReActPlainTextParser()
+        actual_reason = parser.parse_finish_reason(meta_data)
+
+        assert actual_reason == expected_reason
+
+    @pytest.mark.parametrize(
+        ("message", "finish_reason", "expected"),
+        [
+            (
+                "<message>Thought: test\nFinal Answer: This is the answer</message>",
+                "stop",
+                AgentFinalAnswer(text="This is the answer", finish_reason="stop"),
+            ),
+            (
+                "<message>Thought: test\nFinal Answer: Truncated answer</message>",
+                "length",
+                AgentFinalAnswer(text="Truncated answer", finish_reason="length"),
+            ),
+            (
+                "<message>Thought: test\nFinal Answer: No finish reason</message>",
+                None,
+                AgentFinalAnswer(text="No finish reason", finish_reason=None),
+            ),
+            (
+                "<message>Thought: test\nNo Final Answer here</message>",
+                "stop",
+                None,
+            ),
+        ],
+    )
+    def test_parse_final_answer(
+        self,
+        message: str,
+        finish_reason: Optional[str],
+        expected: Optional[AgentFinalAnswer],
+    ):
+        parser = ReActPlainTextParser()
+        actual = parser._parse_final_answer(message, finish_reason)
+
+        assert actual == expected
+
+    @pytest.mark.parametrize(
+        ("text", "finish_reason", "expected"),
+        [
+            (
+                "thought1\nFinal Answer: final answer",
+                "stop",
+                AgentFinalAnswer(text="final answer", finish_reason="stop"),
+            ),
+            (
+                "thought1\nFinal Answer: truncated",
+                "length",
+                AgentFinalAnswer(text="truncated", finish_reason="length"),
+            ),
+            (
+                "thought1\nFinal Answer: truncated",
+                None,
+                AgentFinalAnswer(text="truncated", finish_reason=None),
+            ),
+            (
+                "thought1\nAction: tool1\nAction Input: tool_input1",
+                "stop",
+                AgentToolAction(
+                    thought="thought1",
+                    tool="tool1",
+                    tool_input="tool_input1",
+                ),
+            ),
+            (
+                "thought1\nAction: tool1\nAction Input: tool_input1",
+                "length",
+                AgentToolAction(
+                    thought="thought1",
+                    tool="tool1",
+                    tool_input="tool_input1",
+                ),
+            ),
+            (
+                "thought1\nAction: tool1\nAction Input: tool_input1",
+                None,
+                AgentToolAction(
+                    thought="thought1",
+                    tool="tool1",
+                    tool_input="tool_input1",
+                ),
+            ),
+            (
+                "Just some random text",
+                "stop",
+                AgentUnknownAction(text="Just some random text"),
+            ),
+            (
+                "Just some random text",
+                "length",
+                AgentUnknownAction(text="Just some random text"),
+            ),
+            (
+                "Just some random text",
+                None,
+                AgentUnknownAction(text="Just some random text"),
+            ),
+        ],
+    )
+    def test_parse(self, text: str, finish_reason: Optional[str], expected):
+        parser = ReActPlainTextParser()
+        actual = parser._parse(text, finish_reason)
 
         assert actual == expected
 
@@ -564,3 +698,103 @@ class TestReActAgent:
 
         messages = prompt_value.to_messages()
         assert len(messages) == 3  # System, User and one added AI message
+
+
+class TestAppendWarningIfResponseExceededMaxTokens:
+    """Test the _append_warning_if_response_exceeded_max_tokens method."""
+
+    @pytest.mark.parametrize(
+        ("event", "expected_text"),
+        [
+            # Final answer with length finish reason - should add warning
+            (
+                AgentFinalAnswer(text="Response text", finish_reason="length"),
+                (
+                    "Response text\n\n"
+                    "**Warning:** Response was incomplete due to token limits. "
+                    "Please try again with less context."
+                ),
+            ),
+            # Final answer with stop finish reason - no warning
+            (
+                AgentFinalAnswer(text="Response text", finish_reason="stop"),
+                "Response text",
+            ),
+            # Final answer with no finish reason - no warning
+            (
+                AgentFinalAnswer(text="Response text", finish_reason=None),
+                "Response text",
+            ),
+        ],
+    )
+    def test_append_warning_if_response_exceeded_max_tokens(
+        self, event, expected_text, agent
+    ):
+
+        result = agent._append_warning_if_response_exceeded_max_tokens(event)
+
+        if expected_text is None:
+            # For tool actions, verify the event is unchanged
+            assert result == event
+        else:
+            # For final answers, verify the text is as expected
+            assert isinstance(result, AgentFinalAnswer)
+            assert result.text == expected_text
+
+
+class TestGLAgentRemoteExecutorTruncationWarning:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("agent_events", "expected_text"),
+        [
+            (
+                [
+                    AgentFinalAnswer(
+                        text="This is a complete answer text", finish_reason="stop"
+                    )
+                ],
+                "This is a complete answer text",
+            ),
+            (
+                [
+                    AgentFinalAnswer(
+                        text="This is truncated text", finish_reason="length"
+                    )
+                ],
+                (
+                    "This is truncated text\n\n"
+                    "**Warning:** Response was incomplete due to token limits. "
+                    "Please try again with less context."
+                ),
+            ),
+            (
+                [AgentFinalAnswer(text="No finish reason text", finish_reason=None)],
+                "No finish reason text",
+            ),
+            (
+                [AgentFinalAnswer(text="End turn text", finish_reason="end_turn")],
+                "End turn text",
+            ),
+        ],
+    )
+    async def test_stream_truncation_warning(self, agent_events, expected_text, agent):
+        """Test that truncation warning is appended when response exceeds max tokens in astream."""
+        inputs = ReActAgentInputs(
+            messages=[
+                Message(role=Role.USER, content="Test question"),
+            ],
+        )
+
+        async def mock_parent_astream(*_args, **_kwargs):
+            for event in agent_events:
+                yield event
+
+        with (
+            patch.object(type(agent).__bases__[0], "astream", new=mock_parent_astream),
+            request_cycle_context({}),
+        ):
+            actual_events = [event async for event in agent.astream(inputs)]
+
+        assert len(actual_events) == 1
+        assert isinstance(actual_events[0], AgentFinalAnswer)
+        assert actual_events[0].text == expected_text

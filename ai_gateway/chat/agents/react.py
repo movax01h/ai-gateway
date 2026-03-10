@@ -32,6 +32,10 @@ __all__ = [
 
 
 _REACT_AGENT_TOOL_ACTION_CONTEXT_KEY = "duo_chat.agent_tool_action"
+_RESPONSE_MAX_TOKENS_WARNING = (
+    "**Warning:** Response was incomplete due to token limits. "
+    "Please try again with less context."
+)
 
 request_log = get_request_logger("react")
 
@@ -44,11 +48,13 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
     re_action_input: re.Pattern = re.compile(r"Action Input:\s*([\s\S]*?)\s*</message>")
     re_final_answer: re.Pattern = re.compile(r"Final Answer:\s*([\s\S]*?)\s*</message>")
 
-    def _parse_final_answer(self, message: str) -> Optional[AgentFinalAnswer]:
+    def _parse_final_answer(
+        self, message: str, finish_reason: Optional[str]
+    ) -> Optional[AgentFinalAnswer]:
         if match_answer := self.re_final_answer.search(message):
 
             return AgentFinalAnswer(
-                text=match_answer.group(1),
+                text=match_answer.group(1), finish_reason=finish_reason
             )
 
         return None
@@ -83,12 +89,12 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
         return name.replace("\\_", "_")
 
-    def _parse(self, text: str) -> AgentEventType:
+    def _parse(self, text: str, finish_reason: Optional[str]) -> AgentEventType:
         wrapped_text = f"<message>Thought: {text}</message>"
 
         event: AgentEventType  # Explicit declaration avoids mypy confusion
 
-        if final_answer := self._parse_final_answer(wrapped_text):
+        if final_answer := self._parse_final_answer(wrapped_text, finish_reason):
             event = final_answer
         elif agent_action := self._parse_agent_action(wrapped_text):
             event = agent_action
@@ -97,15 +103,34 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 
         return event
 
+    def parse_finish_reason(self, meta_data: Optional[dict]) -> Optional[str]:
+        if not meta_data:
+            return None
+
+        reason = None
+
+        if finish_reason := meta_data.get("finish_reason"):  # Vertex
+            reason = finish_reason
+
+        if stop_reason := meta_data.get("stop_reason"):  # Anthropic
+            reason = stop_reason
+            if stop_reason == "max_tokens":
+                reason = "length"  # Convert to Vertex format
+
+        return reason
+
     @override
     def parse_result(
         self, result: list[Generation], *, partial: bool = False
     ) -> Optional[AgentEventType]:
         event = None
         text = result[0].text.strip()
+        message = getattr(result[0], "message", None)
+        response_metadata = getattr(message, "response_metadata", None)
+        finish_reason = self.parse_finish_reason(response_metadata)
 
         try:
-            event = self._parse(text)
+            event = self._parse(text, finish_reason)
         except ValueError as e:
             if not partial:
                 msg = f"Invalid output: {text}"
@@ -199,6 +224,13 @@ class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
     def __init__(self, prompt: Prompt) -> None:
         super().__init__(bound=prompt | ReActPlainTextParser())
 
+    def _append_warning_if_response_exceeded_max_tokens(
+        self, event: AgentFinalAnswer
+    ) -> AgentFinalAnswer:
+        if event.finish_reason == "length":
+            event.text = event.text + "\n\n" + _RESPONSE_MAX_TOKENS_WARNING
+        return event
+
     @override
     async def astream(
         self,
@@ -224,6 +256,10 @@ class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
                     if len(event.text) > 0:
                         response = AgentFinalAnswer(
                             text=event.text[len_final_answer:],
+                            finish_reason=event.finish_reason,
+                        )
+                        response = self._append_warning_if_response_exceeded_max_tokens(
+                            response
                         )
                         yield cast(TypeAgentEvent, response)
 
