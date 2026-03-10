@@ -1,0 +1,13 @@
+name: convert_ci_push_changes_prompt
+model:
+  params:
+    max_tokens: 32_768
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'convert_ci_push_changes/system/1.0.0.jinja' %}
+  user: |
+    {% include 'convert_ci_push_changes/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60
