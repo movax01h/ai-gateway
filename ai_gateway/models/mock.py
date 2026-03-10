@@ -239,3 +239,34 @@ class ChatModel(ChatModelBase):
             score=0,
             safety_attributes=SafetyAttributes(),
         )
+
+
+class FakeEmbeddingModel:
+    def __init__(self, *_args: Any, **_kwargs: Any):
+        pass
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-provider"
+
+    @property
+    def _identifying_params(self) -> dict[str, Any]:
+        return {"model": "fake-model"}
+
+    def bind(self, **_kwargs: Any) -> RunnableLambda:
+        return RunnableLambda(self._ainvoke)
+
+    async def _ainvoke(self, input: dict[str, Any]) -> AIMessage:
+        return AIMessage(content=self._mock_predictions(input))
+
+    async def ainvoke(self, input: dict[str, Any], **_kwargs: Any) -> AIMessage:
+        return AIMessage(content=self._mock_predictions(input))
+
+    def _mock_predictions(self, input: dict[str, Any]) -> list[str | dict[Any, Any]]:
+        return [
+            {
+                "embedding": [0.1, 0.2, 0.3],
+                "index": idx,
+            }
+            for idx, _content in enumerate(input.get("contents", []))
+        ]

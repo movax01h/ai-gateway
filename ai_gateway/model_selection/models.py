@@ -18,6 +18,7 @@ __all__ = [
 class ModelClassProvider(StrEnum):
     LITE_LLM = "litellm"
     LITE_LLM_COMPLETION = "litellm_completion"
+    LITE_LLM_EMBEDDING = "litellm_embedding"
     ANTHROPIC = "anthropic"
     AMAZON_Q = "amazon_q"
     OPENAI = "openai"
@@ -74,3 +75,8 @@ class CompletionLiteLLMParams(BaseModelParams):
         if self.completion_type == CompletionType.FIM and not self.fim_format:
             raise ValueError("fim_format is required when completion_type is 'fim'")
         return self
+
+
+class EmbeddingLiteLLMParams(BaseModelParams):
+    custom_llm_provider: str | None = None
+    vertex_ai_location: str | None = None

@@ -59,6 +59,7 @@ _SKIP_ENDPOINTS = [
 CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.v1.x_ray.libraries",
     "ai_gateway.api.v1.chat.agent",
+    "ai_gateway.api.v1.embeddings.code_embeddings",
     "ai_gateway.api.v1.search.docs",
     "ai_gateway.api.v2.code.completions",
     "ai_gateway.api.v3.code.completions",

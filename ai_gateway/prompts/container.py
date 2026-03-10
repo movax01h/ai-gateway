@@ -64,6 +64,9 @@ class ContainerPrompts(containers.DeclarativeContainer):
             ModelClassProvider.LITE_LLM_COMPLETION: providers.Factory(
                 models.lite_llm_completion_fn
             ),
+            ModelClassProvider.LITE_LLM_EMBEDDING: providers.Factory(
+                models.lite_llm_embedding_fn
+            ),
             ModelClassProvider.GOOGLE_GENAI: providers.Factory(
                 models.google_chat_gen_vertex_ai_global_fn
             ),

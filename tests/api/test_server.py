@@ -36,6 +36,7 @@ from ai_gateway.structured_logging import setup_logging
 _ROUTES_V1 = [
     ("/v1/chat/{chat_invokable}", ["POST"]),  # legacy path
     ("/v1/x-ray/libraries", ["POST"]),
+    ("/v1/embeddings/code_embeddings", ["POST"]),
 ]
 
 _ROUTES_V2 = [

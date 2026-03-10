@@ -11,6 +11,8 @@ from pydantic import AnyUrl
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
+from ai_gateway.model_selection.models import EmbeddingLiteLLMParams
+from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.prompts import Prompt
 from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider, PromptConfig
 from ai_gateway.prompts.registry import (
@@ -159,6 +161,24 @@ def test_container_openai_model_factory_exists(
     assert model.max_tokens == 1_028
     assert model.max_retries == 1
     assert model.output_version == "responses/v1"
+
+
+def test_container_lite_llm_embedding_model_factory_exists(
+    mock_ai_gateway_container: containers.DeclarativeContainer,
+):
+    prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
+    registry = cast(LocalPromptRegistry, prompts.prompt_registry())
+
+    assert ModelClassProvider.LITE_LLM_EMBEDDING in registry.model_factories
+
+    factory = registry.model_factories[ModelClassProvider.LITE_LLM_EMBEDDING]
+    assert isinstance(factory, Factory)
+
+    params = EmbeddingLiteLLMParams(
+        custom_llm_provider="vertex_ai",
+    )
+    model = factory(model="text-embedding-005", **params.model_dump(exclude_none=True))
+    assert isinstance(model, EmbeddingLiteLLM)
 
 
 def test_prompt_family_configs_are_valid():
