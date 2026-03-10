@@ -10,6 +10,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
     CompletionLiteLLMDefinition,
+    EmbeddingLiteLLMDefinition,
     ModelSelectionConfig,
     UnitPrimitiveConfig,
 )
@@ -40,6 +41,13 @@ def mock_fs_fixture(fs: FakeFilesystem):
                 max_context_tokens: 200000
                 params:
                   model: provider-model-2
+              - name: Embedding Model
+                gitlab_identifier: gitlab-embedding-model
+                model_class_provider: litellm_embedding
+                max_context_tokens: 200000
+                params:
+                  custom_llm_provider: openai
+                  model: embedding-model-001
             """
         ),
     )
@@ -84,6 +92,12 @@ def test_load_llm_definitions(selection_config):
             gitlab_identifier="gitlab-model-2",
             max_context_tokens=200000,
             params={"model": "provider-model-2"},
+        ),
+        "gitlab-embedding-model": EmbeddingLiteLLMDefinition(
+            name="Embedding Model",
+            gitlab_identifier="gitlab-embedding-model",
+            max_context_tokens=200000,
+            params={"model": "embedding-model-001", "custom_llm_provider": "openai"},
         ),
     }
 

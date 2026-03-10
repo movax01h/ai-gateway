@@ -18,6 +18,7 @@ from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.completion import completion_prompt_template_factory
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptConfig
+from ai_gateway.prompts.embedding import embedding_prompt_template_factory
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import current_event_context
@@ -359,11 +360,11 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_class_provider = model_metadata.llm_definition.model_class_provider
         prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
 
-        if (
-            not prompt_template_override
-            and model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION
-        ):
-            prompt_template_override = completion_prompt_template_factory
+        if not prompt_template_override:
+            if model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION:
+                prompt_template_override = completion_prompt_template_factory
+            elif model_class_provider == ModelClassProvider.LITE_LLM_EMBEDDING:
+                prompt_template_override = embedding_prompt_template_factory
         prompt_template_factory: TypePromptTemplateFactory | None
         if isinstance(prompt_template_override, str):
             prompt_template_factory = cast(

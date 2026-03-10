@@ -1,0 +1,5 @@
+---
+name: Code Embeddings
+unit_primitive: generate_embeddings_codebase
+prompt_template:
+  user: "{{contents}}"

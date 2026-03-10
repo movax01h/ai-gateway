@@ -4,6 +4,7 @@ from ai_gateway.api.v1 import (
     amazon_q,
     chat,
     code,
+    embeddings,
     models,
     prompts,
     proxy,
@@ -23,3 +24,4 @@ api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(proxy.router, prefix="/proxy", tags=["proxy"])
 api_router.include_router(amazon_q.router, prefix="/amazon_q", tags=["amazon_q"])
 api_router.include_router(models.router, prefix="/models", tags=["models"])
+api_router.include_router(embeddings.router, prefix="/embeddings", tags=["embeddings"])

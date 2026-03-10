@@ -499,6 +499,25 @@ def mock_litellm_acompletion_for_vertex_fixture():
         yield mock_acompletion
 
 
+@pytest.fixture(name="mock_litellm_aembedding_response")
+def mock_litellm_aembedding_response_fixture():
+    return AsyncMock(
+        data=[
+            {"embedding": [0.1, 0.2, 0.3], "index": 0},
+            {"embedding": [0.4, 0.5, 0.6], "index": 1},
+        ],
+    )
+
+
+@pytest.fixture(name="mock_litellm_aembedding")
+def mock_litellm_aembedding_fixture(mock_litellm_aembedding_response):
+    with patch(
+        "ai_gateway.models.v2.embedding_litellm.litellm.aembedding"
+    ) as mock_aembedding:
+        mock_aembedding.return_value = mock_litellm_aembedding_response
+        yield mock_aembedding
+
+
 @pytest.fixture(name="model_response")
 def model_response_fixture():
     return "Hello there!"

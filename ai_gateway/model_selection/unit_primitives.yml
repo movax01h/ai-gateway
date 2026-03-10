@@ -696,3 +696,9 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+  - feature_setting: "embeddings_code"
+    unit_primitives:
+      - "generate_embeddings_codebase"
+    default_model: "text_embedding_005_vertex"
+    selectable_models:
+      - "text_embedding_005_vertex"

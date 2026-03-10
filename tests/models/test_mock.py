@@ -4,6 +4,7 @@ from types import MappingProxyType
 from typing import List
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from ai_gateway.models import Message, ModelMetadata, Role, TextGenModelOutput, mock
 from ai_gateway.safety_attributes import SafetyAttributes
@@ -115,6 +116,17 @@ class TestChatModel:
 
         assert actual_text.startswith("echo:")
         assert all(substring in actual_text for substring in expected_substrings)
+
+
+@pytest.mark.asyncio
+class TestFakeEmbeddingModel:
+    async def test_ainvoke(self):
+        input = {"contents": ["one", "two"]}
+        model = mock.FakeEmbeddingModel()
+
+        response = await model.ainvoke(input)
+        assert isinstance(response, AIMessage)
+        assert len(response.content) == 2
 
 
 def _build_expected_substrings_from_kwargs(

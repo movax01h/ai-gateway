@@ -14,6 +14,7 @@ from ai_gateway.model_selection.models import (
     ChatLiteLLMParams,
     ChatOpenAIParams,
     CompletionLiteLLMParams,
+    EmbeddingLiteLLMParams,
     ModelClassProvider,
 )
 from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
@@ -91,13 +92,21 @@ class CompletionLiteLLMDefinition(BaseLLMDefinition):
     params: CompletionLiteLLMParams
 
 
+class EmbeddingLiteLLMDefinition(BaseLLMDefinition):
+    model_class_provider: Literal[ModelClassProvider.LITE_LLM_EMBEDDING] = (
+        ModelClassProvider.LITE_LLM_EMBEDDING
+    )
+    params: EmbeddingLiteLLMParams
+
+
 LLMDefinition = Annotated[
     ChatLiteLLMDefinition
     | ChatAnthropicDefinition
     | ChatAmazonQDefinition
     | ChatOpenAIDefinition
     | ChatGoogleGenAIDefinition
-    | CompletionLiteLLMDefinition,
+    | CompletionLiteLLMDefinition
+    | EmbeddingLiteLLMDefinition,
     Field(discriminator="model_class_provider"),
 ]
 

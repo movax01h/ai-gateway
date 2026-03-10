@@ -94,7 +94,9 @@ def get_selectable_models() -> dict[str, str]:
     selectable_gitlab_ids = set()
     for up_config in config.get_unit_primitive_config():
         # Skip code_completions - uses flat rate pricing, not model-based multipliers
-        if up_config.feature_setting == "code_completions":
+        # Skip embeddings_code - pricing to be set as part of
+        #   https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/1985
+        if up_config.feature_setting in ("code_completions", "embeddings_code"):
             continue
 
         selectable_gitlab_ids.add(up_config.default_model)

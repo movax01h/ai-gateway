@@ -14,6 +14,7 @@ from ai_gateway.models.v2.chat_google_genai import (
 )
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
+from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.models.v2.openai import ChatOpenAI
 
 __all__ = [
@@ -110,4 +111,12 @@ class ContainerModels(containers.DeclarativeContainer):
         ),
         mocked=providers.Factory(mock.FakeCompletionModel),
         agentic=providers.Factory(mock.AgenticFakeModel),
+    )
+
+    lite_llm_embedding_fn = providers.Selector(
+        _mock_selector,
+        original=providers.Factory(
+            EmbeddingLiteLLM,
+        ),
+        mocked=providers.Factory(mock.FakeEmbeddingModel),
     )

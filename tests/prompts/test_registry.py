@@ -24,6 +24,7 @@ from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
+from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
@@ -146,6 +147,15 @@ models:
         - vertex
     params:
         model: claude-sonnet-4-5@20250929
+        custom_llm_provider: vertex_ai
+  - name: Embedding Test
+    gitlab_identifier: embedding_test
+    max_context_tokens: 200000
+    model_class_provider: litellm_embedding
+    family:
+        - embedding
+    params:
+        model: embedding_test
         custom_llm_provider: vertex_ai
 """,
     )
@@ -401,6 +411,16 @@ params:
     - Bar
 """,
     )
+    fs.create_file(
+        prompts_definitions_dir / "embeddings_code" / "base" / "1.0.0.yml",
+        contents="""
+---
+name: Code Embeddings
+unit_primitive: generate_embeddings_codebase
+prompt_template:
+  user: "{{contents}}"
+""",
+    )
 
     with patch(
         "ai_gateway.prompts.registry.LEGACY_MODEL_MAPPING", {"test": {"0.0.1": "haiku"}}
@@ -426,6 +446,9 @@ def model_factories_fixture():
             **kwargs,
         ),
         ModelClassProvider.LITE_LLM_COMPLETION: lambda model, **kwargs: CompletionLiteLLM(
+            model=model, **kwargs
+        ),
+        ModelClassProvider.LITE_LLM_EMBEDDING: lambda model, **kwargs: EmbeddingLiteLLM(
             model=model, **kwargs
         ),
     }
@@ -1165,6 +1188,21 @@ class TestLocalPromptRegistry:
             "^1.0.0",
             model_metadata=create_model_metadata(
                 {"provider": "gitlab", "identifier": "completion_test"}
+            ),
+        )
+
+        assert isinstance(prompt, Prompt)
+        assert isinstance(prompt.prompt_tpl, RunnableLambda)
+
+    def test_embedding_prompt_uses_passthrough_template(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        prompt = registry.get(
+            "embeddings_code",
+            "^1.0.0",
+            model_metadata=create_model_metadata(
+                {"provider": "gitlab", "identifier": "embedding_test"}
             ),
         )
 
