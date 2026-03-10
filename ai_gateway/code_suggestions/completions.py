@@ -17,9 +17,11 @@ from ai_gateway.code_suggestions.processing.post.completions import PostProcesso
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.processing.typing import MetadataExtraInfo
 from ai_gateway.instrumentators import TextGenModelInstrumentator
+from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.models import ChatModelBase, Message, ModelAPICallError, ModelAPIError
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
+from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -43,8 +45,10 @@ class CodeCompletions:
         tokenization_strategy: TokenStrategyBase,
         post_processor: Optional[Factory[PostProcessor]] = None,
         billing_event_client: Optional[BillingEventsClient] = None,
+        model_metadata: Optional[ModelMetadata] = None,
     ):
         self.model = model
+        self.model_metadata = model_metadata
 
         self.instrumentator = TextGenModelInstrumentator(
             model.metadata.engine, model.metadata.name
@@ -200,7 +204,7 @@ class CodeCompletions:
         return CodeSuggestionsOutput(
             text="",
             score=0,
-            model=self.model.metadata,
+            model_metadata=self._model_metadata(),
             lang_id=lang_id,
             metadata=CodeSuggestionsOutput.Metadata(
                 tokens_consumption_metadata=self._get_tokens_consumption_metadata(
@@ -259,12 +263,19 @@ class CodeCompletions:
         return CodeSuggestionsOutput(
             text=response_text,
             score=response.score,
-            model=self.model.metadata,
+            model_metadata=self._model_metadata(),
             lang_id=lang_id,
             metadata=CodeSuggestionsOutput.Metadata(
                 tokens_consumption_metadata=tokens_consumption_metadata,
             ),
         )
+
+    def _model_metadata(self) -> LegacyModelMetadata:
+        if self.model_metadata:
+            return LegacyModelMetadata(
+                name=self.model_metadata.name, engine=self.model_metadata.provider
+            )
+        return self.model.metadata
 
     async def _get_response_text(
         self,

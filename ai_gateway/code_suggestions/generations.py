@@ -236,7 +236,7 @@ class CodeGenerations:
                 raise
 
         return CodeSuggestionsOutput(
-            text="", score=0, model=self.model.metadata, lang_id=lang_id
+            text="", score=0, model_metadata=self.model.metadata, lang_id=lang_id
         )
 
     async def _handle_stream(
@@ -303,6 +303,6 @@ class CodeGenerations:
         return CodeSuggestionsOutput(
             text=generation,
             score=response.score,
-            model=self.model.metadata,
+            model_metadata=self.model.metadata,
             lang_id=lang_id,
         )

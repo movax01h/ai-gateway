@@ -347,7 +347,7 @@ def mock_suggestions_output_fixture(
     return CodeSuggestionsOutput(
         text=mock_suggestions_output_text,
         score=0,
-        model=LegacyModelMetadata(
+        model_metadata=LegacyModelMetadata(
             name=mock_suggestions_model, engine=mock_suggestions_engine
         ),
         lang_id=LanguageId.PYTHON,
