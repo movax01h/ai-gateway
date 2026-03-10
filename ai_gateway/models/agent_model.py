@@ -28,6 +28,7 @@ class AgentModel(TextGenModelBase):
         self._metadata = ModelMetadata(
             name=prompt.name,
             engine=AGENT,
+            identifier=llm_definition.gitlab_identifier if llm_definition else None,
         )
 
     @property

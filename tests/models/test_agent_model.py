@@ -77,10 +77,22 @@ class TestAgentModel:
     def params_fixture(self):
         return {"prefix": "def binary_search(s):", "suffix": "end"}
 
-    def test_init(self, prompt, model):
-        assert model.prompt == prompt
+    def test_init(self, model):
         assert model.metadata.name == "test"
         assert model.metadata.engine == "agent"
+        assert model.metadata.identifier is None
+
+    def test_init_with_llm_definition_sets_identifier(
+        self, model_with_llm_definition, llm_definition
+    ):
+        assert (
+            model_with_llm_definition.metadata.identifier
+            == llm_definition.gitlab_identifier
+        )
+        assert model_with_llm_definition.metadata.identifier == "test_model"
+
+    def test_init_without_llm_definition_identifier_is_none(self, model):
+        assert model.metadata.identifier is None
 
     def test_input_token_limit_with_llm_definition(
         self, model_with_llm_definition, llm_definition
