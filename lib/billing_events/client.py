@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 from gitlab_cloud_connector import CloudConnectorUser
@@ -56,7 +56,7 @@ class BillingEventsClient:
 
         if enabled:
             self._logger.info("Creating AsyncEmitter and Tracker for billing events")
-            emitter = AsyncEmitter(
+            self._emitter = AsyncEmitter(
                 batch_size=batch_size,
                 thread_count=thread_count,
                 endpoint=endpoint,
@@ -67,13 +67,40 @@ class BillingEventsClient:
             self.snowplow_tracker = Tracker(
                 app_id=app_id,
                 namespace=namespace,
-                emitters=[emitter],
+                emitters=[self._emitter],
             )
             self._logger.info("Successfully initialized billing events tracker")
         else:
             self._logger.info(
                 "Billing events disabled - skipping tracker initialization"
             )
+
+    def _get_emitter_stats(self) -> Tuple[int, int]:
+        if not self.enabled:
+            return -1, -1
+        try:
+            queue_size = self._emitter.queue.qsize()
+        except AttributeError:
+            queue_size = -1
+        try:
+            buffer_size = self._emitter.event_store.size()
+        except AttributeError:
+            buffer_size = -1
+        return queue_size, buffer_size
+
+    def shutdown(self) -> None:
+        if not self.enabled:
+            return
+
+        queue_size, buffer_size = self._get_emitter_stats()
+        self._logger.info(
+            "Shutting down billing events client",
+            emitter_queue_size=queue_size,
+            emitter_buffer_size=buffer_size,
+            emitter_total_pending=(
+                queue_size + buffer_size if queue_size >= 0 and buffer_size >= 0 else -1
+            ),
+        )
 
     def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
         self._logger.info(
