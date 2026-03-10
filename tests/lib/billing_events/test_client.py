@@ -93,14 +93,14 @@ def user_fixture():
     )
 
 
-class TestBillingEventsClient:
+class TestBillingEventsClient:  # pylint: disable=too-many-public-methods
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
     def test_initialization(self, mock_emitter_init, mock_tracker_init):
         mock_emitter_init.return_value = None
         mock_tracker_init.return_value = None
 
-        BillingEventsClient(
+        client = BillingEventsClient(
             enabled=True,
             endpoint="https://billing.local",
             app_id="gitlab_ai_gateway-billing",
@@ -122,6 +122,7 @@ class TestBillingEventsClient:
         assert tracker_args["app_id"] == "gitlab_ai_gateway-billing"
         assert tracker_args["namespace"] == "gl"
         assert len(tracker_args["emitters"]) == 1
+        assert tracker_args["emitters"][0] is client._emitter
 
     @pytest.mark.parametrize(
         "event, unit_of_measure, quantity, metadata, category, kwargs",
@@ -601,4 +602,57 @@ class TestBillingEventsClient:
                 event_name="test_event",
                 label="test_label",
                 property="test_property",
+            )
+
+    @pytest.mark.parametrize(
+        "queue_size,buffer_size,expected_queue,expected_buffer,expected_total",
+        [
+            (15, 3, 15, 3, 18),
+            (None, 5, -1, 5, -1),
+            (10, None, 10, -1, -1),
+            (None, None, -1, -1, -1),
+        ],
+    )
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_shutdown_logs_stats(
+        self,
+        mock_emitter_init: MagicMock,
+        mock_tracker_init: MagicMock,
+        queue_size: int | None,
+        buffer_size: int | None,
+        expected_queue: int,
+        expected_buffer: int,
+        expected_total: int,
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://billing.local",
+            app_id="gitlab_ai_gateway-billing",
+            namespace="gl",
+            batch_size=1,
+            thread_count=1,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+        )
+
+        if queue_size is not None:
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = queue_size
+            client._emitter.queue = mock_queue
+
+        if buffer_size is not None:
+            mock_event_store = MagicMock()
+            mock_event_store.size.return_value = buffer_size
+            client._emitter.event_store = mock_event_store
+
+        with mock.patch.object(client._logger, "info") as mock_info:
+            client.shutdown()
+            mock_info.assert_called_once_with(
+                "Shutting down billing events client",
+                emitter_queue_size=expected_queue,
+                emitter_buffer_size=expected_buffer,
+                emitter_total_pending=expected_total,
             )
