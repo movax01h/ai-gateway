@@ -146,6 +146,7 @@ message GenerateTokenRequest {
 message GenerateTokenResponse {
     string token = 1;
     int64 expiresAt = 2;
+    repeated string server_capabilities = 3;
 }
 
 message ListToolsRequest {

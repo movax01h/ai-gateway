@@ -153,6 +153,7 @@ export interface GenerateTokenRequest {
 export interface GenerateTokenResponse {
   token: string;
   expiresAt: number;
+  server_capabilities: string[];
 }
 
 /** Intentionally empty */
@@ -2325,7 +2326,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
 };
 
 function createBaseGenerateTokenResponse(): GenerateTokenResponse {
-  return { token: "", expiresAt: 0 };
+  return { token: "", expiresAt: 0, server_capabilities: [] };
 }
 
 export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
@@ -2335,6 +2336,9 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
     }
     if (message.expiresAt !== 0) {
       writer.uint32(16).int64(message.expiresAt);
+    }
+    for (const v of message.server_capabilities) {
+      writer.uint32(26).string(v!);
     }
     return writer;
   },
@@ -2362,6 +2366,14 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
           message.expiresAt = longToNumber(reader.int64());
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.server_capabilities.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2375,6 +2387,9 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
     return {
       token: isSet(object.token) ? globalThis.String(object.token) : "",
       expiresAt: isSet(object.expiresAt) ? globalThis.Number(object.expiresAt) : 0,
+      server_capabilities: globalThis.Array.isArray(object?.server_capabilities)
+        ? object.server_capabilities.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -2386,6 +2401,9 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
     if (message.expiresAt !== 0) {
       obj.expiresAt = Math.round(message.expiresAt);
     }
+    if (message.server_capabilities?.length) {
+      obj.server_capabilities = message.server_capabilities;
+    }
     return obj;
   },
 
@@ -2396,6 +2414,7 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
     const message = createBaseGenerateTokenResponse();
     message.token = object.token ?? "";
     message.expiresAt = object.expiresAt ?? 0;
+    message.server_capabilities = object.server_capabilities?.map((e) => e) || [];
     return message;
   },
 };
