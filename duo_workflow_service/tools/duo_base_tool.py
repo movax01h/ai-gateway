@@ -3,6 +3,7 @@ from abc import abstractmethod
 from typing import Any, ClassVar, List, NamedTuple, Optional, Type, final, override
 
 from langchain_core.tools import BaseTool, ToolException
+from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -15,6 +16,10 @@ from duo_workflow_service.tools.tool_output_manager import (
 )
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
+
+# Tools with a version below this threshold are considered experimental
+# and are not exposed via the ListTools API.
+STABLE_VERSION_THRESHOLD = Version("1.0.0")
 
 
 class ProjectURLValidationResult(NamedTuple):
@@ -68,6 +73,10 @@ class DuoBaseTool(BaseTool):
 
     # Client capability required to use this tool (if any)
     required_capability: ClassVar[Optional[str]] = None
+
+    # Semantic version of the tool. Tools with version < 1.0.0 are experimental
+    # and not exposed via the ListTools API.
+    tool_version: ClassVar[Version] = Version("1.0.0")
 
     @property
     def gitlab_client(self) -> GitlabHttpClient:

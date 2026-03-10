@@ -5,7 +5,7 @@ import json
 import os
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional, override
+from typing import AsyncIterable, AsyncIterator, Optional, cast, override
 
 import aiohttp
 import grpc
@@ -62,7 +62,10 @@ from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitori
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    STABLE_VERSION_THRESHOLD,
+    DuoBaseTool,
+)
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
@@ -561,8 +564,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
         response = contract_pb2.ListToolsResponse()
         for tool_cls in tool_classes:
+            duo_tool_cls = cast(type[DuoBaseTool], tool_cls)
+            if (
+                not hasattr(duo_tool_cls, "tool_version")
+                or duo_tool_cls.tool_version < STABLE_VERSION_THRESHOLD
+            ):
+                continue
+
             spec_struct = Struct()
-            tool: DuoBaseTool = tool_cls()  # type: ignore[assignment]
+            tool = duo_tool_cls()  # type: ignore[call-arg]
             spec_struct.update(convert_to_openai_tool(tool))
             response.tools.append(spec_struct)
 

@@ -59,6 +59,8 @@ _DEFAULT_TOOLS: list[Type[BaseTool]] = [
     tools.UpdateTaskDescription,
     tools.GetPlan,
     tools.SetTaskStatus,
+    tools.TodoWrite,
+    tools.Think,
 ]
 
 # These tools are used to request formatted and definitive output from

@@ -20,6 +20,7 @@ from gitlab_cloud_connector import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
+from packaging.version import Version
 
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from ai_gateway.container import ContainerApplication
@@ -187,12 +188,20 @@ async def test_list_tools(
     # avoid duplicated mock tool with the same tool name
     _tool_class_cache = {}
 
-    def create_mock_tool(name: str, eval_prompts: Optional[List[str]] = None):
+    def create_mock_tool(
+        name: str,
+        eval_prompts: Optional[List[str]] = None,
+        tool_version: Optional[Version] = None,
+    ):
         cache_key = name
         if cache_key in _tool_class_cache:
             return _tool_class_cache[cache_key]
 
+        version = tool_version or Version("1.0.0")
+
         class MockTool(DuoBaseTool):
+            tool_version = version
+
             def __init__(self):
                 super().__init__(
                     name=name,
@@ -257,6 +266,77 @@ async def test_list_tools(
         key=lambda x: x.get("function", {}).get("name", ""),
     )
     assert actual_sorted == expected_sorted
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._READ_ONLY_GITLAB_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._AGENT_PRIVILEGES")
+@patch("duo_workflow_service.server.convert_to_openai_tool")
+async def test_list_tools_excludes_experimental(
+    mock_convert_to_openai_tool,
+    mock_agent_privileges,
+    mock_readonly_tools,
+    mock_default_tools,
+):
+    _tool_class_cache = {}
+
+    def create_mock_tool(
+        name: str,
+        tool_version: Optional[Version] = None,
+    ):
+        cache_key = name
+        if cache_key in _tool_class_cache:
+            return _tool_class_cache[cache_key]
+
+        version = tool_version or Version("1.0.0")
+
+        class MockTool(DuoBaseTool):
+            tool_version = version
+
+            def __init__(self):
+                super().__init__(
+                    name=name,
+                    description=f"{name} description",
+                )
+
+            async def _execute(self, *args, **kwargs):
+                pass
+
+        _tool_class_cache[cache_key] = MockTool
+        return MockTool
+
+    def mock_convert_side_effect(tool):
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": f"{tool.name} description",
+            },
+        }
+
+    stable_tool = create_mock_tool(name="stable_tool", tool_version=Version("1.0.0"))
+    experimental_tool = create_mock_tool(
+        name="experimental_tool", tool_version=Version("0.1.0")
+    )
+
+    mock_default_tools.__add__.return_value = [stable_tool, experimental_tool]
+    mock_readonly_tools.__add__.return_value = []
+    mock_agent_privileges.values.return_value = []
+    mock_convert_to_openai_tool.side_effect = mock_convert_side_effect
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+    response = await service.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+
+    assert isinstance(response, contract_pb2.ListToolsResponse)
+    assert len(response.tools) == 1
+
+    tool_names = [
+        MessageToDict(tool).get("function", {}).get("name") for tool in response.tools
+    ]
+    assert "stable_tool" in tool_names
+    assert "experimental_tool" not in tool_names
 
 
 @pytest.mark.asyncio
