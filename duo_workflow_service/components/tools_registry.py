@@ -78,6 +78,7 @@ NO_OP_TOOLS: list[Type[BaseModel]] = [
 _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.ShellCommand,
     tools.AdvanceBlobSearch,
+    tools.ReadFileChunked,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [

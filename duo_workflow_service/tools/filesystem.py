@@ -1,6 +1,6 @@
 import json
 from enum import IntEnum
-from typing import Any, List, Type
+from typing import Any, ClassVar, List, Optional, Type
 
 import gitmatch
 import structlog
@@ -18,6 +18,9 @@ from duo_workflow_service.policies.file_exclusion_policy import (
 )
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+
+DEFAULT_READ_FILE_OFFSET = 0
+DEFAULT_READ_FILE_LIMIT = 2000
 
 # Security denylist of sensitive directories and files that should not be accessed
 DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
@@ -120,6 +123,73 @@ class ReadFile(DuoBaseTool):
 
     def format_display_message(
         self, args: ReadFileInput, _tool_response: Any = None
+    ) -> str:
+        msg = "Read file"
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):
+            msg += FileExclusionPolicy.format_user_exclusion_message([args.file_path])
+
+        return msg
+
+
+class ReadFileChunkedInput(BaseModel):
+    file_path: str = Field(description="the file_path to read the file from")
+    offset: int = Field(
+        default=DEFAULT_READ_FILE_OFFSET,
+        description="Starting line number (0-indexed). Use with limit for reading large files in chunks.",
+    )
+    limit: int = Field(
+        default=DEFAULT_READ_FILE_LIMIT,
+        description="Number of lines to read from offset. Use for reading large files in chunks.",
+    )
+
+
+class ReadFileChunked(DuoBaseTool):
+    """Enhanced read_file tool with offset/limit support for chunked reading of large files.
+
+    Supersedes ReadFile when the client declares the 'read_file_chunked' capability, ensuring the LLM only receives
+    offset/limit parameters when the executor can honour them.
+    """
+
+    name: str = "read_file"
+    description: str = """Read a file from the local filesystem.
+
+    Usage:
+    - By default, returns up to 2000 lines from the start of the file.
+    - The offset parameter is the line number to start from (0-indexed).
+    - To read later sections, call this tool again with a larger offset.
+    - If the file is truncated, a hint is returned at the end with the next offset value — use it to continue reading.
+    - Call this tool in parallel when you need to read multiple files.
+    - Avoid tiny repeated slices; if you need more context, read a larger window.
+    """
+    args_schema: Type[BaseModel] = ReadFileChunkedInput
+    handle_tool_error: bool = True
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = ReadFile
+    required_capability: ClassVar[str] = "read_file_chunked"
+
+    async def _execute(
+        self,
+        file_path: str,
+        offset: int = DEFAULT_READ_FILE_OFFSET,
+        limit: int = DEFAULT_READ_FILE_LIMIT,
+    ) -> str:
+        # Check file exclusion policy
+        if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
+            return FileExclusionPolicy.format_llm_exclusion_message([file_path])
+
+        # Check path security before proceeding
+        validate_duo_context_exclusions(file_path)
+
+        return await _execute_action(
+            self.metadata,  # type: ignore
+            contract_pb2.Action(
+                runReadFile=contract_pb2.ReadFile(
+                    filepath=file_path, offset=offset, limit=limit
+                )
+            ),
+        )
+
+    def format_display_message(
+        self, args: ReadFileChunkedInput, _tool_response: Any = None
     ) -> str:
         msg = "Read file"
         if not FileExclusionPolicy.is_allowed_for_project(self.project, args.file_path):

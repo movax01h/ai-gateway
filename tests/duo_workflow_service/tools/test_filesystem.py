@@ -9,6 +9,8 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
     DEFAULT_CONTEXT_EXCLUSIONS,
+    DEFAULT_READ_FILE_LIMIT,
+    DEFAULT_READ_FILE_OFFSET,
     EditFile,
     EditFileInput,
     FindFiles,
@@ -18,6 +20,8 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     Mkdir,
     MkdirInput,
     ReadFile,
+    ReadFileChunked,
+    ReadFileChunkedInput,
     ReadFileInput,
     ReadFiles,
     ReadFilesInput,
@@ -341,6 +345,108 @@ class TestReadFile:
     async def test_read_file_rejects_excluded_paths(self, path):
         with pytest.raises(ToolException, match="Access denied"):
             await ReadFile(description="Read file content")._arun(path)
+
+    @pytest.mark.asyncio
+    async def test_read_file_sends_filepath_only(self, metadata_with_project):
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        path = "./somepath"
+
+        response = await tool._arun(path)
+
+        assert response == "test contents"
+
+        outbox = metadata_with_project["outbox"]
+        outbox.put_action_and_wait_for_response.assert_called_once()
+        action = outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+        assert action.runReadFile.offset == 0
+        assert action.runReadFile.limit == 0
+
+
+class TestReadFileChunked:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path", [*SENSITIVE_DIRECTORIES, *SENSITIVE_FILES, *SUSPICIOUS_PATHS]
+    )
+    async def test_rejects_excluded_paths(self, path):
+        with pytest.raises(ToolException, match="Access denied"):
+            await ReadFileChunked(description="Read file content")._arun(path)
+
+    @pytest.mark.asyncio
+    async def test_with_offset_and_limit(self, metadata_with_project):
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = metadata_with_project
+        path = "./somepath"
+
+        response = await tool._arun(path, offset=10, limit=20)
+
+        assert response == "test contents"
+
+        outbox = metadata_with_project["outbox"]
+        outbox.put_action_and_wait_for_response.assert_called_once()
+        action = outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+        assert action.runReadFile.offset == 10
+        assert action.runReadFile.limit == 20
+
+    @pytest.mark.asyncio
+    async def test_with_offset_only(self, metadata_with_project):
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = metadata_with_project
+        path = "./somepath"
+
+        response = await tool._arun(path, offset=5)
+
+        assert response == "test contents"
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+        assert action.runReadFile.offset == 5
+        assert action.runReadFile.limit == DEFAULT_READ_FILE_LIMIT
+
+    @pytest.mark.asyncio
+    async def test_without_offset_and_limit(self, metadata_with_project):
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = metadata_with_project
+        path = "./somepath"
+
+        response = await tool._arun(path)
+
+        assert response == "test contents"
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+        assert action.runReadFile.offset == DEFAULT_READ_FILE_OFFSET
+        assert action.runReadFile.limit == DEFAULT_READ_FILE_LIMIT
+
+    @pytest.mark.asyncio
+    async def test_with_zero_offset(self, metadata_with_project):
+        """Ensure offset=0 is not falsily converted — it should remain 0, not be treated as None."""
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = metadata_with_project
+        path = "./somepath"
+
+        await tool._arun(path, offset=0, limit=50)
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.offset == 0
+        assert action.runReadFile.limit == 50
+
+    def test_supersedes_read_file(self):
+        assert ReadFileChunked.supersedes is ReadFile
+
+    def test_required_capability(self):
+        assert ReadFileChunked.required_capability == "read_file_chunked"
+
+    def test_shares_tool_name_with_read_file(self):
+        assert ReadFileChunked.model_fields["name"].default == "read_file"
 
 
 class TestReadFiles:
