@@ -17,17 +17,12 @@ import structlog
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from duo_workflow_service.conversation.trimmer import (
-    LEGACY_MAX_CONTEXT_TOKENS,
-    trim_conversation_history,
-)
+from duo_workflow_service.conversation.trimmer import preprocess_conversation_history
 from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
     _ui_chat_log_reducer,
 )
-from lib.context import current_model_metadata_context
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 logger = structlog.stdlib.get_logger("experimental_state")
 
@@ -118,19 +113,10 @@ def _conversation_history_replace_reducer(
             reduced[agent_name] = []
             continue
 
-        model_metadata = current_model_metadata_context.get()
-        max_context_tokens = (
-            model_metadata.llm_definition.max_context_tokens
-            if is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
-            and model_metadata is not None
-            else LEGACY_MAX_CONTEXT_TOKENS
-        )
-
-        # Delegate to the centralized trimming function
-        reduced[agent_name] = trim_conversation_history(
+        # Do the preprocessing only, trim or compaction happen during agent run stage
+        # before making llm call
+        reduced[agent_name] = preprocess_conversation_history(
             messages=new_messages,
-            component_name=agent_name,
-            max_context_tokens=max_context_tokens,
         )
 
     return reduced

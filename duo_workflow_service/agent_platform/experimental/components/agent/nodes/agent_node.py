@@ -13,6 +13,10 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKey,
     get_vars_from_state,
 )
+from duo_workflow_service.conversation.compaction import (
+    ConversationCompactor,
+    maybe_compact_history,
+)
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
 from lib.context import LLMFinishReason
 from lib.events import GLReportingEventContext
@@ -64,6 +68,7 @@ class AgentNode:
     _flow_id: str
     _flow_type: GLReportingEventContext
     _error_handler: ModelErrorHandler
+    _compactor: ConversationCompactor | None
 
     def __init__(
         self,
@@ -74,6 +79,7 @@ class AgentNode:
         inputs: list[IOKey],
         component_name: str,
         internal_event_client: InternalEventsClient,
+        compactor: ConversationCompactor | None = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -83,12 +89,17 @@ class AgentNode:
         self._component_name = component_name
         self._internal_event_client = internal_event_client
         self._error_handler = ModelErrorHandler()
+        self._compactor = compactor
 
     async def run(self, state: FlowState) -> dict:
         history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
             self._component_name, []
         )
         variables = get_vars_from_state(self._inputs, state)
+
+        history = await maybe_compact_history(
+            compactor=self._compactor, history=history, agent_name=self.name
+        )
 
         while True:
             try:

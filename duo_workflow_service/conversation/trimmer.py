@@ -238,17 +238,60 @@ def trim_conversation_history(
 ) -> List[BaseMessage]:
     """Trim conversation history to fit within the model's context window.
 
-    Always runs (cheap, no token counting):
-    1. Deduplicates additional context tags
-    2. Restores message consistency (converts orphaned tool messages to human messages)
-
-    Only when token count exceeds the token budget to avoid unnecessary computation (token counting is expensive):
-    3. Replaces oversized single messages with placeholders
-    4. Trims conversation to fit budget using LangChain's trim_messages (strategy="last")
-    5. Falls back to system + recent messages if trimming produces empty/invalid results
+    Combines preprocessing and token-based trimming:
+    1. Preprocessing (always runs): Deduplicates additional context tags
+    2. Token-based trim (conditional): Trims to fit budget, restores message consistency
 
     Args:
         messages: List of messages to trim
+        component_name: Name of the component/agent (used for token counting and logging)
+        max_context_tokens: Maximum number of tokens allowed in the context window
+
+    Returns:
+        Trimmed list of messages that fits within the context window
+    """
+    messages = preprocess_conversation_history(messages)
+    return apply_token_based_trim(messages, component_name, max_context_tokens)
+
+
+def preprocess_conversation_history(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Apply cheap preprocessing to conversation history.
+
+    Always runs regardless of token count. These operations are O(n) and don't
+    require token counting.
+
+    Operations:
+    1. Deduplicates additional context tags (keeps first occurrence)
+
+    Args:
+        messages: List of messages to preprocess
+
+    Returns:
+        Preprocessed list of messages
+    """
+    if not messages:
+        return []
+
+    return _deduplicate_additional_context(messages)
+
+
+def apply_token_based_trim(
+    messages: List[BaseMessage],
+    component_name: str,
+    max_context_tokens: int,
+) -> List[BaseMessage]:
+    """Apply token-based trimming to conversation history.
+
+    Only runs when token count exceeds budget. This is expensive due to token counting.
+
+    Operations:
+    1. Replaces oversized single messages with placeholders
+    2. Trims conversation to fit budget using LangChain's trim_messages (strategy="last")
+    3. Falls back to system + recent messages if trimming fails
+    4. Restores message consistency (converts orphaned tool messages)
+
+    Args:
+        messages: List of messages to trim (should be preprocessed first)
         component_name: Name of the component/agent (used for token counting and logging)
         max_context_tokens: Maximum number of tokens allowed in the context window
 
@@ -260,9 +303,6 @@ def trim_conversation_history(
 
     token_budget = int(TRIM_THRESHOLD * max_context_tokens)
     max_single_message_tokens = int(token_budget * MAX_SINGLE_MESSAGE_TOKEN_SHARE)
-
-    # Always run: cheap maintenance (no token counting)
-    messages = _deduplicate_additional_context(messages)
 
     token_counter = TikTokenCounter(component_name)
     initial_tokens = _estimate_tokens_from_history(
@@ -284,12 +324,8 @@ def trim_conversation_history(
         )
         return messages
 
-    # Costly trimming pipeline — only runs when over budget
     t_start = time.perf_counter()
-    # Use TikTokenCounter for trimming - it supports slicing which is needed
-    # by LangChain's trim_messages binary search
     token_counter = TikTokenCounter(component_name)
-    # We count once more to be able to compare before and after counts derived from the same method
     initial_tokens = token_counter.count_tokens(messages, include_tool_tokens=True)
 
     logger.info(

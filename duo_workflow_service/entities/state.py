@@ -147,21 +147,27 @@ def _conversation_history_reducer(
         existing_messages = reduced.get(agent_name, [])
         combined_messages = existing_messages + new_messages
 
-        # If feature flag is enabled, trim to max context window for the specific model
-        # Otherwise trim to the old 400K context window size for all models.
-        model_metadata = current_model_metadata_context.get()
         reduced[agent_name] = trim_conversation_history(
             messages=combined_messages,
             component_name=agent_name,
-            max_context_tokens=(
-                model_metadata.llm_definition.max_context_tokens
-                if is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
-                and model_metadata is not None
-                else LEGACY_MAX_CONTEXT_TOKENS
-            ),
+            max_context_tokens=get_model_max_context_token_limit(),
         )
 
     return reduced
+
+
+def get_model_max_context_token_limit() -> int:
+    # If feature flag is enabled, trim to max context window for the specific model
+    # Otherwise trim to the old 400K context window size for all models.
+    model_metadata = current_model_metadata_context.get()
+    token_limit = (
+        model_metadata.llm_definition.max_context_tokens
+        if model_metadata is not None
+        and is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
+        else LEGACY_MAX_CONTEXT_TOKENS
+    )
+    logger.info("Current model context window limit.", token_limit=token_limit)
+    return token_limit
 
 
 def _ui_chat_log_reducer(

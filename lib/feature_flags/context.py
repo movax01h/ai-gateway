@@ -13,6 +13,7 @@ class FeatureFlag(StrEnum):
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
     AI_PROMPT_SCANNING = "ai_prompt_scanning"
     DAP_WEB_SEARCH = "dap_web_search"
+    AI_CONTEXT_COMPACTION = "ai_context_compaction"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
