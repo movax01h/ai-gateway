@@ -1,10 +1,51 @@
 # Agent environment config, see: https://docs.gitlab.com/user/duo_agent_platform/flows/execution/
+# All dependencies are installed in setup_script for reliability
 
-# Use pre-built image
-image: registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/duo-agent:latest
+# Use minimal Python base image
+image: python:3.12.12-slim
 
 setup_script:
-  # Install AI Gateway project
-  - poetry install --only-root --no-interaction --no-ansi
-  - poetry --version && python --version && git --version && npm --version
+  # Install system dependencies
+  - export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends
+    git
+    npm
+    build-essential
+    libsqlite3-dev
+    curl
+    ca-certificates
+    libcurl4-openssl-dev
+    libexpat1-dev
+    gettext
+    libz-dev
+    libssl-dev
+    bubblewrap
+    socat
+    ripgrep
+  - apt-get clean
+  - rm -rf /var/lib/apt/lists/*
+
+  # Install Poetry
+  - export POETRY_VERSION=2.3.1
+  - export POETRY_VIRTUALENVS_IN_PROJECT=true
+  - pip install "poetry==$POETRY_VERSION"
+
+  # Install Python dependencies
+  - poetry install --with test,lint,eval --no-interaction --no-ansi
+
+  # Install Anthropic Sandbox Runtime
+  - npm install -g @anthropic-ai/sandbox-runtime@0.0.20
+  - test -s "$(npm root -g)/@anthropic-ai/sandbox-runtime/package.json"
+
+  # Verify installations
+  - poetry --version && python --version && git --version && npm --version && srt --version
   - echo "Setup complete"
+
+cache:
+  key:
+    files:
+      - poetry.lock
+      - pyproject.toml
+  paths:
+    - .venv/
+    - /root/.cache/pypoetry
+    - /usr/local/lib/node_modules
