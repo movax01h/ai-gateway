@@ -609,8 +609,6 @@ models:
       - gpt
     params:
       model: gpt
-      temperature: 0.0
-      max_tokens: 4_096
 
   - name: Codegemma
     gitlab_identifier: codegemma
