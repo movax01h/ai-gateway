@@ -55,7 +55,7 @@ def mock_tool_monitoring_fixture():
 
 @pytest.fixture(name="tool_node")
 def tool_node_fixture(
-    component_name,
+    conversation_history_key,
     mock_toolset,
     flow_id,
     flow_type,
@@ -68,7 +68,7 @@ def tool_node_fixture(
     """Fixture for ToolNode instance."""
     return ToolNode(
         name="test_tool_node",
-        component_name=component_name,
+        conversation_history_key_factory=lambda _: conversation_history_key,
         toolset=mock_toolset,
         flow_id=flow_id,
         flow_type=flow_type,

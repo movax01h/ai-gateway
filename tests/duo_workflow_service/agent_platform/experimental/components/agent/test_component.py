@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     AgentComponent,
+    AgentComponentBase,
     RoutingError,
 )
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
@@ -144,6 +145,103 @@ def mock_final_response_node_cls_fixture(component_name):
         yield mock_cls
 
 
+class TestAgentComponentBase:
+    """Test suite for AgentComponentBase abstract stubs."""
+
+    def test_agent_node_router_raises_not_implemented(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Base _agent_node_router must raise NotImplementedError."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        with pytest.raises(NotImplementedError):
+            component._agent_node_router({})
+
+    def test_attach_raises_not_implemented(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_state_graph,
+        mock_router,
+    ):
+        """Base attach must raise NotImplementedError."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        with pytest.raises(NotImplementedError):
+            component.attach(mock_state_graph, mock_router)
+
+    def test_conversation_history_key_returns_correct_iokey(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """_conversation_history_key satisfies the factory protocol and returns the correct IOKey."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        assert callable(component._conversation_history_key)
+
+        iokey = component._conversation_history_key({})
+        assert iokey.target == "conversation_history"
+        assert iokey.subkeys == [component_name]
+        assert iokey.optional is True
+
+
 class TestAgentComponentInitialization:
     """Test suite for AgentComponent initialization."""
 
@@ -260,7 +358,10 @@ class TestAgentComponentAttachNodes:
         mock_agent_node_cls.assert_called_once()
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
         assert agent_call_kwargs["name"] == f"{component_name}#agent"
-        assert agent_call_kwargs["component_name"] == component_name
+        assert (
+            agent_call_kwargs["conversation_history_key_factory"]
+            == agent_component._conversation_history_key
+        )
         assert (
             agent_call_kwargs["prompt"]
             == mock_prompt_registry.get_on_behalf.return_value
@@ -274,7 +375,10 @@ class TestAgentComponentAttachNodes:
         mock_tool_node_cls.assert_called_once()
         tool_call_kwargs = mock_tool_node_cls.call_args[1]
         assert tool_call_kwargs["name"] == f"{component_name}#tools"
-        assert tool_call_kwargs["component_name"] == component_name
+        assert (
+            tool_call_kwargs["conversation_history_key_factory"]
+            == agent_component._conversation_history_key
+        )
         assert tool_call_kwargs["toolset"] == mock_toolset
         assert tool_call_kwargs["flow_id"] == flow_id
         assert tool_call_kwargs["flow_type"] == flow_type
@@ -289,10 +393,11 @@ class TestAgentComponentAttachNodes:
         mock_final_response_node_cls.assert_called_once()
         final_call_kwargs = mock_final_response_node_cls.call_args[1]
         assert final_call_kwargs["name"] == f"{component_name}#final_response"
-        assert final_call_kwargs["component_name"] == component_name
-        assert final_call_kwargs["output"] == IOKey(
-            target="context", subkeys=[component_name, "final_answer"]
+        assert (
+            final_call_kwargs["conversation_history_key_factory"]
+            == agent_component._conversation_history_key
         )
+        assert callable(final_call_kwargs["output_key_factory"])
 
         # FinalResponse Node UI logging
         assert "ui_history" in final_call_kwargs

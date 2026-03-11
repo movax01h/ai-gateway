@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal, Optional, Union, override
+from typing import Annotated, ClassVar, Literal, Optional, Union
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -29,6 +29,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowStateKeys,
     IOKeyTemplate,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import IOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
@@ -40,15 +41,23 @@ from duo_workflow_service.conversation.compaction import (
 from duo_workflow_service.tools.toolset import Toolset
 from lib.internal_events import InternalEventsClient
 
-__all__ = ["AgentComponent", "RoutingError"]
+__all__ = ["AgentComponent", "AgentComponentBase", "RoutingError"]
 
 
 class RoutingError(Exception):
     """Exception raised when edge routers encounter unexpected conditions."""
 
 
-@register_component(decorators=[inject])
-class AgentComponent(BaseComponent):
+class AgentComponentBase(BaseComponent):
+    """Shared base for agent-style components (AgentComponent, SubagentComponent, SupervisorAgentComponent).
+
+    Holds the common field declarations and class-level metadata shared by all
+    agent variants.  Subclasses must override ``_agent_node_router`` and
+    ``attach`` with their own graph-topology logic.
+
+    Do NOT use this class directly in flow configs — use AgentComponent instead.
+    """
+
     _final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "final_answer"],
@@ -77,10 +86,45 @@ class AgentComponent(BaseComponent):
         ContainerApplication.internal_event.client
     ]
 
+    _allowed_input_targets = tuple(FlowState.__annotations__.keys())
+
+    def _conversation_history_key(self, _state: FlowState) -> IOKey:
+        """Return the ``IOKey`` for this component's conversation history.
+
+        Matches the ``ConversationHistoryKeyFactory`` signature so it can be
+        passed directly as ``conversation_history_key_factory=self._conversation_history_key``.
+
+        Args:
+            _state: Current flow state (unused; present to satisfy the factory protocol).
+
+        Returns:
+            The resolved ``IOKey`` pointing to this component's conversation history slot.
+        """
+        return IOKey(
+            target="conversation_history",
+            subkeys=[self.name],
+            optional=True,
+        )
+
+    def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
+        return f"{self.name}#agent"
+
+    def _agent_node_router(self, state: FlowState) -> str:
+        raise NotImplementedError
+
+    def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
+        raise NotImplementedError
+
+
+@register_component(decorators=[inject])
+class AgentComponent(AgentComponentBase):
+    """Registered AgentComponent for use in flow configs.
+
+    Provides the standard single-agent ReAct loop (agent ↔ tools, final_response) with dependency injection applied.
+    """
+
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
-
-    _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
     def _agent_node_router(self, state: FlowState) -> str:
         history: list[BaseMessage] = state[FlowStateKeys.CONVERSATION_HISTORY].get(
@@ -107,11 +151,6 @@ class AgentComponent(BaseComponent):
             return f"{self.name}#final_response"
         return f"{self.name}#tools"
 
-    @override
-    def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
-
-    @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable + [AgentFinalOutput]
         tool_choice = "any"  # make sure the LLM always uses a tool to respond.
@@ -129,9 +168,13 @@ class AgentComponent(BaseComponent):
             },
         )
 
+        output_key = self._final_answer_key.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        )
+
         node_agent = AgentNode(
             name=self.__entry_hook__(),
-            component_name=self.name,
+            conversation_history_key_factory=self._conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
             flow_id=self.flow_id,
@@ -152,7 +195,7 @@ class AgentComponent(BaseComponent):
         )
         node_tools = ToolNode(
             name=f"{self.name}#tools",
-            component_name=self.name,
+            conversation_history_key_factory=self._conversation_history_key,
             toolset=self.toolset,
             flow_id=self.flow_id,
             flow_type=self.flow_type,
@@ -163,10 +206,8 @@ class AgentComponent(BaseComponent):
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
-            component_name=self.name,
-            output=self._final_answer_key.to_iokey(
-                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
-            ),
+            conversation_history_key_factory=self._conversation_history_key,
+            output_key_factory=lambda _: output_key,
             ui_history=UIHistory(
                 events=self.ui_log_events,
                 writer_class=default_ui_log_writer_class(

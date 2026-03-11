@@ -1,4 +1,4 @@
-from typing import ClassVar, Self, cast
+from typing import Callable, ClassVar, Self, cast
 
 import structlog
 from anthropic import APIStatusError
@@ -9,7 +9,6 @@ from pydantic_core import ValidationError
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
-    FlowStateKeys,
     IOKey,
     get_vars_from_state,
 )
@@ -25,6 +24,8 @@ from lib.internal_events import InternalEventsClient
 __all__ = ["AgentNode", "AgentFinalOutput"]
 
 log = structlog.stdlib.get_logger("agent_node")
+
+ConversationHistoryKeyFactory = Callable[[FlowState], IOKey]
 
 
 class AgentFinalOutput(BaseModel):
@@ -56,12 +57,35 @@ class AgentFinalOutput(BaseModel):
 
 
 class AgentNode:
+    """LangGraph node that invokes an LLM and appends the completion to conversation history.
+
+    All state interactions are performed exclusively through ``IOKey`` instances,
+    following the Flow Registry guideline of avoiding direct state dictionary
+    access.
+
+    The conversation-history ``IOKey`` is resolved dynamically at runtime via
+    ``conversation_history_key_factory``.  This supports both the common case
+    (static key wrapped in a lambda by the caller) and the supervisor case where
+    the key is only known at runtime.
+
+    Args:
+        flow_id: Identifier of the current flow execution.
+        flow_type: Reporting context used for internal events and metrics.
+        name: LangGraph node name (used when registering with ``StateGraph``).
+        prompt: Bound ``Prompt`` instance used to invoke the LLM.
+        inputs: ``IOKey`` list describing which state values to pass as prompt
+            variables.
+        conversation_history_key_factory: Callable ``(state) -> IOKey`` that
+            resolves the conversation-history ``IOKey`` at runtime.
+        internal_event_client: Client for tracking internal telemetry events.
+    """
+
     name: str
     _prompt: Prompt
 
     _inputs: list[IOKey]
 
-    _component_name: str
+    _conversation_history_key_factory: ConversationHistoryKeyFactory
 
     _internal_event_client: InternalEventsClient
 
@@ -77,8 +101,8 @@ class AgentNode:
         name: str,
         prompt: Prompt,
         inputs: list[IOKey],
-        component_name: str,
         internal_event_client: InternalEventsClient,
+        conversation_history_key_factory: ConversationHistoryKeyFactory,
         compactor: ConversationCompactor | None = None,
     ):
         self._flow_id = flow_id
@@ -86,15 +110,14 @@ class AgentNode:
         self.name = name
         self._prompt = prompt
         self._inputs = inputs
-        self._component_name = component_name
         self._internal_event_client = internal_event_client
         self._error_handler = ModelErrorHandler()
         self._compactor = compactor
+        self._conversation_history_key_factory = conversation_history_key_factory
 
     async def run(self, state: FlowState) -> dict:
-        history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
-            self._component_name, []
-        )
+        history_iokey = self._conversation_history_key_factory(state)
+        history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
 
         history = await maybe_compact_history(
@@ -118,11 +141,7 @@ class AgentNode:
                 # Append new completion to existing history for replace-based reducer.
                 # The reducer will replace this component's conversation history with
                 # the complete list returned here.
-                return {
-                    FlowStateKeys.CONVERSATION_HISTORY: {
-                        self._component_name: history + [completion]
-                    },
-                }
+                return history_iokey.to_nested_dict(history + [completion])
             except APIStatusError as e:
                 error_message = str(e)
                 status_code = e.response.status_code

@@ -32,7 +32,7 @@ def agent_node_fixture(
     flow_id,
     mock_prompt,
     inputs,
-    component_name,
+    conversation_history_key,
     mock_internal_event_client,
 ):
     """Fixture for AgentNode instance."""
@@ -42,7 +42,7 @@ def agent_node_fixture(
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
-        component_name=component_name,
+        conversation_history_key_factory=lambda _: conversation_history_key,
         internal_event_client=mock_internal_event_client,
     )
 
@@ -181,11 +181,12 @@ class TestAgentNode:
         self,
         flow_id,
         inputs,
-        component_name,
+        conversation_history_key,
         mock_internal_event_client,
         base_flow_state,
         mock_ai_message,
         mock_prompt,
+        component_name,
     ):
         """Test run method handles retryable API status errors."""
         # Create mock API error (429 - rate limit)
@@ -213,7 +214,7 @@ class TestAgentNode:
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
-                component_name=component_name,
+                conversation_history_key_factory=lambda _: conversation_history_key,
                 internal_event_client=mock_internal_event_client,
             )
             result = await agent_node.run(base_flow_state)

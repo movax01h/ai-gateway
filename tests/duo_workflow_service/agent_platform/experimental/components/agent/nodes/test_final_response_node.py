@@ -25,18 +25,19 @@ class TestFinalResponseNode:
     @pytest.mark.asyncio
     async def test_run_success_with_output(
         self,
-        component_name,
+        conversation_history_key,
         simple_output,
         flow_state_with_message,
         tool_call_id,
         final_response_content,
         ui_history,
+        component_name,
     ):
         """Test successful run with output IOKey."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -75,13 +76,18 @@ class TestFinalResponseNode:
 
     @pytest.mark.asyncio
     async def test_run_success_without_output(
-        self, component_name, flow_state_with_message, tool_call_id, ui_history
+        self,
+        conversation_history_key,
+        flow_state_with_message,
+        tool_call_id,
+        ui_history,
+        component_name,
     ):
         """Test successful run without output IOKey."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=None,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: None,
             ui_history=ui_history,
         )
 
@@ -110,13 +116,18 @@ class TestFinalResponseNode:
 
     @pytest.mark.asyncio
     async def test_run_success_with_nested_output(
-        self, component_name, nested_output, final_response_content, ui_history
+        self,
+        conversation_history_key,
+        nested_output,
+        final_response_content,
+        ui_history,
+        component_name,
     ):
         """Test successful run with nested output IOKey."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=nested_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: nested_output,
             ui_history=ui_history,
         )
 
@@ -155,13 +166,18 @@ class TestFinalResponseNode:
 
     @pytest.mark.asyncio
     async def test_run_last_messages_is_not_ai_message_raises_error(
-        self, component_name, simple_output, base_flow_state, ui_history
+        self,
+        conversation_history_key,
+        simple_output,
+        base_flow_state,
+        ui_history,
+        component_name,
     ):
         """Test run with multiple tool calls raises ValueError."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -174,25 +190,24 @@ class TestFinalResponseNode:
             await node.run(state)
 
         error_message = str(exc_info.value)
-        assert (
-            f"The last message of {component_name} is not of type AIMessage"
-            == error_message
-        )
+        assert "is not of type AIMessage" in error_message
+        assert component_name in error_message
 
     @pytest.mark.asyncio
     async def test_run_multiple_tool_calls_raises_error(
         self,
-        component_name,
+        conversation_history_key,
         simple_output,
         base_flow_state,
         mock_ai_message_with_multiple_tools,
         ui_history,
+        component_name,
     ):
         """Test run with multiple tool calls raises ValueError."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -213,17 +228,18 @@ class TestFinalResponseNode:
     @pytest.mark.asyncio
     async def test_run_no_final_response_tool_call_raises_error(
         self,
-        component_name,
+        conversation_history_key,
         simple_output,
         base_flow_state,
         mock_ai_message_without_final_tool,
         ui_history,
+        component_name,
     ):
         """Test run raises ValueError when no final response tool call is found."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -247,17 +263,18 @@ class TestFinalResponseNode:
     @pytest.mark.asyncio
     async def test_run_empty_tool_calls_raises_error(
         self,
-        component_name,
+        conversation_history_key,
         simple_output,
         base_flow_state,
         mock_ai_message_empty_tools,
         ui_history,
+        component_name,
     ):
         """Test run raises ValueError when tool_calls is empty."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -275,13 +292,18 @@ class TestFinalResponseNode:
 
     @pytest.mark.asyncio
     async def test_run_no_conversation_history_raises_error(
-        self, component_name, simple_output, flow_state_no_history, ui_history
+        self,
+        conversation_history_key,
+        simple_output,
+        flow_state_no_history,
+        ui_history,
+        component_name,
     ):
         """Test run raises ValueError when no conversation history exists for component."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -290,17 +312,23 @@ class TestFinalResponseNode:
             await node.run(flow_state_no_history)
 
         error_message = str(exc_info.value)
-        assert f"No messages found for {component_name}" == error_message
+        assert "No messages found" in error_message
+        assert component_name in error_message
 
     @pytest.mark.asyncio
     async def test_run_empty_conversation_history_raises_error(
-        self, component_name, simple_output, flow_state_empty_history, ui_history
+        self,
+        conversation_history_key,
+        simple_output,
+        flow_state_empty_history,
+        ui_history,
+        component_name,
     ):
         """Test run raises ValueError when conversation history is empty for component."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
@@ -309,17 +337,23 @@ class TestFinalResponseNode:
             await node.run(flow_state_empty_history)
 
         error_message = str(exc_info.value)
-        assert f"No messages found for {component_name}" == error_message
+        assert "No messages found" in error_message
+        assert component_name in error_message
 
     @pytest.mark.asyncio
     async def test_run_with_multiple_messages_uses_last(
-        self, component_name, simple_output, base_flow_state, ui_history
+        self,
+        conversation_history_key,
+        simple_output,
+        base_flow_state,
+        ui_history,
+        component_name,
     ):
         """Test run uses the last message in conversation history."""
         node = FinalResponseNode(
-            component_name=component_name,
             name="test_node",
-            output=simple_output,
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
         )
 
