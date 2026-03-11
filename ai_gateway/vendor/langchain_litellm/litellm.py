@@ -678,7 +678,9 @@ class ChatLiteLLM(BaseChatModel):
             if isinstance(chunk, AIMessageChunk):
                 if not added_model_name:
                     chunk.response_metadata = {
-                        "model_name": self.model_name or self.model
+                        "model_name": params.get("model")
+                        or self.model_name
+                        or self.model
                     }
                     added_model_name = True
 
