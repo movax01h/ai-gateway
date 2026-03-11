@@ -2,6 +2,8 @@ from typing import Annotated, List
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from ai_gateway.searches.typing import SearchResult
+
 __all__ = [
     "SearchRequest",
     "SearchResponseMetadata",
@@ -35,12 +37,6 @@ class SearchRequest(BaseModel):
 class SearchResponseMetadata(BaseModel):
     provider: str
     timestamp: int
-
-
-class SearchResult(BaseModel):
-    id: str
-    content: str
-    metadata: dict
 
 
 class SearchResponseDetails(BaseModel):

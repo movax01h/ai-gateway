@@ -71,8 +71,8 @@ async def test_sqlite_search(
     sqlite_search = sqlite_search_factory()
 
     result = await sqlite_search.search(query, gl_version, page_size)
-    assert result[0]["id"] == mock_sqlite_search_struct_data["id"]
-    assert result[0]["metadata"] == mock_sqlite_search_struct_data["metadata"]
+    assert result[0].id == mock_sqlite_search_struct_data["id"]
+    assert result[0].metadata == mock_sqlite_search_struct_data["metadata"]
 
 
 @pytest.mark.asyncio
@@ -95,3 +95,101 @@ async def test_sqlite_search_with_no_db(
 
         result = await sqlite_search.search(query, gl_version, page_size)
         assert result == []
+
+
+class TestSqliteSearchTokenLimiting:
+    """Test token limiting functionality in SqliteSearch."""
+
+    def test_estimate_token_count_empty(self, sqlite_search_factory):
+        """Test token count for empty text."""
+        sqlite_search = sqlite_search_factory()
+
+        token_count = sqlite_search.estimate_token_count("")
+
+        assert token_count == 0
+
+    def test_limit_search_results_within_limit(self, sqlite_search_factory):
+        """Test limiting results when within token limit."""
+        sqlite_search = sqlite_search_factory()
+
+        response = [
+            {
+                "id": "1",
+                "content": "short content",
+                "metadata": {"filename": "file1.md"},
+            },
+        ]
+
+        results, token_count = sqlite_search.limit_search_results(
+            response, max_tokens=1000
+        )
+
+        assert len(results) == 1
+        assert results[0].id == "1"
+        assert token_count > 0
+
+    def test_limit_search_results_exceeds_limit(self, sqlite_search_factory):
+        """Test limiting results when exceeding token limit."""
+        sqlite_search = sqlite_search_factory()
+
+        response = [
+            {
+                "id": "1",
+                "content": "a " * 3000,
+                "metadata": {"filename": "file1.md"},
+            },
+            {
+                "id": "2",
+                "content": "b " * 2000,
+                "metadata": {"filename": "file2.md"},
+            },
+        ]
+
+        results, token_count = sqlite_search.limit_search_results(
+            response, max_tokens=5500
+        )
+
+        assert len(results) == 1
+        assert results[0].id == "1"
+        assert token_count == int(3000 * 1.4)
+
+    def test_limit_search_results_empty_response(self, sqlite_search_factory):
+        """Test limiting empty response."""
+        sqlite_search = sqlite_search_factory()
+
+        results, token_count = sqlite_search.limit_search_results([], max_tokens=8000)
+
+        assert results == []
+        assert token_count == 0
+
+    def test_limit_search_results_multiple_results(self, sqlite_search_factory):
+        """Test limiting multiple results that fit within token limit."""
+        sqlite_search = sqlite_search_factory()
+
+        response = [
+            {
+                "id": "1",
+                "content": "content " * 100,
+                "metadata": {"filename": "file1.md"},
+            },
+            {
+                "id": "2",
+                "content": "content " * 100,
+                "metadata": {"filename": "file2.md"},
+            },
+            {
+                "id": "3",
+                "content": "content " * 100,
+                "metadata": {"filename": "file3.md"},
+            },
+        ]
+
+        results, token_count = sqlite_search.limit_search_results(
+            response, max_tokens=5000
+        )
+
+        assert len(results) == 3
+        assert results[0].id == "1"
+        assert results[1].id == "2"
+        assert results[2].id == "3"
+        assert token_count <= 5000

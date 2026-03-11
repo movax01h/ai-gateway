@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import os
 from typing import Any, Optional, Sequence, Type, TypedDict, Union
 
 from langchain.tools import BaseTool
@@ -129,16 +128,8 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     GetSecurityFindingDetails,
     ListSecurityFindings,
     tools.GetWikiPage,
+    tools.DocumentationSearch,
 ]
-
-# Only add the `DocumentationSearch` tool if Vertex is configured (or we're in the test environment)
-# pylint: disable=direct-environment-variable-reference
-if (
-    os.environ.get("AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT")
-    or "PYTEST_VERSION" in os.environ
-):
-    _READ_ONLY_GITLAB_TOOLS.append(tools.DocumentationSearch)
-# pylint: enable=direct-environment-variable-reference
 
 # Generic GitLab API tools - conditionally enabled via feature flag
 _GENERIC_GITLAB_API_TOOLS: list[Type[BaseTool]] = [
