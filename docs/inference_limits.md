@@ -57,6 +57,8 @@ AI-gateway itself. See the `ModelRequestInstrumentator` in
 | `model_inferences_max_concurrent` | `model_engine`, `model_name` | Set when a model is first used                                             |
 | `model_max_input_tokens`          | `model_engine`, `model_name` | Set when a model is first used                                             |
 | `model_max_output_tokens`         | `model_engine`, `model_name` | Set when a model is first used                                             |
+| `model_max_total_tokens`          | `model_engine`, `model_name` | Set when a model is first used                                             |
+| `inference_total_tokens`          | `model_engine`, `model_name` | Incremented with total tokens for each request                             |
 
 The metric for the limits is configured through an environment variable called
 `AIGW_MODEL_ENGINE_LIMITS`. It's currently only used for
@@ -65,7 +67,7 @@ variable needs to be set in JSON with this format:
 
 ```json
 {
-  "<engine-name>": { "<model-name>":  { "input_tokens": integer-limit, "output_tokens": integer-limit, "concurrency": integer-limit } }
+  "<engine-name>": { "<model-name>":  { "input_tokens": integer-limit, "output_tokens": integer-limit, "concurrency": integer-limit, "total_tokens": integer-limit } }
 }
 ```
 
@@ -73,6 +75,12 @@ For example for Anthropic (these are not our actual limits):
 
 ```json
 { "anthropic-chat": { "claude-3-7-sonnet-20250219": { "input_tokens": 1000, "output_tokens": 500, "concurrency": 60 } } }
+```
+
+For AWS Bedrock models, use the `total_tokens` parameter:
+
+```json
+{ "bedrock": { "anthropic.claude-3-sonnet-20240229-v1:0": { "total_tokens": 4096, "concurrency": 60 } } }
 ```
 
 Because we don't want to share the limits we got from providers, this

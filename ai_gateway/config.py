@@ -194,6 +194,7 @@ class ModelLimits(TypedDict, total=False):
     concurrency: int
     input_tokens: int
     output_tokens: int
+    total_tokens: int
 
 
 class ConfigModelLimits(RootModel):

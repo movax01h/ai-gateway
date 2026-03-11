@@ -514,6 +514,21 @@ def test_amazon_q():
             {"AIGW_MODEL_ENGINE_LIMITS": '{"engine": {"model": {"concurrency": 30}}}'},
             ConfigModelLimits({"engine": {"model": {"concurrency": 30}}}),
         ),
+        (
+            {
+                "AIGW_MODEL_ENGINE_LIMITS": '{"bedrock": {"anthropic.claude-3-sonnet-20240229-v1:0": {"total_tokens": 4096, "concurrency": 60}}}'  # pylint: disable=line-too-long
+            },
+            ConfigModelLimits(
+                {
+                    "bedrock": {
+                        "anthropic.claude-3-sonnet-20240229-v1:0": {
+                            "total_tokens": 4096,
+                            "concurrency": 60,
+                        }
+                    }
+                }
+            ),
+        ),
     ],
 )
 def test_config_model_limits(values: dict, expected: ConfigModelLimits):

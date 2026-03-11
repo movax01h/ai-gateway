@@ -95,6 +95,8 @@ class TestWatchContainer:
             mock.call().inc(10),
             mock.call(**DEFAULT_ARGS),
             mock.call().inc(15),
+            mock.call(**DEFAULT_ARGS),
+            mock.call().inc(25),
         ]
         assert token_usage.get() == {
             "test_model": {"input_tokens": 10, "output_tokens": 15}
@@ -381,7 +383,12 @@ class TestModelRequestInstrumentator:
         instrumentator = ModelRequestInstrumentator(
             model_engine="test_engine",
             model_name="test_model",
-            limits={"input_tokens": 5, "output_tokens": 10, "concurrency": 15},
+            limits={
+                "input_tokens": 5,
+                "output_tokens": 10,
+                "concurrency": 15,
+                "total_tokens": 4096,
+            },
         )
 
         with instrumentator.watch():
@@ -393,6 +400,8 @@ class TestModelRequestInstrumentator:
                     mock.call().set(5),
                     mock.call(model_engine="test_engine", model_name="test_model"),
                     mock.call().set(10),
+                    mock.call(model_engine="test_engine", model_name="test_model"),
+                    mock.call().set(4096),
                 ]
             )
 
