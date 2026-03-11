@@ -115,6 +115,12 @@ def flow_state_with_history_fixture(base_flow_state, component_name):
     mock_message = Mock(spec=AIMessage)
     mock_message.content = "Previous response"
     mock_message.additional_kwargs = {}
+    mock_message.usage_metadata = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "total_tokens": 150,
+    }
+    mock_message.type = "ai"
     state["conversation_history"] = {component_name: [mock_message]}
     return state
 
