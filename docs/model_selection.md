@@ -149,18 +149,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `description` (optional): A brief description of the model, used for display in the UI (e.g "Fast, cost-effective responses").
   These should be no more than 90 characters and may require vendor approval. Please tag `@tmccaslin` (Taylor McCaslin)
   for review when updating/adding descriptions.
-- `cost_indicator` (optional): A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`).
-  See table below for thresholds when updating/adding new cost indicators. These are based off model drawdown rates defined by our pricing team for usage billing. See [issue](https://gitlab.com/gitlab-org/gitlab/-/issues/566740).
-
-  **TODO:** Add link to rate cards once they are officially documented.
-
-  | Cost Indicator | Drawdown Rate Range |
-  | -------------- | ------------------- |
-  | `$`            | 0.01 ≤ rate ≤ 0.3   |
-  | `$$`           | 0.3 < rate ≤ 0.6    |
-  | `$$$`          | 0.6 < rate ≤ 1.0    |
-  | `$$$$`         | 1.0 < rate          |
-
+- `cost_indicator`: **Required** for GitLab UI-selectable models. A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`). See [Determining model cost indicators](#determining-model-cost-indicators).
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
 - `params`: Dictionary with custom parameters to be passed to the model client
@@ -185,6 +174,29 @@ models:
       timeout: 60
       max_retries: 3
 ```
+
+### Determining model cost indicators
+
+1. Find the model's `multiplier` in the [pricing multipliers](https://gitlab.com/gitlab-org/customers-gitlab-com/-/blob/main/config/billing/pricing_multipliers.yml?ref_type=heads) file.
+
+1. Map the multiplier to a cost indicator using the table below:
+
+| pricing multiplier                                 | cost indicator |
+| -------------------------------------------------- | -------------- |
+| less than or equal to `0.3`                        | `$`            |
+| greater than `0.3` and less than or equal to `0.6` | `$$`           |
+| greater than `0.6` and less than or equal to `1.0` | `$$$`          |
+| greater than `1.0`                                 | `$$$$`         |
+
+**Example:** For a model with the following entry in the billing multipliers file
+
+```yaml
+gpt-5.2-codex:
+  - end_date: null
+    multiplier: 0.8
+```
+
+The `multiplier` is 0.8, so the `cost_indicator` is `$$$`.
 
 ### Authorization
 

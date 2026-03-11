@@ -471,6 +471,7 @@ models:
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_1_codex"
     description: "Earlier GPT-5.1 Codex release for coding tasks."
+    cost_indicator: "$$"
     max_context_tokens: 400000
     proxy_provider: openai
     model_class_provider: "openai"
@@ -482,6 +483,7 @@ models:
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_2_codex"
     description: "Earlier GPT-5.2 Codex release for coding tasks."
+    cost_indicator: "$$$"
     max_context_tokens: 400000
     proxy_provider: openai
     model_class_provider: "openai"
@@ -494,6 +496,7 @@ models:
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_3_codex"
     description: "Latest GPT-5.3 Codex release for coding tasks."
+    cost_indicator: "$$$"
     max_context_tokens: 400000
     proxy_provider: openai
     model_class_provider: "openai"
