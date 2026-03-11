@@ -8,6 +8,12 @@ components:
     inputs:
       - from: "context:goal"
         as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -32,8 +38,11 @@ components:
       - "todo_write"
       - "run_command"
       - "run_git_command"
-      - "get_issue"
-      - "list_issue_notes"
+      - "gitlab_api_get"
+      - "gitlab_graphql"
+      - "create_issue_note"
+      - "create_merge_request_note"
+      - "create_work_item_note"
       - "create_merge_request"
       - "update_merge_request"
 
@@ -168,6 +177,12 @@ prompts:
         <env>
           Today's date: {{ today }}
           Is directory a git repo: yes
+          {%- if project_id %}
+          Project ID: {{ project_id }}
+          {%- endif %}
+          {%- if project_url %}
+          Project URL: {{ project_url }}
+          {%- endif %}
           {%- if primary_branch %}
           Default branch: {{ primary_branch }}
           {%- endif %}
@@ -181,7 +196,19 @@ prompts:
       user: |
         {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
 
+        {% if 'Input:' in goal and 'Context:' in goal %}
+        You were mentioned in a comment on a GitLab resource.
+
+        {{ goal }}
+
+        Fetch the referenced resource to understand the full context and the comment thread. Then address the request from the comment. Determine the appropriate course of action based on what is being asked — this could be implementing code changes, researching a topic, creating an issue, answering a question, or any other task. If the task involves code changes, verify they work and create a merge request.
+        {% elif '/-/merge_requests/' in goal %}
+        You were assigned as a reviewer on a merge request: {{ goal }}
+
+        Fetch the merge request details and its diffs. Review the code changes thoroughly — check for correctness, potential bugs, readability, and adherence to the project's coding conventions. Read relevant existing code for context where needed. Leave your review as comments on the merge request, highlighting any issues found and suggesting improvements. If the changes look good, approve the merge request.
+        {% else %}
         Solve the following GitLab issue: {{ goal }}
 
         Fetch the issue details and understand the problem thoroughly before writing any code. Consider what might be causing the issue and where in the codebase the relevant logic lives. If there are multiple possible approaches, reason about the tradeoffs and pick the simplest one that fully addresses the issue. Implement your solution, verify it works, then create a merge request with your changes.
+        {% endif %}
       placeholder: history
