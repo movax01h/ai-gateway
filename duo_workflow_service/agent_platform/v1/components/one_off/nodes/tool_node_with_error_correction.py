@@ -150,13 +150,19 @@ class ToolNodeWithErrorCorrection:
         if errors:
             # Create error feedback message for LLM
             error_feedback = self._create_error_feedback(
-                errors, tool_calls, attempts + 1
+                errors, tool_calls, attempts + 1, context
             )
 
             # Update conversation_history while preserving context
             result[FlowStateKeys.CONVERSATION_HISTORY] = {
                 self._component_name: tool_responses + [error_feedback]
             }
+
+            # Update context with correction attempts
+            context_dict = IOKey(
+                target="context", subkeys=[self._component_name]
+            ).to_nested_dict(context)
+            result = merge_nested_dict(result, context_dict)
 
             # If we are out of attempts then update execution status to failed
             if (
@@ -395,7 +401,11 @@ class ToolNodeWithErrorCorrection:
         return errors
 
     def _create_error_feedback(
-        self, errors: list[str], tool_calls: list[dict], attempt_count: int
+        self,
+        errors: list[str],
+        tool_calls: list[dict],
+        attempt_count: int,
+        context: dict[str, Any],
     ) -> HumanMessage:
         """Create detailed error feedback for LLM to correct its mistakes."""
 
@@ -423,5 +433,8 @@ class ToolNodeWithErrorCorrection:
             "3. Ensure all required arguments are included\n"
             "4. Validate argument values are appropriate for the tool"
         )
+
+        # Update context with correction attempts
+        context["correction_attempts"] = attempt_count
 
         return HumanMessage(content=feedback_message)
