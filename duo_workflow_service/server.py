@@ -629,6 +629,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return response
 
+    # Usage check is performed only for Self-Managed instances on GitLab 18.8 or less
+    # please see usage_quota interceptor for more details
     @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN)
     async def GenerateToken(
