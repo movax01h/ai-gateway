@@ -9,10 +9,12 @@ from pydantic import Field, model_validator
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from duo_workflow_service.agent_platform.experimental.components import (
-    BaseComponent,
     RouterProtocol,
     RoutingError,
     register_component,
+)
+from duo_workflow_service.agent_platform.experimental.components.agent.component import (
+    AgentComponentBase,
 )
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentNode,
@@ -39,7 +41,7 @@ from lib.internal_events import InternalEventsClient
 
 
 @register_component(decorators=[inject])
-class OneOffComponent(BaseComponent):
+class OneOffComponent(AgentComponentBase):
     _tool_calls_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_calls"],
@@ -116,7 +118,7 @@ class OneOffComponent(BaseComponent):
         # reuse existing agent_node
         agent_node = AgentNode(
             name=self.__entry_hook__(),
-            component_name=self.name,
+            conversation_history_key_factory=self._conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
             flow_id=self.flow_id,

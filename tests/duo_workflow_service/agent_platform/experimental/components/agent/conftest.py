@@ -37,6 +37,16 @@ def component_name_fixture():
     return "test_component"
 
 
+@pytest.fixture(name="conversation_history_key")
+def conversation_history_key_fixture(component_name):
+    """Fixture for conversation history IOKey."""
+    return IOKey(
+        target="conversation_history",
+        subkeys=[component_name],
+        optional=True,
+    )
+
+
 @pytest.fixture(name="flow_type")
 def flow_type_fixture() -> GLReportingEventContext:
     """Fixture for flow type."""
