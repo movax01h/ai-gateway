@@ -576,14 +576,12 @@ configurable_unit_primitives:
         with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
             await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
-        mock_ainvoke.assert_called_once_with(
-            ChatPromptValue(
-                messages=[
-                    SystemMessage(content="Hi, I'm Duo"),
-                    HumanMessage(content="What's up?"),
-                ]
-            ),
-            mock.ANY,
+        mock_ainvoke.assert_called_once()
+        assert mock_ainvoke.call_args.args[0] == ChatPromptValue(
+            messages=[
+                SystemMessage(content="Hi, I'm Duo"),
+                HumanMessage(content="What's up?"),
+            ]
         )
 
     @pytest.mark.asyncio
@@ -604,14 +602,12 @@ configurable_unit_primitives:
         ) as mock_astream:
             await anext(prompt.astream({"name": "Duo", "content": "What's up?"}))
 
-        mock_astream.assert_called_once_with(
-            ChatPromptValue(
-                messages=[
-                    SystemMessage(content="Hi, I'm Duo"),
-                    HumanMessage(content="What's up?"),
-                ]
-            ),
-            mock.ANY,
+        mock_astream.assert_called_once()
+        assert mock_astream.call_args.args[0] == ChatPromptValue(
+            messages=[
+                SystemMessage(content="Hi, I'm Duo"),
+                HumanMessage(content="What's up?"),
+            ]
         )
 
     @pytest.mark.asyncio
@@ -731,7 +727,7 @@ class TestPromptCaching:
             (
                 PromptParams(),
                 ModelClassProvider.ANTHROPIC,
-                False,
+                True,
             ),
         ],
     )

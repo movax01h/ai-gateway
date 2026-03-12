@@ -14,6 +14,37 @@ CACHE_CONTROL_INJECTION_POINTS_KEY = "cache_control_injection_points"
 # Custom field of `cache_control_injection_points` to filter out points when prompt caching is disabled in a request.
 REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST = "require_prompt_caching_enabled_in_request"
 
+# Providers that do not support prompt caching via cache_control_injection_points.
+CACHE_CONTROL_UNSUPPORTED_PROVIDERS = frozenset(
+    {ModelClassProvider.AMAZON_Q, ModelClassProvider.LITE_LLM_COMPLETION}
+)
+
+
+def default_cache_control_injection_points(
+    prompt_template: dict[str, str],
+) -> list[dict]:
+    """Generate default cache control injection points based on prompt structure.
+
+    Matches the production pattern used by chat agent flows:
+
+    - The system message (index 0) is always cached unconditionally.
+    - For multi-turn prompts (with a ``placeholder`` key), the full
+    conversation history (index -1) is additionally cached, gated on
+    the ``X-Gitlab-Model-Prompt-Cache-Enabled`` request header.
+    """
+    points: list[dict] = [
+        {"location": "message", "index": 0},
+    ]
+    if "placeholder" in prompt_template:
+        points.append(
+            {
+                "location": "message",
+                "index": -1,
+                REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
+            }
+        )
+    return points
+
 
 def filter_cache_control_injection_points(model_kwargs: MutableMapping[str, Any]):
     if CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs:
