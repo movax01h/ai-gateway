@@ -1,11 +1,13 @@
 """Test suite for AgentComponent class."""
 
-from typing import Literal
+from typing import ClassVar, Literal
 from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
+from pydantic import BaseModel, ConfigDict, Field
 
+from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
@@ -72,6 +74,45 @@ def agent_component_fixture(
         internal_event_client=mock_internal_event_client,
         ui_log_events=ui_log_events,
         ui_role_as=ui_role_as,
+    )
+
+
+@pytest.fixture(name="agent_component_with_custom_schema")
+def agent_component_with_custom_schema_fixture(
+    component_name,
+    flow_id,
+    flow_type,
+    user,
+    prompt_id,
+    prompt_version,
+    ui_log_events,
+    ui_role_as,
+    mock_toolset,
+    mock_prompt_registry,
+    mock_internal_event_client,
+    mock_schema_registry,
+):
+    """Fixture for AgentComponent instance with custom response schema."""
+    # Exclude response schema tool from toolset to avoid collision
+    mock_schema = mock_schema_registry.get.return_value
+    mock_toolset.__contains__ = lambda self, name: name != mock_schema.tool_title
+
+    return AgentComponent(
+        name=component_name,
+        flow_id=flow_id,
+        flow_type=flow_type,
+        user=user,
+        inputs=["context:user_input", "context:task_description"],
+        prompt_id=prompt_id,
+        prompt_version=prompt_version,
+        toolset=mock_toolset,
+        prompt_registry=mock_prompt_registry,
+        internal_event_client=mock_internal_event_client,
+        ui_log_events=ui_log_events,
+        ui_role_as=ui_role_as,
+        response_schema_id="general/structured_response",
+        response_schema_version="1.0.0",
+        schema_registry=mock_schema_registry,
     )
 
 
@@ -143,6 +184,28 @@ def mock_final_response_node_cls_fixture(component_name):
         mock_cls.return_value = mock_final_response_node
 
         yield mock_cls
+
+
+@pytest.fixture(name="mock_schema_registry")
+def mock_schema_registry_fixture():
+    """Fixture for mock schema registry."""
+    mock_registry = Mock(spec=BaseResponseSchemaRegistry)
+
+    # Create a mock custom schema class
+    class CustomResponseTool(BaseModel):
+        model_config = ConfigDict(frozen=True)
+
+        tool_title: ClassVar[str] = "custom_response_tool"
+
+        summary: str = Field(description="Summary")
+        score: int = Field(description="Score")
+
+        @classmethod
+        def from_ai_message(cls, msg):
+            return cls(**msg.tool_calls[0]["args"])
+
+    mock_registry.get.return_value = CustomResponseTool
+    return mock_registry
 
 
 class TestAgentComponentBase:
@@ -316,6 +379,7 @@ class TestAgentComponentAttachNodes:
             # Custom values
         ],
     )
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
     def test_attach_creates_nodes_with_correct_parameters(
         self,
         mock_final_response_node_cls,
@@ -408,19 +472,33 @@ class TestAgentComponentAttachNodes:
 class TestAgentComponentAttachEdges:
     """Test suite for AgentComponent routing behavior through graph execution."""
 
+    # pylint: disable=unused-argument
+    @pytest.mark.parametrize(
+        ("component_fixture", "final_tool_fixture"),
+        [
+            ("agent_component", "mock_final_tool_call"),
+            ("agent_component_with_custom_schema", "mock_custom_schema_tool_call"),
+        ],
+        ids=["default_schema", "custom_schema"],
+    )
     def test_routing_with_final_tool_call_goes_to_final_response(
         self,
-        agent_component,
+        request,
         mock_state_graph,
         mock_router,
         base_flow_state,
         component_name,
-        mock_final_tool_call,
         mock_agent_node_cls,
         mock_tool_node_cls,
         mock_final_response_node_cls,
+        component_fixture,
+        final_tool_fixture,
     ):
         """Test that final tool call routes to final response node."""
+        # Get fixtures dynamically based on parameters
+        agent_component = request.getfixturevalue(component_fixture)
+        mock_final_tool_call = request.getfixturevalue(final_tool_fixture)
+
         # Create state with final tool call
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = [mock_final_tool_call]
@@ -444,9 +522,15 @@ class TestAgentComponentAttachEdges:
         expected = f"{component_name}#final_response"
         assert result == expected
 
+    # pylint: disable=unused-argument
+    @pytest.mark.parametrize(
+        "component_fixture",
+        ["agent_component", "agent_component_with_custom_schema"],
+        ids=["default_schema", "custom_schema"],
+    )
     def test_routing_with_other_tool_calls_goes_to_tools(
         self,
-        agent_component,
+        request,
         mock_state_graph,
         mock_router,
         base_flow_state,
@@ -455,8 +539,12 @@ class TestAgentComponentAttachEdges:
         mock_agent_node_cls,
         mock_tool_node_cls,
         mock_final_response_node_cls,
+        component_fixture,
     ):
         """Test that non-final tool calls route to tools node."""
+        # Get fixture dynamically based on parameter
+        agent_component = request.getfixturevalue(component_fixture)
+
         # Create state with other tool call
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = [mock_other_tool_call]
@@ -480,20 +568,34 @@ class TestAgentComponentAttachEdges:
         expected = f"{component_name}#tools"
         assert result == expected
 
+    # pylint: disable=unused-argument
+    @pytest.mark.parametrize(
+        ("component_fixture", "final_tool_fixture"),
+        [
+            ("agent_component", "mock_final_tool_call"),
+            ("agent_component_with_custom_schema", "mock_custom_schema_tool_call"),
+        ],
+        ids=["default_schema", "custom_schema"],
+    )
     def test_routing_with_mixed_tool_calls_prioritizes_final_response(
         self,
-        agent_component,
+        request,
         mock_state_graph,
         mock_router,
         base_flow_state,
         component_name,
-        mock_final_tool_call,
         mock_other_tool_call,
         mock_agent_node_cls,
         mock_tool_node_cls,
         mock_final_response_node_cls,
+        component_fixture,
+        final_tool_fixture,
     ):
         """Test that mixed tool calls prioritize final response routing."""
+        # Get fixtures dynamically based on parameters
+        agent_component = request.getfixturevalue(component_fixture)
+        mock_final_tool_call = request.getfixturevalue(final_tool_fixture)
+
         # Create state with mixed tool calls
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = [mock_other_tool_call, mock_final_tool_call]
@@ -517,6 +619,7 @@ class TestAgentComponentAttachEdges:
         expected = f"{component_name}#final_response"
         assert result == expected
 
+    # pylint: disable=unused-argument
     def test_routing_with_without_conversation_history(
         self,
         agent_component,
@@ -553,6 +656,7 @@ class TestAgentComponentAttachEdges:
         ):
             router_function(base_flow_state)
 
+    # pylint: disable=unused-argument
     def test_routing_with_non_ai_message_raises_error(
         self,
         agent_component,
@@ -589,6 +693,7 @@ class TestAgentComponentAttachEdges:
         ):
             router_function(state_with_non_ai_message)
 
+    # pylint: disable=unused-argument
     def test_routing_with_no_tool_calls_raises_error(
         self,
         agent_component,
@@ -624,3 +729,248 @@ class TestAgentComponentAttachEdges:
             RoutingError, match=f"Tool calls not found for component {component_name}"
         ):
             router_function(state_with_no_tools)
+
+
+class TestAgentComponentResponseSchema:
+    """Test suite for custom response schema functionality."""
+
+    @pytest.mark.parametrize(
+        ("component_fixture", "use_custom_schema"),
+        [
+            ("agent_component", False),
+            ("agent_component_with_custom_schema", True),
+        ],
+        ids=["default_schema", "custom_schema"],
+    )
+    def test_attach_passes_correct_schema_to_nodes(
+        self,
+        request,
+        mock_agent_node_cls,
+        mock_final_response_node_cls,
+        mock_state_graph,
+        mock_router,
+        mock_schema_registry,
+        component_fixture,
+        use_custom_schema,
+    ):
+        """Test that nodes receive the correct response schema (default or custom)."""
+        component = request.getfixturevalue(component_fixture)
+        component.attach(mock_state_graph, mock_router)
+
+        # Determine expected schema
+        if use_custom_schema:
+            expected_schema = mock_schema_registry.get.return_value
+        else:
+            expected_schema = AgentFinalOutput
+
+        # Verify AgentNode received correct schema
+        agent_call_kwargs = mock_agent_node_cls.call_args[1]
+        assert agent_call_kwargs["response_schema"] == expected_schema
+
+        # Verify FinalResponseNode received correct schema
+        final_call_kwargs = mock_final_response_node_cls.call_args[1]
+        assert final_call_kwargs["response_schema"] == expected_schema
+
+    @pytest.mark.parametrize(
+        ("schema_id", "schema_version", "should_raise"),
+        [
+            ("test/schema", "^1.0.0", False),  # Both provided - valid
+            (None, None, False),  # Neither provided - valid
+            ("test/schema", None, True),  # Only ID - invalid
+            (None, "^1.0.0", True),  # Only version - invalid
+        ],
+    )
+    def test_id_and_version_are_provided(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_schema_registry,
+        mock_internal_event_client,
+        schema_id,
+        schema_version,
+        should_raise,
+    ):
+        """Test validation of response_schema_id and response_schema_version parameters.
+
+        Both parameters must be provided together, or both omitted. Providing only one should raise a ValueError.
+        """
+        if should_raise:
+            with pytest.raises(ValueError, match="must be provided together"):
+                AgentComponent(
+                    name=component_name,
+                    flow_id=flow_id,
+                    flow_type=flow_type,
+                    user=user,
+                    inputs=["context:user_input"],
+                    prompt_id=prompt_id,
+                    prompt_version=prompt_version,
+                    toolset=mock_toolset,
+                    response_schema_id=schema_id,
+                    response_schema_version=schema_version,
+                    prompt_registry=mock_prompt_registry,
+                    internal_event_client=mock_internal_event_client,
+                )
+        else:
+            # Exclude response schema tool from toolset if schema is provided
+            if schema_id and schema_version:
+                mock_schema = mock_schema_registry.get.return_value
+                mock_toolset.__contains__ = (
+                    lambda self, name: name != mock_schema.tool_title
+                )
+
+            # Should not raise
+            component = AgentComponent(
+                name=component_name,
+                flow_id=flow_id,
+                flow_type=flow_type,
+                user=user,
+                inputs=["context:user_input"],
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                toolset=mock_toolset,
+                response_schema_id=schema_id,
+                response_schema_version=schema_version,
+                schema_registry=mock_schema_registry,
+                prompt_registry=mock_prompt_registry,
+                internal_event_client=mock_internal_event_client,
+            )
+            assert component.response_schema_id == schema_id
+            assert component.response_schema_version == schema_version
+
+    def test_tool_name_collision_with_response_schema(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_schema_registry,
+        mock_internal_event_client,
+    ):
+        """Test that response schema colliding with tool name raises error."""
+        # Create a mock tool with name "colliding_response_tool"
+        mock_tool = Mock()
+        mock_tool.name = "colliding_response_tool"
+        mock_toolset.__contains__ = Mock(return_value=True)  # Simulate collision
+
+        # Mock schema with same tool_title
+        mock_schema = Mock()
+        mock_schema.tool_title = "colliding_response_tool"
+        mock_schema_registry.get.return_value = mock_schema
+
+        # Override toolset to report this specific tool exists (creating actual collision)
+        mock_toolset.__contains__ = lambda self, name: name == "colliding_response_tool"
+
+        # Error should occur during component initialization, not attach
+        with pytest.raises(ValueError, match="collides with existing tool"):
+            AgentComponent(
+                name=component_name,
+                flow_id=flow_id,
+                flow_type=flow_type,
+                user=user,
+                inputs=["context:user_input"],
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                toolset=mock_toolset,
+                response_schema_id="test/schema",
+                response_schema_version="1.0.0",
+                schema_registry=mock_schema_registry,
+                prompt_registry=mock_prompt_registry,
+                internal_event_client=mock_internal_event_client,
+            )
+
+
+class TestAgentComponentOutputs:
+    """Test suite for Agent Component Outputs."""
+
+    def test_outputs_with_agent_final_output(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that outputs property returns base outputs only for default schema."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            # No response_schema_id/version - uses default AgentFinalOutput
+        )
+
+        outputs = component.outputs
+
+        # Should return only the 3 base outputs (no custom field outputs)
+        assert len(outputs) == 3
+        assert all(isinstance(output, IOKey) for output in outputs)
+
+        # Verify the base outputs exist
+        output_targets = [(out.target, out.subkeys) for out in outputs]
+        assert ("conversation_history", [component_name]) in output_targets
+        assert ("status", None) in output_targets
+        assert ("context", [component_name, "final_answer"]) in output_targets
+
+    def test_outputs_with_custom_schema_includes_field_outputs(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_schema_registry,
+    ):
+        """Test that custom schema outputs include base outputs + field-level outputs."""
+        # Exclude response schema tool from toolset
+        mock_schema = mock_schema_registry.get.return_value
+        mock_toolset.__contains__ = lambda self, name: name != mock_schema.tool_title
+
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            response_schema_id="test/custom_schema",
+            response_schema_version="1.0.0",
+            schema_registry=mock_schema_registry,
+        )
+
+        outputs = component.outputs
+
+        # Should have 3 base outputs + 2 custom fields (summary, score)
+        assert len(outputs) == 5
+        assert all(isinstance(output, IOKey) for output in outputs)
+
+        # Verify base outputs exist
+        output_keys = [(out.target, out.subkeys) for out in outputs]
+        assert ("conversation_history", [component_name]) in output_keys
+        assert ("status", None) in output_keys
+        assert ("context", [component_name, "final_answer"]) in output_keys
+
+        # Verify custom field outputs exist
+        assert ("context", [component_name, "final_answer", "summary"]) in output_keys
+        assert ("context", [component_name, "final_answer", "score"]) in output_keys

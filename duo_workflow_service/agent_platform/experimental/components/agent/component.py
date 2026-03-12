@@ -1,12 +1,14 @@
-from typing import Annotated, ClassVar, Literal, Optional, Union
+from typing import Annotated, ClassVar, Literal, Optional, Type, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph import StateGraph
-from pydantic import Field
+from pydantic import Field, PrivateAttr, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.response_schemas import BaseResponseSchemaRegistry
+from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentFinalOutput,
     AgentNode,
@@ -78,9 +80,14 @@ class AgentComponentBase(BaseComponent):
     prompt_version: Optional[str] = None
     toolset: Toolset
     compaction: Union[CompactionConfig, bool] = False
+    response_schema_id: Optional[str] = None
+    response_schema_version: Optional[str] = None
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
+    ]
+    schema_registry: BaseResponseSchemaRegistry = Provide[
+        ContainerApplication.pkg_schemas.schema_registry
     ]
     internal_event_client: InternalEventsClient = Provide[
         ContainerApplication.internal_event.client
@@ -126,6 +133,42 @@ class AgentComponent(AgentComponentBase):
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
 
+    _allowed_input_targets = tuple(FlowState.__annotations__.keys())
+    _response_schema: Type[BaseAgentOutput] = PrivateAttr()
+
+    @model_validator(mode="after")
+    def validate_and_resolve_response_schema(self):
+        """Validate response schema params and resolve the schema.
+
+        This validator:
+        1. Validates that response_schema_id and response_schema_version are either both set or both None
+        2. Resolves the response schema from the registry (or uses default AgentFinalOutput)
+        3. Validates that the schema tool name doesn't collide with existing tools
+        """
+        if bool(self.response_schema_id) != bool(self.response_schema_version):
+            raise ValueError(
+                "response_schema_id and response_schema_version must be provided together. "
+                "Either provide both or omit both to default to AgentFinalOutput."
+            )
+
+        # Resolve the response schema
+        if self.response_schema_id and self.response_schema_version:
+            response_schema = self.schema_registry.get(
+                schema_id=self.response_schema_id,
+                schema_version=self.response_schema_version,
+            )
+            # Check to see if name of schema tool collides with existing tools
+            if response_schema.tool_title in self.toolset:
+                raise ValueError(
+                    f"Response schema tool title '{response_schema.tool_title}' "
+                    f"collides with existing tool: '{response_schema.tool_title}'"
+                )
+        else:
+            response_schema = AgentFinalOutput
+
+        self._response_schema = response_schema
+        return self
+
     def _agent_node_router(self, state: FlowState) -> str:
         history: list[BaseMessage] = state[FlowStateKeys.CONVERSATION_HISTORY].get(
             self.name,
@@ -145,14 +188,60 @@ class AgentComponent(AgentComponentBase):
             raise RoutingError(f"Tool calls not found for component {self.name}")
 
         if any(
-            tool_call["name"] == AgentFinalOutput.tool_title
+            tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
             return f"{self.name}#final_response"
         return f"{self.name}#tools"
 
+    @override
+    def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
+        return f"{self.name}#agent"
+
+    @property
+    def outputs(self) -> tuple[IOKey, ...]:
+        """Return the outputs for this component.
+
+        For custom response schemas, this includes both the base final_answer output
+        and individual field paths for each schema field, enabling easier discovery
+        and access to nested data.
+
+        Returns:
+            Tuple of IOKey objects describing all output paths from this component.
+
+        Examples:
+            Default AgentFinalOutput:
+                - context:<name>.final_answer (string)
+
+            Custom schema with fields (summary, issues_found, recommendations):
+                - context:<name>.final_answer (dict)
+                - context:<name>.final_answer.summary
+                - context:<name>.final_answer.issues_found
+                - context:<name>.final_answer.recommendations
+        """
+
+        replacements = {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        base_outputs = tuple(output.to_iokey(replacements) for output in self._outputs)
+
+        # If using custom response schema, add individual field outputs
+        if self.response_schema_id and self.response_schema_version:
+            # Add output keys for each field in the schema
+            field_outputs = []
+            for field_name in self._response_schema.model_fields.keys():
+                field_outputs.append(
+                    IOKey(
+                        target="context",
+                        subkeys=[self.name, "final_answer", field_name],
+                    )
+                )
+
+            return base_outputs + tuple(field_outputs)
+
+        return base_outputs
+
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
-        tools = self.toolset.bindable + [AgentFinalOutput]
+        # Response schema is already resolved in validate_and_resolve_response_schema()
+        tools = self.toolset.bindable + [self._response_schema]
         tool_choice = "any"  # make sure the LLM always uses a tool to respond.
 
         prompt = self.prompt_registry.get_on_behalf(
@@ -192,6 +281,7 @@ class AgentComponent(AgentComponentBase):
                 if self.compaction
                 else None
             ),
+            response_schema=self._response_schema,
         )
         node_tools = ToolNode(
             name=f"{self.name}#tools",
@@ -214,6 +304,7 @@ class AgentComponent(AgentComponentBase):
                     events_class=UILogEventsAgent, ui_role_as=self.ui_role_as
                 ),
             ),
+            response_schema=self._response_schema,
         )
 
         graph.add_node(self.__entry_hook__(), node_agent.run)

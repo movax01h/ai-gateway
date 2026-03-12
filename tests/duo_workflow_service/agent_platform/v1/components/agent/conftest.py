@@ -194,6 +194,20 @@ def mock_other_tool_call_fixture():
     }
 
 
+@pytest.fixture(name="mock_custom_schema_tool_call")
+def mock_custom_schema_tool_call_fixture():
+    """Fixture for mock custom schema tool call."""
+    return {
+        "id": "custom_schema_tool_id",
+        "name": "custom_response_tool",
+        "args": {
+            "summary": "Test summary",
+            "issues_found": [],
+            "overall_score": 8,
+        },
+    }
+
+
 @pytest.fixture(name="mock_tool_call")
 def mock_tool_call_fixture():
     """Fixture for mock tool call."""

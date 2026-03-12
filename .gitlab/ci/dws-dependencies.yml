@@ -16,6 +16,9 @@
     - ai_gateway/prompts/config/base.py
     - ai_gateway/prompts/registry.py
     - ai_gateway/prompts/typing.py
+    - ai_gateway/response_schemas/*.py
+    - ai_gateway/response_schemas/base.py
+    - ai_gateway/response_schemas/registry.py
     - ai_gateway/searches/*.py
     - ai_gateway/searches/typing.py
     - ai_gateway/structured_logging.py

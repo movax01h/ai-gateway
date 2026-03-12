@@ -8,6 +8,7 @@ from ai_gateway.integrations.container import ContainerIntegrations
 from ai_gateway.models.container import ContainerModels
 from ai_gateway.models.v2.container import ContainerModels as ContainerModelsV2
 from ai_gateway.prompts.container import ContainerPrompts
+from ai_gateway.response_schemas.container import ContainerSchemas
 from ai_gateway.searches.container import ContainerSearches
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.x_ray.container import ContainerXRay
@@ -70,6 +71,7 @@ class ContainerApplication(containers.DeclarativeContainer):
         internal_event=internal_event,
         config=config,
     )
+    pkg_schemas = providers.Container(ContainerSchemas)
 
     code_suggestions = providers.Container(
         ContainerCodeSuggestions,
