@@ -713,7 +713,11 @@ class TestLocalPromptRegistry:
                 "Test prompt 1.0.1",
                 [("system", "Template1")],
                 "claude-3-5-sonnet-20241022",
-                {},
+                {
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
+                },
                 {
                     "top_p": 0.1,
                     "top_k": 50,
@@ -730,7 +734,11 @@ class TestLocalPromptRegistry:
                 "Test prompt 1.0.2-dev",
                 [("system", "Template1")],
                 "claude-3-5-sonnet-20241022",
-                {},
+                {
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
+                },
                 {
                     "top_p": 0.1,
                     "top_k": 50,
@@ -747,7 +755,11 @@ class TestLocalPromptRegistry:
                 "Test prompt 1.0.0",
                 [("system", "Template1")],
                 "claude-3-5-sonnet-20241022",
-                {},
+                {
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
+                },
                 {
                     "top_p": 0.1,
                     "top_k": 50,
@@ -834,6 +846,9 @@ class TestLocalPromptRegistry:
                     "api_key": "token",
                     "api_base": "http://localhost:4000",
                     "vertex_location": "us-east1",
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
                 },
                 {
                     "temperature": 0.1,
@@ -866,6 +881,9 @@ class TestLocalPromptRegistry:
                     "api_key": "token",
                     "api_base": "http://localhost:4000",
                     "vertex_location": "us-east1",
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
                 },
                 {
                     "temperature": 0.1,
@@ -898,6 +916,9 @@ class TestLocalPromptRegistry:
                     "api_key": "token",
                     "api_base": "http://localhost:4000",
                     "vertex_location": "us-east1",
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
                 },
                 {
                     "temperature": 0.1,
@@ -922,6 +943,9 @@ class TestLocalPromptRegistry:
                 {
                     "stop": ["Foo", "Bar"],
                     "timeout": 60,
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
                 },
                 {
                     "temperature": 0.1,
@@ -946,6 +970,9 @@ class TestLocalPromptRegistry:
                 {
                     "stop": ["Foo", "Bar"],
                     "timeout": 60,
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
                 },
                 {
                     "temperature": 0.2,
@@ -971,6 +998,9 @@ class TestLocalPromptRegistry:
                     "stop": ["Foo", "Bar"],
                     "timeout": 60,
                     "vertex_location": "global",
+                    "cache_control_injection_points": [
+                        {"location": "message", "index": 0}
+                    ],
                 },
                 {
                     "temperature": 0.2,

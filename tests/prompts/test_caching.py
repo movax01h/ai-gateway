@@ -2,11 +2,14 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
+from ai_gateway.model_selection import PromptParams
 from ai_gateway.model_selection.models import ModelClassProvider
+from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
     REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST,
     CacheControlInjectionPointsConverter,
+    default_cache_control_injection_points,
     filter_cache_control_injection_points,
 )
 from lib.prompts.caching import set_prompt_caching_enabled_to_current_request
@@ -84,6 +87,136 @@ class TestFilterCacheControlInjectionPoints:
                 model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY]
                 == expected_cache_control_injection_points
             )
+
+
+class TestDefaultCacheControlInjectionPoints:
+    def test_single_turn_prompt(self):
+        prompt_template = {
+            "system": "You are a helpful assistant.",
+            "user": "Hello",
+        }
+
+        result = default_cache_control_injection_points(prompt_template)
+
+        assert result == [{"location": "message", "index": 0}]
+
+    def test_multi_turn_prompt(self):
+        prompt_template = {
+            "system": "You are a helpful assistant.",
+            "user": "Hello",
+            "placeholder": "history",
+        }
+
+        result = default_cache_control_injection_points(prompt_template)
+
+        assert result == [
+            {"location": "message", "index": 0},
+            {
+                "location": "message",
+                "index": -1,
+                REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
+            },
+        ]
+
+
+class TestDefaultCacheControlAppliedToPrompts:
+    """Verify that prompts without explicit cache_control_injection_points in their YAML config automatically get
+    caching defaults — the core cost-saving behaviour this feature provides."""
+
+    def test_litellm_single_turn_prompt_gets_system_message_cached(self):
+        """LiteLLM single-turn prompt: system message is always cached
+        (passed through to LiteLLM which handles it natively)."""
+        model_kwargs = Prompt._build_model_kwargs(
+            None,
+            params=PromptParams(timeout=60),
+            model_metadata=None,
+            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            model_class_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] == [
+            {"location": "message", "index": 0},
+        ]
+
+    def test_litellm_multi_turn_prompt_caches_history_when_header_enabled(self):
+        """LiteLLM multi-turn prompt: both system message and conversation
+        history are cached when the request header enables caching."""
+
+        set_prompt_caching_enabled_to_current_request("true")
+
+        model_kwargs = Prompt._build_model_kwargs(
+            None,
+            params=PromptParams(timeout=60),
+            model_metadata=None,
+            prompt_template={
+                "system": "You are helpful.",
+                "user": "Hi",
+                "placeholder": "history",
+            },
+            model_class_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] == [
+            {"location": "message", "index": 0},
+            {"location": "message", "index": -1},
+        ]
+
+    def test_litellm_multi_turn_prompt_only_caches_system_when_header_disabled(self):
+        """LiteLLM multi-turn prompt: only the system message is cached
+        when the request header does not enable caching."""
+
+        set_prompt_caching_enabled_to_current_request("false")
+
+        model_kwargs = Prompt._build_model_kwargs(
+            None,
+            params=PromptParams(timeout=60),
+            model_metadata=None,
+            prompt_template={
+                "system": "You are helpful.",
+                "user": "Hi",
+                "placeholder": "history",
+            },
+            model_class_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] == [
+            {"location": "message", "index": 0},
+        ]
+
+    def test_unsupported_provider_gets_no_defaults(self):
+        """Providers that don't support prompt caching (e.g. amazon_q) should not get any
+        cache_control_injection_points."""
+        model_kwargs = Prompt._build_model_kwargs(
+            None,
+            params=PromptParams(timeout=60),
+            model_metadata=None,
+            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            model_class_provider=ModelClassProvider.AMAZON_Q,
+        )
+
+        assert CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
+
+    def test_explicit_yaml_config_is_not_overridden(self):
+        """When a prompt YAML already defines cache_control_injection_points, the defaults must NOT override it."""
+
+        explicit_points = [{"location": "message", "index": 0}]
+
+        model_kwargs = Prompt._build_model_kwargs(
+            None,
+            params=PromptParams(cache_control_injection_points=explicit_points),
+            model_metadata=None,
+            prompt_template={
+                "system": "You are helpful.",
+                "user": "Hi",
+                "placeholder": "history",
+            },
+            model_class_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        # Should keep the explicit single-point config, NOT add the multi-turn default
+        assert model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] == [
+            {"location": "message", "index": 0},
+        ]
 
 
 class TestCacheControlInjectionPointsConverter:
