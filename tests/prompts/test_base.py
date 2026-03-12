@@ -1196,6 +1196,20 @@ models:
     gitlab_identifier: model_c
     model_class_provider: amazon_q
     max_context_tokens: 1000
+  - name: "text-embedding-005 - Vertex"
+    provider: "Vertex"
+    gitlab_identifier: text_embedding_005_vertex
+    description: "Natural language processing technique that converts textual data into numerical vectors."
+    cost_indicator: "$"
+    max_context_tokens: 20000
+    model_class_provider: litellm_embedding
+    family:
+      - vertex
+    params:
+      model: "text-embedding-005"
+      custom_llm_provider: vertex_ai
+    prompt_params:
+      vertex_location: global
 """,
         )
         fs.create_file(
@@ -1221,6 +1235,12 @@ configurable_unit_primitives:
     default_model: "model_b"
     selectable_models:
       - "model_b"
+  - feature_setting: "embeddings_code"
+    unit_primitives:
+      - "generate_embeddings_codebase"
+    default_model: "text_embedding_005_vertex"
+    selectable_models:
+      - "text_embedding_005_vertex"
 """,
         )
         # editorconfig-checker-enable
@@ -1250,6 +1270,23 @@ configurable_unit_primitives:
         assert len(log_messages) == 2
         logged_models = {log["model"] for log in log_messages}
         assert logged_models == {"model_a", "model_b"}
+
+    @pytest.mark.asyncio
+    async def test_skips_embedding_model_in_validation(
+        self,
+        registry: BasePromptRegistry,
+    ):
+        with mock.patch.object(registry, "get", wraps=registry.get) as mock_get:
+            await registry.validate_default_models()
+
+        validated_models = {
+            call.kwargs["model_metadata"].name
+            for call in mock_get.mock_calls
+            if call.args and call.args[0] == "model_configuration/check"
+        }
+        assert validated_models == {"model_a", "model_b"}
+        assert registry.validations is not None
+        assert "text_embedding_005_vertex" in registry.validations
 
     @pytest.mark.asyncio
     async def test_with_unit_primitive_filter_matching(
