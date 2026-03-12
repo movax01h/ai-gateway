@@ -29,6 +29,41 @@ When analyzing secret detection findings for false positive detection, follow th
   - Variable names containing "test", "demo", or "example"
   - Comments suggesting it's for testing
 
+3a. **The Context Trap — CRITICAL**:
+  Your FP likelihood score must be based on the credential's own characteristics, not on where it was found. The following are NOT valid reasons to raise FP likelihood:
+  - File path, directory name, or repository name (e.g. paths containing "dataset", "evaluation", "test", "sample", "fixture", "secrets-dataset-collection")
+  - Repository purpose or project description suggesting it is for testing or evaluation
+  - The appearance of the credential in what looks like a security research or scanning dataset
+  - Variable names or comments that suggest the file is for demonstration purposes
+  - The project path containing "ai-evaluation", "secret-scanning-evaluations", or similar evaluation-related names
+
+  Real leaked credentials are commonly found in public repositories and end up in evaluation datasets — their location there does not make them fake. If you find yourself citing a file path, directory name, or repository name as part of your reasoning for a higher FP likelihood, stop immediately and remove that reasoning. Re-evaluate based solely on the credential value itself. If after doing so you are still uncertain, score 41-60.
+
+3b. **The Default and Generic Credentials Trap — CRITICAL**:
+  Credentials using well-known default or generic values (e.g. `guest:guest`, `admin:admin`, `root:password`, `user:pass`, `username:password`) are genuinely ambiguous. Real users commonly use these values as actual passwords, but developers also use them as placeholder values in connection strings and configuration files. You cannot determine from the credential value alone which case applies.
+
+  Do NOT score these confidently as either TP or FP based on the credential value alone. The following are NOT sufficient to call them FP:
+  - The credentials connect to localhost or 127.0.0.1
+  - The credentials are well-known defaults for a particular service
+  - The username and password are simple, identical, or generic
+  - The credentials appear in a flag default value or environment variable
+
+  And the following are NOT sufficient to call them TP:
+  - The credential is in a functional-looking connection string
+  - The file is not explicitly marked as a template or example
+
+  When default or generic credentials are the primary signal, score 41-60 unless there is explicit additional evidence — such as a comment marking it as fake, explicit placeholder syntax, or a file header indicating it is a template to be filled in.
+
+3c. **Weak Signal Calibration — CRITICAL**:
+  The following patterns are weak FP signals on their own and are NOT sufficient alone to score above 60. When these are the only signals present, score 41-60 and let the developer decide:
+  - A password that resembles a person's name or surname (e.g. `sara_zhang`, `john_smith`)
+  - A purely numeric password that could be a date, ID, or PIN (e.g. `10052004`, `19051997`)
+  - Identical username and password (e.g. `dbGoLib:dbGoLib`)
+  - Low entropy but no explicit repeating or sequential pattern (e.g. `agghgagag`)
+  - A localhost or 127.0.0.1 connection address alone
+
+  To score above 60 on these cases, at least one additional concrete FP indicator must also be present — such as explicit placeholder syntax, a comment marking it as fake, a well-known documented test token, or masking characters.
+
 4. **False Positive Indicators** — look actively for these patterns before scoring:
   - Explicit placeholder syntax: ${API_KEY}, <YOUR_KEY_HERE>, [INSERT_KEY_HERE]
   - Documented test tokens from official sources (e.g., GitHub's official test token documentation)
@@ -52,6 +87,14 @@ When analyzing secret detection findings for false positive detection, follow th
   - Credentials that reference real infrastructure (real hostnames, real service names)
   - Credentials in configuration files or connection strings
   - No explicit evidence that the credential is fake or revoked
+  - **Credentials in comments are still TPs**: A credential that appears in a commented-out line (`//`, `#`, `/* */`) is still a leaked credential. The fact that the line is commented out does not make it safe — it was committed to the repository and is visible in git history. Do NOT treat commented-out credentials as FP on the basis of being commented out alone.
+  - **Known real credential formats**: Credentials with a recognizable prefix structure — typically a short alphabetic identifier, followed by a separator (-, _, .), followed by a high-entropy alphanumeric string. The following formats are examples of that generic pattern and they match real credentials and should be treated as TP unless there is explicit placeholder evidence in the credential value itself:
+    - OpenAI API keys (`sk-` prefix with high-entropy suffix, including those containing the substring `T3BlbkFJ` which is a base64 segment of real OpenAI keys — this is NOT a synthetic pattern)
+    - AWS Access Key IDs (`AKIA...` or `ASIA...` prefix, 20 characters)
+    - GitHub Personal Access Tokens (`ghp_`, `glpat-` prefixes)
+    - SendGrid API keys (`SG.` prefix)
+    - Slack tokens (`xoxb-`, `xoxp-` prefixes with realistic entropy)
+    - MongoDB Atlas connection strings (`mongodb+srv://` with realistic usernames and passwords)
 
 6. **Critical Analysis Requirements**:
   - DO actively look for placeholder patterns, masking characters, and artificial structure before scoring
@@ -156,7 +199,7 @@ The explanation should include:
   - What evidence points toward TP and what points toward FP
   - What additional context or information would resolve the ambiguity
 
-**For TRUE POSITIVES (false_positive_likelihood < 41):**
+**For TRUE POSITIVES (false_positive_likelihood < 61):**
 The explanation should include ALL of the following sections:
 
 1. **Secret Analysis**
