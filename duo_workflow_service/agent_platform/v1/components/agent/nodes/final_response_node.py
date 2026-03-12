@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Optional, Type
 
 from langchain_core.messages import AIMessage, ToolMessage
 
+from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
@@ -27,11 +28,13 @@ class FinalResponseNode:
         name: str,
         output: Optional[IOKey],
         ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
+        response_schema: Type[BaseAgentOutput] = AgentFinalOutput,
     ):
         self._component_name = component_name
         self.name = name
         self._output = output
         self._ui_history = ui_history
+        self._response_schema = response_schema
 
     async def run(self, state: FlowState) -> dict:
         history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
@@ -61,14 +64,15 @@ class FinalResponseNode:
         final_response_call = last_message.tool_calls[0]
 
         # Check if no final response tool call found
-        if final_response_call["name"] != AgentFinalOutput.tool_title:
+        if final_response_call["name"] != self._response_schema.tool_title:
             raise ValueError(
                 f"Final response tool call not found in the conversation history of {self._component_name}"
             )
 
-        parsed_response = AgentFinalOutput(**final_response_call["args"])
+        parsed_response = self._response_schema(**final_response_call["args"])
+
         self._ui_history.log.success(
-            parsed_response.final_response,
+            parsed_response.to_string_output(),
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
         )
 
@@ -82,11 +86,13 @@ class FinalResponseNode:
         }
 
         if self._output:
+            output_data = parsed_response.to_output()
+
             if self._output.subkeys is not None:
                 updates[self._output.target] = create_nested_dict(
-                    self._output.subkeys, parsed_response.final_response
+                    self._output.subkeys, output_data
                 )
             else:
-                updates[self._output.target] = parsed_response.final_response
+                updates[self._output.target] = output_data
 
         return updates

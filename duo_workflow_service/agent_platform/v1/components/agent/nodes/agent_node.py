@@ -1,12 +1,13 @@
-from typing import ClassVar, Self, cast
+from typing import ClassVar, Type, cast
 
 import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, ToolMessage
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from pydantic_core import ValidationError
 
 from ai_gateway.prompts import Prompt
+from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     FlowStateKeys,
@@ -23,7 +24,7 @@ __all__ = ["AgentNode", "AgentFinalOutput"]
 log = structlog.stdlib.get_logger("agent_node")
 
 
-class AgentFinalOutput(BaseModel):
+class AgentFinalOutput(BaseAgentOutput):
     """
     MANDATORY COMPLETION TOOL: You MUST use this tool to provide your final answer
     when you have completed the user's request. This is the ONLY way to properly
@@ -45,10 +46,11 @@ class AgentFinalOutput(BaseModel):
         description="The final response to the user to communicate work completion"
     )
 
-    @classmethod
-    def from_ai_message(cls, ai_message: AIMessage) -> Self:
-        """Generate an AgentFinalOutput from an AI message."""
-        return cls(**ai_message.tool_calls[0]["args"])
+    def to_string_output(self) -> str:
+        return self.final_response
+
+    def to_output(self) -> str:
+        return self.final_response
 
 
 class AgentNode:
@@ -74,6 +76,7 @@ class AgentNode:
         inputs: list[IOKey],
         component_name: str,
         internal_event_client: InternalEventsClient,
+        response_schema: Type[BaseAgentOutput] = AgentFinalOutput,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -83,6 +86,7 @@ class AgentNode:
         self._component_name = component_name
         self._internal_event_client = internal_event_client
         self._error_handler = ModelErrorHandler()
+        self._response_schema = response_schema
 
     async def run(self, state: FlowState) -> dict:
         history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
@@ -121,11 +125,14 @@ class AgentNode:
                 await self._error_handler.handle_error(model_error)
 
     def _final_answer_validate(self, completion: AIMessage) -> list:
+
+        tool_title = self._response_schema.tool_title
+
         final_answer = next(
             (
                 tool_call
                 for tool_call in completion.tool_calls
-                if tool_call["name"] == AgentFinalOutput.tool_title
+                if tool_call["name"] == tool_title
             ),
             None,
         )
@@ -136,20 +143,20 @@ class AgentNode:
         if len(completion.tool_calls) > 1:
             return [completion] + [
                 ToolMessage(
-                    content=f"{AgentFinalOutput.tool_title} mustn't be combined with other tool calls",
+                    content=f"{tool_title} mustn't be combined with other tool calls",
                     tool_call_id=tool_call["id"],
                 )
                 for tool_call in completion.tool_calls
             ]
 
         try:
-            AgentFinalOutput.from_ai_message(completion)
+            self._response_schema.from_ai_message(completion)
             return []
         except ValidationError as ve:
             return [
                 completion,
                 ToolMessage(
-                    content=f"{AgentFinalOutput.tool_title} raised validation error: {ve}",
+                    content=f"{tool_title} raised validation error: {ve}",
                     tool_call_id=final_answer["id"],
                 ),
             ]
