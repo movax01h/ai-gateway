@@ -14,7 +14,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.events import GLReportingEventContext
 
-__all__ = ["RouterProtocol", "BaseComponent", "EndComponent", "AbortComponent"]
+__all__ = ["RouterProtocol", "BaseComponent", "EndComponent"]
 
 
 class RouterProtocol(Protocol):
@@ -92,19 +92,3 @@ class EndComponent(BaseComponent):
         self, state: FlowState  # pylint: disable=unused-argument
     ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}
-
-
-class AbortComponent(BaseComponent):
-    def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
-        return "abort_flow"
-
-    def attach(
-        self, graph: StateGraph, router: Optional[RouterProtocol] = None
-    ) -> None:
-        graph.add_node(self.__entry_hook__(), self._abort_flow)
-        graph.add_edge(self.__entry_hook__(), END)
-
-    async def _abort_flow(
-        self, state: FlowState  # pylint: disable=unused-argument
-    ) -> dict:
-        return {FlowStateKeys.STATUS: WorkflowStatusEnum.ERROR.value}
