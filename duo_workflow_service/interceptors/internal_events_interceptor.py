@@ -7,6 +7,9 @@ from typing import List, Optional, override
 import grpc
 
 from duo_workflow_service.interceptors import (
+    X_GITLAB_CLIENT_NAME_HEADER,
+    X_GITLAB_CLIENT_TYPE_HEADER,
+    X_GITLAB_CLIENT_VERSION_HEADER,
     X_GITLAB_DEPLOYMENT_TYPE,
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS,
     X_GITLAB_FEATURE_ENABLEMENT_TYPE,
@@ -108,6 +111,9 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             is_gitlab_team_member=is_gitlab_member,
             deployment_type=metadata.get(X_GITLAB_DEPLOYMENT_TYPE),
             extra=extra,
+            client_name=metadata.get(X_GITLAB_CLIENT_NAME_HEADER, None) or None,
+            client_type=metadata.get(X_GITLAB_CLIENT_TYPE_HEADER, None) or None,
+            client_version=metadata.get(X_GITLAB_CLIENT_VERSION_HEADER, None) or None,
         )
 
         current_event_context.set(context)
