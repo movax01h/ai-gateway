@@ -89,7 +89,6 @@ def mock_toolset_fixture(mock_tool):
     mock_toolset = Mock(spec=Toolset)
     mock_toolset.__contains__ = Mock(return_value=True)
     mock_toolset.__getitem__ = Mock(return_value=mock_tool)
-    mock_toolset.__len__ = Mock(return_value=1)
     mock_toolset.bindable = [mock_tool]
     return mock_toolset
 

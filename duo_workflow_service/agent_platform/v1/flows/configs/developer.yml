@@ -265,11 +265,7 @@ routers:
   - from: "programming_agent"
     to: "git_actions"
   - from: "git_actions"
-    condition:
-      input: "context:git_actions.execution_result"
-      routes:
-        "success": "end"
-        "failed": "abort"
+    to: "end"
 
 flow:
   entry_point: "issue_parser"
