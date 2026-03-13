@@ -44,6 +44,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
     process_agents_dot_md,
+    process_workspace_agent_skills,
 )
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tools.handover import HandoverTool
@@ -332,6 +333,10 @@ class Workflow(AbstractWorkflow):
 
         context_builder.prompt_template_inputs["agents_dot_md"] = process_agents_dot_md(
             self._additional_context
+        )
+
+        context_builder.prompt_template_inputs["workspace_agent_skills"] = (
+            process_workspace_agent_skills(self._additional_context)
         )
 
         return {

@@ -28,6 +28,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.entities.agent_user_environment import _AGENT_SKILLS_ID
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -156,7 +157,12 @@ class Flow(AbstractWorkflow):
             if (
                 item.category in _EXECUTOR_CONTEXT
             ):  # This category is passed in from the executor
-                processed_additional_context[item.category] = item.content
+                if item.id == _AGENT_SKILLS_ID:
+                    processed_additional_context["workspace_agent_skills"] = (
+                        item.content
+                    )
+                else:
+                    processed_additional_context[item.category] = item.content
                 continue
 
             if item.category not in jsonschemas_by_category.keys():

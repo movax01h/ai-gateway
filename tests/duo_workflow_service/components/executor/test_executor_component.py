@@ -219,6 +219,7 @@ class TestExecutorComponent:
                 "get_plan_tool_name": "get_plan",
                 "agent_user_environment": {},
                 "agents_dot_md": None,
+                "workspace_agent_skills": None,
             },
         )
 

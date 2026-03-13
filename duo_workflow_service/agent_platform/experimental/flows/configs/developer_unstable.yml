@@ -17,6 +17,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
       # TODO: This seems not to be send by the CI --> Probably we should have this from the CI as well!
       - from: "context:inputs.agent_user_environment"
         as: "agent_user_environment"

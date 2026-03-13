@@ -145,7 +145,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         with patch(
             "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry"
         ) as mock_tools_registry_class:
-
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
             mock_tools_registry_class.configure = AsyncMock(
@@ -568,7 +567,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 return_value=mock_end_component,
             ) as mock_end_component_class,
         ):
-
             # Setup component loading mocks
             mock_load_class.side_effect = [
                 mock_agent_class,  # For "AgentComponent"
@@ -886,6 +884,30 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             ),
         ):
             flow_instance._process_additional_context(additional_context)
+
+    def test_process_additional_context_agent_skills_routing(self, flow_instance):
+        """Test that user_rule with agent-skills-instructions id routes to workspace_agent_skills."""
+        additional_context = [
+            AdditionalContext(
+                category="user_rule",
+                id="agents-md-user-instructions",
+                content="# AGENTS.md content",
+            ),
+            AdditionalContext(
+                category="user_rule",
+                id="agent-skills-instructions",
+                content="<available_skills>...</available_skills>",
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        assert result["user_rule"] == "# AGENTS.md content"
+        assert (
+            result["workspace_agent_skills"]
+            == "<available_skills>...</available_skills>"
+        )
+        assert "agent-skills-instructions" not in result
 
     def test_build_routers_always_passes_tracking_params_for_conditional_routers(
         self,
