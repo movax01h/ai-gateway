@@ -146,9 +146,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `name`: A human-readable name for the model, to be displayed in UI
 - `gitlab_identifier`: an identifier used to reference the model within GitLab configuration
 - `provider` (optional): The provider of the model, used for display in the UI (e.g "Vertex", "Anthropic")
-- `description` (optional): A brief description of the model, used for display in the UI (e.g "Fast, cost-effective responses").
-  These should be no more than 90 characters and may require vendor approval. Please tag `@tmccaslin` (Taylor McCaslin)
-  for review when updating/adding descriptions.
+- `description`: **Required** for GitLab UI-selectable models. A brief description of the model (up to 90 characters) used for display in the UI e.g "Fast, cost-effective responses". When adding descriptions, tag `@tmccaslin` (Taylor McCaslin) for a vendor approval on the copy.
 - `cost_indicator`: **Required** for GitLab UI-selectable models. A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`). See [Determining model cost indicators](#determining-model-cost-indicators).
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)

@@ -168,69 +168,99 @@ class ModelSelectionConfig:
     def get_unit_primitive_config(self) -> Iterable[UnitPrimitiveConfig]:
         return self.get_unit_primitive_config_map().values()
 
-    def validate(self) -> None:
-        unit_primitive_configs = self.get_unit_primitive_config()
-        models = self.get_llm_definitions()
-        models_ids = models.keys()
-
+    def _validate_model_ids_exist(
+        self,
+        unit_primitive_configs: Iterable[UnitPrimitiveConfig],
+        models_ids: set,
+    ) -> list[str]:
         errors: set[str] = set()
-        default_model_not_selectable_errors: list[str] = []
-        dev_models_validation_errors: list[str] = []
-
-        for unit_primitive_config in unit_primitive_configs:
+        for upc in unit_primitive_configs:
             ids = chain(
-                [unit_primitive_config.default_model],
-                unit_primitive_config.selectable_models,
-                unit_primitive_config.beta_models,
-                (
-                    unit_primitive_config.dev.selectable_models
-                    if unit_primitive_config.dev
-                    else []
-                ),
+                [upc.default_model],
+                upc.selectable_models,
+                upc.beta_models,
+                upc.dev.selectable_models if upc.dev else [],
             )
-
             errors.update(model_id for model_id in ids if model_id not in models_ids)
-
-            # Validate that the default model is also included in selectable_models
-            if (
-                unit_primitive_config.default_model
-                not in unit_primitive_config.selectable_models
-            ):
-                default_model_not_selectable_errors.append(
-                    f"Feature '{unit_primitive_config.feature_setting}' has default model "
-                    f"'{unit_primitive_config.default_model}' that is not in selectable_models."
-                )
-
-            if unit_primitive_config.dev:
-                dev_selectable = unit_primitive_config.dev.selectable_models
-                dev_groups = unit_primitive_config.dev.group_ids
-
-                # Validate that dev_selectable_models has at least a dev group ID specified
-                if dev_selectable and not dev_groups:
-                    dev_models_validation_errors.append(
-                        f"Feature '{unit_primitive_config.feature_setting}' has dev selectable_models "
-                        f"but group_ids is empty. Specify at least one group ID."
-                    )
-
-        error_messages = []
         if errors:
-            error_messages.append(
+            return [
                 f"The following models ids are used but are not defined in models.yml: {', '.join(errors)}"
-            )
+            ]
+        return []
 
-        if default_model_not_selectable_errors:
-            error_messages.append(
+    def _validate_default_models_are_selectable(
+        self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
+    ) -> list[str]:
+        errors = [
+            f"Feature '{upc.feature_setting}' has default model "
+            f"'{upc.default_model}' that is not in selectable_models."
+            for upc in unit_primitive_configs
+            if upc.default_model not in upc.selectable_models
+        ]
+        if errors:
+            return [
                 "Default models must be included in selectable_models:\n"
-                + "\n".join(
-                    f"  - {error}" for error in default_model_not_selectable_errors
-                )
-            )
+                + "\n".join(f"  - {error}" for error in errors)
+            ]
+        return []
 
-        if dev_models_validation_errors:
-            error_messages.append(
+    def _validate_dev_models(
+        self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
+    ) -> list[str]:
+        errors = [
+            f"Feature '{upc.feature_setting}' has dev selectable_models "
+            f"but group_ids is empty. Specify at least one group ID."
+            for upc in unit_primitive_configs
+            if upc.dev and upc.dev.selectable_models and not upc.dev.group_ids
+        ]
+        if errors:
+            return [
                 "Developer-only models contain certain errors:\n"
-                + "\n".join(f"  - {error}" for error in dev_models_validation_errors)
-            )
+                + "\n".join(f"  - {error}" for error in errors)
+            ]
+        return []
+
+    def _validate_selectable_model_required_fields(
+        self,
+        unit_primitive_configs: Iterable[UnitPrimitiveConfig],
+        models: dict,
+        models_ids: set,
+    ) -> list[str]:
+        errors = []
+        for upc in unit_primitive_configs:
+            for model_id in upc.selectable_models:
+                if model_id not in models_ids:
+                    continue
+                if models[model_id].cost_indicator is None:
+                    errors.append(
+                        f"Feature '{upc.feature_setting}' has selectable model "
+                        f"'{model_id}' without a cost_indicator."
+                    )
+                if models[model_id].description is None:
+                    errors.append(
+                        f"Feature '{upc.feature_setting}' has selectable model "
+                        f"'{model_id}' without a description."
+                    )
+        if errors:
+            return [
+                "Selectable models are missing required fields:\n"
+                + "\n".join(f"  - {error}" for error in errors)
+            ]
+        return []
+
+    def validate(self) -> None:
+        unit_primitive_configs = list(self.get_unit_primitive_config())
+        models = self.get_llm_definitions()
+        models_ids = set(models.keys())
+
+        error_messages = [
+            *self._validate_model_ids_exist(unit_primitive_configs, models_ids),
+            *self._validate_default_models_are_selectable(unit_primitive_configs),
+            *self._validate_dev_models(unit_primitive_configs),
+            *self._validate_selectable_model_required_fields(
+                unit_primitive_configs, models, models_ids
+            ),
+        ]
 
         if error_messages:
             raise ValueError("\n".join(error_messages))

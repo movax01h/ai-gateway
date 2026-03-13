@@ -32,6 +32,8 @@ def mock_fs_fixture(fs: FakeFilesystem):
                 gitlab_identifier: gitlab-model-1
                 model_class_provider: litellm
                 max_context_tokens: 200000
+                cost_indicator: "$"
+                description: "Model one description."
                 params:
                   model: provider-model-1
                   custom_llm_provider: value1
@@ -85,6 +87,8 @@ def test_load_llm_definitions(selection_config):
             name="Model One",
             gitlab_identifier="gitlab-model-1",
             max_context_tokens=200000,
+            cost_indicator="$",
+            description="Model one description.",
             params={"model": "provider-model-1", "custom_llm_provider": "value1"},
         ),
         "gitlab-model-2": ChatAnthropicDefinition(
@@ -188,6 +192,8 @@ def test_get_model(selection_config):
         name="Model One",
         gitlab_identifier="gitlab-model-1",
         max_context_tokens=200000,
+        cost_indicator="$",
+        description="Model one description.",
         params={"model": "provider-model-1", "custom_llm_provider": "value1"},
     )
 
@@ -204,6 +210,8 @@ def test_get_model_for_feature(selection_config):
         name="Model One",
         gitlab_identifier="gitlab-model-1",
         max_context_tokens=200000,
+        cost_indicator="$",
+        description="Model one description.",
         params={"model": "provider-model-1", "custom_llm_provider": "value1"},
     )
 
@@ -284,18 +292,24 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
                 gitlab_identifier: model_1
                 max_context_tokens: 200000
                 model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Model one description."
                 params:
                   model: provider-model-1
               - name: Model Two
                 gitlab_identifier: model_2
                 max_context_tokens: 200000
                 model_class_provider: anthropic
+                cost_indicator: "$$"
+                description: "Model two description."
                 params:
                   model: provider-model-2
               - name: Model Three
                 gitlab_identifier: model_3
                 max_context_tokens: 200000
                 model_class_provider: anthropic
+                cost_indicator: "$$$"
+                description: "Model three description."
                 params:
                   model: provider-model-3
             """
@@ -407,6 +421,45 @@ def test_get_proxy_models_for_provider(fs: FakeFilesystem):
     # Test unknown provider returns empty list
     unknown_models = config.get_proxy_models_for_provider("unknown")
     assert not unknown_models
+
+
+def test_selectable_models_have_required_fields():
+    """Test that UI-selectable models in unit_primitives.yml have a cost_indicator and description."""
+    config = ModelSelectionConfig()
+    llm_definitions = config.get_llm_definitions()
+
+    missing_cost_indicator = [
+        (upc.feature_setting, model_id)
+        for upc in config.get_unit_primitive_config()
+        for model_id in upc.selectable_models
+        if model_id in llm_definitions
+        and llm_definitions[model_id].cost_indicator is None
+    ]
+
+    missing_description = [
+        (upc.feature_setting, model_id)
+        for upc in config.get_unit_primitive_config()
+        for model_id in upc.selectable_models
+        if model_id in llm_definitions and llm_definitions[model_id].description is None
+    ]
+
+    errors = []
+    if missing_cost_indicator:
+        errors.append(
+            "The following selectable models are missing a cost_indicator:\n"
+            + "\n".join(
+                f"  - feature '{f}': model '{m}'" for f, m in missing_cost_indicator
+            )
+        )
+    if missing_description:
+        errors.append(
+            "The following selectable models are missing a description:\n"
+            + "\n".join(
+                f"  - feature '{f}': model '{m}'" for f, m in missing_description
+            )
+        )
+
+    assert not errors, "\n".join(errors)
 
 
 def test_fireworks_models_have_max_retries_10():
