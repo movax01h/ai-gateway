@@ -18,6 +18,7 @@ from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
     process_agents_dot_md,
+    process_workspace_agent_skills,
 )
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.handover import HandoverTool
@@ -96,6 +97,9 @@ class PlannerComponent(BaseComponent):
                     self.additional_context
                 ),
                 "agents_dot_md": process_agents_dot_md(self.additional_context),
+                "workspace_agent_skills": process_workspace_agent_skills(
+                    self.additional_context
+                ),
             },
         )
 

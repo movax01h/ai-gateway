@@ -19,6 +19,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset:
       - get_downstream_pipelines
       - get_pipeline_failing_jobs

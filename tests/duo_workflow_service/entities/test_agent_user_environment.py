@@ -7,6 +7,7 @@ import pytest
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
     process_agents_dot_md,
+    process_workspace_agent_skills,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
@@ -355,4 +356,34 @@ class TestProcessAgentUserEnvironment:
 )
 def test_process_agents_dot_md(contexts, expected_result):
     result = process_agents_dot_md(contexts)
+    assert result == expected_result
+
+
+@pytest.mark.parametrize(
+    "contexts,expected_result",
+    [
+        (
+            [
+                AdditionalContext(
+                    category="user_rule",
+                    id="agent-skills-instructions",
+                    content="The following skills provide specialized instructions for specific tasks. When a task matches a skill's description, use your file-read tool to load the SKILL.md at the listed location before proceeding. When a skill references relative paths, resolve them against the skill's directory (the parent of SKILL.md) and use absolute paths in tool calls.\n\n<available_skills>\n  <skill>\n    <name>pdf-processing</name>\n    <description>Extract text and tables from PDF files, fill forms, merge documents.</description>\n    <location>/home/user/.agents/skills/pdf-processing/SKILL.md</location>\n  </skill>\n</available_skills>",
+                )
+            ],
+            "The following skills provide specialized instructions for specific tasks. When a task matches a skill's description, use your file-read tool to load the SKILL.md at the listed location before proceeding. When a skill references relative paths, resolve them against the skill's directory (the parent of SKILL.md) and use absolute paths in tool calls.\n\n<available_skills>\n  <skill>\n    <name>pdf-processing</name>\n    <description>Extract text and tables from PDF files, fill forms, merge documents.</description>\n    <location>/home/user/.agents/skills/pdf-processing/SKILL.md</location>\n  </skill>\n</available_skills>",
+        ),
+        (
+            [
+                AdditionalContext(
+                    category="user_rule", id="different-id", content="Some content"
+                )
+            ],
+            None,
+        ),
+        ([], None),
+        (None, None),
+    ],
+)
+def test_process_workspace_agent_skills(contexts, expected_result):
+    result = process_workspace_agent_skills(contexts)
     assert result == expected_result

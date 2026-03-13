@@ -32,6 +32,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -55,6 +58,9 @@ components:
         as: "target_branch"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
         optional: True
     ui_log_events:
       - "on_tool_call_input"
@@ -106,6 +112,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset:
       - "list_issues"
       - "get_issue"
@@ -152,6 +161,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset:
       - "create_merge_request_note"
     ui_log_events:
@@ -173,6 +185,9 @@ components:
         as: "os_information"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
         optional: True
     toolset:
       - "list_issues"
@@ -221,6 +236,9 @@ components:
         as: "issue_url"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
         optional: True
     toolset:
       - "run_git_command"
