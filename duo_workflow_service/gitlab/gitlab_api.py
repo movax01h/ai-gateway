@@ -326,7 +326,7 @@ async def fetch_workflow_and_container_data(
     prompt_injection_protection_level = PromptInjectionProtectionLevel.LOG_ONLY
 
     ai_settings = (
-        project_data.get("namespace", {}).get("aiSettings", {})
+        (project_data.get("namespace") or {}).get("aiSettings", {})
         or namespace_data.get("aiSettings", {})
         or {}  # set ai_settings default to empty dict in case project and namespace data are both None
     )
