@@ -485,6 +485,67 @@ async def test_fetch_workflow_with_prompt_injection_protection_level_from_projec
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "workflow_namespace, expected_level",
+    [
+        pytest.param(
+            {
+                "id": "gid://gitlab/Group/123",
+                "name": "test-group",
+                "description": "Test Group",
+                "webUrl": "http://example.com/test-group",
+                "aiSettings": {"promptInjectionProtectionLevel": "INTERRUPT"},
+            },
+            PromptInjectionProtectionLevel.INTERRUPT,
+            id="null_project_namespace_falls_back_to_workflow_namespace",
+        ),
+        pytest.param(
+            None,
+            PromptInjectionProtectionLevel.LOG_ONLY,
+            id="null_project_namespace_and_null_workflow_namespace_defaults_to_log_only",
+        ),
+    ],
+)
+async def test_fetch_workflow_prompt_injection_with_null_project_namespace(
+    workflow_namespace, expected_level
+):
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test.git",
+                        "webUrl": "http://example.com/test",
+                        "namespace": None,  # when GraphQL returns null for parent namespace
+                    },
+                    "namespaceId": (
+                        "gid://gitlab/Group/123" if workflow_namespace else None
+                    ),
+                    "namespace": workflow_namespace,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["prompt_injection_protection_level"] == expected_level
+
+
+@pytest.mark.asyncio
 async def test_fetch_workflow_protection_level_defaults_to_log_only():
     """Test that protection level defaults to LOG_ONLY when not specified."""
     gitlab_client = AsyncMock()
