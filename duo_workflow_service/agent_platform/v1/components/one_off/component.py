@@ -49,12 +49,14 @@ class OneOffComponent(BaseComponent):
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "execution_result"],
     )
 
+    _conversation_history_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="conversation_history",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE],
+    )
+
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         IOKeyTemplate(target="ui_chat_log"),
-        IOKeyTemplate(
-            target="conversation_history",
-            subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE],
-        ),
+        _conversation_history_key,
         _tool_calls_key,
         _tool_responses_key,
         _execution_result_key,
@@ -137,6 +139,9 @@ class OneOffComponent(BaseComponent):
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),
             execution_result_key=self._execution_result_key.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
+            conversation_history_key=self._conversation_history_key.to_iokey(
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),
         )
