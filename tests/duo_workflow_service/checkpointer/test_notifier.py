@@ -752,6 +752,98 @@ def test_replace_langchain_id_with_open_ai_id(
     assert checkpoint_notifier.current_resp_id == expected_current_resp_id
 
 
+@pytest.mark.asyncio
+async def test_throttle_skips_checkpoint_within_window(checkpoint_notifier):
+    """Rapid message events within the throttle window should only enqueue once."""
+    message = AIMessageChunk(id="msg-1", content="token")
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.CHECKPOINT_THROTTLE_SECONDS", 0.1
+    ):
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+
+    # Only the first call should have enqueued - the rest are within the throttle window
+    assert checkpoint_notifier.outbox.put_action.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_throttle_allows_checkpoint_after_window(checkpoint_notifier):
+    """A message event after the throttle window should enqueue a new checkpoint."""
+    message = AIMessageChunk(id="msg-1", content="token")
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.CHECKPOINT_THROTTLE_SECONDS", 0.05
+    ):
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        # Simulate time passing beyond the throttle window
+        checkpoint_notifier._throttle.last_enqueued_at -= 0.1
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+
+    assert checkpoint_notifier.outbox.put_action.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_throttle_trailing_edge_delivers_last_chunk(checkpoint_notifier):
+    """The trailing edge task must fire after the throttle window to deliver the last chunk."""
+    message = AIMessageChunk(id="msg-1", content="token")
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.CHECKPOINT_THROTTLE_SECONDS", 0.05
+    ):
+        # First call enqueues immediately
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        assert checkpoint_notifier.outbox.put_action.call_count == 1
+
+        # Second call is within window - skipped but trailing task scheduled
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        assert checkpoint_notifier.outbox.put_action.call_count == 1
+        assert checkpoint_notifier._throttle.trailing_task is not None
+        trailing_task = checkpoint_notifier._throttle.trailing_task
+
+        # Verify the trailing task will eventually fire (without real sleep to avoid flakiness)
+        assert not trailing_task.done()
+
+
+@pytest.mark.asyncio
+async def test_throttle_trailing_edge_replaced_by_new_chunk(checkpoint_notifier):
+    message = AIMessageChunk(id="msg-1", content="token")
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.CHECKPOINT_THROTTLE_SECONDS", 0.05
+    ):
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        first_task = checkpoint_notifier._throttle.trailing_task
+
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        second_task = checkpoint_notifier._throttle.trailing_task
+
+    # Each within-window call replaces the trailing task with a new one
+    assert second_task is not first_task
+    assert first_task is not None
+    assert second_task is not None
+
+
+@pytest.mark.asyncio
+async def test_values_event_bypasses_throttle(checkpoint_notifier):
+    """Values events (status updates) must always enqueue immediately, ignoring throttle."""
+    state = {"status": WorkflowStatusEnum.EXECUTION, "ui_chat_log": [], "plan": {}}
+    message = AIMessageChunk(id="msg-1", content="token")
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.CHECKPOINT_THROTTLE_SECONDS", 0.1
+    ):
+        # Exhaust the throttle window with a messages event
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        assert checkpoint_notifier.outbox.put_action.call_count == 1
+
+        # Values event must still enqueue immediately despite being within the window
+        await checkpoint_notifier.send_event("values", state, False)
+        assert checkpoint_notifier.outbox.put_action.call_count == 2
+
+
 def test_most_recent_new_checkpoint_with_missing_message_ids(checkpoint_notifier):
     """Test that messages without message_id are handled gracefully."""
     client_capabilities.set({"incremental_streaming"})

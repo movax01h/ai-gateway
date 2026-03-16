@@ -1,3 +1,4 @@
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
@@ -19,6 +20,18 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 
+log = structlog.stdlib.get_logger("notifier")
+
+CHECKPOINT_THROTTLE_SECONDS = 0.05
+
+
+class _ThrottleState:
+    """Holds throttle state for checkpoint enqueuing."""
+
+    def __init__(self):
+        self.last_enqueued_at: float = 0
+        self.trailing_task: Optional[asyncio.Task] = None
+
 
 class UserInterface:
     def __init__(
@@ -35,6 +48,7 @@ class UserInterface:
         self.latest_ai_message: Optional[BaseMessageChunk] = None
         self.last_sent_ui_message_id: Optional[str] = None
         self.current_resp_id: Optional[str] = None
+        self._throttle = _ThrottleState()
 
     async def send_event(
         self,
@@ -52,7 +66,7 @@ class UserInterface:
             self.steps = state.get("plan", {}).get("steps", [])
             self.ui_chat_log = deepcopy(state["ui_chat_log"])
 
-            return await self._execute_action()
+            return await self._execute_action(throttle=False)
 
         if not stream:
             return
@@ -62,20 +76,58 @@ class UserInterface:
 
             self._append_chunk_to_ui_chat_log(message)
 
-            return await self._execute_action()
+            return await self._execute_action(throttle=True)
 
-    async def _execute_action(self):
+    async def _execute_action(self, throttle: bool = False):
+        # For streaming message chunks, throttle checkpoint enqueues so at most
+        # one is sent per CHECKPOINT_THROTTLE_SECONDS window. This prevents
+        # flooding workhorse with a checkpoint per LLM token.
+        # A trailing edge task is always scheduled to ensure the final chunk
+        # is delivered even if it falls within a throttle window.
+        # For values events (status updates), bypass throttle and enqueue immediately.
+        if not throttle:
+            await self._enqueue_checkpoint()
+            return
+
+        now = asyncio.get_running_loop().time()
+        elapsed = now - self._throttle.last_enqueued_at
+
+        # Cancel any pending trailing edge task - we'll reschedule it.
+        if self._throttle.trailing_task and not self._throttle.trailing_task.done():
+            self._throttle.trailing_task.cancel()
+            try:
+                await self._throttle.trailing_task
+            except asyncio.CancelledError:
+                pass
+
+        if elapsed >= CHECKPOINT_THROTTLE_SECONDS:
+            self._throttle.last_enqueued_at = now
+            await self._enqueue_checkpoint()
+        else:
+            # Within throttle window - skip but schedule a trailing edge send
+            # so the last chunk is never lost.
+            remaining = CHECKPOINT_THROTTLE_SECONDS - elapsed
+            self._throttle.trailing_task = asyncio.create_task(
+                self._enqueue_checkpoint_after(remaining)
+            )
+
+    async def _enqueue_checkpoint_after(self, delay: float):
+        try:
+            await asyncio.sleep(max(0, delay))
+        except asyncio.CancelledError:
+            return
+        self._throttle.last_enqueued_at = asyncio.get_running_loop().time()
+        await self._enqueue_checkpoint()
+
+    async def _enqueue_checkpoint(self):
         # This is a placeholder empty message. The message will be replaced
-        # with most_recent_new_checkpoint below
+        # with most_recent_new_checkpoint in send_events.
         action = contract_pb2.Action(
             newCheckpoint=contract_pb2.NewCheckpoint(),
         )
 
-        log = structlog.stdlib.get_logger("workflow")
         log.info("Attempting to add NewCheckpoint to outbox")
-
         self.outbox.put_action(action)
-
         log.info("Added NewCheckpoint to outbox")
 
     def most_recent_checkpoint_number(self):
