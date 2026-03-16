@@ -28,6 +28,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from duo_workflow_service.tools import Toolset
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -59,8 +60,15 @@ def workflow_type_fixture() -> str:
     return CategoryEnum.WORKFLOW_CHAT.value
 
 
+@pytest.fixture(name="mock_toolset")
+def mock_toolset_fixture():
+    mock = Mock(spec=Toolset)
+    mock.validate_tool_call.return_value = None
+    return mock
+
+
 @pytest.fixture(name="chat_agent")
-def chat_agent_fixture(system_template_override: str):
+def chat_agent_fixture(system_template_override: str, mock_toolset):
     mock_prompt_adapter = Mock()
     mock_prompt_adapter.get_response.return_value = AIMessage(content="Hello there!")
     mock_prompt_adapter.get_model.return_value = Mock()
@@ -70,6 +78,7 @@ def chat_agent_fixture(system_template_override: str):
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
         system_template_override=system_template_override,
+        toolset=mock_toolset,
     )
 
 
@@ -600,7 +609,7 @@ class TestChatAgentGitLabInstanceInfo:
 
 
 @pytest.mark.asyncio
-async def test_agentic_fake_model_bypasses_tool_approval(input):
+async def test_agentic_fake_model_bypasses_tool_approval(input, mock_toolset):
     mock_model = Mock()
     mock_model._is_agentic_mock_model = True
 
@@ -615,6 +624,7 @@ async def test_agentic_fake_model_bypasses_tool_approval(input):
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
         system_template_override=None,
+        toolset=mock_toolset,
     )
 
     # Create an AI message with tool calls to simulate what would happen
@@ -640,7 +650,7 @@ async def test_agentic_fake_model_bypasses_tool_approval(input):
 
 
 @pytest.mark.asyncio
-async def test_mixed_tool_calls_approval_only_for_requiring_tools(input):
+async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_toolset):
     """Test that approval messages are only added for tools that actually require approval.
 
     This test verifies the fix for the bug where approval_required flag was checked outside the loop, causing approval
@@ -670,6 +680,7 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input):
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
         system_template_override=None,
+        toolset=mock_toolset,
     )
 
     # Create an AI message with multiple tool calls: preapproved, requiring approval, preapproved
@@ -733,6 +744,7 @@ async def test_approval_enriches_tool_info_with_project_name(input):
         name="Chat Agent",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
+        toolset=Mock(spec=Toolset),
         system_template_override=None,
     )
 
@@ -829,7 +841,7 @@ class TestChatAgentCompaction:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.chat_agent.maybe_compact_history")
     async def test_compaction_called_with_compactor(
-        self, mock_maybe_compact, system_template_override
+        self, mock_maybe_compact, system_template_override, mock_toolset
     ):
         """Test that maybe_compact_history is called when compactor is provided."""
         mock_compactor = Mock()
@@ -846,6 +858,7 @@ class TestChatAgentCompaction:
             tools_registry=mock_tools_registry,
             system_template_override=system_template_override,
             compactor=mock_compactor,
+            toolset=mock_toolset,
         )
 
         input_state = {
@@ -872,7 +885,7 @@ class TestChatAgentCompaction:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.chat_agent.maybe_compact_history")
     async def test_compaction_called_without_compactor(
-        self, mock_maybe_compact, system_template_override
+        self, mock_maybe_compact, system_template_override, mock_toolset
     ):
         """Test that maybe_compact_history is called with None compactor when not provided."""
         mock_prompt_adapter = Mock()
@@ -888,6 +901,7 @@ class TestChatAgentCompaction:
             tools_registry=mock_tools_registry,
             system_template_override=system_template_override,
             compactor=None,
+            toolset=mock_toolset,
         )
 
         input_state = {
@@ -914,7 +928,7 @@ class TestChatAgentCompaction:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.chat_agent.maybe_compact_history")
     async def test_compacted_history_used_for_llm_call(
-        self, mock_maybe_compact, system_template_override
+        self, mock_maybe_compact, system_template_override, mock_toolset
     ):
         """Test that compacted history is used for the LLM call."""
         mock_compactor = Mock()
@@ -931,6 +945,7 @@ class TestChatAgentCompaction:
             tools_registry=mock_tools_registry,
             system_template_override=system_template_override,
             compactor=mock_compactor,
+            toolset=mock_toolset,
         )
 
         original_history = [

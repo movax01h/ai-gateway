@@ -8,6 +8,10 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 
 from duo_workflow_service.agents.project_utils import resolve_project_name_for_tool
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
+from duo_workflow_service.agents.tool_call_validator import (
+    retry_malformed_tool_calls,
+    validate_tool_calls,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.compaction import (
     ConversationCompactor,
@@ -30,6 +34,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import LLMFinishReason
 
@@ -42,6 +47,7 @@ class ChatAgent:
         name: str,
         prompt_adapter: BasePromptAdapter,
         tools_registry: ToolsRegistry,
+        toolset: Toolset,
         system_template_override: str | None,
         compactor: ConversationCompactor | None = None,
     ):
@@ -50,6 +56,7 @@ class ChatAgent:
         self.tools_registry = tools_registry
         self.system_template_override = system_template_override
         self._compactor = compactor
+        self.toolset = toolset
 
     def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
@@ -263,10 +270,25 @@ class ChatAgent:
             ):
                 agent_response = await self._get_agent_response(state)
 
-            # Check for abnormal finish reasons
-            finish_reason = agent_response.response_metadata.get("finish_reason")
-            if finish_reason in LLMFinishReason.abnormal_values():
-                log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
+                # Check for abnormal finish reasons
+                finish_reason = agent_response.response_metadata.get("finish_reason")
+                if finish_reason in LLMFinishReason.abnormal_values():
+                    log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
+
+                # Validate tool calls before building the response. If malformed, retry the call.
+                if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
+                    validation_errors = validate_tool_calls(
+                        self.toolset, agent_response
+                    )
+                    if validation_errors:
+                        agent_response = await retry_malformed_tool_calls(
+                            toolset=self.toolset,
+                            agent_response=agent_response,
+                            validation_errors=validation_errors,
+                            state=state,
+                            agent_name=self.name,
+                            get_agent_response=self._get_agent_response,
+                        )
 
             return self._build_response(agent_response, state)
 

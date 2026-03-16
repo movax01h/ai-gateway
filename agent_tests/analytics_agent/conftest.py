@@ -82,6 +82,7 @@ def analytics_agent(
 ):
     """Analytics agent with real LLM and mocked tools."""
     from duo_workflow_service.agents.chat_agent import ChatAgent
+    from duo_workflow_service.tools.toolset import Toolset
 
     RealLLMPromptAdapter = make_prompt_adapter_class()
     adapter = RealLLMPromptAdapter(
@@ -91,9 +92,11 @@ def analytics_agent(
         agent_name="analytics_agent",
     )
 
+    tools_dict = {tool.name: tool for tool in [glql_tool, work_item_note_tool]}
     return ChatAgent(
         name="analytics_agent",
         prompt_adapter=adapter,
         tools_registry=mock_tools_registry,
         system_template_override=None,
+        toolset=Toolset(pre_approved=set(), all_tools=tools_dict),
     )

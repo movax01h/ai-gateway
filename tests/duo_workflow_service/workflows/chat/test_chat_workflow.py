@@ -26,6 +26,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.interceptors.route.usage_billing import (
     PromptRegistrySelfHostedBillingSupport,
 )
+from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
@@ -83,11 +84,14 @@ def mock_prompt_adapter_fixture():
 
 @pytest.fixture(name="mock_chat_agent")
 def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
+    mock_toolset = Mock(spec=Toolset)
+    mock_toolset.validate_tool_call.return_value = None
     agent = ChatAgent(
         name="test_prompt",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
         system_template_override=None,
+        toolset=mock_toolset,
     )
     return agent
 

@@ -36,6 +36,12 @@ from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
+MALFORMED_TOOL_CALL_ERROR_TEMPLATE = (
+    "While processing your request, GitLab Duo Chat encountered a problem making a call to the "
+    "{tool_name} tool. Try again, or rephrase your request. If the problem "
+    "persists, start a new chat, and/or select a different model for your request."
+)
+
 _HIDDEN_TOOLS = ["get_plan"]
 
 _ACTION_HANDLERS = [
@@ -181,10 +187,8 @@ class ToolsExecutor:
 
         for invalid_tool_call in invalid_tool_calls:
             tool_name = invalid_tool_call.get("name") or "unknown"
-            error_content = (
-                f"While processing your request, GitLab Duo Chat encountered a problem making a call to the "
-                f"{tool_name} tool. Try again, or rephrase your request. If the problem "
-                f"persists, start a new chat, and/or select a different model for your request."
+            error_content = MALFORMED_TOOL_CALL_ERROR_TEMPLATE.format(
+                tool_name=tool_name
             )
 
             tool_call_id = invalid_tool_call["id"]
