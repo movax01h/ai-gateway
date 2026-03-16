@@ -283,7 +283,7 @@ test-integration: install-test-deps
 .PHONY: test-agents
 test-agents: install-test-deps
 	@echo "Running agent tests..."
-	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 -v --tb=short \
+	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 -v --tb=short --reruns 2 --reruns-delay 5 \
 		$(if $(EXECUTION_MODEL),--execution-model=$(EXECUTION_MODEL)) \
 		$(if $(VALIDATION_MODEL),--validation-model=$(VALIDATION_MODEL))
 

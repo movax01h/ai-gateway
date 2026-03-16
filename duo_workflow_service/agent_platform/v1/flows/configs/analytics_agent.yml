@@ -90,6 +90,7 @@ prompts:
 
           - **Default to project-level scope** (most common, faster queries)
           - **Use group-level** when context suggests broader scope
+          - **When users say "me", "my", "mine", or "assigned to me"**, always use `currentUser()` in the query (e.g., `assignee = currentUser()`). Do NOT ask for their username.
 
           When making assumptions, add a brief scope note to the answer.
         </scope_clarification>
@@ -299,7 +300,7 @@ prompts:
 
           - The `in` operator uses OR logic. For AND logic, use multiple conditions: `label = ~bug and label = ~security`
           - There are NO text search, `contains`, `like`, or similar operators
-          - Use `currentUser()` when users ask about "my", "mine", or "assigned to me" items (e.g., "my open MRs" → `author = currentUser()`, "issues assigned to me" → `assignee = currentUser()`)
+          - `currentUser()` is a valid value for `assignee` and `author` fields (e.g., `assignee = currentUser()`)
 
           ### Time Expressions (ALWAYS PREFER RELATIVE)
 

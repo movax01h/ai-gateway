@@ -1,7 +1,6 @@
 """Response Format Tests.
 
-Validates analytical (answer-first) vs query (embedded view) response patterns,
-including IDE-specific rendering (standard Markdown instead of GLQL blocks).
+Validates response format
 """
 
 import pytest
@@ -16,6 +15,76 @@ from .helpers import (
     mock_glql_response,
 )
 
+@pytest.mark.asyncio
+async def test_analytical_question_answers_first(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Analytical questions should provide answer BEFORE showing GLQL query."""
+    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS, count=15))
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "How many merge requests were merged this month in the gitlab-org group?",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response provides a direct answer or count BEFORE showing any GLQL query",
+            "The GLQL query appears inside a collapsible/details section",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_query_request_shows_embedded_view(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Query requests should show embedded view format prominently."""
+    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Write a GLQL query for open issues in the gitlab-org group",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response contains a ```glql code block with the query visible directly in the response",
+            "The response uses embedded view format with display, fields, and query parameters",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_visualization_request_shows_embedded_view(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Visualization requests should show embedded view format prominently."""
+    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Show me all open issues in the gitlab-org group",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response contains a ```glql code block with the query visible directly in the response",
+            "The response uses embedded view format with display, fields, and query parameters",
+        ]
+    )
 
 @pytest.mark.asyncio
 async def test_ide_analytical_question_answers_first(
