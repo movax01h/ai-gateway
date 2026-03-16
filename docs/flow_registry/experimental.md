@@ -70,6 +70,8 @@ needed to complete its task.
   from flow YAML.
 - **inputs**: List of input data sources (default: `["context:goal"]`)
 - **toolset**: List of tools available to the agent
+- **compaction**: Configuration for conversation compaction. When enabled, automatically summarizes older conversation
+  history to stay within token limits. See [Conversation Compaction](../context_management/compaction.md) for details.
 - **ui_log_events**: UI logging configuration
 - **ui_role_as**: Display role in UI (`"agent"` or `"tool"`)
 
@@ -235,6 +237,47 @@ components:
           - "on_tool_execution_success"
           - "on_tool_execution_failed"
       ui_role_as: "agent"
+```
+
+#### AgentComponent with Compaction Example
+
+For long-running agents that may accumulate extensive conversation history, enable compaction to automatically summarize
+older context:
+
+```yaml
+components:
+  - name: "code_assistant"
+    type: AgentComponent
+    prompt_id: "code_review_helper"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset:
+      - "read_file"
+      - "edit_file"
+      - "list_dir"
+    compaction: true  # Enable with default settings
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+```
+
+With custom compaction settings:
+
+```yaml
+components:
+  - name: "code_assistant"
+    type: AgentComponent
+    prompt_id: "code_review_helper"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset:
+      - "read_file"
+      - "edit_file"
+    compaction:
+      max_recent_messages: 15
+      trim_threshold: 0.8
+    ui_log_events:
+      - "on_agent_final_answer"
 ```
 
 ### HumanInputComponent
@@ -485,6 +528,8 @@ results,
   from flow YAML.
 - **inputs**: List of input data sources (default: `["context:goal"]`)
 - **max_correction_attempts**: Maximum number of retry attempts for failed tool executions (default: 3)
+- **compaction**: Configuration for conversation compaction. Useful when OneOffComponent is used in flows with prior
+  conversation history. See [Conversation Compaction](../context_management/compaction.md) for details.
 - **ui_log_events**: UI logging configuration for displaying tool execution progress
 
 #### Internal Architecture
@@ -566,6 +611,26 @@ components:
           - "on_tool_call_input"
           - "on_tool_execution_success"
           - "on_tool_execution_failed"
+```
+
+#### OneOffComponent with Compaction Example
+
+When a OneOffComponent may receive extensive conversation history from previous components, enable compaction:
+
+```yaml
+components:
+  - name: "file_processor"
+    type: OneOffComponent
+    prompt_id: "process_files"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "task"
+    toolset:
+      - "read_file"
+      - "edit_file"
+    compaction: true
+    max_correction_attempts: 3
 ```
 
 #### Usage Patterns
