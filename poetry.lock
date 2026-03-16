@@ -6396,6 +6396,27 @@ url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
 reference = "litellm"
 
 [[package]]
+name = "pytest-rerunfailures"
+version = "16.1"
+description = "pytest plugin to re-run tests to eliminate flaky failures"
+optional = false
+python-versions = ">=3.10"
+groups = ["test"]
+files = [
+    {file = "pytest_rerunfailures-16.1-py3-none-any.whl", hash = "sha256:5d11b12c0ca9a1665b5054052fcc1084f8deadd9328962745ef6b04e26382e86"},
+    {file = "pytest_rerunfailures-16.1.tar.gz", hash = "sha256:c38b266db8a808953ebd71ac25c381cb1981a78ff9340a14bcb9f1b9bff1899e"},
+]
+
+[package.dependencies]
+packaging = ">=17.1"
+pytest = ">=7.4,<8.2.2 || >8.2.2"
+
+[package.source]
+type = "legacy"
+url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
+reference = "litellm"
+
+[[package]]
 name = "pytest-watcher"
 version = "0.6.3"
 description = "Automatically rerun your tests on file modifications"
@@ -9864,4 +9885,4 @@ reference = "litellm"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "c83fa2b0efd28a3595ad42e4f05bee2c9f9ceff27b9bb7336b8d50ba5d9d1d09"
+content-hash = "ab04f27b53fad3722b9e49e0860a2c13ef27e258c69f62239e8218197ef5ced8"

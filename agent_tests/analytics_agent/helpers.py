@@ -100,3 +100,41 @@ SAMPLE_MRS = [
         "state": "merged",
     },
 ]
+
+EMPTY_RESPONSE: list[dict[str, Any]] = []
+
+REALISTIC_ISSUE_TITLES = [
+    "Fix authentication timeout in SSO login flow",
+    "Add dark mode support for the dashboard",
+    "Performance regression in search API",
+    "Update documentation for CI/CD pipeline",
+    "Security vulnerability in file upload",
+    "Implement two-factor authentication",
+    "Bug: merge request approval not working",
+    "Add GraphQL support for project queries",
+    "Improve error handling in webhook delivery",
+    "Refactor database connection pooling",
+    "Add audit logging for admin actions",
+    "Fix memory leak in background jobs",
+    "Implement rate limiting for API endpoints",
+    "Update dependencies to latest versions",
+    "Add support for custom project templates",
+    "Bug: notification emails not being sent",
+    "Improve accessibility of the web interface",
+    "Add bulk operations for issue management",
+    "Fix timezone handling in scheduled jobs",
+    "Implement caching for frequently accessed data",
+]
+
+
+def generate_issues(count: int) -> list[dict[str, Any]]:
+    """Generate a list of sample issues with realistic titles."""
+    return [
+        {
+            "id": f"gid://gitlab/Issue/{i}",
+            "iid": str(i),
+            "title": REALISTIC_ISSUE_TITLES[i % len(REALISTIC_ISSUE_TITLES)],
+            "state": "opened",
+        }
+        for i in range(1, count + 1)
+    ]

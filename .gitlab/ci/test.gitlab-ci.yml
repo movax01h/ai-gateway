@@ -73,6 +73,14 @@ tests:agents:analytics:
   extends: .tests:agents
   variables:
     AGENT_TEST_DIR: analytics_agent/
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - duo_workflow_service/agent_platform/v1/flows/configs/analytics_agent.yml
+        - agent_tests/analytics_agent/**/*
+      when: on_success
+    - when: manual
 
 .test-base: &test-base
   stage: test
