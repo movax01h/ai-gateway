@@ -57,7 +57,7 @@ models:
     provider: "Vertex"
     gitlab_identifier: "gemini_1_5_flash_vertex"
     description: "Multimodal for high-volume tasks."
-    max_context_tokens: 1000000 # https://gemini-api.apidog.io/doc-965857
+    max_context_tokens: 1_000_000 # https://gemini-api.apidog.io/doc-965857
     # Note: "Gemini 1.5 Flash come with a 1-million-token context window, and Gemini 1.5 Pro comes with a 2-million-token context window.". Read the source for more information.
     model_class_provider: litellm
     params:
@@ -72,7 +72,7 @@ models:
     gitlab_identifier: "gemini_2_0_flash_lite_vertex"
     description: "Optimized for high-volume, latency-sensitive tasks."
     cost_indicator: "$"
-    max_context_tokens: 1000000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-0-flash-lite
+    max_context_tokens: 1_000_000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-0-flash-lite
     model_class_provider: litellm
     params:
       model: "vertex_ai/gemini-2.0-flash-lite"
@@ -86,7 +86,7 @@ models:
     gitlab_identifier: "gemini_2_5_flash_vertex"
     description: "Multimodal reasoning with extended context."
     cost_indicator: "$"
-    max_context_tokens: 1000000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
+    max_context_tokens: 1_000_000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
     model_class_provider: litellm
     params:
       model: "gemini-2.5-flash"
@@ -171,7 +171,7 @@ models:
     gitlab_identifier: "claude_opus_4_6_vertex"
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
-    max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    max_context_tokens: 1_000_000
     model_class_provider: litellm
     family:
       - claude_4_5
@@ -181,16 +181,13 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
-      extra_headers:
-        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
   - name: "Claude Sonnet 4.6 - Anthropic"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_6"
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
-    # Note: Claude Sonnet 4.6 supports a 1M token context window **only** when using the context-1m-2025-08-07 beta header
+    max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
     family:
@@ -207,8 +204,7 @@ models:
     gitlab_identifier: "claude_sonnet_4_6_vertex"
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-6
-    # Note: max context window tokens of 1M are supported in Beta
+    max_context_tokens: 1_000_000
     family:
       - claude_4_5
     model_class_provider: litellm
@@ -218,8 +214,6 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
-      extra_headers:
-        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
@@ -376,7 +370,7 @@ models:
     gitlab_identifier: "gemini_3_1_pro_preview_vertex"
     description: "Designed to deliver strong agentic capabilities (near-Pro level) at substantial speed and value."
     cost_indicator: "$" # To be confirmed
-    max_context_tokens: 1000000
+    max_context_tokens: 1_000_000
     model_class_provider: google_genai
     family:
       - google_genai
