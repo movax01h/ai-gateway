@@ -1,0 +1,30 @@
+The git push output is provided in the tool_response tag below:
+<tool_response>{{ git_push_response }}</tool_response>
+
+From the tool_response, extract the pushed branch name. Use it as BRANCH_NAME below.
+
+<step number="1">
+  Use the `create_merge_request` tool to open a new merge request:
+  create_merge_request(
+      project_id={{ project_id }},
+      source_branch=BRANCH_NAME,
+      target_branch="{{ source_branch or default_branch }}",
+      title="Draft: [FixPipeline] {{ pipeline_url }}",
+      description="",
+  )
+  DO NOT include a "labels" parameter.
+</step>
+
+<step number="2">
+  Use the `update_merge_request` tool to update the merge request description with a summary of what was changed:
+  <execution_output>
+    {{ execution_results }}
+  </execution_output>
+
+  Add this text at the bottom of the description:
+  <text>
+    Fixes [failing pipeline]({{ pipeline_url }})<br><br>[Session {{ workflow_id }}]({{ session_url }})
+  </text>
+
+  Also set assignee_id to `{{ assignee_id }}`.
+</step>

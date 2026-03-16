@@ -1,0 +1,22 @@
+Fetch and checkout the existing branch specified below.
+
+<repository>{{ repository_url }}</repository>
+
+<branch>{{ ref }}</branch>
+
+Follow these exact steps:
+<step number="1">
+  Use the `run_git_command` tool to fetch the branch:
+  <git_command>
+    git fetch origin {{ ref }}
+  </git_command>
+</step>
+
+<step number="2">
+  Use the `run_git_command` tool to checkout the branch:
+  <git_command>
+    git checkout -B {{ ref }} --track origin/{{ ref }}
+  </git_command>
+</step>
+
+Return the branch name: "{{ ref }}"

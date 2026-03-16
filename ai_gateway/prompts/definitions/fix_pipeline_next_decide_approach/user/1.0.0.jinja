@@ -1,0 +1,6 @@
+Examine the information in the `context` tags below, and respond with either `add_comment`, `create_fix_on_new_mr`, or `create_fix_on_existing_mr`:
+<context>
+  {{fix_pipeline_context_results}}
+</context>
+
+{% if merge_request_url %}<merge_request_url>{{merge_request_url}}</merge_request_url>{% endif %}

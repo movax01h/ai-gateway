@@ -373,6 +373,51 @@ configurable_unit_primitives:
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_next_decide_approach"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_next_push_changes"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_next_checkout_existing_branch"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_next_create_new_mr"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+  - feature_setting: "fix_pipeline_next_comment_existing_mr"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
   - feature_setting: "explore_directories_for_prescan"
     unit_primitives: []
     default_model: "claude_sonnet_4_20250514_vertex"
