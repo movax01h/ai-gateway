@@ -13,9 +13,18 @@ TEST_CLONE=/tmp/gitlab-docs-${TEST_TAG}
 GITLAB_DOCS_CLONE_DIR=${TEST_CLONE}
 GITLAB_DOCS_JSONL_EXPORT_PATH=${TEST_CLONE}/docs-${TEST_TAG}.jsonl
 
-echo "------------------------------------------------------- Clone Docs -------------------------------------------------------"
+echo "------------------------------------------------------- Downloading Docs -------------------------------------------------------"
 rm -Rf "${GITLAB_DOCS_CLONE_DIR}"
-git clone --branch "${TEST_TAG}" --depth 1 "${GITLAB_DOCS_REPO}" "${GITLAB_DOCS_CLONE_DIR}"
+mkdir -p "${GITLAB_DOCS_CLONE_DIR}"
+
+PROTOCOL=$(echo "${GITLAB_DOCS_REPO}" | sed 's|://.*||')
+HOST=$(echo "${GITLAB_DOCS_REPO}" | sed 's|.*://\([^/]*\).*|\1|')
+PROJECT_PATH=$(echo "${GITLAB_DOCS_REPO}" | sed "s|.*://${HOST}/||" | sed 's|\.git$||')
+PROJECT_ID=$(printf '%s' "${PROJECT_PATH}" | sed 's|/|%2F|g')
+
+ARCHIVE_URL="${PROTOCOL}://${HOST}/api/v4/projects/${PROJECT_ID}/repository/archive.tar.gz?sha=${TEST_TAG}"
+
+curl -L "${ARCHIVE_URL}" | tar -xz -C "${GITLAB_DOCS_CLONE_DIR}" --strip-components=1
 
 echo "------------------------------------------------------- Validating -------------------------------------------------------"
 "${STEPS_DIR}"/validate.sh
