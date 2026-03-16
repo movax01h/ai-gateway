@@ -1,0 +1,17 @@
+mutation createAscpScan($input: AscpScanCreateInput!) {
+  ascpScanCreate(input: $input) {
+    scan {
+      id
+      scanSequence
+      scanType
+      commitSha
+      baseCommitSha
+      baseScan {
+        id
+      }
+      createdAt
+      updatedAt
+    }
+    errors
+  }
+}
