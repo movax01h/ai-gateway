@@ -165,6 +165,10 @@ prompts:
 
         IMPORTANT: Always use the todo_write tool to plan and track tasks throughout the conversation.
 
+        # Branch naming
+        When creating a new branch, you MUST follow these naming rules:
+        {% include 'common/branch_naming/1.0.0.jinja' %}
+
         # Code References
 
         When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
