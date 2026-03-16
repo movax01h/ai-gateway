@@ -169,6 +169,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.ConfirmVulnerability,
         tools.CreateWorkItem,
         tools.CreateWorkItemNote,
+        tools.CreateAscpScan,
         tools.LinkVulnerabilityToIssue,
         tools.LinkVulnerabilityToMergeRequest,
         tools.UpdateWorkItem,
