@@ -16,9 +16,8 @@ from ai_gateway.code_suggestions.processing import Prompt, TokenStrategyBase
 from ai_gateway.code_suggestions.processing.post.completions import PostProcessor
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.processing.typing import MetadataExtraInfo
-from ai_gateway.instrumentators import TextGenModelInstrumentator
 from ai_gateway.model_metadata import ModelMetadata
-from ai_gateway.models import ChatModelBase, Message, ModelAPICallError, ModelAPIError
+from ai_gateway.models import ChatModelBase, Message
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
@@ -49,10 +48,6 @@ class CodeCompletions:
     ):
         self.model = model
         self.model_metadata = model_metadata
-
-        self.instrumentator = TextGenModelInstrumentator(
-            model.metadata.engine, model.metadata.name
-        )
 
         self.post_processor = post_processor
         self.billing_event_client = billing_event_client
@@ -149,57 +144,42 @@ class CodeCompletions:
             context_max_percent=context_max_percent,
         )
 
-        with self.instrumentator.watch(prompt) as watch_container:
-            try:
-                watch_container.register_lang(lang_id, editor_lang)
+        if isinstance(self.model, AgentModel):
+            if lang := (editor_lang or resolve_lang_name(file_name)):
+                params = {
+                    "prefix": prompt.prefix,
+                    "suffix": prompt.suffix,
+                    "file_name": file_name,
+                    "language": lang.lower(),
+                }
 
-                if isinstance(self.model, AgentModel):
-                    if lang := (editor_lang or resolve_lang_name(file_name)):
-                        params = {
-                            "prefix": prompt.prefix,
-                            "suffix": prompt.suffix,
-                            "file_name": file_name,
-                            "language": lang.lower(),
-                        }
+                res = await self.model.generate(params, stream)
+            else:
+                res = None
+        elif isinstance(self.model, ChatModelBase):
+            res = await self.model.generate(prompt.prefix, stream=stream, **kwargs)
+        elif isinstance(self.model, AmazonQModel):
+            if lang := (editor_lang or resolve_lang_name(file_name)):
+                res = await self.model.generate(
+                    prompt.prefix,
+                    prompt.suffix,
+                    file_name,
+                    lang.lower(),
+                    stream,
+                    **kwargs,
+                )
+            else:
+                res = None
+        else:
+            res = await self.model.generate(
+                prompt.prefix, prompt.suffix, stream, **kwargs
+            )
 
-                        res = await self.model.generate(params, stream)
-                    else:
-                        res = None
-                elif isinstance(self.model, ChatModelBase):
-                    res = await self.model.generate(
-                        prompt.prefix, stream=stream, **kwargs
-                    )
-                elif isinstance(self.model, AmazonQModel):
-                    if lang := (editor_lang or resolve_lang_name(file_name)):
-                        res = await self.model.generate(
-                            prompt.prefix,
-                            prompt.suffix,
-                            file_name,
-                            lang.lower(),
-                            stream,
-                            **kwargs,
-                        )
-                    else:
-                        res = None
-                else:
-                    res = await self.model.generate(
-                        prompt.prefix, prompt.suffix, stream, **kwargs
-                    )
+        if res:
+            if isinstance(res, AsyncIterator):
+                return self._handle_stream(res, user)
 
-                if res:
-                    if isinstance(res, AsyncIterator):
-                        return self._handle_stream(res, user)
-
-                    return await self._handle_sync(
-                        prompt, res, lang_id, watch_container, user
-                    )
-            except ModelAPICallError as ex:
-                watch_container.register_model_exception(str(ex), ex.code)
-                raise
-            except ModelAPIError as ex:
-                # TODO: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/294
-                watch_container.register_model_exception(str(ex), -1)
-                raise
+            return await self._handle_sync(prompt, res, lang_id, user)
 
         return CodeSuggestionsOutput(
             text="",
@@ -237,13 +217,8 @@ class CodeCompletions:
         prompt: Prompt,
         response: TextGenModelOutput,
         lang_id: Optional[LanguageId],
-        watch_container: TextGenModelInstrumentator.WatchContainer,
         user: Optional[CloudConnectorUser] = None,
     ) -> CodeSuggestionsOutput:
-        watch_container.register_model_output_length(response.text)
-        watch_container.register_model_score(response.score)
-        watch_container.register_safety_attributes(response.safety_attributes)
-
         tokens_consumption_metadata = self._get_tokens_consumption_metadata(
             prompt, response
         )
@@ -255,8 +230,6 @@ class CodeCompletions:
             score=response.score,
             max_output_tokens_used=tokens_consumption_metadata.max_output_tokens_used,
         )
-
-        watch_container.register_model_post_processed_output_length(response_text)
 
         self._track_billing_event(user, tokens_consumption_metadata.output_tokens)
 

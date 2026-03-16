@@ -19,8 +19,7 @@ from ai_gateway.code_suggestions.processing.post.generations import (
 )
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.prompts import PromptTemplate
-from ai_gateway.instrumentators import TextGenModelInstrumentator
-from ai_gateway.models import Message, ModelAPICallError, ModelAPIError
+from ai_gateway.models import Message
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base_chat import ChatModelBase
@@ -60,9 +59,6 @@ class CodeGenerations:
         self.model = model
 
         self.prompt: Optional[Prompt] = None
-        self.instrumentator = TextGenModelInstrumentator(
-            model.metadata.engine, model.metadata.name
-        )
         self.prompt_builder = PromptBuilderPrefixBased(
             model.input_token_limit, tokenization_strategy
         )
@@ -161,79 +157,60 @@ class CodeGenerations:
             )
         )
 
-        with self.instrumentator.watch(prompt) as watch_container:
-            try:
-                watch_container.register_lang(lang_id, editor_lang)
+        if isinstance(self.model, AgentModel):
+            # The prefix variable here is content-above-cursor, it'll appear as `prefix` field in the template
+            # The prompt.prefix field is the pre-processed prompt and contains the user's instruction
+            params = {
+                "prefix": prefix,
+                "instruction": prompt.prefix,
+                "user_instruction": prompt.prefix,
+                "language": editor_lang,
+                "file_name": file_name,
+            }
 
-                if isinstance(self.model, AgentModel):
-                    # The prefix variable here is content-above-cursor, it'll appear as `prefix` field in the template
-                    # The prompt.prefix field is the pre-processed prompt and contains the user's instruction
-                    params = {
-                        "prefix": prefix,
-                        "instruction": prompt.prefix,
-                        "user_instruction": prompt.prefix,
-                        "language": editor_lang,
-                        "file_name": file_name,
-                    }
+            if prompt_enhancer:
+                params.update(prompt_enhancer)
+            res = await self.model.generate(params, stream)
+        elif isinstance(self.model, ChatModelBase):
+            res = await self.model.generate(prompt.prefix, stream=stream, **kwargs)
+        elif isinstance(self.model, AmazonQModel):
+            if lang := (editor_lang or resolve_lang_name(file_name)):
+                res = await self.model.generate(
+                    prefix,
+                    suffix,
+                    file_name,
+                    lang.lower(),
+                    stream,
+                    **kwargs,
+                )
+            else:
+                res = None
 
-                    if prompt_enhancer:
-                        params.update(prompt_enhancer)
-                    res = await self.model.generate(params, stream)
-                elif isinstance(self.model, ChatModelBase):
-                    res = await self.model.generate(
-                        prompt.prefix, stream=stream, **kwargs
-                    )
-                elif isinstance(self.model, AmazonQModel):
-                    if lang := (editor_lang or resolve_lang_name(file_name)):
-                        res = await self.model.generate(
-                            prefix,
-                            suffix,
-                            file_name,
-                            lang.lower(),
-                            stream,
-                            **kwargs,
-                        )
-                    else:
-                        res = None
+        else:
+            prefix_str = (
+                prompt.prefix
+                if isinstance(prompt.prefix, str)
+                else "".join(prompt.prefix)
+            )
 
-                else:
-                    prefix_str = (
-                        prompt.prefix
-                        if isinstance(prompt.prefix, str)
-                        else "".join(prompt.prefix)
-                    )
+            res = await self.model.generate(prefix_str, "", stream=stream, **kwargs)
 
-                    res = await self.model.generate(
-                        prefix_str, "", stream=stream, **kwargs
-                    )
+        if isinstance(res, list):
+            res = res[0]
 
-                if isinstance(res, list):
-                    res = res[0]
+        if res:
+            if isinstance(res, AsyncIterator):
+                stream_result = self._handle_stream(res, snowplow_event_context, user)
+                return stream_result
 
-                if res:
-                    if isinstance(res, AsyncIterator):
-                        stream_result = self._handle_stream(
-                            res, snowplow_event_context, user
-                        )
-                        return stream_result
-
-                    return await self._handle_sync(
-                        response=res,
-                        lang_id=lang_id,
-                        model_provider=model_provider,
-                        prefix=prefix,
-                        watch_container=watch_container,
-                        user=user,
-                        snowplow_event_context=snowplow_event_context,
-                    )
-
-            except ModelAPICallError as ex:
-                watch_container.register_model_exception(str(ex), ex.code)
-                raise
-            except ModelAPIError as ex:
-                # TODO: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/294
-                watch_container.register_model_exception(str(ex), -1)
-                raise
+            return await self._handle_sync(
+                response=res,
+                lang_id=lang_id,
+                model_provider=model_provider,
+                prefix=prefix,
+                user=user,
+                snowplow_event_context=snowplow_event_context,
+            )
 
         return CodeSuggestionsOutput(
             text="", score=0, model_metadata=self.model.metadata, lang_id=lang_id
@@ -270,17 +247,10 @@ class CodeGenerations:
         response: TextGenModelOutput,
         lang_id: Optional[LanguageId],
         prefix: str,
-        watch_container: TextGenModelInstrumentator.WatchContainer,
         model_provider: Optional[str] = None,
         snowplow_event_context: Optional[SnowplowEventContext] = None,
         user: Optional[CloudConnectorUser] = None,
     ) -> CodeSuggestionsOutput:
-        watch_container.register_model_output_length(response.text)
-        if response.score is not None:
-            watch_container.register_model_score(response.score)
-        if response.safety_attributes is not None:
-            watch_container.register_safety_attributes(response.safety_attributes)
-
         processor = (
             PostProcessorAnthropic
             if model_provider == ModelProvider.ANTHROPIC

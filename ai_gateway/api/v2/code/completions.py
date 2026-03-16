@@ -52,7 +52,6 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessorOperation,
 )
 from ai_gateway.config import Config
-from ai_gateway.instrumentators.base import TelemetryInstrumentator
 from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
@@ -297,15 +296,14 @@ async def generations(
     if payload.prompt_version == 3:
         code_generations.with_prompt_prepared(payload.prompt)
 
-    with TelemetryInstrumentator().watch(payload.telemetry):
-        suggestion = await code_generations.execute(
-            prefix=payload.current_file.content_above_cursor,
-            file_name=payload.current_file.file_name,
-            editor_lang=payload.current_file.language_identifier,
-            model_provider=payload.model_provider,
-            stream=payload.stream,
-            snowplow_event_context=snowplow_event_context,
-        )
+    suggestion = await code_generations.execute(
+        prefix=payload.current_file.content_above_cursor,
+        file_name=payload.current_file.file_name,
+        editor_lang=payload.current_file.language_identifier,
+        model_provider=payload.model_provider,
+        stream=payload.stream,
+        snowplow_event_context=snowplow_event_context,
+    )
 
     if isinstance(suggestion, AsyncIterator):
         return await _handle_stream(suggestion)
@@ -749,17 +747,16 @@ async def _execute_code_completion(
     snowplow_event_context: Optional[SnowplowEventContext] = None,
     **kwargs: dict,
 ) -> any:
-    with TelemetryInstrumentator().watch(payload.telemetry):
-        output = await code_completions.execute(
-            prefix=payload.current_file.content_above_cursor,
-            suffix=payload.current_file.content_below_cursor,
-            file_name=payload.current_file.file_name,
-            editor_lang=payload.current_file.language_identifier,
-            stream=payload.stream or False,  # Ensure stream is bool, not None
-            user=current_user.cloud_connector_user,  # Pass the underlying CloudConnectorUser
-            snowplow_event_context=snowplow_event_context,
-            **kwargs,
-        )
+    output = await code_completions.execute(
+        prefix=payload.current_file.content_above_cursor,
+        suffix=payload.current_file.content_below_cursor,
+        file_name=payload.current_file.file_name,
+        editor_lang=payload.current_file.language_identifier,
+        stream=payload.stream or False,  # Ensure stream is bool, not None
+        user=current_user.cloud_connector_user,  # Pass the underlying CloudConnectorUser
+        snowplow_event_context=snowplow_event_context,
+        **kwargs,
+    )
 
     if isinstance(code_completions, CodeCompletions):
         return [output]

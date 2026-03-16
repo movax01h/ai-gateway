@@ -19,7 +19,6 @@ from ai_gateway.code_suggestions.processing.typing import (
     Prompt,
     TokenStrategyBase,
 )
-from ai_gateway.instrumentators import TextGenModelInstrumentator
 from ai_gateway.models import (
     AnthropicAPIConnectionError,
     AnthropicAPIStatusError,
@@ -69,7 +68,6 @@ class TestCodeCompletions:
         )  # Return subscriptable list
 
         use_case = CodeCompletions(model, tokenization_strategy)
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
 
         yield use_case
@@ -90,7 +88,6 @@ class TestCodeCompletions:
             tokenization_strategy=Mock(spec=TokenStrategyBase),
             billing_event_client=mock_billing_client,
         )
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
         use_case.prompt_builder = Mock()
         use_case.prompt_builder.build.return_value = Prompt(
             prefix="test_prefix",
@@ -149,7 +146,6 @@ class TestCodeCompletions:
             post_processor=post_processor_factory,
         )
         completions.prompt_builder = prompt_builder
-        completions.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         yield completions
 
@@ -488,30 +484,16 @@ class TestCodeCompletions:
         mock_generate = AsyncMock(side_effect=_side_effect)
 
         mock_context_manager = Mock()
-        mock_context_manager.register_model_exception = Mock()
         mock_enter = Mock(return_value=mock_context_manager)
         mock_exit = Mock(return_value=None)
         mock_watch = Mock()
         mock_watch.return_value.__enter__ = mock_enter
         mock_watch.return_value.__exit__ = mock_exit
 
-        with (
-            patch.object(use_case.model, "generate", mock_generate),
-            patch.object(use_case.instrumentator, "watch", mock_watch),
-        ):
+        with patch.object(use_case.model, "generate", mock_generate):
 
             with pytest.raises(model_exception_type):
                 _ = await use_case.execute(prefix, suffix, file_name, editor_lang)
-
-            code = (
-                model_exception_type.code
-                if hasattr(model_exception_type, "code")
-                else -1
-            )
-
-            mock_context_manager.register_model_exception.assert_called_with(
-                str(exception), code
-            )
 
     async def test_execute_with_post_processor(
         self, completions_with_post_processing: Mock
@@ -626,7 +608,6 @@ class TestCodeCompletions:
         tokenization_strategy = Mock(spec=TokenStrategyBase)
         tokenization_strategy.estimate_length = Mock(return_value=[10, 0])
         use_case = CodeCompletions(model, tokenization_strategy)
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         # Mock prompt builder
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
@@ -695,7 +676,6 @@ class TestCodeCompletions:
         )
 
         use_case = CodeCompletions(agent_model, Mock(spec=TokenStrategyBase))
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         # Mock prompt builder
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
@@ -982,7 +962,6 @@ class TestCodeCompletions:
         )
 
         use_case = CodeCompletions(agent_model, Mock(spec=TokenStrategyBase))
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         # Mock prompt builder
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
