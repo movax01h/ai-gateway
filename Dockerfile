@@ -59,7 +59,7 @@ COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/venv/ 
 RUN poetry run python scripts/bootstrap.py
 
 # Pull foundational agents from the catalog
-RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356" \
+RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356,pipeline_authoring:1004583" \
     --flow-registry-version v1
 
 EXPOSE 5052
