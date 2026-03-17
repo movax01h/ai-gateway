@@ -17,6 +17,16 @@ from duo_workflow_service.tools.tool_output_manager import (
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
+# editorconfig-checker-disable
+QUICK_ACTIONS_WARNING = """
+IMPORTANT: Do NOT include GitLab quick actions in the body, title, or description fields. Quick actions
+are lines starting with / (such as /label, /assign, /milestone, /close, /reopen, /approve) and will
+cause HTTP 403 errors with the message "Quick actions cannot be used with AI workflows". If you encounter
+quick actions in a template, remove them and use the dedicated tool parameters instead
+(e.g., use the labels parameter for labels, the assignee_ids parameter for assignments).
+"""
+# editorconfig-checker-enable
+
 # Tools with a version below this threshold are considered experimental
 # and are not exposed via the ListTools API.
 STABLE_VERSION_THRESHOLD = Version("1.0.0")

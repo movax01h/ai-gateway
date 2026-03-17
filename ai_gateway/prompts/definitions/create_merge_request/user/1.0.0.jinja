@@ -17,3 +17,5 @@ Use `create_merge_request` tool to create a draft merge request for the current 
         * Use conventional commit types: feat, fix, docs, style, refactor, test, chore
         * Keep concise title under 50 characters based on the actual issue content.
         - Description: "Duo developer is starting to work on the issue {{ issue_url }}, revisit this page for more updates"
+
+    IMPORTANT: Do NOT include quick actions (lines starting with /) in the title or description. Quick actions like /draft, /assign, /label are forbidden and will cause the request to fail. Use the "Draft:" title prefix instead of /draft.
