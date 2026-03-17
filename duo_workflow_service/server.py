@@ -92,8 +92,11 @@ from lib.internal_events.context import (
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 from lib.usage_quota import UsageQuotaEvent
+from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
+
+_PROPAGATED_EXTRA_CLAIMS = {SKIP_USAGE_CUTOFF_CLAIM}
 
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
@@ -672,6 +675,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             extra_claims = {
                 "gitlab_instance_uid": getattr(user.claims, "gitlab_instance_uid", None)
             }
+            if user.claims.extra:
+                incoming_extra = dict(user.claims.extra)
+                for claim in _PROPAGATED_EXTRA_CLAIMS:
+                    if claim in incoming_extra:
+                        extra_claims[claim] = incoming_extra[claim]
 
         scopes = []
         if user.is_debug:
