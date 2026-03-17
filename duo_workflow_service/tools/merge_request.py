@@ -8,6 +8,7 @@ from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPol
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
+    QUICK_ACTIONS_WARNING,
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
@@ -33,6 +34,11 @@ MERGE_REQUEST_IDENTIFICATION_DESCRIPTION = """To identify a merge request you mu
   - https://gitlab.com/namespace/project/-/merge_requests/42
   - https://gitlab.com/group/subgroup/project/-/merge_requests/42
 """
+
+MERGE_REQUEST_QUICK_ACTIONS_WARNING = (
+    QUICK_ACTIONS_WARNING.rstrip()
+    + ' To create a draft merge request, prefix the title with "Draft:" instead of using /draft.\n'
+)
 # editorconfig-checker-enable
 
 
@@ -81,10 +87,7 @@ class CreateMergeRequest(DuoBaseTool):
     Make sure the source branch has been pushed to the remote repository before calling this tool,
     otherwise the merge request will have an empty diff.
 
-    IMPORTANT: Do NOT include quick actions in the description field. Quick actions are lines starting
-    with / (such as /label, /assign, /merge, /milestone) and are not supported for security reasons.
-    If you encounter quick actions in a merge request template, remove them and use the dedicated tool
-    parameters instead (e.g., use the labels parameter for labels, the assignee parameter for assignments).
+    {MERGE_REQUEST_QUICK_ACTIONS_WARNING}
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 
@@ -655,10 +658,7 @@ class UpdateMergeRequest(DuoBaseTool):
     description: str = f"""Updates an existing merge request. You can change the target branch, title, or even close the MR.
 Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.
 
-IMPORTANT: Do NOT include quick actions in the description field. Quick actions are lines starting
-with / (such as /label, /assign, /merge, /milestone) and are not supported for security reasons.
-If you encounter quick actions in a merge request template, remove them and use the dedicated tool
-parameters instead (e.g., use the labels parameter for labels, the assignee parameter for assignments).
+{MERGE_REQUEST_QUICK_ACTIONS_WARNING}
 
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
