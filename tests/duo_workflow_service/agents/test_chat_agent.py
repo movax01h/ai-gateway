@@ -759,3 +759,142 @@ async def test_chat_agent_notifiable_exception_non_5xx_error(chat_agent, input):
         "if the issue persists."
     )
     assert exc_info.value.__cause__ is original_error
+
+
+class TestChatAgentCompaction:
+    """Test suite for ChatAgent compaction integration."""
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.chat_agent.maybe_compact_history")
+    async def test_compaction_called_with_compactor(
+        self, mock_maybe_compact, system_template_override
+    ):
+        """Test that maybe_compact_history is called when compactor is provided."""
+        mock_compactor = Mock()
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="Response", id="msg-id")
+        )
+        mock_prompt_adapter.get_model.return_value = Mock()
+        mock_tools_registry = Mock(spec=ToolsRegistry)
+
+        chat_agent = ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=mock_tools_registry,
+            system_template_override=system_template_override,
+            compactor=mock_compactor,
+        )
+
+        input_state = {
+            "conversation_history": {"Chat Agent": [HumanMessage(content="hi")]},
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+            "approval": None,
+        }
+
+        mock_maybe_compact.return_value = [HumanMessage(content="hi")]
+
+        await chat_agent.run(input_state)
+
+        mock_maybe_compact.assert_called_once_with(
+            compactor=mock_compactor,
+            history=[HumanMessage(content="hi")],
+            agent_name="Chat Agent",
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.chat_agent.maybe_compact_history")
+    async def test_compaction_called_without_compactor(
+        self, mock_maybe_compact, system_template_override
+    ):
+        """Test that maybe_compact_history is called with None compactor when not provided."""
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="Response", id="msg-id")
+        )
+        mock_prompt_adapter.get_model.return_value = Mock()
+        mock_tools_registry = Mock(spec=ToolsRegistry)
+
+        chat_agent = ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=mock_tools_registry,
+            system_template_override=system_template_override,
+            compactor=None,
+        )
+
+        input_state = {
+            "conversation_history": {"Chat Agent": [HumanMessage(content="hi")]},
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+            "approval": None,
+        }
+
+        mock_maybe_compact.return_value = [HumanMessage(content="hi")]
+
+        await chat_agent.run(input_state)
+
+        mock_maybe_compact.assert_called_once_with(
+            compactor=None,
+            history=[HumanMessage(content="hi")],
+            agent_name="Chat Agent",
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.chat_agent.maybe_compact_history")
+    async def test_compacted_history_used_for_llm_call(
+        self, mock_maybe_compact, system_template_override
+    ):
+        """Test that compacted history is used for the LLM call."""
+        mock_compactor = Mock()
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="Response", id="msg-id")
+        )
+        mock_prompt_adapter.get_model.return_value = Mock()
+        mock_tools_registry = Mock(spec=ToolsRegistry)
+
+        chat_agent = ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=mock_tools_registry,
+            system_template_override=system_template_override,
+            compactor=mock_compactor,
+        )
+
+        original_history = [
+            HumanMessage(content="message 1"),
+            AIMessage(content="response 1"),
+            HumanMessage(content="message 2"),
+        ]
+        compacted_history = [
+            HumanMessage(content="summary"),
+            HumanMessage(content="message 2"),
+        ]
+
+        input_state = {
+            "conversation_history": {"Chat Agent": original_history},
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+            "approval": None,
+        }
+
+        mock_maybe_compact.return_value = compacted_history
+
+        await chat_agent.run(input_state)
+
+        called_state = mock_prompt_adapter.get_response.call_args[0][0]
+        assert called_state["conversation_history"]["Chat Agent"] == compacted_history

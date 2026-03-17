@@ -5,6 +5,10 @@ from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import DefaultPromptAdapter
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.components.tools_registry import Toolset, ToolsRegistry
+from duo_workflow_service.conversation.compaction import (
+    CompactionConfig,
+    create_conversation_compactor,
+)
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
@@ -19,6 +23,7 @@ def create_agent(
     workflow_type: GLReportingEventContext,
     system_template_override: str | None,
     agent_name_override: str | None = None,
+    compaction: CompactionConfig | None = None,
 ) -> ChatAgent:
     # Use agent_name_override for chat-partial flows, default to "chat"
     agent_name = agent_name_override if agent_name_override else "chat"
@@ -44,9 +49,16 @@ def create_agent(
         },
     )
 
+    compactor = (
+        create_conversation_compactor(config=compaction, llm_model=prompt.model)
+        if compaction
+        else None
+    )
+
     return ChatAgent(
         name=prompt.name,
         prompt_adapter=DefaultPromptAdapter(prompt),
         tools_registry=tools_registry,
         system_template_override=system_template_override,
+        compactor=compactor,
     )

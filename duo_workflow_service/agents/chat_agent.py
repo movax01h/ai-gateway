@@ -8,6 +8,10 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.conversation.compaction import (
+    ConversationCompactor,
+    maybe_compact_history,
+)
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
@@ -38,11 +42,13 @@ class ChatAgent:
         prompt_adapter: BasePromptAdapter,
         tools_registry: ToolsRegistry,
         system_template_override: str | None,
+        compactor: ConversationCompactor | None = None,
     ):
         self.name = name
         self.prompt_adapter = prompt_adapter
         self.tools_registry = tools_registry
         self.system_template_override = system_template_override
+        self._compactor = compactor
 
     def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str]
@@ -230,6 +236,14 @@ class ChatAgent:
         # Handle approval rejection
         if isinstance(approval_state, ApprovalStateRejection):
             self._handle_approval_rejection(state, approval_state)
+
+        history = state["conversation_history"].get(self.name, [])
+        compacted_history = await maybe_compact_history(
+            compactor=self._compactor,
+            history=history,
+            agent_name=self.name,
+        )
+        state["conversation_history"][self.name] = compacted_history
 
         try:
             with GitLabServiceContext(
