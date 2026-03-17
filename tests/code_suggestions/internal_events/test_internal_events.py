@@ -1,5 +1,5 @@
 from unittest import mock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from snowplow_tracker import SelfDescribingJson, Snowplow, StructuredEvent
@@ -82,6 +82,7 @@ class TestInternalEventsClient:
         assert tracker_args["app_id"] == "gitlab_ai_gateway"
         assert tracker_args["namespace"] == "gl"
         assert len(tracker_args["emitters"]) == 1
+        assert tracker_args["emitters"][0] is client._emitter
 
     @pytest.mark.parametrize(
         "event_name, additional_properties, category, kwargs",
@@ -322,4 +323,66 @@ class TestInternalEventsClient:
                 label="test_label",
                 property="test_property",
                 event_id="event-id-1",
+            )
+
+    @pytest.mark.parametrize(
+        "queue_size,buffer_size,expected_queue,expected_buffer",
+        [
+            (15, 3, 15, 3),
+            (None, 5, -1, 5),
+            (10, None, 10, -1),
+            (None, None, -1, -1),
+        ],
+    )
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_shutdown_logs_stats(
+        self,
+        mock_emitter_init: MagicMock,
+        mock_tracker_init: MagicMock,
+        queue_size: int | None,
+        buffer_size: int | None,
+        expected_queue: int,
+        expected_buffer: int,
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = InternalEventsClient(
+            enabled=True,
+            endpoint="https://whitechoc.local",
+            app_id="gitlab_ai_gateway",
+            namespace="gl",
+            batch_size=3,
+            thread_count=2,
+        )
+
+        if queue_size is not None:
+            mock_queue = MagicMock()
+            mock_queue.qsize.return_value = queue_size
+            client._emitter.queue = mock_queue
+
+        if buffer_size is not None:
+            mock_event_store = MagicMock()
+            mock_event_store.size.return_value = buffer_size
+            client._emitter.event_store = mock_event_store
+
+        with (
+            mock.patch.object(client.snowplow_tracker, "flush") as mock_flush,
+            mock.patch.object(client._session, "close") as mock_close,
+            mock.patch.object(client._logger, "info") as mock_info,
+        ):
+            client.shutdown()
+            mock_flush.assert_called_once()
+            mock_close.assert_called_once()
+            assert mock_info.call_count == 2
+            mock_info.assert_any_call(
+                "Shutting down internal events client, flushing remaining events",
+                emitter_queue_size=expected_queue,
+                emitter_buffer_size=expected_buffer,
+            )
+            mock_info.assert_any_call(
+                "Internal events client shutdown complete",
+                emitter_queue_size=expected_queue,
+                emitter_buffer_size=expected_buffer,
             )

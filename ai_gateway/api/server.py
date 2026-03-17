@@ -93,11 +93,18 @@ async def lifespan(app: FastAPI):
     yield
 
     await container_application.usage_quota.service().aclose()
+
     try:
         container_application.billing_event.client().shutdown()
     except Exception as e:
         structlog.stdlib.get_logger("billing_events_client").warning(
             "Failed to shutdown billing events client", error=str(e)
+        )
+    try:
+        container_application.internal_event.client().shutdown()
+    except Exception as e:
+        structlog.stdlib.get_logger("internal_events_client").warning(
+            "Failed to shutdown internal events client", error=str(e)
         )
 
 
