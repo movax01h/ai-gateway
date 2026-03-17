@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import structlog
@@ -52,6 +52,38 @@ class InternalEventsClient:
                 namespace=namespace,
                 emitters=[self._emitter],
             )
+
+    def _get_emitter_stats(self) -> Tuple[int, int]:
+        if not self.enabled:
+            return -1, -1
+        try:
+            queue_size = self._emitter.queue.qsize()
+        except AttributeError:
+            queue_size = -1
+        try:
+            buffer_size = self._emitter.event_store.size()
+        except AttributeError:
+            buffer_size = -1
+        return queue_size, buffer_size
+
+    def shutdown(self) -> None:
+        if not self.enabled:
+            return
+
+        queue_size, buffer_size = self._get_emitter_stats()
+        self._logger.info(
+            "Shutting down internal events client, flushing remaining events",
+            emitter_queue_size=queue_size,
+            emitter_buffer_size=buffer_size,
+        )
+        self.snowplow_tracker.flush()
+        queue_size, buffer_size = self._get_emitter_stats()
+        self._session.close()
+        self._logger.info(
+            "Internal events client shutdown complete",
+            emitter_queue_size=queue_size,
+            emitter_buffer_size=buffer_size,
+        )
 
     def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
         self._logger.info(
