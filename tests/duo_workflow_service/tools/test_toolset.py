@@ -3,13 +3,13 @@ from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, Field
 
-from duo_workflow_service import tools
 from duo_workflow_service.tools import (
     MalformedToolCallError,
     Toolset,
     ToolType,
     UnknownToolError,
 )
+from duo_workflow_service.tools.merge_request import CreateMergeRequestNote
 
 
 class MockBaseTool(BaseTool):
@@ -62,16 +62,21 @@ def mock_pre_approved_fixture() -> list[str]:
 @pytest.fixture(name="toolset")
 def toolset_fixture(mock_all_tools, mock_pre_approved) -> Toolset:
     """Create a ToolSet instance for testing."""
-    return Toolset(pre_approved=mock_pre_approved, all_tools=mock_all_tools)
+    return Toolset(
+        pre_approved=mock_pre_approved, all_tools=mock_all_tools, tool_options={}
+    )
 
 
 class TestToolset:
     def test_initialization(self, mock_all_tools, mock_pre_approved):
         """Test that ToolSet initializes correctly."""
-        toolset = Toolset(pre_approved=mock_pre_approved, all_tools=mock_all_tools)
+        toolset = Toolset(
+            pre_approved=mock_pre_approved, all_tools=mock_all_tools, tool_options={}
+        )
 
         assert toolset._all_tools == mock_all_tools
         assert toolset._pre_approved == mock_pre_approved
+        assert toolset._tool_options == {}
         assert len(toolset.bindable) == 5
         assert len(toolset._executable_tools) == 3  # Only BaseTool instances
         assert set(toolset._executable_tools.keys()) == {
@@ -79,6 +84,150 @@ class TestToolset:
             "mock_tool_pre_approved",
             "mock_tool_with_params",
         }
+
+    def test_tool_options_validation_valid_key(self):
+        """Test that valid tool option keys are accepted."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        # 'internal' is a valid parameter on CreateMergeRequestNoteInput
+        toolset = Toolset(
+            pre_approved=set(),
+            all_tools=all_tools,
+            tool_options={"create_merge_request_note": {"internal": True}},
+        )
+        assert toolset._tool_options == {
+            "create_merge_request_note": {"internal": True}
+        }
+
+    def test_tool_options_validation_invalid_key(self):
+        """Test that invalid tool option keys raise ValueError."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        with pytest.raises(ValueError, match="Invalid tool option 'not_a_real_param'"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={"create_merge_request_note": {"not_a_real_param": True}},
+            )
+
+    def test_tool_options_validation_skips_missing_tools(self):
+        """Test that tool_options for tools not in the toolset are silently skipped."""
+        toolset = Toolset(
+            pre_approved=set(),
+            all_tools={},
+            tool_options={"nonexistent_tool": {"some_option": True}},
+        )
+        assert toolset._tool_options == {"nonexistent_tool": {"some_option": True}}
+
+    def test_tool_options_validation_rejects_nested_dict(self):
+        """Test that nested dict values in tool_options raise ValueError."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        with pytest.raises(ValueError, match="nested structures"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={
+                    "create_merge_request_note": {
+                        "body": {"nested": {"deeply": "value"}}
+                    }
+                },
+            )
+
+    def test_tool_options_validation_rejects_nested_list(self):
+        """Test that nested list values in tool_options raise ValueError."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        with pytest.raises(ValueError, match="nested structures"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={
+                    "create_merge_request_note": {"body": [["nested", "list"]]}
+                },
+            )
+
+    def test_tool_options_validation_rejects_list_with_dicts(self):
+        """Test that list values containing dicts in tool_options raise ValueError."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        with pytest.raises(ValueError, match="nested structures"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={
+                    "create_merge_request_note": {"body": [{"key": "value"}]}
+                },
+            )
+
+    def test_tool_options_validation_allows_flat_values(self):
+        """Test that primitive, flat list, and flat dict values are accepted."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        # All of these should be accepted: bool, str are primitives (flat)
+        toolset = Toolset(
+            pre_approved=set(),
+            all_tools=all_tools,
+            tool_options={"create_merge_request_note": {"internal": True}},
+        )
+        assert toolset._tool_options == {
+            "create_merge_request_note": {"internal": True}
+        }
+
+    def test_tool_options_validation_rejects_dict_with_nested_list(self):
+        """Test that dict values containing lists in tool_options raise ValueError."""
+        tool = CreateMergeRequestNote(
+            metadata={
+                "gitlab_client": None,
+                "gitlab_host": "gitlab.com",
+                "project": None,
+            }
+        )
+        all_tools = {"create_merge_request_note": tool}
+        with pytest.raises(ValueError, match="nested structures"):
+            Toolset(
+                pre_approved=set(),
+                all_tools=all_tools,
+                tool_options={
+                    "create_merge_request_note": {"body": {"key": ["nested", "list"]}}
+                },
+            )
 
     def test_mapping_interface(self, toolset):
         """Test that ToolSet implements the Mapping interface correctly."""
@@ -102,7 +251,7 @@ class TestToolset:
 
         # Test KeyError when accessing nonexistent tool
         with pytest.raises(KeyError):
-            toolset["nonexistent_tool"]
+            toolset["nonexistent_tool"]  # pylint: disable=pointless-statement
 
     def test_approved_method(self, toolset):
         """Test that the approved method works correctly."""

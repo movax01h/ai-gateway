@@ -598,7 +598,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             # Assert all component instances were created with correct parameters
             # Agent component
             mock_tools_registry.toolset.assert_called_once_with(
-                ["read_file", "edit_file"]
+                ["read_file", "edit_file"], tool_options={}
             )
             mock_agent_class.assert_called_once()
             agent_call_args = mock_agent_class.call_args[1]
@@ -794,7 +794,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
             # Verify tools_registry.toolset was called with the expected arguments
             if want_toolset is not None:
-                mock_tools_registry.toolset.assert_called_once_with(want_toolset)
+                if toolset is not None:
+                    # When toolset is specified in config, _parse_toolset is used which passes tool_options
+                    mock_tools_registry.toolset.assert_called_once_with(
+                        want_toolset, tool_options={}
+                    )
+                else:
+                    # When only tool_name is specified, toolset is called directly without tool_options
+                    mock_tools_registry.toolset.assert_called_once_with(want_toolset)
             else:
                 # When neither toolset nor tool_name is specified, toolset shouldn't be called
                 mock_tools_registry.toolset.assert_not_called()

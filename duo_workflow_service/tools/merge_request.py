@@ -307,6 +307,11 @@ class CreateMergeRequestNoteInput(MergeRequestResourceInput):
         "The tool will automatically find the discussion containing this note. "
         "If not provided, creates a standalone comment.",
     )
+    internal: bool = Field(
+        default=False,
+        description="If true, creates an internal note visible only to project members "
+        "with at least the Reporter role.",
+    )
 
 
 class CreateMergeRequestNote(DuoBaseTool):
@@ -331,10 +336,14 @@ The body parameter is always required.
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, body: str, **kwargs: Any) -> str:
+        # Apply flow-level tool_options overrides before processing kwargs
+        kwargs = self._apply_tool_options(kwargs)
+
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         merge_request_iid = kwargs.pop("merge_request_iid", None)
         note_id = kwargs.pop("note_id", None)
+        internal = kwargs.pop("internal", False)
 
         validation_result = self._validate_merge_request_url(
             url, project_id, merge_request_iid
@@ -369,7 +378,9 @@ The body parameter is always required.
         else:
             path = f"{base_path}/notes"
 
-        payload = {"body": body}
+        payload: dict[str, Any] = {"body": body}
+        if internal:
+            payload["internal"] = True
 
         try:
             response = await self.gitlab_client.apost(

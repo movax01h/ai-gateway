@@ -372,6 +372,7 @@ class TestLoadComponentClass:
 
         class TestComponent(BaseComponent):
             def attach(self, graph: StateGraph, router: RouterProtocol) -> None: ...
+
             def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
                 return "mock"
 

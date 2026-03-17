@@ -119,6 +119,24 @@ class DuoBaseTool(BaseTool):
                 f"Implement _execute instead."
             )
 
+    def _apply_tool_options(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Apply flow-level tool_options overrides to the given kwargs.
+
+        Tool options take precedence over LLM-provided values for matching
+        parameter names. This allows flows to enforce specific parameter
+        values (e.g., internal=True) that the LLM cannot override.
+
+        Args:
+            kwargs: The keyword arguments to apply overrides to.
+
+        Returns:
+            The kwargs dict with overrides applied.
+        """
+        tool_opts = getattr(self, "_tool_options", {}).get(self.name, {})
+        if tool_opts:
+            kwargs.update(tool_opts)
+        return kwargs
+
     @override
     @final
     async def _arun(self, *args: Any, **kwargs: Any) -> Any:

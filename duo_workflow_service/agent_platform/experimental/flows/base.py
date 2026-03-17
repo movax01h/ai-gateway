@@ -261,7 +261,9 @@ class Flow(AbstractWorkflow):
             )
 
             if "toolset" in comp_params:
-                comp_params["toolset"] = tools_registry.toolset(comp_params["toolset"])
+                comp_params["toolset"] = self._parse_toolset(
+                    tools_registry, comp_params["toolset"]
+                )
             elif "tool_name" in comp_params:
                 # If a tool_name is specified without a toolset, create a toolset containing just that tool.
                 comp_params["toolset"] = tools_registry.toolset(
@@ -346,6 +348,31 @@ class Flow(AbstractWorkflow):
         graph.set_entry_point(entry_component.__entry_hook__())
 
         return graph.compile(checkpointer=checkpointer)
+
+    def _parse_toolset(
+        self, tools_registry: ToolsRegistry, toolset_config: list
+    ) -> Any:
+        """Parse toolset configuration and extract tool options.
+
+        Supports two formats:
+        1. Simple string: "tool_name"
+        2. Dict with options: {"tool_name": {"option": "value"}}
+
+        Returns a Toolset with the appropriate tool options applied.
+        """
+        tool_names: list[str] = []
+        tool_options: dict[str, dict[str, Any]] = {}
+
+        for item in toolset_config:
+            if isinstance(item, str):
+                tool_names.append(item)
+            elif isinstance(item, dict):
+                for tool_name, options in item.items():
+                    tool_names.append(tool_name)
+                    if options:
+                        tool_options[tool_name] = options
+
+        return tools_registry.toolset(tool_names, tool_options=tool_options)
 
     @override
     async def _handle_workflow_failure(
