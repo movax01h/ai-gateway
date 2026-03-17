@@ -76,7 +76,7 @@ def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
-def test_exeption_capture(mock_log_exception):
+def test_exception_capture(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         response = client.post("/", headers={}, data={"foo": "bar"})
 
@@ -89,7 +89,7 @@ def test_exeption_capture(mock_log_exception):
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
-def test_exeption_group_capture(mock_log_exception):
+def test_exception_group_capture(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(ValueError):
         response = client.post("/exception_group", headers={}, data={"foo": "bar"})
 

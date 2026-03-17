@@ -11,7 +11,9 @@ __all__ = [
 log = structlog.stdlib.get_logger("exceptions")
 
 
-def log_exception(ex: Exception, extra: Optional[Dict] = None, **kwargs: Any) -> None:
+def log_exception(
+    ex: BaseException, extra: Optional[Dict] = None, **kwargs: Any
+) -> None:
     """Log the exception with the correlation ID.
 
     Args:

@@ -2,7 +2,7 @@ import logging
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, cast
 
 import structlog
 from asgi_correlation_id.context import correlation_id
@@ -10,6 +10,7 @@ from fastapi import status
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import Request
 from starlette_context import context as starlette_context
+from uvicorn._types import WWWScope
 from uvicorn.protocols.utils import get_path_with_query_string
 
 from ai_gateway.tracking.errors import log_exception
@@ -77,7 +78,7 @@ class AccessLogMiddleware:
         # duration_request represents latency added by sending request from Rails to AI gateway
         try:
             wait_duration = time.time() - float(
-                request.headers.get(X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT)
+                request.headers.get(X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT, "")
             )
         except (ValueError, TypeError):
             wait_duration = -1
@@ -107,19 +108,23 @@ class AccessLogMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception as e:
+            exc: BaseException = e
+
             if isinstance(e, BaseExceptionGroup):
-                e = e.exceptions[0]
-            starlette_context.data["exception_message"] = str(e)
-            starlette_context.data["exception_class"] = type(e).__name__
+                exc = cast(BaseException, e.exceptions[0])
+
+            starlette_context.data["exception_message"] = str(exc)
+            starlette_context.data["exception_class"] = type(exc).__name__
             starlette_context.data["exception_backtrace"] = traceback.format_exc()
-            log_exception(e)
-            raise e
+
+            log_exception(exc)
+            raise exc
         finally:
             elapsed_time = time.perf_counter() - start_time_total
             cpu_time = time.process_time() - start_time_cpu
-            url = get_path_with_query_string(request.scope)
-            client_host = request.client.host
-            client_port = request.client.port
+            url = get_path_with_query_string(cast(WWWScope, request.scope))
+            client_host = request.client.host if request.client else None
+            client_port = request.client.port if request.client else None
             http_method = request.method
             http_version = request.scope["http_version"]
 

@@ -152,7 +152,7 @@ class ModelRequestInstrumentator:
             self.error = False
             self.error_type = ERROR_TYPE_NONE
             self.streaming = streaming
-            self.start_time = None
+            self.start_time: Optional[float] = None
             self.unit_primitive = unit_primitive
             self.internal_event_client = internal_event_client
             self.finish_reason = "unknown"
@@ -274,6 +274,10 @@ class ModelRequestInstrumentator:
             Duration is calculated from the start time set by `start()`.
             """
             INFERENCE_IN_FLIGHT_GAUGE.labels(**self.labels).dec()
+
+            if self.start_time is None:
+                logger.warning("finish() called without start()", source=__name__)
+                return
 
             duration = time.perf_counter() - self.start_time
             logger.info("Request to LLM complete", source=__name__, duration=duration)
