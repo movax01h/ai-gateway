@@ -19,13 +19,9 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
 MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
-	--exclude "ai_gateway/api/middleware/base.py" \
 	--exclude "ai_gateway/api/v2/code/completions.py" \
 	--exclude "ai_gateway/api/v3/code/completions.py" \
-	--exclude "ai_gateway/code_suggestions/completions.py" \
-	--exclude "ai_gateway/code_suggestions/processing/ops.py" \
-	--exclude "ai_gateway/instrumentators/model_requests.py" \
-	--exclude "ai_gateway/integrations/amazon_q/test_chat.py"
+	--exclude "ai_gateway/code_suggestions/completions.py"
 
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?= ${ROOT_DIR}

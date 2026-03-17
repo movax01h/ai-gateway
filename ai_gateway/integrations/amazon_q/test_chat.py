@@ -1,3 +1,4 @@
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -8,7 +9,7 @@ from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ, Reference, Refere
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 
 
-class TestChatAmazonQ:
+class TestChatAmazonQ:  # pylint: disable=too-many-public-methods
     @pytest.fixture(name="mock_q_client_factory")
     def mock_q_client_factory_fixture(self):
         return mock.MagicMock(AmazonQClientFactory)
@@ -137,7 +138,7 @@ class TestChatAmazonQ:
 
     def test_process_empty_references(self, chat_amazon_q):
         """Test processing empty references list."""
-        event = {"codeReferenceEvent": {"references": []}}
+        event: dict[str, Any] = {"codeReferenceEvent": {"references": []}}
         chunks = chat_amazon_q._process_code_reference_event(event)
         self.assert_chunk_content(chunks, "")
 
@@ -250,7 +251,7 @@ class TestChatAmazonQ:
 
         # Test missing shape
         with pytest.raises(ValueError):
-            ReferenceSpan()
+            ReferenceSpan.model_validate({})
 
     def test_reference_model_with_span_objects(self):
         """Test Reference model with ReferenceSpan objects."""
@@ -319,7 +320,7 @@ class TestChatAmazonQ:
 
     def test_reference_format_partial_fields(self):
         """Test format_reference with partial fields."""
-        test_cases = [
+        test_cases: list[dict[str, Any]] = [
             {"input": {"repository": "repo-name"}, "expected": "repo-name"},
             {
                 "input": {"repository": "repo-name", "licenseName": "MIT"},
@@ -354,41 +355,52 @@ class TestChatAmazonQ:
 
         # Test with invalid types
         with pytest.raises(ValueError):
-            Reference(repository=123)  # type: ignore
+            Reference.model_validate({"repository": 123})
 
         with pytest.raises(ValueError):
-            Reference(url=["invalid"])  # type: ignore
+            Reference.model_validate({"url": ["invalid"]})
 
     def test_reference_format_empty(self):
         """Test format_reference with empty Reference."""
         reference = Reference()
         assert reference.format_reference() == ""
 
-    def test_model_validate_method(self):
+    @pytest.mark.parametrize(
+        "input_data, expected_repo, expect_error",
+        [
+            (
+                {
+                    "repository": {"shape": "repo-name"},
+                    "licenseName": {"shape": "MIT"},
+                    "url": {"shape": "https://example.com"},
+                    "recommendationContentSpan": {"shape": "lines 1-10"},
+                },
+                "repo-name",
+                False,
+            ),
+            (
+                {
+                    "repository": "repo-name",
+                    "licenseName": "MIT",
+                    "url": "https://example.com",
+                    "recommendationContentSpan": "lines 1-10",
+                },
+                "repo-name",
+                False,
+            ),
+            ({"repository": {"invalid": "value"}}, None, True),
+        ],
+    )
+    def test_model_validate_method(
+        self, input_data: dict[str, Any], expected_repo: str | None, expect_error: bool
+    ):
         """Test model_validate method with various inputs."""
-        # Valid input with shape objects
-        input_data = {
-            "repository": {"shape": "repo-name"},
-            "licenseName": {"shape": "MIT"},
-            "url": {"shape": "https://example.com"},
-            "recommendationContentSpan": {"shape": "lines 1-10"},
-        }
-        reference = Reference.model_validate(input_data)
-        assert reference.get_repository() == "repo-name"
-
-        # Valid input with direct strings
-        input_data = {
-            "repository": "repo-name",
-            "licenseName": "MIT",
-            "url": "https://example.com",
-            "recommendationContentSpan": "lines 1-10",
-        }
-        reference = Reference.model_validate(input_data)
-        assert reference.get_repository() == "repo-name"
-
-        # Invalid input
-        with pytest.raises(ValueError):
-            Reference.model_validate({"repository": {"invalid": "value"}})
+        if expect_error:
+            with pytest.raises(ValueError):
+                Reference.model_validate(input_data)
+        else:
+            reference = Reference.model_validate(input_data)
+            assert reference.get_repository() == expected_repo
 
     def test_generate_response(
         self,

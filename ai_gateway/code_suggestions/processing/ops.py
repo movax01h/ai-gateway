@@ -1,8 +1,9 @@
 import re
 from pathlib import Path
-from typing import Callable, NamedTuple, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import numpy as np
+import numpy.typing as npt
 from tree_sitter import Node
 
 from ai_gateway.code_suggestions.processing.typing import LanguageId
@@ -228,7 +229,7 @@ def find_common_lines(
     source: list[str],
     target: list[str],
     comparison_func: Callable[[str, str], bool] = compare_exact,
-) -> list[tuple]:
+) -> list[tuple[Any, ...]]:
     # editorconfig-checker-disable
     """Finds the common strings between two lists, keeping track of repeated ranges.
 
@@ -268,7 +269,9 @@ def find_common_lines(
 
     # The 0th row and column always contain zero values to simplify
     # the LCS algorithm implementation
-    l_matrix = np.zeros((len_source + 1, len_target + 1), dtype=int)
+    l_matrix: npt.NDArray[np.int_] = np.zeros(
+        (len_source + 1, len_target + 1), dtype=int
+    )
 
     # Tabulated implementation for the LCS problem.
     # Complexity: O(len_source*len_target)
@@ -308,10 +311,9 @@ def find_common_lines(
     # Input: [0,4,5,6,7]
     # Output: [(0,), (4,5,6), (7,)]
     diff_matches = np.diff(target_matches)
-    groups = np.split(target_lines_idx, np.where(diff_matches != 1)[0] + 1)
-    groups = list(map(tuple, groups))
+    splits = np.split(target_lines_idx, np.where(diff_matches != 1)[0] + 1)
 
-    return groups
+    return [tuple(g) for g in splits]
 
 
 def split_on_point(
