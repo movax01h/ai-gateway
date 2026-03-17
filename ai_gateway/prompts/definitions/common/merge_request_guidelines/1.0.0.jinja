@@ -1,0 +1,6 @@
+<merge_request_guidelines>
+When creating a merge request:
+1. Check if the project has MR description templates in `.gitlab/merge_request_templates/`. Prefer `Default.md` when present; only fall back to other templates in that directory if `Default.md` does not exist.
+2. If a default template exists, use it as the base for your MR description — fill in the template sections with relevant information rather than writing a description from scratch.
+3. Preserve any quick action commands (lines starting with `/`) from the template, as they trigger important automation (e.g. `/assign_reviewer`, `/label`).
+</merge_request_guidelines>
