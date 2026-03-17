@@ -22,6 +22,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.conversation.compaction import CompactionConfig
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
@@ -321,6 +322,7 @@ class Workflow(AbstractWorkflow):
             workflow_type=self._workflow_type,
             system_template_override=self.system_template_override,
             agent_name_override=self._agent_name_override,
+            compaction=CompactionConfig(trim_threshold=0.7),
         )
 
         tools_runner = ToolsExecutor(

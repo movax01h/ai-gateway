@@ -5,6 +5,7 @@ import pytest
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import create_agent
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.conversation.compaction import CompactionConfig
 from duo_workflow_service.tools.toolset import Toolset
 from lib.feature_flags.context import FeatureFlag
 from lib.internal_events.event_enum import CategoryEnum
@@ -231,3 +232,123 @@ class TestCreateAgent:
             mock_is_client_capable.assert_called_once_with("web_search")
         else:
             mock_is_client_capable.assert_not_called()
+
+    @patch(
+        "duo_workflow_service.agents.chat_agent_factory.create_conversation_compactor"
+    )
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    def test_create_agent_with_compaction_default_config(
+        self,
+        mock_is_client_capable,
+        mock_is_feature_enabled,
+        mock_create_compactor,
+        user,
+        mock_tools_registry,
+        mock_toolset,
+        mock_local_prompt_registry,
+        prompt,
+    ):
+        """Test that compactor is created when compaction=CompactionConfig()."""
+        mock_is_feature_enabled.return_value = False
+        mock_is_client_capable.return_value = False
+        mock_compactor = Mock()
+        mock_create_compactor.return_value = mock_compactor
+
+        agent = create_agent(
+            user=user,
+            tools_registry=mock_tools_registry,
+            internal_event_category="test_category",
+            tools=mock_toolset,
+            prompt_registry=mock_local_prompt_registry,
+            workflow_id="workflow_123",
+            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            system_template_override=None,
+            compaction=CompactionConfig(),
+        )
+
+        assert isinstance(agent, ChatAgent)
+        assert agent._compactor == mock_compactor
+        mock_create_compactor.assert_called_once()
+        call_kwargs = mock_create_compactor.call_args.kwargs
+        assert isinstance(call_kwargs["config"], CompactionConfig)
+        assert call_kwargs["llm_model"] == prompt.model
+
+    @patch(
+        "duo_workflow_service.agents.chat_agent_factory.create_conversation_compactor"
+    )
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    def test_create_agent_with_compaction_config(
+        self,
+        mock_is_client_capable,
+        mock_is_feature_enabled,
+        mock_create_compactor,
+        user,
+        mock_tools_registry,
+        mock_toolset,
+        mock_local_prompt_registry,
+    ):
+        """Test that custom CompactionConfig is used when provided."""
+        mock_is_feature_enabled.return_value = False
+        mock_is_client_capable.return_value = False
+        mock_compactor = Mock()
+        mock_create_compactor.return_value = mock_compactor
+
+        custom_config = CompactionConfig(
+            max_recent_messages=15,
+            trim_threshold=0.6,
+        )
+
+        agent = create_agent(
+            user=user,
+            tools_registry=mock_tools_registry,
+            internal_event_category="test_category",
+            tools=mock_toolset,
+            prompt_registry=mock_local_prompt_registry,
+            workflow_id="workflow_123",
+            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            system_template_override=None,
+            compaction=custom_config,
+        )
+
+        assert isinstance(agent, ChatAgent)
+        assert agent._compactor == mock_compactor
+        mock_create_compactor.assert_called_once()
+        call_kwargs = mock_create_compactor.call_args.kwargs
+        assert call_kwargs["config"] == custom_config
+
+    @patch(
+        "duo_workflow_service.agents.chat_agent_factory.create_conversation_compactor"
+    )
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    def test_create_agent_without_compaction(
+        self,
+        mock_is_client_capable,
+        mock_is_feature_enabled,
+        mock_create_compactor,
+        user,
+        mock_tools_registry,
+        mock_toolset,
+        mock_local_prompt_registry,
+    ):
+        """Test that no compactor is created when compaction=None (default)."""
+        mock_is_feature_enabled.return_value = False
+        mock_is_client_capable.return_value = False
+
+        agent = create_agent(
+            user=user,
+            tools_registry=mock_tools_registry,
+            internal_event_category="test_category",
+            tools=mock_toolset,
+            prompt_registry=mock_local_prompt_registry,
+            workflow_id="workflow_123",
+            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            system_template_override=None,
+            compaction=None,
+        )
+
+        assert isinstance(agent, ChatAgent)
+        assert agent._compactor is None
+        mock_create_compactor.assert_not_called()
