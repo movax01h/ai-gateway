@@ -1,0 +1,27 @@
+query ListAscpScans(
+  $fullPath: ID!
+  $scanType: AscpScanType
+  $first: Int
+  $after: String
+) {
+  project(fullPath: $fullPath) {
+    ascpScans(scanType: $scanType, first: $first, after: $after) {
+      nodes {
+        id
+        scanSequence
+        scanType
+        commitSha
+        baseCommitSha
+        baseScan {
+          id
+        }
+        createdAt
+        updatedAt
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}

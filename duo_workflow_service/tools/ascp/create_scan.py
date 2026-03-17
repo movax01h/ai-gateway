@@ -1,11 +1,10 @@
-from typing import Any, Literal, Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.ascp.queries import CREATE_ASCP_SCAN_MUTATION
+from duo_workflow_service.tools.ascp.types import ScanTypeLiteral
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-
-ScanTypeLiteral = Literal["FULL", "INCREMENTAL"]
 
 
 class CreateAscpScanResponseBody(BaseModel):

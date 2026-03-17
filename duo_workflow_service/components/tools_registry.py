@@ -126,6 +126,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     BuildReviewMergeRequestContext,
     GetSecurityFindingDetails,
     ListSecurityFindings,
+    tools.ListAscpScans,
     tools.GetWikiPage,
     tools.DocumentationSearch,
     GitLabApiGet,
