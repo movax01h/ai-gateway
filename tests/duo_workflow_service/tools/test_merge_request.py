@@ -977,6 +977,201 @@ async def test_create_merge_request_note_allows_regular_notes(
     )
 
 
+# ---- CreateMergeRequestNote internal parameter tests ----
+
+
+@pytest.mark.asyncio
+async def test_create_merge_request_note_with_internal_true(
+    gitlab_client_mock, metadata
+):
+    """Test creating an internal note by setting internal=True."""
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": "Internal note", "internal": True},
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+    tool = CreateMergeRequestNote(metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, body="Internal note", internal=True
+    )
+
+    expected_response = json.dumps(
+        {
+            "created_merge_request_note": {
+                "id": 1,
+                "body": "Internal note",
+                "internal": True,
+            },
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/notes",
+        body=json.dumps({"body": "Internal note", "internal": True}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_merge_request_note_with_internal_false(
+    gitlab_client_mock, metadata
+):
+    """Test creating a public note by setting internal=False (default)."""
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": "Public note"},
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+    tool = CreateMergeRequestNote(metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, body="Public note", internal=False
+    )
+
+    expected_response = json.dumps(
+        {
+            "created_merge_request_note": {"id": 1, "body": "Public note"},
+        }
+    )
+    assert response == expected_response
+
+    # internal should not be in payload when False
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/notes",
+        body=json.dumps({"body": "Public note"}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_merge_request_note_tool_options_internal_override(
+    gitlab_client_mock, project_mock
+):
+    """Test that internal: true in tool_options overrides LLM's internal=False."""
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": "Forced internal note", "internal": True},
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+    # Create metadata without tool_options (they come from toolset now)
+    metadata = {
+        "gitlab_client": gitlab_client_mock,
+        "gitlab_host": "gitlab.com",
+        "project": project_mock,
+    }
+
+    tool = CreateMergeRequestNote(metadata=metadata)
+    # Set tool_options via the toolset mechanism using the actual parameter name
+    tool._tool_options = {"create_merge_request_note": {"internal": True}}
+
+    # LLM passes internal=False, but tool_options should override
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, body="Forced internal note", internal=False
+    )
+
+    expected_response = json.dumps(
+        {
+            "created_merge_request_note": {
+                "id": 1,
+                "body": "Forced internal note",
+                "internal": True,
+            },
+        }
+    )
+    assert response == expected_response
+
+    # Should include internal=True in payload due to tool_options override
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/notes",
+        body=json.dumps({"body": "Forced internal note", "internal": True}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_merge_request_note_tool_options_internal_with_llm_internal_true(
+    gitlab_client_mock, project_mock
+):
+    """Test that tool_options internal works when LLM also sets internal=True."""
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": "Internal note", "internal": True},
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+    metadata = {
+        "gitlab_client": gitlab_client_mock,
+        "gitlab_host": "gitlab.com",
+        "project": project_mock,
+    }
+
+    tool = CreateMergeRequestNote(metadata=metadata)
+    # Set tool_options via the toolset mechanism using the actual parameter name
+    tool._tool_options = {"create_merge_request_note": {"internal": True}}
+
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, body="Internal note", internal=True
+    )
+
+    expected_response = json.dumps(
+        {
+            "created_merge_request_note": {
+                "id": 1,
+                "body": "Internal note",
+                "internal": True,
+            },
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/notes",
+        body=json.dumps({"body": "Internal note", "internal": True}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_merge_request_note_no_tool_options_respects_llm_choice(
+    gitlab_client_mock, project_mock
+):
+    """Test that without tool_options, LLM's choice is respected."""
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"id": 1, "body": "Public note"},
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
+
+    # Metadata without tool_options
+    metadata = {
+        "gitlab_client": gitlab_client_mock,
+        "gitlab_host": "gitlab.com",
+        "project": project_mock,
+    }
+
+    tool = CreateMergeRequestNote(metadata=metadata)
+    # Set empty tool_options
+    tool._tool_options = {}
+
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, body="Public note", internal=False
+    )
+
+    expected_response = json.dumps(
+        {
+            "created_merge_request_note": {"id": 1, "body": "Public note"},
+        }
+    )
+    assert response == expected_response
+
+    # Should NOT include internal in payload
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/merge_requests/123/notes",
+        body=json.dumps({"body": "Public note"}),
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_all_merge_request_notes(gitlab_client_mock, metadata):
     mock_response = GitLabHttpResponse(

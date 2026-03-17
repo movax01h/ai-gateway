@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import logging
@@ -389,11 +390,17 @@ class ToolsRegistry:
             for approved_call_hash in approved_tool_calls
         )
 
-    def toolset(self, tool_names: list[str]) -> Toolset:
+    def toolset(
+        self,
+        tool_names: list[str],
+        tool_options: Optional[dict[str, dict[str, Any]]] = None,
+    ) -> Toolset:
         """Create a Toolset instance representing complete collection of tools available to an agent.
 
         Args:
             tool_names: A list of tool names to include in the Toolset.
+            tool_options: Optional dict mapping tool names to their option overrides.
+                Example: {"create_merge_request_note": {"force_internal": True}}
 
         Returns:
             A new Toolset instance containing the requested tools.
@@ -402,11 +409,23 @@ class ToolsRegistry:
         # MCP tools if there are any are added to toolset
         tool_names += self._mcp_tool_names
 
-        all_tools = {
-            tool_name: self._enabled_tools[tool_name]
-            for tool_name in tool_names
-            if tool_name in self._enabled_tools
-        }
+        all_tools = {}
+        for tool_name in tool_names:
+            if tool_name not in self._enabled_tools:
+                continue
+            tool = self._enabled_tools[tool_name]
+            # Clone tools that have options to avoid shared-state mutation
+            # across different Toolsets using the same tool with different options
+            if (
+                tool_options
+                and tool_name in tool_options
+                and isinstance(tool, BaseTool)
+            ):
+                tool = copy.copy(tool)
+                # Prevent metadata cross-contamination if mutated
+                if hasattr(tool, "metadata") and tool.metadata:
+                    tool.metadata = dict(tool.metadata)
+            all_tools[tool_name] = tool
 
         pre_approved = {
             tool_name
@@ -414,4 +433,8 @@ class ToolsRegistry:
             if tool_name in self._preapproved_tool_names
         }
 
-        return Toolset(pre_approved=pre_approved, all_tools=all_tools)
+        return Toolset(
+            pre_approved=pre_approved,
+            all_tools=all_tools,
+            tool_options=tool_options or {},
+        )

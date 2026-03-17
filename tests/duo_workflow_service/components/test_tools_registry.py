@@ -502,6 +502,81 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
     assert registry._mcp_tool_names == ["extra_tool"]
 
 
+@pytest.mark.asyncio
+async def test_registry_toolset_with_tool_options(gl_http_client, project_mock):
+    """Test that tool_options are passed through to toolset and tools are cloned."""
+    workflow_config = {
+        "id": "test_workflow",
+        "agent_privileges_names": ["read_write_gitlab"],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+
+    tool_options = {"create_merge_request_note": {"internal": True}}
+
+    # Create toolset with tool_options
+    toolset = registry.toolset(["create_merge_request_note"], tool_options=tool_options)
+
+    # Verify tool_options are available in toolset
+    assert toolset._tool_options == tool_options
+
+    # Verify tool has _tool_options attribute set
+    note_tool = toolset._all_tools.get("create_merge_request_note")
+    assert note_tool is not None
+    assert hasattr(note_tool, "_tool_options")
+    assert note_tool._tool_options == tool_options
+
+    # Verify the tool in the toolset is a clone, not the same instance from the registry
+    original_tool = registry.get("create_merge_request_note")
+    assert note_tool is not original_tool
+
+
+@pytest.mark.asyncio
+async def test_registry_toolset_with_tool_options_no_cross_contamination(
+    gl_http_client, project_mock
+):
+    """Test that tool_options on one toolset don't affect another toolset's tools."""
+    workflow_config = {
+        "id": "test_workflow",
+        "agent_privileges_names": ["read_write_gitlab"],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+
+    # First toolset: internal=True
+    toolset_internal = registry.toolset(
+        ["create_merge_request_note"],
+        tool_options={"create_merge_request_note": {"internal": True}},
+    )
+
+    # Second toolset: no tool_options (public notes)
+    toolset_public = registry.toolset(["create_merge_request_note"])
+
+    # Verify each toolset has its own tool_options
+    internal_tool = toolset_internal._all_tools["create_merge_request_note"]
+    public_tool = toolset_public._all_tools["create_merge_request_note"]
+
+    assert internal_tool._tool_options == {
+        "create_merge_request_note": {"internal": True}
+    }
+    assert public_tool._tool_options == {}
+
+    # Verify they are different instances
+    assert internal_tool is not public_tool
+
+
 @pytest.mark.parametrize(
     "tool_name,expected_tool,config",
     [
@@ -779,7 +854,9 @@ def test_toolset_method(
         }
 
         mock_toolset_class.assert_called_once_with(
-            pre_approved=expected_preapproved, all_tools=expected_all_tools
+            pre_approved=expected_preapproved,
+            all_tools=expected_all_tools,
+            tool_options={},
         )
         assert toolset == mock_toolset
 
