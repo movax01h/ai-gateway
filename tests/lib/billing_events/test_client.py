@@ -93,7 +93,7 @@ def user_fixture():
     )
 
 
-class TestBillingEventsClient:  # pylint: disable=too-many-public-methods
+class TestBillingEventsClient:
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
     def test_initialization(self, mock_emitter_init, mock_tracker_init):

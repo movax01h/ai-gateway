@@ -46,7 +46,6 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
 )
 from ai_gateway.code_suggestions.base import CodeSuggestionsOutput
-from ai_gateway.code_suggestions.processing.base import ModelEngineOutput
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor,
@@ -714,9 +713,7 @@ def _completion_suggestion_choices(
 
         if tokens_consumption_metadata is None:
             # We take the first metadata from the suggestions since they are all the same
-            if isinstance(suggestion, ModelEngineOutput):
-                tokens_consumption_metadata = suggestion.tokens_consumption_metadata
-            elif isinstance(suggestion, CodeSuggestionsOutput) and suggestion.metadata:
+            if isinstance(suggestion, CodeSuggestionsOutput) and suggestion.metadata:
                 tokens_consumption_metadata = (
                     suggestion.metadata.tokens_consumption_metadata
                 )

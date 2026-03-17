@@ -24,7 +24,6 @@ from ai_gateway.tracking import SnowplowEventContext
 
 __all__ = [
     "PalmCodeBisonModel",
-    "PalmTextBisonModel",
     "PalmCodeGenBaseModel",
     "KindVertexTextModel",
     "VertexAPIConnectionError",
@@ -258,66 +257,6 @@ class PalmCodeGenBaseModel(TextGenModelBase):
         TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
     ):
         pass
-
-
-class PalmTextBisonModel(PalmCodeGenBaseModel):
-    def __init__(
-        self,
-        client: PredictionServiceAsyncClient,
-        project: str,
-        location: str,
-        *args: Any,
-        model_name: str = KindVertexTextModel.TEXT_BISON_002.value,
-        **kwargs: Any,
-    ):
-        super().__init__(model_name, client, project, location, *args, **kwargs)
-
-    @property
-    @override
-    def input_token_limit(self) -> int:
-        return 8_192
-
-    @override
-    async def generate(
-        self,
-        prefix: str,
-        suffix: str,
-        stream: bool = False,
-        temperature: float = 0.2,
-        max_output_tokens: int = 32,
-        top_p: float = 0.95,
-        top_k: int = 40,
-        candidate_count: int = 1,
-        stop_sequences: Optional[Sequence[str]] = None,
-        snowplow_event_context: Optional[SnowplowEventContext] = None,
-    ) -> (
-        TextGenModelOutput | list[TextGenModelOutput] | AsyncIterator[TextGenModelChunk]
-    ):
-        model_input = TextBisonModelInput(prefix)
-        res = await self._generate(
-            model_input,
-            temperature,
-            max_output_tokens,
-            top_p,
-            top_k,
-            candidate_count,
-            stop_sequences,
-        )
-
-        return res
-
-    @classmethod
-    def from_model_name(
-        cls,
-        name: Union[str, KindVertexTextModel],
-        client: PredictionServiceAsyncClient,
-        project: str,
-        location: str,
-        **kwargs: Any,
-    ):
-        name = _resolve_model_name(name, "text-bison")
-
-        return cls(client, project, location, model_name=name.value, **kwargs)
 
 
 class PalmCodeBisonModel(PalmCodeGenBaseModel):

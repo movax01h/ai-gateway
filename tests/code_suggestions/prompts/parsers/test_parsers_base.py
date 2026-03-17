@@ -1,6 +1,6 @@
 import pytest
 
-from ai_gateway.code_suggestions.processing.base import LanguageId
+from ai_gateway.code_suggestions.processing import LanguageId
 from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
 
