@@ -54,6 +54,7 @@ from lib.internal_events.event_enum import (
     EventLabelEnum,
     EventPropertyEnum,
 )
+from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 
 @pytest.fixture(autouse=True)
@@ -961,6 +962,71 @@ async def test_generate_token(mock_generate_token_response, mock_token_authority
         expiresAt=one_hour_later,
         server_capabilities=["tool_call_approval"],
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_skip_usage_cutoff(
+    _mock_generate_token_response, mock_token_authority
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_agent_platform"],
+            extra={
+                SKIP_USAGE_CUTOFF_CLAIM: True,
+                "non_propagated_claim": "should_be_excluded",
+            },
+        ),
+    )
+    current_user.set(user)
+
+    servicer = DuoWorkflowService()
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    kwargs = mock_token_authority.return_value.encode.call_args.kwargs
+    assert kwargs["extra_claims"][SKIP_USAGE_CUTOFF_CLAIM] is True
+    assert "non_propagated_claim" not in kwargs["extra_claims"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_without_skip_usage_cutoff(
+    _mock_generate_token_response, mock_token_authority
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        is_debug=False,
+        claims=UserClaims(
+            issuer="gitlab.com",
+            scopes=["duo_agent_platform"],
+        ),
+    )
+    current_user.set(user)
+
+    servicer = DuoWorkflowService()
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    kwargs = mock_token_authority.return_value.encode.call_args.kwargs
+    assert SKIP_USAGE_CUTOFF_CLAIM not in kwargs["extra_claims"]
 
 
 @pytest.mark.asyncio
