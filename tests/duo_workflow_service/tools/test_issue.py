@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import json
 from unittest.mock import AsyncMock, Mock
 
@@ -1113,6 +1114,115 @@ async def test_create_issue_note(issue_tool_setup, note_data):
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/issues/123/notes",
         body=json.dumps({"body": "Test note"}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_issue_note_with_note_id_reply(issue_tool_setup):
+    """Test creating a reply to an existing note using note_id."""
+    gitlab_client_mock, metadata = issue_tool_setup
+
+    discussions_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(
+            [{"id": "disc123", "notes": [{"id": 42, "body": "Original note"}]}]
+        ),
+    )
+
+    reply_response = GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 99,
+            "body": "This is a reply",
+            "created_at": "2024-01-01T13:00:00Z",
+            "author": {"id": 1, "name": "Test User"},
+        },
+    )
+
+    gitlab_client_mock.aget = AsyncMock(return_value=discussions_response)
+    gitlab_client_mock.apost = AsyncMock(return_value=reply_response)
+
+    tool = CreateIssueNote(
+        description="create issue note description", metadata=metadata
+    )
+
+    response = await tool._arun(
+        project_id=1,
+        issue_iid=123,
+        body="This is a reply",
+        note_id=42,
+    )
+
+    parsed = json.loads(response)
+    assert parsed["status"] == "success"
+    assert parsed["body"] == "This is a reply"
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/1/issues/123/discussions",
+        parse_json=False,
+    )
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/issues/123/discussions/disc123/notes",
+        body=json.dumps({"body": "This is a reply"}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_issue_note_with_note_id_not_found(issue_tool_setup):
+    """Test that note_id resolution returns error when note is not found."""
+    gitlab_client_mock, metadata = issue_tool_setup
+
+    discussions_response = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(
+            [{"id": "disc123", "notes": [{"id": 42, "body": "Some note"}]}]
+        ),
+    )
+
+    gitlab_client_mock.aget = AsyncMock(return_value=discussions_response)
+
+    tool = CreateIssueNote(
+        description="create issue note description", metadata=metadata
+    )
+
+    response = await tool._arun(
+        project_id=1,
+        issue_iid=123,
+        body="This is a reply",
+        note_id=999,
+    )
+
+    parsed = json.loads(response)
+    assert "error" in parsed
+    assert "999" in parsed["error"]
+
+
+@pytest.mark.asyncio
+async def test_create_issue_note_without_note_id(issue_tool_setup, note_data):
+    """Test that omitting note_id creates a standalone note (no discussion lookup)."""
+    gitlab_client_mock, metadata = issue_tool_setup
+    gitlab_client_mock.apost.return_value = note_data
+
+    tool = CreateIssueNote(
+        description="create issue note description", metadata=metadata
+    )
+
+    response = await tool._arun(
+        project_id=1,
+        issue_iid=123,
+        body="Standalone note",
+    )
+
+    parsed = json.loads(response)
+    assert parsed["status"] == "success"
+
+    # Should NOT have called aget for discussions
+    gitlab_client_mock.aget.assert_not_called()
+
+    gitlab_client_mock.apost.assert_called_once_with(
+        path="/api/v4/projects/1/issues/123/notes",
+        body=json.dumps({"body": "Standalone note"}),
     )
 
 

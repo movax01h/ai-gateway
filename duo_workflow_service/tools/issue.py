@@ -454,6 +454,12 @@ class CreateIssueNoteInput(IssueResourceInput):
     body: str = Field(
         description="The content of the note. Limited to 1,000,000 characters."
     )
+    note_id: Optional[int] = Field(
+        default=None,
+        description="ID of an existing note to reply to. "
+        "The tool will automatically find the discussion containing this note. "
+        "If not provided, creates a standalone comment.",
+    )
 
 
 class CreateIssueNote(IssueBaseTool):
@@ -479,6 +485,7 @@ The body parameter is always required.
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         issue_iid = kwargs.pop("issue_iid", None)
+        note_id = kwargs.pop("note_id", None)
 
         project_id, issue_iid, errors = self._validate_issue_url(
             url, project_id, issue_iid
@@ -488,17 +495,31 @@ The body parameter is always required.
             return json.dumps({"error": "; ".join(errors)})
 
         try:
+            discussion_id = None
+            if note_id is not None and project_id and issue_iid:
+                discussion_result = await self._get_discussion_id_from_note_rest(
+                    project_id,
+                    "issues",
+                    issue_iid,
+                    note_id,
+                )
+                if "error" in discussion_result:
+                    return json.dumps(discussion_result)
+                discussion_id = discussion_result.get("discussionId")
+
+            base_path = f"/api/v4/projects/{project_id}/issues/{issue_iid}"
+            if discussion_id:
+                path = f"{base_path}/discussions/{discussion_id}/notes"
+            else:
+                path = f"{base_path}/notes"
+
             response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
-                body=json.dumps(
-                    {
-                        "body": body,
-                    }
-                ),
+                path=path,
+                body=json.dumps({"body": body}),
             )
 
             response = self._process_http_response(
-                identifier=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
+                identifier=path,
                 response=response,
             )
 

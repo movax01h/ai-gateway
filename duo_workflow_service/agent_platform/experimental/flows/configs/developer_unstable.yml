@@ -42,7 +42,6 @@ components:
       - "run_command"
       - "run_git_command"
       - "gitlab_api_get"
-      - "gitlab_graphql"
       - "create_issue_note"
       - "create_merge_request_note"
       - "create_work_item_note"
@@ -187,6 +186,9 @@ prompts:
         assistant: Clients are marked as failed in the `connectToServer` function in src/services/process.ts:712.
         </example>
 
+        # Cross-project references
+        When referencing issues, merge requests, or other resources in comments or descriptions, be aware that IID shorthand (e.g. `!123` or `#456`) only resolves within the same project. If you are posting a comment or creating a resource in a **different project** than the one the reference belongs to, you MUST use the fully qualified reference format with the full namespace path: `full/path/to/project!123` for MRs, `full/path/to/project#456` for issues (e.g. `gitlab-org/modelops/ai-assist!123`). When in doubt, use the full URL. The project you are operating in is shown in the `<env>` block below — compare it against the target to decide.
+
         {# environment block #}
         Here is some useful information about the environment you are running in:
         <env>
@@ -210,16 +212,20 @@ prompts:
 
       user: |
         {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
+        {% include 'common/merge_request_guidelines/1.0.0.jinja' %}
 
         {% if 'Input:' in goal and 'Context:' in goal %}
         You were mentioned in a comment on a GitLab resource.
 
         {{ goal }}
 
-        Fetch the referenced resource to understand the full context and the comment thread. Then address the request from the comment.
-        Determine the appropriate course of action based on what is being asked — this could be implementing code changes, researching a topic, creating an issue, answering a question, or any other task.
-        If the task involves code changes, verify they work and create a merge request.
-        Always post your response or findings as a comment on the relevant GitLab resource so the user can see your results.
+        Steps:
+        1. Fetch the referenced resource (issue, MR, or work item) and its comments/notes.
+        2. Find the specific comment that mentioned you — its body will match the `Input:` text above. Note the comment's `id` so you can reply to that thread later.
+        3. Read the surrounding conversation thread (parent discussion and sibling replies) to fully understand what is being asked.
+        4. Determine the appropriate course of action — this could be implementing code changes, researching a topic, creating an issue, answering a question, posting a status update, or any other task.
+        5. If you need to respond back to the commenter, reply **in the same discussion thread** using the `note_id` parameter (set it to the ID of the comment that mentioned you). Only post a new top-level comment if the task explicitly calls for a standalone update (e.g. a status update posted to an issue, not a reply to the mention).
+        6. If the task involves code changes, verify they work and create a merge request.
         {% elif '/-/merge_requests/' in goal %}
         You were assigned as a reviewer on a merge request: {{ goal }}
 
