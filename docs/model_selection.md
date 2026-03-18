@@ -173,6 +173,47 @@ models:
       max_retries: 3
 ```
 
+### Context management in prompt_params
+
+> **Note:** Context management is currently in [Anthropic's public beta](https://platform.claude.com/docs/en/build-with-claude/context-editing).
+> The API surface may change.
+
+The `prompt_params` section supports a `context_management` field for Anthropic models. This enables automatic context
+window trimming for long-running conversations (e.g., agentic workflows with many tool calls).
+
+```yaml
+models:
+  - name: "Claude Sonnet 4"
+    gitlab_identifier: "claude_sonnet_4_20250514"
+    model_class_provider: "anthropic"
+    params:
+      model: "claude-sonnet-4-20250514"
+      temperature: 0.0
+      max_tokens: 16384
+    prompt_params:
+      timeout: 60
+      context_management:
+        edits:
+          - type: "clear_tool_uses_20250919"
+            trigger:
+              type: "input_tokens"
+              value: 5000
+            keep:
+              type: "tool_uses"
+              value: 3
+            clear_at_least:
+              type: "input_tokens"
+              value: 15000
+            exclude_tools: []
+```
+
+This parameter is **Anthropic-specific**. When a non-Anthropic model is selected at runtime, `context_management` is
+automatically stripped from the kwargs before the LLM call. This means it is safe to define `context_management` in
+prompt YAML files that may be shared across model families — it will only take effect for Anthropic providers (including
+LiteLLM with `custom_llm_provider: anthropic`).
+
+For full configuration details, see the [Context Management section in the Prompt Registry docs](aigw_prompt_registry.md#context-management-anthropic-only).
+
 ### Determining model cost indicators
 
 1. Find the model's `multiplier` in the [pricing multipliers](https://gitlab.com/gitlab-org/customers-gitlab-com/-/blob/main/config/billing/pricing_multipliers.yml?ref_type=heads) file.

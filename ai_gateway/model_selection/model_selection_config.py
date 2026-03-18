@@ -34,6 +34,7 @@ class PromptParams(BaseModel):
     timeout: float | None = None
     vertex_location: str | None = None
     cache_control_injection_points: list[dict] | None = None
+    context_management: dict | None = None
 
 
 class BaseLLMDefinition(BaseModel):
