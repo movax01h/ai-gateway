@@ -49,3 +49,8 @@ cache:
     - .venv/
     - /root/.cache/pypoetry
     - /usr/local/lib/node_modules
+
+network_policy:
+  include_recommended_allowed: true
+  allowed_domains: []
+  denied_domains: []
