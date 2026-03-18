@@ -2,7 +2,7 @@
 # All dependencies are installed in setup_script for reliability
 
 # Use minimal Python base image
-image: python:3.12.12-slim
+image: python:3.12.13-slim
 
 setup_script:
   # Install system dependencies
