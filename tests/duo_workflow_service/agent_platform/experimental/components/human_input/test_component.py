@@ -1,10 +1,8 @@
 from unittest.mock import Mock, call, patch
 
 import pytest
-from langchain_core.prompts import PromptTemplate
 from langgraph.graph import StateGraph
 
-from ai_gateway.prompts import LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.human_input.component import (
     HumanInputComponent,
 )
@@ -26,18 +24,7 @@ class TestHumanInputComponent:
         return GLReportingEventContext.from_workflow_definition("chat")
 
     @pytest.fixture
-    def mock_prompt_registry(self):
-        """Mock prompt registry."""
-        registry = Mock(spec=LocalPromptRegistry)
-        prompt = Mock(spec=PromptTemplate)
-        prompt.format.return_value = "Test prompt content"
-        registry.get.return_value = prompt
-        return registry
-
-    @pytest.fixture
-    def human_input_component(
-        self, user, mock_prompt_registry, flow_type: GLReportingEventContext
-    ):
+    def human_input_component(self, user, flow_type: GLReportingEventContext):
         """Create a HumanInputComponent instance for testing."""
         return HumanInputComponent(
             name="test_human_input",
@@ -45,9 +32,7 @@ class TestHumanInputComponent:
             flow_id="test_flow",
             flow_type=flow_type,
             user=user,
-            prompt_id="test_prompt",
-            prompt_version="v1.0",
-            prompt_registry=mock_prompt_registry,
+            message_template="test_message_template",
             ui_log_events=[
                 UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
                 UILogEventsHumanInput.ON_USER_RESPONSE,
@@ -110,7 +95,7 @@ class TestHumanInputComponent:
             mock_request_node.assert_called_once_with(
                 name="test_human_input#request",
                 component_name="test_human_input",
-                prompt=mock_request_node.call_args[1]["prompt"],
+                message_template=mock_request_node.call_args[1]["message_template"],
                 inputs=human_input_component.inputs,
                 ui_history=mock_request_node.call_args[1]["ui_history"],
             )
@@ -135,10 +120,8 @@ class TestHumanInputComponent:
                 "test_human_input#fetch", router.route
             )
 
-    def test_prompt_registry_integration(
-        self, human_input_component, mock_prompt_registry, user
-    ):
-        """Test integration with prompt registry like AgentComponent."""
+    def test_message_template(self, human_input_component):
+        """Test integration with AgentComponent."""
         graph = StateGraph(FlowState)
         router = Mock()
 
@@ -162,26 +145,18 @@ class TestHumanInputComponent:
 
             human_input_component.attach(graph, router)
 
-            # Verify prompt registry was called
-            mock_prompt_registry.get_on_behalf.assert_called_once_with(
-                user, "test_prompt", "v1.0"
-            )
-
-            # Verify request node was created with prompt
+            # Verify request node was created with message_template
             call_args = mock_request_node.call_args
-            assert call_args[1]["prompt"] is not None
+            assert call_args[1]["message_template"] == "test_message_template"
 
-    def test_optional_prompt(
-        self, user, mock_prompt_registry, flow_type: GLReportingEventContext
-    ):
-        """Test that prompt is optional when no prompt_id or prompt_version provided."""
+    def test_optional_message_template(self, user, flow_type: GLReportingEventContext):
+        """Test that message_template is optional when no message_template provided."""
         component = HumanInputComponent(
             name="test_human_input",
             sends_response_to="awesome_agent",
             flow_id="test_flow",
             flow_type=flow_type,
             user=user,
-            prompt_registry=mock_prompt_registry,
         )
 
         graph = StateGraph(FlowState)
@@ -207,12 +182,9 @@ class TestHumanInputComponent:
 
             component.attach(graph, router)
 
-            # Verify prompt registry was not called
-            mock_prompt_registry.get_on_behalf.assert_not_called()
-
-            # Verify request node was created with None prompt
+            # Verify request node was created with None message_template
             call_args = mock_request_node.call_args
-            assert call_args[1]["prompt"] is None
+            assert call_args[1]["message_template"] is None
 
     def test_ui_log_events_integration(self, human_input_component):
         """Test UI log events are properly passed to nodes."""

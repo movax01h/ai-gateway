@@ -308,10 +308,9 @@ The HumanInputComponent consists of two internal nodes:
 
 #### Optional Parameters
 
-- **prompt_id**: ID of the prompt template from the prompt registry to display to the user
-- **prompt_version**: Semantic version constraint for the prompt (e.g., `"^1.0.0"`)
-- **inputs**: List of input data sources for prompt rendering (default: empty list)
-- **ui_log_events**: UI logging configuration for displaying prompts
+- **message_template**: Jinja2 template to be used to render a message when requesting user input
+- **inputs**: List of input data sources for template rendering (default: empty list)
+- **ui_log_events**: UI logging configuration for displaying messages
 
 #### Supported Event Types
 
@@ -348,8 +347,7 @@ components:
     - name: "user_approval"
       type: HumanInputComponent
       sends_response_to: "code_assistant"
-      prompt_id: "approval_request"
-      prompt_version: "^1.0.0"
+      message_template: "Confirm if you want to proceed with {{ proposed_changes }}"
       inputs:
           - from: "context:code_assistant.final_answer"
             as: "proposed_changes"
