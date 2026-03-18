@@ -5,7 +5,7 @@ from uuid import uuid4
 import structlog
 from anthropic import APIStatusError
 from gitlab_cloud_connector import CloudConnectorUser
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -35,8 +35,6 @@ log = structlog.stdlib.get_logger("agent_v2")
 
 
 class AgentPromptTemplate(Runnable[dict, PromptValue]):
-    messages: list[BaseMessage]
-
     def __init__(self, _model_provider: ModelClassProvider, config: PromptConfig):
         self.agent_name = config.name
         self.preamble_messages = prompt_template_to_messages(config.prompt_template)
@@ -48,21 +46,21 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
         config: RunnableConfig | None = None,
         **kwargs: Any,
     ) -> PromptValue:
-        if self.agent_name in input["conversation_history"]:
-            messages = input["conversation_history"][self.agent_name]
-        else:
-            if "handover" in input:
-                # Transform handover into an agent-readable representation
-                input["handover"] = "\n".join(
-                    map(lambda x: x.pretty_repr(), input["handover"])
-                )
+        if "handover" in input:
+            # Transform handover into an agent-readable representation
+            input["handover"] = "\n".join(
+                map(lambda x: x.pretty_repr(), input["handover"])
+            )
 
-            messages = self.preamble_messages
+        messages = self.preamble_messages
+
+        if self.agent_name in input["conversation_history"]:
+            # NOTE: Not equivalent to `messages += input[...]`, which would modify `self.preamble_messages`
+            messages = messages + input["conversation_history"][self.agent_name]
 
         prompt_value = ChatPromptTemplate.from_messages(
             messages, template_format="jinja2"
         ).invoke(input, config, **kwargs)
-        self.messages = prompt_value.to_messages()
 
         return prompt_value
 
@@ -74,10 +72,8 @@ class Agent(BaseAgent):
 
     async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
         with duo_workflow_metrics.time_compute(
-            operation_type=f"{self.prompt.name}_processing"
+            operation_type=f"{self.name}_processing"
         ):
-            updates: dict[str, Any] = {}
-
             if self.check_events:
                 event: WorkflowEvent | None = await get_event(
                     self.http_client, self.workflow_id, False
@@ -95,20 +91,8 @@ class Agent(BaseAgent):
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
-                if self.prompt.name in state["conversation_history"]:
-                    updates["conversation_history"] = {
-                        self.prompt.name: [model_completion]
-                    }
-                else:
-                    messages = cast(
-                        AgentPromptTemplate, self.prompt.prompt_tpl
-                    ).messages
-                    updates["conversation_history"] = {
-                        self.prompt.name: [*messages, model_completion]
-                    }
-
                 return {
-                    **updates,
+                    "conversation_history": {self.name: [model_completion]},
                     **self._respond_to_human(state, model_completion),
                 }
             except APIStatusError as error:
