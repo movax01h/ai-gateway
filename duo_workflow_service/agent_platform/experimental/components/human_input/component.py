@@ -1,11 +1,8 @@
 from typing import Annotated, ClassVar, Optional, override
 
-from dependency_injector.wiring import Provide, inject
 from langgraph.graph import StateGraph
 from pydantic import Field
 
-from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import BasePromptRegistry
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -32,7 +29,7 @@ from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 __all__ = ["HumanInputComponent"]
 
 
-@register_component(decorators=[inject])
+@register_component()
 class HumanInputComponent(BaseComponent):
     """Component for requesting and fetching user input during workflow execution.
 
@@ -73,12 +70,7 @@ class HumanInputComponent(BaseComponent):
     supported_environments: ClassVar[tuple[str, ...]] = ("ide",)
 
     sends_response_to: str
-    prompt_id: Optional[str] = None
-    prompt_version: Optional[str] = None
-
-    prompt_registry: BasePromptRegistry = Provide[
-        ContainerApplication.pkg_prompts.prompt_registry
-    ]
+    message_template: Optional[str] = None
 
     ui_log_events: list[UILogEventsHumanInput] = Field(default_factory=list)
 
@@ -105,15 +97,6 @@ class HumanInputComponent(BaseComponent):
 
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
-        # Prepare prompt if provided
-        prompt = None
-        if self.prompt_id and self.prompt_version:
-            prompt = self.prompt_registry.get_on_behalf(
-                self.user,
-                self.prompt_id,
-                self.prompt_version,
-            )
-
         ui_history = None
         if self.ui_log_events:
             ui_history = UIHistory(
@@ -130,7 +113,7 @@ class HumanInputComponent(BaseComponent):
         request_node = RequestNode(
             name=f"{self.name}#request",
             component_name=self.name,
-            prompt=prompt,
+            message_template=self.message_template,
             inputs=self.inputs,
             ui_history=ui_history,
         )

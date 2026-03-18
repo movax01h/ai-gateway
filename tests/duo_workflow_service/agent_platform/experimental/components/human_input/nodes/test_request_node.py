@@ -1,10 +1,7 @@
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import HumanMessage
-from langchain_core.prompts import ChatPromptTemplate
 
-from ai_gateway.prompts.base import Prompt
 from duo_workflow_service.agent_platform.experimental.components.human_input.nodes.request_node import (
     RequestNode,
 )
@@ -22,25 +19,16 @@ class TestRequestNode:
     """Test suite for RequestNode."""
 
     @pytest.fixture
-    def mock_prompt(self):
-        """Mock prompt."""
-        prompt = Mock(spec=Prompt)
-        prompt_tpl = Mock(spec=ChatPromptTemplate)
-
-        # Mock the invoke method to return messages
-        mock_messages = [HumanMessage(content="Formatted prompt content")]
-        prompt_tpl.invoke.return_value.messages = mock_messages
-        prompt.prompt_tpl = prompt_tpl
-
-        return prompt
+    def mock_message_template(self):
+        return "Input value: {{ test_key }}"
 
     @pytest.fixture
-    def request_node(self, mock_prompt):
+    def request_node(self, mock_message_template):
         """Create RequestNode instance for testing."""
         return RequestNode(
             name="test_component#request",
             component_name="test_component",
-            prompt=mock_prompt,
+            message_template=mock_message_template,
             inputs=[IOKey(target="context", subkeys=["test_key"])],
             ui_history=UIHistory(
                 events=[UILogEventsHumanInput.ON_USER_INPUT_PROMPT],
@@ -69,23 +57,6 @@ class TestRequestNode:
         assert result[FlowStateKeys.STATUS] == WorkflowStatusEnum.INPUT_REQUIRED.value
 
     @pytest.mark.asyncio
-    async def test_prompt_registry_sourcing(
-        self, request_node, sample_state, mock_prompt
-    ):
-        """Test that prompt is sourced from prompt registry and formatted."""
-        with patch(
-            "duo_workflow_service.agent_platform.experimental.state.base.get_vars_from_state"
-        ) as mock_get_vars:
-            mock_get_vars.return_value = {"test_key": "test_value"}
-
-            await request_node.run(sample_state)
-
-            # Verify prompt template was invoked with input variables
-            mock_prompt.prompt_tpl.invoke.assert_called_once_with(
-                {"test_key": "test_value"}
-            )
-
-    @pytest.mark.asyncio
     async def test_ui_log_event_emission(self, request_node, sample_state):
         """Test that user_input_prompt UI log event is emitted."""
         with patch(
@@ -101,18 +72,18 @@ class TestRequestNode:
 
             # Verify the log entry content
             ui_log_entry = result[FlowStateKeys.UI_CHAT_LOG][0]
-            assert ui_log_entry["content"] == "Formatted prompt content"
+            assert ui_log_entry["content"] == "Input value: test_value"
             assert ui_log_entry["message_type"] == MessageTypeEnum.AGENT
 
     @pytest.mark.asyncio
-    async def test_no_ui_log_when_both_prompt_and_ui_history_missing(
+    async def test_no_ui_log_when_both_message_template_and_ui_history_missing(
         self, sample_state
     ):
-        """Test that no UI log is emitted when both prompt and ui_history are missing."""
+        """Test that no UI log is emitted when both message_template and ui_history are missing."""
         request_node = RequestNode(
             name="test_component#request",
             component_name="test_component",
-            prompt=None,
+            message_template=None,
             inputs=[],
             ui_history=None,
         )
@@ -126,14 +97,14 @@ class TestRequestNode:
 
     @pytest.mark.asyncio
     async def test_ui_log_always_emitted_when_ui_history_present(
-        self, mock_prompt, sample_state
+        self, mock_message_template, sample_state
     ):
         """Test that UI log is always emitted when ui_history is present, regardless of events."""
         # Create RequestNode with ui_history but without the specific event
         request_node = RequestNode(
             name="test_component#request",
             component_name="test_component",
-            prompt=mock_prompt,
+            message_template=mock_message_template,
             inputs=[],
             ui_history=UIHistory(
                 events=[],  # No ON_USER_INPUT_PROMPT event - but should still log
@@ -158,21 +129,20 @@ class TestRequestNode:
             assert FlowStateKeys.UI_CHAT_LOG in result
             # The underlying logger framework will decide whether to actually log based on events
 
-            # Verify prompt was processed
-            mock_prompt.prompt_tpl.invoke.assert_called_once_with({})
-
     @pytest.mark.asyncio
-    async def test_validation_prompt_and_ui_history_both_or_neither(self, mock_prompt):
-        """Test that RequestNode validation ensures prompt and ui_history are both present or both missing."""
-        # Test case 1: ui_history present but prompt missing should fail
+    async def test_validation_prompt_and_ui_history_both_or_neither(
+        self, mock_message_template
+    ):
+        """Test that RequestNode validation ensures message_template and ui_history are both present or both missing."""
+        # Test case 1: ui_history present but message_template missing should fail
         with pytest.raises(
             ValueError,
-            match="prompt and ui_history must be either both present or both missing",
+            match="message_template and ui_history must be either both present or both missing",
         ):
             RequestNode(
                 name="test_component#request",
                 component_name="test_component",
-                prompt=None,  # No prompt
+                message_template=None,  # No message_template
                 inputs=[],
                 ui_history=UIHistory(
                     events=[UILogEventsHumanInput.ON_USER_INPUT_PROMPT],
@@ -180,15 +150,15 @@ class TestRequestNode:
                 ),
             )
 
-        # Test case 2: prompt present but ui_history missing should fail
+        # Test case 2: message_template present but ui_history missing should fail
         with pytest.raises(
             ValueError,
-            match="prompt and ui_history must be either both present or both missing",
+            match="message_template and ui_history must be either both present or both missing",
         ):
             RequestNode(
                 name="test_component#request",
                 component_name="test_component",
-                prompt=mock_prompt,  # Prompt present
+                message_template=mock_message_template,  # message_template present
                 inputs=[],
                 ui_history=None,  # No ui_history
             )
@@ -198,7 +168,7 @@ class TestRequestNode:
             RequestNode(
                 name="test_component#request",
                 component_name="test_component",
-                prompt=mock_prompt,
+                message_template=mock_message_template,
                 inputs=[],
                 ui_history=UIHistory(
                     events=[UILogEventsHumanInput.ON_USER_INPUT_PROMPT],
@@ -206,19 +176,23 @@ class TestRequestNode:
                 ),
             )
         except ValueError:
-            pytest.fail("RequestNode should accept both prompt and ui_history present")
+            pytest.fail(
+                "RequestNode should accept both message_template and ui_history present"
+            )
 
         # Test case 4: both missing should succeed
         try:
             RequestNode(
                 name="test_component#request",
                 component_name="test_component",
-                prompt=None,
+                message_template=None,
                 inputs=[],
                 ui_history=None,
             )
         except ValueError:
-            pytest.fail("RequestNode should accept both prompt and ui_history missing")
+            pytest.fail(
+                "RequestNode should accept both message_template and ui_history missing"
+            )
 
     @pytest.mark.asyncio
     async def test_input_variables_extraction(self, request_node, sample_state):
