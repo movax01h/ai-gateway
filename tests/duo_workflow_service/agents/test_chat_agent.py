@@ -718,6 +718,68 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input):
 
 
 @pytest.mark.asyncio
+async def test_approval_enriches_tool_info_with_project_name(input):
+    """Test that approval messages use resolve_project_name_for_tool to enrich tool_info args."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    mock_tools_registry.approval_required.return_value = True
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+    )
+
+    tool_args = {"project_id": 42, "branch": "main"}
+    ai_message = AIMessage(
+        content="I need to create a commit",
+        tool_calls=[
+            {
+                "name": "create_commit",
+                "args": tool_args,
+                "id": "call_1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    project = Project(
+        id=42,
+        name="my-project",
+        description="",
+        http_url_to_repo="",
+        web_url="",
+        default_branch="main",
+        languages=[],
+        exclusion_rules=[],
+    )
+    state = {**input, "project": project}
+
+    with patch(
+        "duo_workflow_service.agents.chat_agent.resolve_project_name_for_tool",
+        return_value="my-project",
+    ) as mock_resolve:
+        result = await chat_agent.run(state)
+
+        mock_resolve.assert_called_once()
+
+    approval_messages = [
+        msg
+        for msg in result["ui_chat_log"]
+        if msg["message_type"] == MessageTypeEnum.REQUEST
+    ]
+    assert len(approval_messages) == 1
+    assert approval_messages[0]["tool_info"]["args"]["project_name"] == "my-project"
+
+
+@pytest.mark.asyncio
 async def test_chat_agent_notifiable_exception_handling(chat_agent, input):
     """Test that ChatAgent raises NotifiableException for LLM errors."""
     error_message = "LLM service temporarily unavailable"

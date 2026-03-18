@@ -14,6 +14,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from ai_gateway.container import ContainerApplication
+from duo_workflow_service.agents.project_utils import resolve_project_name_for_tool
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -94,6 +95,8 @@ class ToolsExecutor:
 
         self._create_ai_message_ui_chat_log(last_message, ui_chat_logs)
 
+        project = state.get("project")
+
         for tool_call in tool_calls:
             tool_name = tool_call["name"]
 
@@ -103,11 +106,14 @@ class ToolsExecutor:
                 )
                 continue
 
+            tool_project_name = resolve_project_name_for_tool(project, tool_call)
+
             result = await self._execute_tool(
                 tool_name,
                 tool_call,
                 plan,
                 last_message.response_metadata.get("finish_reason"),
+                tool_project_name,
             )
             response = result.get("response")
             if response and hasattr(response, "content"):
@@ -130,6 +136,11 @@ class ToolsExecutor:
                     )
                     error_message = e.format_user_message(tool_name)
                     result["response"].content = error_message
+
+                    tool_args = tool_call.get("args", {})
+                    if tool_project_name:
+                        tool_args = {**tool_args, "project_name": tool_project_name}
+
                     # Replace success chat log with security error
                     result["chat_logs"] = [
                         UiChatLog(
@@ -141,7 +152,7 @@ class ToolsExecutor:
                             correlation_id=None,
                             tool_info=ToolInfo(
                                 name=tool_name,
-                                args=tool_call.get("args", {}),
+                                args=tool_args,
                             ),
                             additional_context=None,
                             message_id=tool_call.get("id"),
@@ -286,12 +297,14 @@ class ToolsExecutor:
         ui_chat_logs: List[UiChatLog],
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
+        project_name: Optional[str] = None,
     ):
         chat_log = self._create_tool_ui_chat_log(
             tool_call=tool_call,
             status=status,
             error_message=error_message,
             tool_response=tool_response,
+            project_name=project_name,
         )
         if chat_log:
             ui_chat_logs.append(chat_log)
@@ -302,6 +315,7 @@ class ToolsExecutor:
         tool_call: ToolCall,
         plan: Plan,
         finish_reason: Optional[str] = None,
+        project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool = self._toolset[tool_name]
         chat_logs: List[UiChatLog] = []
@@ -333,6 +347,7 @@ class ToolsExecutor:
                 status=ToolStatus.SUCCESS,
                 ui_chat_logs=chat_logs,
                 tool_response=tool_response,
+                project_name=project_name,
             )
 
             return {
@@ -341,13 +356,17 @@ class ToolsExecutor:
             }
 
         except TypeError as error:
-            return self._handle_type_error(tool, tool_call, error, chat_logs)
+            return self._handle_type_error(
+                tool, tool_call, error, chat_logs, project_name
+            )
 
         except ValidationError as error:
-            return self._handle_validation_error(tool_call, error, chat_logs)
+            return self._handle_validation_error(
+                tool_call, error, chat_logs, project_name
+            )
 
         except ToolException as error:
-            return self._handle_tool_error(tool_call, error, chat_logs)
+            return self._handle_tool_error(tool_call, error, chat_logs, project_name)
 
         except Exception as error:
             # Convert any unexpected exception to ToolException to avoid blocking workflow
@@ -355,7 +374,9 @@ class ToolsExecutor:
                 f"Unexpected error executing tool {tool_name}: {str(error)}"
             )
             tool_exception.__cause__ = error
-            return self._handle_tool_error(tool_call, tool_exception, chat_logs)
+            return self._handle_tool_error(
+                tool_call, tool_exception, chat_logs, project_name
+            )
 
     def _handle_type_error(
         self,
@@ -363,6 +384,7 @@ class ToolsExecutor:
         tool_call: ToolCall,
         error: TypeError,
         chat_logs: List[UiChatLog],
+        project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool_name = tool_call["name"]
 
@@ -394,6 +416,7 @@ class ToolsExecutor:
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message="Invalid arguments",
+            project_name=project_name,
         )
 
         return {
@@ -406,6 +429,7 @@ class ToolsExecutor:
         tool_call: ToolCall,
         error: ValidationError,
         chat_logs: List[UiChatLog],
+        project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool_name = tool_call["name"]
         tool_args = tool_call.get("args", {})
@@ -426,6 +450,7 @@ class ToolsExecutor:
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message="Validation error",
+            project_name=project_name,
         )
 
         return {
@@ -438,6 +463,7 @@ class ToolsExecutor:
         tool_call: ToolCall,
         error: ToolException,
         chat_logs: List[UiChatLog],
+        project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool_name = tool_call["name"]
         error_type = type(error).__name__
@@ -466,6 +492,7 @@ class ToolsExecutor:
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message=error_message,
+            project_name=project_name,
         )
 
         return {
@@ -507,6 +534,7 @@ class ToolsExecutor:
         status: ToolStatus = ToolStatus.SUCCESS,
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
+        project_name: Optional[str] = None,
     ) -> Optional[UiChatLog]:
         tool_name = tool_call["name"]
         tool_args = tool_call.get("args", {})
@@ -522,6 +550,9 @@ class ToolsExecutor:
         content = display_message
         if error_message:
             content = f"Failed: {display_message} - {error_message}"
+
+        if project_name:
+            tool_args = {**tool_args, "project_name": project_name}
 
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
