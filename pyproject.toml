@@ -49,7 +49,7 @@ anthropic = "^0.76.0"
 pydantic = "^2.7.4"
 pydantic-settings = "^2.1.0"
 starlette = "^0.47.2"
-httpx = "^0.28.0"
+httpx = {version = "^0.28.0", extras = ["socks"]}
 prometheus-client = "^0.22.0"
 tree-sitter-languages = "^1.10.2"
 jinja2 = "^3.1.3"
