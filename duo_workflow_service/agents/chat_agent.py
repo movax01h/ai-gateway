@@ -6,6 +6,7 @@ import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agents.project_utils import resolve_project_name_for_tool
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities.state import (
@@ -45,7 +46,7 @@ class ChatAgent:
         self.system_template_override = system_template_override
 
     def _get_approvals(
-        self, message: AIMessage, preapproved_tools: List[str]
+        self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
     ) -> tuple[bool, list[UiChatLog]]:
         approval_required = False
         approval_messages = []
@@ -67,6 +68,15 @@ class ChatAgent:
 
             if needs_approval:
                 approval_required = True
+
+                project_name = resolve_project_name_for_tool(state.get("project"), call)
+                if project_name:
+                    tool_info_args = {
+                        **tool_args,
+                        "project_name": project_name,
+                    }
+                else:
+                    tool_info_args = tool_args
                 approval_messages.append(
                     UiChatLog(
                         message_type=MessageTypeEnum.REQUEST,
@@ -75,7 +85,7 @@ class ChatAgent:
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
-                        tool_info=ToolInfo(name=tool_name, args=tool_args),
+                        tool_info=ToolInfo(name=tool_name, args=tool_info_args),
                         additional_context=None,
                         message_id=f'request-{call["id"]}',
                     )
@@ -199,7 +209,7 @@ class ChatAgent:
 
         preapproved_tools = state.get("preapproved_tools") or []
         tools_need_approval, approval_messages = self._get_approvals(
-            agent_response, preapproved_tools
+            agent_response, preapproved_tools, state
         )
 
         if len(agent_response.tool_calls) > 0 and tools_need_approval:

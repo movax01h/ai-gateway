@@ -1718,3 +1718,60 @@ async def test_invalid_tool_call_with_valid_tool_calls(
     assert ui_chat_logs[2]["status"] == ToolStatus.FAILURE
     assert ui_chat_logs[2]["message_id"] == "invalid-call-1"
     assert ui_chat_logs[2]["message_id"] == "invalid-call-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_datetime")
+async def test_tool_info_args_enriched_with_project_name(
+    workflow_state,
+    flow_type: GLReportingEventContext,
+):
+    """Test that tool execution uses resolve_project_name_for_tool to enrich tool_info args."""
+    tool = mock_tool(name="get_issue", content="issue details")
+
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+    )
+
+    tool_args = {"project_id": 42, "issue_id": 1}
+    workflow_state["project"] = {
+        "id": 42,
+        "name": "my-project",
+        "description": "",
+        "http_url_to_repo": "",
+        "web_url": "",
+        "default_branch": "main",
+        "languages": [],
+        "exclusion_rules": None,
+    }
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[{"id": "call-1", "name": "get_issue", "args": tool_args}],
+            id="ai-msg-project-name-test",
+        )
+    ]
+
+    with patch(
+        "duo_workflow_service.agents.tools_executor.resolve_project_name_for_tool",
+        return_value="my-project",
+    ) as mock_resolve:
+        result = await tools_executor.run(workflow_state)
+
+        mock_resolve.assert_called_once()
+
+    update = cast(Command, result[-1]).update
+    assert update is not None
+    ui_chat_logs = update["ui_chat_log"]
+    tool_log = next(
+        log for log in ui_chat_logs if log["message_type"] == MessageTypeEnum.TOOL
+    )
+
+    assert tool_log["tool_info"]["args"]["project_name"] == "my-project"
