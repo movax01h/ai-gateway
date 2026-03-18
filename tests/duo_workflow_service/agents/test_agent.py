@@ -2,7 +2,8 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from anthropic import APIStatusError
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.prompts.base import Prompt
 from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
@@ -17,6 +18,7 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from lib.internal_events.event_enum import CategoryEnum
+from tests.conftest import FakeModel
 
 
 @pytest.fixture(name="prompt_template_factory")
@@ -54,6 +56,17 @@ def agent_fixture(
     )  # type: ignore[call-arg]
 
 
+@pytest.fixture(name="mock_response")
+def mock_response_fixture() -> Mock:
+    return Mock()
+
+
+@pytest.fixture(name="mock_ainvoke")
+def mock_ainvoke_fixture(mock_response: Mock):
+    with patch.object(FakeModel, "ainvoke", return_value=mock_response) as mock:
+        yield mock
+
+
 class TestAgent:
     @pytest.mark.asyncio
     async def test_run_with_empty_conversation(
@@ -62,17 +75,22 @@ class TestAgent:
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
         goal: str,
-        model_response: str,
+        mock_response: Mock,
+        mock_ainvoke: Mock,
     ):
         result = await agent.run(workflow_state)
 
-        assert result["conversation_history"][prompt_name] == [
-            SystemMessage(content="You are AGI entity capable of anything"),
-            HumanMessage(content=f"Your goal is: {goal}"),
-            AIMessage.model_construct(
-                content=model_response, id=ANY, usage_metadata=ANY
+        mock_ainvoke.assert_called_once_with(
+            ChatPromptValue(
+                messages=[
+                    SystemMessage(content="You are AGI entity capable of anything"),
+                    HumanMessage(content=f"Your goal is: {goal}"),
+                ]
             ),
-        ]
+            ANY,
+        )
+
+        assert result["conversation_history"][prompt_name] == [mock_response]
 
     @pytest.mark.asyncio
     async def test_run_with_empty_conversation_and_handover(
@@ -81,7 +99,8 @@ class TestAgent:
         workflow_state: WorkflowState,
         prompt_name: str,
         goal: str,
-        model_response: str,
+        mock_response: Mock,
+        mock_ainvoke: Mock,
     ):
         workflow_state["handover"] = [
             SystemMessage(content="System message"),
@@ -96,15 +115,19 @@ Human message"""
 
         result = await agent.run(workflow_state)
 
-        assert result["conversation_history"][prompt_name] == [
-            SystemMessage(content="You are AGI entity capable of anything"),
-            HumanMessage(
-                content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
+        mock_ainvoke.assert_called_once_with(
+            ChatPromptValue(
+                messages=[
+                    SystemMessage(content="You are AGI entity capable of anything"),
+                    HumanMessage(
+                        content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
+                    ),
+                ]
             ),
-            AIMessage.model_construct(
-                content=model_response, id=ANY, usage_metadata=ANY
-            ),
-        ]
+            ANY,
+        )
+
+        assert result["conversation_history"][prompt_name] == [mock_response]
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.agents.agent.get_event")
@@ -126,7 +149,9 @@ Human message"""
         agent: Agent,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
-        model_response: str,
+        goal: str,
+        mock_response: Mock,
+        mock_ainvoke: Mock,
         check_events: bool,
     ):
         workflow_state["conversation_history"][prompt_name] = [
@@ -142,12 +167,18 @@ Human message"""
         else:
             mock_get_event.assert_not_called()
 
-        # Check that we have exactly one AIMessage with the expected content
-        assert len(result["conversation_history"][prompt_name]) == 1
-        message = result["conversation_history"][prompt_name][0]
-        assert isinstance(message, AIMessage)
-        assert message.content == model_response
-        # Don't check for exact equality since the message may have additional fields like id and usage_metadata
+        mock_ainvoke.assert_called_once_with(
+            ChatPromptValue(
+                messages=[
+                    SystemMessage(content="You are AGI entity capable of anything"),
+                    HumanMessage(content=f"Your goal is: {goal}"),
+                    HumanMessage(content="Existing chat"),
+                ]
+            ),
+            ANY,
+        )
+
+        assert result["conversation_history"][prompt_name] == [mock_response]
 
         assert "ui_chat_log" not in result
 
