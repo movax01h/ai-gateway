@@ -220,6 +220,17 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  - name: "fix_pipeline_decide_comment"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_decide_comment"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+    toolset: []
+    ui_log_events:
+      - "on_agent_final_answer"
+
   - name: "fix_pipeline_comment_link"
     type: OneOffComponent
     prompt_id: "fix_pipeline_comment_link"
@@ -265,7 +276,14 @@ routers:
   - from: "fix_pipeline_git_push"
     to: "fix_pipeline_summarize"
   - from: "fix_pipeline_summarize"
-    to: "fix_pipeline_comment_link"
+    to: "fix_pipeline_decide_comment"
+  - from: "fix_pipeline_decide_comment"
+    condition:
+      input: "context:fix_pipeline_decide_comment.final_answer"
+      routes:
+        "comment_link": "fix_pipeline_comment_link"
+        "end": "end"
+        "default_route": "end"
   - from: "fix_pipeline_comment_link"
     to: "end"
 
