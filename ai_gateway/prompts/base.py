@@ -36,7 +36,7 @@ from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
 from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
-from ai_gateway.model_selection.models import ModelClassProvider
+from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
@@ -211,6 +211,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         **kwargs: Any,
     ):
         model_kwargs = self._build_model_kwargs(config.params, model_metadata)
+
+        if "context_management" in model_kwargs and not self._is_anthropic_provider(
+            model_provider, config.model.params
+        ):
+            model_kwargs.pop("context_management")
+
         model = self._build_model(
             model_factory, config.model, model_metadata, disable_streaming
         )
@@ -241,6 +247,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         )
         prompt = self._chain_cache_control_injection_points_converter(
             model_kwargs, prompt, model_provider
+        )
+
+        log.debug(
+            "Binding model kwargs to LLM",
+            model_kwargs_keys=list(model_kwargs.keys()),
+            model_provider=model_provider,
         )
 
         chain = cast(
@@ -287,6 +299,16 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
         return chain
 
+    @staticmethod
+    def _is_anthropic_provider(
+        model_provider: ModelClassProvider, model_params: BaseModelParams
+    ) -> bool:
+        if model_provider == ModelClassProvider.ANTHROPIC:
+            return True
+        if model_provider == ModelClassProvider.LITE_LLM:
+            return getattr(model_params, "custom_llm_provider", None) == "anthropic"
+        return False
+
     def _build_model_kwargs(
         self,
         params: PromptParams | None,
@@ -318,7 +340,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         model_factory_args = {
             "disable_streaming": disable_streaming,
             **llm_params,
-            **config.params.model_dump(exclude_none=True, by_alias=True),
+            **config.params.model_dump(
+                exclude={"model_class_provider"}, exclude_none=True, by_alias=True
+            ),
         }
         return model_factory(**model_factory_args)
 

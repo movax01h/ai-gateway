@@ -133,6 +133,19 @@ prompt_template: # Required. Templates for model interaction
 params: # Optional. Request handling parameters
     timeout: <integer>              # Optional. Maximum response time in seconds (default: 30)
     max_retries: <integer>          # Optional. Maximum retry attempts (default: 3)
+    context_management:             # Optional. Anthropic-only context window management
+        edits:
+            - type: <string>        # Edit strategy (e.g., "clear_tool_uses_20250919")
+              trigger:
+                  type: <string>    # Trigger type (e.g., "input_tokens")
+                  value: <integer>  # Trigger threshold
+              keep:
+                  type: <string>    # What to keep (e.g., "tool_uses")
+                  value: <integer>  # Number to keep
+              clear_at_least:       # Optional. Minimum amount to clear
+                  type: <string>
+                  value: <integer>
+              exclude_tools: []     # Optional. Tools to exclude from clearing
 ```
 
 #### Example Configuration
@@ -172,6 +185,77 @@ The `placeholder` attribute allows you to include conversation history and other
   Complete parameter documentation
 - [ChatPromptTemplate Guide](https://python.langchain.com/docs/concepts/prompt_templates/#messagesplaceholder) - Usage
   examples and concepts
+
+### Context Management (Anthropic-only)
+
+> **Note:** Context management is currently in [Anthropic's public beta](https://platform.claude.com/docs/en/build-with-claude/context-editing).
+> The API surface may change. Refer to Anthropic's official documentation for the latest details.
+
+The `context_management` parameter enables automatic context window management for long-running conversations. When
+configured, the Anthropic API automatically trims conversation history based on the specified strategy, preventing
+context window overflow without manual intervention.
+
+#### Provider Compatibility
+
+Context management is **Anthropic-specific** and is automatically filtered out for non-Anthropic providers. It works
+with:
+
+- **Direct Anthropic** (`model_class_provider: anthropic`)
+- **LiteLLM with Anthropic** (`model_class_provider: litellm` and `custom_llm_provider: anthropic`), including
+  Google Vertex AI Anthropic models
+
+For all other providers (OpenAI, Google GenAI, etc.), the `context_management` parameter is silently removed before
+the LLM invocation. This filtering is handled in the `Prompt.__init__` method via the `_is_anthropic_provider` check.
+
+#### Configuration
+
+Context management is configured in the `params` section of a prompt definition YAML file or in the `prompt_params`
+section of a model definition in `models.yml`:
+
+```yaml
+params:
+  context_management:
+    edits:
+      - type: "clear_tool_uses_20250919"
+        trigger:
+          type: "input_tokens"
+          value: 5000
+        keep:
+          type: "tool_uses"
+          value: 3
+        clear_at_least:
+          type: "input_tokens"
+          value: 15000
+        exclude_tools: []
+```
+
+#### Configuration Fields
+
+- **`edits`**: A list of edit strategies to apply when the context window needs trimming.
+  - **`type`**: The edit strategy to use. Currently supported: `clear_tool_uses_20250919` (clears old tool use
+    message pairs from conversation history).
+  - **`trigger`**: Defines when the edit strategy activates.
+    - `type`: The metric to monitor (e.g., `input_tokens`).
+    - `value`: The threshold at which the strategy triggers.
+  - **`keep`**: Defines what to preserve after trimming.
+    - `type`: The type of content to keep (e.g., `tool_uses`).
+    - `value`: The number of items to retain.
+  - **`clear_at_least`** (optional): Minimum amount to clear when triggered, ensuring meaningful reduction.
+    - `type`: The metric type (e.g., `input_tokens`).
+    - `value`: The minimum amount to clear.
+  - **`exclude_tools`** (optional): List of tool names to exclude from clearing.
+
+#### How It Works
+
+1. The `context_management` dict is defined in `PromptParams` and loaded from YAML configuration.
+1. During `Prompt.__init__`, `_build_model_kwargs` serializes `PromptParams` into `model_kwargs` via `model_dump()`.
+1. Before model binding, the `_is_anthropic_provider` check runs. If the provider is not Anthropic, the
+   `context_management` key is removed from `model_kwargs`.
+1. For Anthropic providers, `context_management` is passed through `model.bind(**model_kwargs)` and forwarded to the
+   Anthropic API on every invocation.
+
+For more details, refer to the
+[Anthropic context editing documentation](https://platform.claude.com/docs/en/build-with-claude/context-editing).
 
 ## 2. AI Gateway Prompt Registry Details
 

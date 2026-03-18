@@ -10,12 +10,12 @@ import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2.exceptions import SecurityError
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableConfig
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 from litellm.exceptions import Timeout
 from pydantic import AnyUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
@@ -34,7 +34,11 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
 )
-from ai_gateway.model_selection.models import ModelClassProvider
+from ai_gateway.model_selection.models import (
+    ChatAnthropicParams,
+    ChatLiteLLMParams,
+    ModelClassProvider,
+)
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import (
     BasePromptCallbackHandler,
@@ -42,7 +46,7 @@ from ai_gateway.prompts import (
     Prompt,
     jinja2_formatter,
 )
-from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
@@ -660,6 +664,113 @@ configurable_unit_primitives:
         kwargs = mock_bind_tool.call_args.kwargs
 
         assert kwargs["tool_choice"] == tool_choice
+
+    @pytest.mark.parametrize(
+        (
+            "model_provider",
+            "model_params",
+            "prompt_params",
+            "expect_context_management",
+        ),
+        [
+            (
+                ModelClassProvider.LITE_LLM,
+                ChatLiteLLMParams(
+                    model="claude-sonnet-4-20250514",
+                    custom_llm_provider="anthropic",
+                ),
+                PromptParams(
+                    context_management={
+                        "edits": [
+                            {
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "input_tokens", "value": 1000},
+                                "keep": {"type": "tool_uses", "value": 1},
+                            }
+                        ]
+                    }
+                ),
+                True,
+            ),
+            (
+                ModelClassProvider.ANTHROPIC,
+                ChatAnthropicParams(),
+                PromptParams(
+                    context_management={
+                        "edits": [
+                            {
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "input_tokens", "value": 1000},
+                                "keep": {"type": "tool_uses", "value": 1},
+                            }
+                        ]
+                    }
+                ),
+                True,
+            ),
+            (
+                ModelClassProvider.LITE_LLM,
+                ChatLiteLLMParams(
+                    model="gpt-4",
+                    custom_llm_provider="openai",
+                ),
+                PromptParams(
+                    context_management={
+                        "edits": [
+                            {
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "input_tokens", "value": 1000},
+                                "keep": {"type": "tool_uses", "value": 1},
+                            }
+                        ]
+                    }
+                ),
+                False,
+            ),
+            (
+                ModelClassProvider.LITE_LLM,
+                ChatLiteLLMParams(
+                    model="some-model",
+                ),
+                PromptParams(
+                    context_management={
+                        "edits": [
+                            {
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "input_tokens", "value": 1000},
+                                "keep": {"type": "tool_uses", "value": 1},
+                            }
+                        ]
+                    }
+                ),
+                False,
+            ),
+        ],
+    )
+    def test_context_management_filtered_by_provider(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_metadata: TypeModelMetadata,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+        expect_context_management: bool,
+    ):
+        with mock.patch.object(FakeModel, "bind") as mock_bind:
+            mock_bind.return_value = model
+
+            Prompt(
+                model_provider=model_provider,
+                model_factory=model_factory,
+                config=prompt_config,
+                model_metadata=model_metadata,
+            )
+
+        bind_kwargs = mock_bind.call_args.kwargs
+        if expect_context_management:
+            assert "context_management" in bind_kwargs
+        else:
+            assert "context_management" not in bind_kwargs
 
 
 @pytest.mark.skipif(
@@ -1415,3 +1526,165 @@ configurable_unit_primitives:
 
             # Doesn't cache the failed results, tries to validate both models again
             assert mock_ainvoke.call_count == 4
+
+
+@pytest.mark.skipif(
+    # pylint: disable=direct-environment-variable-reference
+    os.getenv("REAL_AI_REQUEST") is None,
+    # pylint: enable=direct-environment-variable-reference
+    reason="3rd party requests not enabled",
+)
+class TestContextManagementTokenReduction:
+    """Integration test demonstrating that Anthropic context management reduces input tokens.
+
+    Uses aggressive thresholds to trigger tool result clearing quickly.
+    The test builds a conversation with simulated tool use/result pairs to
+    generate enough token volume, then verifies that context_management
+    clears old tool results and reduces input tokens.
+
+    Run with: REAL_AI_REQUEST=1 pytest tests/prompts/test_base.py::TestContextManagementTokenReduction -v
+    """
+
+    AGGRESSIVE_CONTEXT_MANAGEMENT = {
+        "edits": [
+            {
+                "type": "clear_tool_uses_20250919",
+                "trigger": {"type": "input_tokens", "value": 1000},
+                "keep": {"type": "tool_uses", "value": 1},
+                "clear_at_least": {"type": "input_tokens", "value": 500},
+                "exclude_tools": [],
+            }
+        ]
+    }
+
+    BULKY_TOOL_RESULT = (
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+        "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
+        "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris "
+        "nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in "
+        "reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla "
+        "pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
+        "culpa qui officia deserunt mollit anim id est laborum. "
+    ) * 3
+
+    NUM_TOOL_TURNS = 5
+
+    @pytest.fixture(name="model_params")
+    def model_params_fixture(self):
+        return ChatLiteLLMParams(
+            custom_llm_provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            max_tokens=100,
+        )
+
+    @pytest.fixture(name="prompt_template")
+    def prompt_template_fixture(self):
+        return {
+            "system": "You are a helpful assistant. Keep responses very short.",
+            "placeholder": "messages",
+            "user": "{{content}}",
+        }
+
+    @pytest.fixture(name="tools")
+    def tools_fixture(self):
+        def read_file(_path: str) -> str:
+            return ""
+
+        return [
+            StructuredTool.from_function(
+                func=read_file,
+                name="read_file",
+                description="Read a file from disk.",
+            )
+        ]
+
+    @pytest.fixture(name="tool_history")
+    def tool_history_fixture(self):
+        messages = []
+        for i in range(self.NUM_TOOL_TURNS):
+            tool_use_id = f"toolu_{i:04d}"
+            messages.append(
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": tool_use_id,
+                            "name": "read_file",
+                            "args": {"path": f"/tmp/file_{i}.txt"},
+                        }
+                    ],
+                )
+            )
+            messages.append(
+                ToolMessage(
+                    content=f"File {i} contents: {self.BULKY_TOOL_RESULT}",
+                    tool_call_id=tool_use_id,
+                )
+            )
+        return messages
+
+    @staticmethod
+    def _build_prompt(
+        model_params: ChatLiteLLMParams,
+        prompt_template: dict,
+        tools: list[BaseTool],
+        prompt_params: PromptParams | None = None,
+    ) -> Prompt:
+        config = PromptConfig(
+            name="context_management_test",
+            model=ModelConfig(params=model_params),
+            unit_primitive="duo_chat",
+            prompt_template=prompt_template,
+            params=prompt_params,
+        )
+
+        def model_factory(**kwargs):
+            return ChatLiteLLM(**kwargs)
+
+        return Prompt(
+            model_provider=ModelClassProvider.LITE_LLM,
+            model_factory=model_factory,
+            config=config,
+            tools=tools,
+        )
+
+    @pytest.mark.asyncio
+    async def test_context_management_reduces_input_tokens(
+        self,
+        model_params: ChatLiteLLMParams,
+        prompt_template: dict,
+        tools: list[BaseTool],
+        tool_history: list,
+    ):
+        prompt_with_cm = self._build_prompt(
+            model_params,
+            prompt_template,
+            tools,
+            prompt_params=PromptParams(
+                context_management=self.AGGRESSIVE_CONTEXT_MANAGEMENT,
+            ),
+        )
+        prompt_without_cm = self._build_prompt(model_params, prompt_template, tools)
+
+        response_with_cm = await prompt_with_cm.ainvoke(
+            {"content": "Summarize all files you read.", "messages": tool_history}
+        )
+        response_without_cm = await prompt_without_cm.ainvoke(
+            {"content": "Summarize all files you read.", "messages": tool_history}
+        )
+
+        assert isinstance(response_with_cm, AIMessage)
+        assert isinstance(response_without_cm, AIMessage)
+        assert response_with_cm.usage_metadata is not None
+        assert response_without_cm.usage_metadata is not None
+        tokens_with_cm = response_with_cm.usage_metadata.get("input_tokens", 0)
+        tokens_without_cm = response_without_cm.usage_metadata.get("input_tokens", 0)
+
+        assert tokens_without_cm > 0, "Baseline should have recorded input tokens"
+        assert (
+            tokens_with_cm > 0
+        ), "Context management run should have recorded input tokens"
+        assert tokens_with_cm < tokens_without_cm, (
+            f"Context management should reduce input tokens: "
+            f"with_cm={tokens_with_cm}, without_cm={tokens_without_cm}"
+        )
