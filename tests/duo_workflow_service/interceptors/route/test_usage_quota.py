@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import grpc
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from grpc.aio import ServicerContext
@@ -75,6 +76,47 @@ async def mock_track_self_hosted_request_generator() -> (
         featureQualifiedName="test_feature",
         featureAiCatalogItem=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_workflow_returns_early_when_stream_closed_before_first_message(
+    mock_usage_quota_service,
+    duo_service,
+    mock_context,
+) -> None:
+    """Test ExecuteWorkflow decorator handles stream closed before first message gracefully."""
+
+    async def empty_request_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
+        return
+        yield  # make it an async generator
+
+    from duo_workflow_service.interceptors.route.usage_quota import (
+        has_sufficient_usage_quota,
+    )
+
+    inner = MagicMock()
+    inner.__name__ = "ExecuteWorkflow"
+    inner.__qualname__ = "DuoWorkflowServicer.ExecuteWorkflow"
+
+    decorated = has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)(
+        inner
+    )
+
+    results = [
+        item
+        async for item in decorated(
+            duo_service,
+            empty_request_generator(),
+            mock_context,
+            service=mock_usage_quota_service,
+        )
+    ]
+
+    assert results == []
+    mock_usage_quota_service.execute.assert_not_called()
+    inner.assert_not_called()
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)
+    mock_context.set_details.assert_called_once_with("workflow execution never started")
 
 
 @pytest.mark.asyncio
