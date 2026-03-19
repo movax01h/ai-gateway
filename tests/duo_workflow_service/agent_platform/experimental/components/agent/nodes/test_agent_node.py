@@ -35,7 +35,7 @@ def agent_node_fixture(
     conversation_history_key,
     mock_internal_event_client,
 ):
-    """Fixture for AgentNode instance."""
+    """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
         flow_id=flow_id,
         flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
@@ -44,6 +44,27 @@ def agent_node_fixture(
         inputs=inputs,
         conversation_history_key_factory=lambda _: conversation_history_key,
         internal_event_client=mock_internal_event_client,
+    )
+
+
+@pytest.fixture(name="agent_node_with_schema")
+def agent_node_with_schema_fixture(
+    flow_id,
+    mock_prompt,
+    inputs,
+    conversation_history_key,
+    mock_internal_event_client,
+):
+    """Fixture for AgentNode instance with AgentFinalOutput response schema."""
+    return AgentNode(
+        flow_id=flow_id,
+        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        name="test_agent_node",
+        prompt=mock_prompt,
+        inputs=inputs,
+        conversation_history_key_factory=lambda _: conversation_history_key,
+        internal_event_client=mock_internal_event_client,
+        response_schema=AgentFinalOutput,
     )
 
 
@@ -242,7 +263,7 @@ class TestAgentNode:
         self,
         mock_ai_message,
         mock_prompt,
-        agent_node,
+        agent_node_with_schema,
         base_flow_state,
         component_name,
         prompt_variables,
@@ -264,7 +285,7 @@ class TestAgentNode:
             side_effect=[mock_ai_message_invalid, mock_ai_message]
         )
 
-        result = await agent_node.run(base_flow_state)
+        result = await agent_node_with_schema.run(base_flow_state)
 
         # Verify prompt was called twice (first failed validation, second succeeded)
         assert mock_prompt.ainvoke.call_count == 2
@@ -305,7 +326,7 @@ class TestAgentNode:
         self,
         mock_ai_message,
         mock_prompt,
-        agent_node,
+        agent_node_with_schema,
         base_flow_state,
         component_name,
     ):
@@ -321,7 +342,7 @@ class TestAgentNode:
 
         mock_prompt.ainvoke = AsyncMock(return_value=mock_ai_message)
 
-        result = await agent_node.run(base_flow_state)
+        result = await agent_node_with_schema.run(base_flow_state)
 
         # Verify successful result
         assert FlowStateKeys.CONVERSATION_HISTORY in result
@@ -331,7 +352,7 @@ class TestAgentNode:
         ]
 
         # Verify prompt was called only once (validation passed)
-        assert agent_node._prompt.ainvoke.call_count == 1
+        assert agent_node_with_schema._prompt.ainvoke.call_count == 1
 
     @pytest.mark.asyncio
     async def test_run_invalid_final_answer_tool_validation_error(
@@ -339,7 +360,7 @@ class TestAgentNode:
         prompt_variables,
         mock_ai_message,
         mock_prompt,
-        agent_node,
+        agent_node_with_schema,
         base_flow_state,
         component_name,
     ):
@@ -358,7 +379,7 @@ class TestAgentNode:
             side_effect=[mock_ai_message_invalid, mock_ai_message]
         )
 
-        result = await agent_node.run(base_flow_state)
+        result = await agent_node_with_schema.run(base_flow_state)
 
         # Verify retry mechanism preserves full conversation history
         assert FlowStateKeys.CONVERSATION_HISTORY in result

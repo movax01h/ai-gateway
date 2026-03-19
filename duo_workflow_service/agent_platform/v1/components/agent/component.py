@@ -10,7 +10,6 @@ from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
-    AgentFinalOutput,
     AgentNode,
     FinalResponseNode,
     ToolNode,
@@ -88,7 +87,7 @@ class AgentComponent(BaseComponent):
     ui_role_as: Literal["agent", "tool"] = "agent"
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
-    _response_schema: Type[BaseAgentOutput] = PrivateAttr()
+    _response_schema: Optional[Type[BaseAgentOutput]] = PrivateAttr()
 
     @model_validator(mode="after")
     def validate_and_resolve_response_schema(self):
@@ -96,13 +95,13 @@ class AgentComponent(BaseComponent):
 
         This validator:
         1. Validates that response_schema_id and response_schema_version are either both set or both None
-        2. Resolves the response schema from the registry (or uses default AgentFinalOutput)
+        2. Resolves the response schema from the registry (or uses None for default text-only mode)
         3. Validates that the schema tool name doesn't collide with existing tools
         """
         if bool(self.response_schema_id) != bool(self.response_schema_version):
             raise ValueError(
                 "response_schema_id and response_schema_version must be provided together. "
-                "Either provide both or omit both to default to AgentFinalOutput."
+                "Either provide both or omit both for default text-only mode."
             )
 
         # Resolve the response schema
@@ -118,7 +117,7 @@ class AgentComponent(BaseComponent):
                     f"collides with existing tool: '{response_schema.tool_title}'"
                 )
         else:
-            response_schema = AgentFinalOutput
+            response_schema = None
 
         self._response_schema = response_schema
         return self
@@ -139,13 +138,19 @@ class AgentComponent(BaseComponent):
             )
 
         if not last_message.tool_calls:
-            raise RoutingError(f"Tool calls not found for component {self.name}")
+            if self._response_schema is not None:
+                raise RoutingError(
+                    f"Schema mode requires a tool call but got a text-only response "
+                    f"for component {self.name}"
+                )
+            return f"{self.name}#final_response"
 
-        if any(
+        if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
             return f"{self.name}#final_response"
+
         return f"{self.name}#tools"
 
     @override
@@ -164,7 +169,7 @@ class AgentComponent(BaseComponent):
             Tuple of IOKey objects describing all output paths from this component.
 
         Examples:
-            Default AgentFinalOutput:
+            Default (no custom schema):
                 - context:<name>.final_answer (string)
 
             Custom schema with fields (summary, issues_found, recommendations):
@@ -178,7 +183,7 @@ class AgentComponent(BaseComponent):
         base_outputs = tuple(output.to_iokey(replacements) for output in self._outputs)
 
         # If using custom response schema, add individual field outputs
-        if self.response_schema_id and self.response_schema_version:
+        if self._response_schema is not None:
             # Add output keys for each field in the schema
             field_outputs = []
             for field_name in self._response_schema.model_fields.keys():
@@ -195,8 +200,12 @@ class AgentComponent(BaseComponent):
 
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         # Response schema is already resolved in validate_and_resolve_response_schema()
-        tools = self.toolset.bindable + [self._response_schema]
-        tool_choice = "any"  # make sure the LLM always uses a tool to respond.
+        if self._response_schema is not None:
+            tools = self.toolset.bindable + [self._response_schema]
+            tool_choice = "any"
+        else:
+            tools = self.toolset.bindable
+            tool_choice = "auto"
 
         prompt = self.prompt_registry.get_on_behalf(
             self.user,

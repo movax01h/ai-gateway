@@ -288,20 +288,14 @@ class TestSupervisorExecutionFlow:
         mock_router,
         base_flow_state,
         supervisor_name,
-        final_response_tool_call,
     ):
-        """When the agent emits a final_response tool call, execution exits via the router."""
+        """When the agent emits a text-only response (no tool calls), execution exits via the router."""
         nodes = all_node_mocks
 
         nodes["agent"].run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
-                supervisor_name: [
-                    AIMessage(
-                        content="",
-                        tool_calls=[final_response_tool_call],
-                    )
-                ]
+                supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
             },
         }
         nodes["final_response"].run.return_value = {**base_flow_state}
@@ -324,7 +318,6 @@ class TestSupervisorExecutionFlow:
         base_flow_state,
         supervisor_name,
         regular_tool_call,
-        final_response_tool_call,
     ):
         """Agent → tools → agent → final_response → exit."""
         nodes = all_node_mocks
@@ -341,9 +334,7 @@ class TestSupervisorExecutionFlow:
             {
                 **base_flow_state,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    supervisor_name: [
-                        AIMessage(content="", tool_calls=[final_response_tool_call])
-                    ]
+                    supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
                 },
             },
         ]
@@ -368,7 +359,6 @@ class TestSupervisorExecutionFlow:
         base_flow_state,
         supervisor_name,
         delegate_tool_call,
-        final_response_tool_call,
     ):
         """Agent → delegation → (no active subagent) → agent → final_response → exit.
 
@@ -390,9 +380,7 @@ class TestSupervisorExecutionFlow:
             {
                 **base_flow_state,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    supervisor_name: [
-                        AIMessage(content="", tool_calls=[final_response_tool_call])
-                    ]
+                    supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
                 },
             },
         ]
@@ -429,16 +417,13 @@ class TestSupervisorExecutionFlow:
         supervisor_name,
         developer_name,
         tester_name,
-        final_response_tool_call,
     ):
         """Attach() calls bind_to_supervisor then attach on every subagent component."""
         nodes = all_node_mocks
         nodes["agent"].run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
-                supervisor_name: [
-                    AIMessage(content="", tool_calls=[final_response_tool_call])
-                ]
+                supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
             },
         }
         nodes["final_response"].run.return_value = {**base_flow_state}
@@ -460,16 +445,13 @@ class TestSupervisorExecutionFlow:
         base_flow_state,
         supervisor_name,
         developer_name,
-        final_response_tool_call,
     ):
         """The router passed to each subagent always routes back to #subagent_return."""
         nodes = all_node_mocks
         nodes["agent"].run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
-                supervisor_name: [
-                    AIMessage(content="", tool_calls=[final_response_tool_call])
-                ]
+                supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
             },
         }
         nodes["final_response"].run.return_value = {**base_flow_state}
@@ -522,7 +504,6 @@ class TestSupervisorExecutionFlow:
         supervisor_name,
         developer_name,
         delegate_tool_call,
-        final_response_tool_call,
     ):
         """Full loop: agent → delegation → subagent node → subagent_return → agent → final_response.
 
@@ -542,13 +523,11 @@ class TestSupervisorExecutionFlow:
                     ]
                 },
             },
-            # Second call: after subagent_return, emit final response
+            # Second call: after subagent_return, emit text-only final response
             {
                 **base_flow_state,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    supervisor_name: [
-                        AIMessage(content="", tool_calls=[final_response_tool_call])
-                    ]
+                    supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
                 },
             },
         ]

@@ -9,9 +9,6 @@ from langgraph.graph import END, StateGraph
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     RoutingError,
 )
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    AgentFinalOutput,
-)
 from duo_workflow_service.agent_platform.experimental.components.supervisor.subagent_component import (
     SubagentComponent,
 )
@@ -148,22 +145,11 @@ def subagent_fixture(unbound_subagent, supervisor_name, developer_name):
 
 
 def _final_response_state(base_flow_state, session_key):
-    """Return state with an AIMessage carrying a final_response tool call."""
+    """Return state with a text-only AIMessage (implicit final answer)."""
     return {
         **base_flow_state,
         FlowStateKeys.CONVERSATION_HISTORY: {
-            session_key: [
-                AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "id": "c_final",
-                            "name": AgentFinalOutput.tool_title,
-                            "args": {"final_response": "Done"},
-                        }
-                    ],
-                )
-            ]
+            session_key: [AIMessage(content="Done", tool_calls=[])]
         },
     }
 
@@ -210,7 +196,7 @@ class TestSubagentExecutionFlow:
         supervisor_name,
         developer_name,
     ):
-        """When the agent emits a final_response tool call, execution exits via the router."""
+        """When the agent emits a text-only response (no tool calls), execution exits via the router."""
         session_key = f"{supervisor_name}__{developer_name}__1"
         nodes = all_node_mocks
         nodes["agent"].run.return_value = _final_response_state(

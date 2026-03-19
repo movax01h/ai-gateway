@@ -41,13 +41,13 @@ The output should be completely empty (no characters at all). Any output indicat
 </recommended_sequence>
 
 <completion>
-After completing the sequence, call final_response_tool:
+After completing the sequence, respond with your final result:
 
 If Step 5 produced empty output:
-  Set final_response to "clean"
+  Respond with "clean"
 
 If any step failed with an unrecoverable error, or Step 5 showed remaining issues:
-  Set final_response to "failed: [describe what went wrong and at which step]"
+  Respond with "failed: [describe what went wrong and at which step]"
 </completion>
 
 Begin by checking the current repository state.

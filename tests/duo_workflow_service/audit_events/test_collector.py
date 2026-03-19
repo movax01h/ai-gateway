@@ -63,7 +63,7 @@ class TestFlush:
         assert len(mock_client.send_batch.call_args[0][0]) == 2
 
     @pytest.mark.asyncio
-    async def test_flush_clears_buffer(self, collector, mock_client):
+    async def test_flush_clears_buffer(self, collector):
         collector.capture(make_audit_event())
         await collector.flush()
         assert len(collector._buffer) == 0

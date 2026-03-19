@@ -1,4 +1,4 @@
-from typing import ClassVar, Type, cast
+from typing import ClassVar, Optional, Type, cast
 
 import structlog
 from anthropic import APIStatusError
@@ -76,7 +76,7 @@ class AgentNode:
         inputs: list[IOKey],
         component_name: str,
         internal_event_client: InternalEventsClient,
-        response_schema: Type[BaseAgentOutput] = AgentFinalOutput,
+        response_schema: Optional[Type[BaseAgentOutput]] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -125,6 +125,8 @@ class AgentNode:
                 await self._error_handler.handle_error(model_error)
 
     def _final_answer_validate(self, completion: AIMessage) -> list:
+        if self._response_schema is None:
+            return []
 
         tool_title = self._response_schema.tool_title
 

@@ -10,7 +10,6 @@ from duo_workflow_service.agent_platform.experimental.components.agent.component
     RoutingError,
 )
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
-    AgentFinalOutput,
     AgentNode,
     FinalResponseNode,
     ToolNode,
@@ -290,11 +289,12 @@ class SupervisorAgentComponent(AgentComponentBase):
         return f"{self.name}#agent"
 
     def _agent_node_router(self, state: FlowState) -> str:
-        """3-way router for the supervisor's agent node.
+        """Router for the supervisor's agent node.
 
-        Routes based on the tool call type:
+        Routes based on the last message:
+        - text-only (no tool calls) → supervisor#final_response (implicit final answer)
         - delegate_task → supervisor#delegation
-        - final_response_tool → supervisor#final_response
+        - schema tool call → supervisor#final_response
         - other tools → supervisor#tools
         """
         history_iokey = self._conversation_history_key(state)
@@ -311,7 +311,12 @@ class SupervisorAgentComponent(AgentComponentBase):
             )
 
         if not last_message.tool_calls:
-            raise RoutingError(f"Tool calls not found for component {self.name}")
+            if self._response_schema is not None:
+                raise RoutingError(
+                    f"Schema mode requires a tool call but got a text-only response "
+                    f"for component {self.name}"
+                )
+            return f"{self.name}#final_response"
 
         # Check for delegate_task
         delegate_title: str = self._delegate_task_cls.tool_title  # type: ignore[attr-defined]
@@ -320,9 +325,9 @@ class SupervisorAgentComponent(AgentComponentBase):
         ):
             return f"{self.name}#delegation"
 
-        # Check for final_response_tool
-        if any(
-            tool_call["name"] == AgentFinalOutput.tool_title
+        # Check for schema tool (final response)
+        if self._response_schema is not None and any(
+            tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
             return f"{self.name}#final_response"
@@ -403,12 +408,13 @@ class SupervisorAgentComponent(AgentComponentBase):
 
     def _build_prompt(self, supervisor_tools: list) -> Any:
         """Build the supervisor prompt with the given tool list."""
+        tool_choice = "any" if self._response_schema is not None else "auto"
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
             self.prompt_version,
             tools=supervisor_tools,
-            tool_choice="any",
+            tool_choice=tool_choice,
             internal_event_extra={
                 "agent_name": self.name,
                 "workflow_id": self.flow_id,
@@ -425,11 +431,10 @@ class SupervisorAgentComponent(AgentComponentBase):
         - One 3-node ReAct subgraph per managed subagent
         - Subagent return node that injects results back to supervisor
         """
-        # Supervisor tools = user-specified tools + delegate_task + final_response_tool
-        supervisor_tools = self.toolset.bindable + [
-            self._delegate_task_cls,
-            AgentFinalOutput,
-        ]
+        # Supervisor tools = user-specified tools + delegate_task + (schema tool if any)
+        supervisor_tools = self.toolset.bindable + [self._delegate_task_cls]
+        if self._response_schema is not None:
+            supervisor_tools = supervisor_tools + [self._response_schema]
         prompt = self._build_prompt(supervisor_tools)
 
         output_key = self._final_answer_key.to_iokey(
