@@ -160,11 +160,13 @@ class SubagentComponent(AgentComponentBase):
                 f"{history_iokey.target}:{history_iokey.subkeys}"
             )
         if not last_message.tool_calls:
-            raise RoutingError(
-                f"Tool calls not found for subsession key "
-                f"{history_iokey.target}:{history_iokey.subkeys}"
-            )
-        if any(
+            if self._response_schema is not None:
+                raise RoutingError(
+                    f"Schema mode requires a tool call but got a text-only response "
+                    f"for subsession key {history_iokey.target}:{history_iokey.subkeys}"
+                )
+            return f"{self.name}#final_response"
+        if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
@@ -191,14 +193,19 @@ class SubagentComponent(AgentComponentBase):
                 f"attach() is called. Call bind_to_supervisor() first."
             )
 
-        tools = self.toolset.bindable + [self._response_schema]
+        if self._response_schema is not None:
+            tools = self.toolset.bindable + [self._response_schema]
+            tool_choice = "any"
+        else:
+            tools = self.toolset.bindable
+            tool_choice = "auto"
 
         prompt = self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
             self.prompt_version,
             tools=tools,  # type: ignore[arg-type]
-            tool_choice="any",
+            tool_choice=tool_choice,
             internal_event_extra={
                 "agent_name": self.name,
                 "workflow_id": self.flow_id,

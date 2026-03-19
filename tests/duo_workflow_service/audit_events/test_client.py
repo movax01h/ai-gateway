@@ -1,4 +1,5 @@
 import json
+import uuid as uuid_mod
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
@@ -183,7 +184,6 @@ class TestBatchIdentity:
 
     @pytest.mark.asyncio
     async def test_batch_id_is_uuid(self, _mock_supported, http_client, events):
-        import uuid as uuid_mod
 
         http_client.apost.return_value = GitLabHttpResponse(status_code=200, body="")
         client = _make_client(http_client)

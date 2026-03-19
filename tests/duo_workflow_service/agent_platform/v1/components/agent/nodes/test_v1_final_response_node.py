@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from unittest.mock import Mock
 
 import pytest
@@ -35,6 +36,7 @@ class TestFinalResponseNode:
             name="test_node",
             output=simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Execute
@@ -74,6 +76,7 @@ class TestFinalResponseNode:
             name="test_node",
             output=None,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Execute
@@ -95,7 +98,7 @@ class TestFinalResponseNode:
 
     @pytest.mark.asyncio
     async def test_run_success_with_nested_output(
-        self, component_name, nested_output, final_response_content, ui_history
+        self, component_name, nested_output, ui_history
     ):
         """Test successful run with nested output IOKey."""
         node = FinalResponseNode(
@@ -103,6 +106,7 @@ class TestFinalResponseNode:
             name="test_node",
             output=nested_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create mock tool call with different content
@@ -179,6 +183,7 @@ class TestFinalResponseNode:
             name="test_node",
             output=simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create state with multiple tool calls
@@ -210,6 +215,7 @@ class TestFinalResponseNode:
             name="test_node",
             output=simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create state with wrong tool call
@@ -230,15 +236,49 @@ class TestFinalResponseNode:
         assert component_name in error_message
 
     @pytest.mark.asyncio
-    async def test_run_empty_tool_calls_raises_error(
+    async def test_run_schema_mode_no_tool_calls_raises_error(
         self,
         component_name,
         simple_output,
         base_flow_state,
-        mock_ai_message_empty_tools,
         ui_history,
     ):
-        """Test run raises ValueError when tool_calls is empty."""
+        """Test run raises ValueError when schema is set but model returns no tool calls."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = []
+        mock_message.text = "Text-only response"
+
+        node = FinalResponseNode(
+            component_name=component_name,
+            name="test_node",
+            output=simple_output,
+            ui_history=ui_history,
+            response_schema=AgentFinalOutput,
+        )
+
+        state = base_flow_state.copy()
+        state["conversation_history"] = {component_name: [mock_message]}
+
+        with pytest.raises(ValueError) as exc_info:
+            await node.run(state)
+
+        error_message = str(exc_info.value)
+        assert "Response schema requires a tool call" in error_message
+        assert component_name in error_message
+
+    @pytest.mark.asyncio
+    async def test_run_empty_tool_calls_uses_text_path(
+        self,
+        component_name,
+        simple_output,
+        base_flow_state,
+        ui_history,
+    ):
+        """Test run with empty tool calls uses text-only response path."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = []
+        mock_message.text = "Text-only response"
+
         node = FinalResponseNode(
             component_name=component_name,
             name="test_node",
@@ -246,17 +286,20 @@ class TestFinalResponseNode:
             ui_history=ui_history,
         )
 
-        # Create state with empty tool calls
         state = base_flow_state.copy()
-        state["conversation_history"] = {component_name: [mock_ai_message_empty_tools]}
+        state["conversation_history"] = {component_name: [mock_message]}
 
-        # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
-            await node.run(state)
+        result = await node.run(state)
 
-        error_message = str(exc_info.value)
-        assert "No tool calls found in the last message" in error_message
-        assert component_name in error_message
+        # Verify text-only path: output set, no conversation_history update
+        assert "context" in result
+        assert result["context"]["result"] == "Text-only response"
+        assert FlowStateKeys.CONVERSATION_HISTORY not in result
+
+        ui_history.log.success.assert_called_once_with(
+            "Text-only response",
+            event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        )
 
     @pytest.mark.asyncio
     async def test_run_no_conversation_history_raises_error(
@@ -306,6 +349,7 @@ class TestFinalResponseNode:
             name="test_node",
             output=simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create first message (should be ignored)

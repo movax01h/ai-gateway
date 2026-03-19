@@ -29,9 +29,9 @@ Restore the repository to a clean state where ALL of the following are true:
    - command: The git subcommand (e.g., "status", "fetch", "checkout")
    - args: Command arguments as a single string, or omit if none needed
 
-2. final_response_tool - Reports your final result when cleanup is complete or has failed
-   Parameters:
-   - final_response: Either "clean" for success, or "failed: [specific reason]" for failure
+When cleanup is complete or has failed, respond with your final result as a text message:
+   - Success: "clean"
+   - Failure: "failed: [specific reason]"
 </available_tools>
 
 <execution_approach>

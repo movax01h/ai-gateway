@@ -13,9 +13,6 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
     RoutingError,
 )
-from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
-    AgentFinalOutput,
-)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
@@ -312,8 +309,8 @@ class TestAgentComponentAttachNodes:
             user,
             prompt_id,
             prompt_version,
-            tools=mock_toolset.bindable + [AgentFinalOutput],
-            tool_choice="any",
+            tools=mock_toolset.bindable,
+            tool_choice="auto",
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,
@@ -369,15 +366,7 @@ class TestAgentComponentAttachEdges:
     """Test suite for AgentComponent routing behavior through graph execution."""
 
     # pylint: disable=unused-argument
-    @pytest.mark.parametrize(
-        ("component_fixture", "final_tool_fixture"),
-        [
-            ("agent_component", "mock_final_tool_call"),
-            ("agent_component_with_custom_schema", "mock_custom_schema_tool_call"),
-        ],
-        ids=["default_schema", "custom_schema"],
-    )
-    def test_routing_with_final_tool_call_goes_to_final_response(
+    def test_routing_with_custom_schema_tool_call_goes_to_final_response(
         self,
         request,
         mock_state_graph,
@@ -387,36 +376,28 @@ class TestAgentComponentAttachEdges:
         mock_agent_node_cls,
         mock_tool_node_cls,
         mock_final_response_node_cls,
-        component_fixture,
-        final_tool_fixture,
+        mock_custom_schema_tool_call,
+        agent_component_with_custom_schema,
     ):
-        """Test that final tool call routes to final response node."""
-        # Get fixtures dynamically based on parameters
-        agent_component = request.getfixturevalue(component_fixture)
-        mock_final_tool_call = request.getfixturevalue(final_tool_fixture)
-
-        # Create state with final tool call
+        """Test that custom schema tool call routes to final response node."""
         mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = [mock_final_tool_call]
+        mock_message.tool_calls = [mock_custom_schema_tool_call]
 
         state_with_final_tool = base_flow_state.copy()
         state_with_final_tool[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_message]
         }
 
-        agent_component.attach(mock_state_graph, mock_router)
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
 
-        # Get the router function that was passed to add_conditional_edges
         router_calls = mock_state_graph.add_conditional_edges.call_args_list
         agent_router_call = next(
             call for call in router_calls if call[0][0] == f"{component_name}#agent"
         )
         router_function = agent_router_call[0][1]
 
-        # Test the routing behavior
         result = router_function(state_with_final_tool)
-        expected = f"{component_name}#final_response"
-        assert result == expected
+        assert result == f"{component_name}#final_response"
 
     # pylint: disable=unused-argument
     @pytest.mark.parametrize(
@@ -438,10 +419,8 @@ class TestAgentComponentAttachEdges:
         component_fixture,
     ):
         """Test that non-final tool calls route to tools node."""
-        # Get fixture dynamically based on parameter
         agent_component = request.getfixturevalue(component_fixture)
 
-        # Create state with other tool call
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = [mock_other_tool_call]
 
@@ -452,68 +431,48 @@ class TestAgentComponentAttachEdges:
 
         agent_component.attach(mock_state_graph, mock_router)
 
-        # Get the router function that was passed to add_conditional_edges
         router_calls = mock_state_graph.add_conditional_edges.call_args_list
         agent_router_call = next(
             call for call in router_calls if call[0][0] == f"{component_name}#agent"
         )
         router_function = agent_router_call[0][1]
 
-        # Test the routing behavior
         result = router_function(state_with_other_tool)
-        expected = f"{component_name}#tools"
-        assert result == expected
+        assert result == f"{component_name}#tools"
 
     # pylint: disable=unused-argument
-    @pytest.mark.parametrize(
-        ("component_fixture", "final_tool_fixture"),
-        [
-            ("agent_component", "mock_final_tool_call"),
-            ("agent_component_with_custom_schema", "mock_custom_schema_tool_call"),
-        ],
-        ids=["default_schema", "custom_schema"],
-    )
     def test_routing_with_mixed_tool_calls_prioritizes_final_response(
         self,
-        request,
         mock_state_graph,
         mock_router,
         base_flow_state,
         component_name,
         mock_other_tool_call,
+        mock_custom_schema_tool_call,
         mock_agent_node_cls,
         mock_tool_node_cls,
         mock_final_response_node_cls,
-        component_fixture,
-        final_tool_fixture,
+        agent_component_with_custom_schema,
     ):
-        """Test that mixed tool calls prioritize final response routing."""
-        # Get fixtures dynamically based on parameters
-        agent_component = request.getfixturevalue(component_fixture)
-        mock_final_tool_call = request.getfixturevalue(final_tool_fixture)
-
-        # Create state with mixed tool calls
+        """Test that mixed tool calls prioritize final response routing (custom schema)."""
         mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = [mock_other_tool_call, mock_final_tool_call]
+        mock_message.tool_calls = [mock_other_tool_call, mock_custom_schema_tool_call]
 
         state_with_mixed_tools = base_flow_state.copy()
         state_with_mixed_tools[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_message]
         }
 
-        agent_component.attach(mock_state_graph, mock_router)
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
 
-        # Get the router function that was passed to add_conditional_edges
         router_calls = mock_state_graph.add_conditional_edges.call_args_list
         agent_router_call = next(
             call for call in router_calls if call[0][0] == f"{component_name}#agent"
         )
         router_function = agent_router_call[0][1]
 
-        # Test the routing behavior
         result = router_function(state_with_mixed_tools)
-        expected = f"{component_name}#final_response"
-        assert result == expected
+        assert result == f"{component_name}#final_response"
 
     # pylint: disable=unused-argument
     def test_routing_with_without_conversation_history(
@@ -590,7 +549,7 @@ class TestAgentComponentAttachEdges:
             router_function(state_with_non_ai_message)
 
     # pylint: disable=unused-argument
-    def test_routing_with_no_tool_calls_raises_error(
+    def test_routing_with_no_tool_calls_goes_to_final_response(
         self,
         agent_component,
         mock_state_graph,
@@ -601,7 +560,7 @@ class TestAgentComponentAttachEdges:
         mock_tool_node_cls,
         mock_final_response_node_cls,
     ):
-        """Test that messages with no tool calls raise RoutingError."""
+        """Test that messages with no tool calls route to final_response."""
         # Create state with AIMessage but no tool calls
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = []
@@ -620,11 +579,8 @@ class TestAgentComponentAttachEdges:
         )
         router_function = agent_router_call[0][1]
 
-        # Test the routing behavior - should raise RoutingError
-        with pytest.raises(
-            RoutingError, match=f"Tool calls not found for component {component_name}"
-        ):
-            router_function(state_with_no_tools)
+        result = router_function(state_with_no_tools)
+        assert result == f"{component_name}#final_response"
 
 
 class TestAgentComponentResponseSchema:
@@ -658,7 +614,7 @@ class TestAgentComponentResponseSchema:
         if use_custom_schema:
             expected_schema = mock_schema_registry.get.return_value
         else:
-            expected_schema = AgentFinalOutput
+            expected_schema = None
 
         # Verify AgentNode received correct schema
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
@@ -808,7 +764,7 @@ class TestAgentComponentOutputs:
             toolset=mock_toolset,
             prompt_registry=mock_prompt_registry,
             internal_event_client=mock_internal_event_client,
-            # No response_schema_id/version - uses default AgentFinalOutput
+            # No response_schema_id/version - no custom response schema
         )
 
         outputs = component.outputs

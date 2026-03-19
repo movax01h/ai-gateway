@@ -7,8 +7,6 @@ from duo_workflow_service.audit_events.event_types import (
     CLOUDEVENT_DATA_CONTENT_TYPE,
     CLOUDEVENT_SOURCE,
     CLOUDEVENT_SPEC_VERSION,
-    AuditEvent,
-    AuditEventType,
     LlmInputSentEvent,
     LlmResponseReceivedEvent,
     SessionEndedEvent,

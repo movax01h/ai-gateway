@@ -39,6 +39,7 @@ class TestFinalResponseNode:
             conversation_history_key_factory=lambda _: conversation_history_key,
             output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Get existing history
@@ -89,6 +90,7 @@ class TestFinalResponseNode:
             conversation_history_key_factory=lambda _: conversation_history_key,
             output_key_factory=lambda _: None,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Get existing history
@@ -119,7 +121,6 @@ class TestFinalResponseNode:
         self,
         conversation_history_key,
         nested_output,
-        final_response_content,
         ui_history,
         component_name,
     ):
@@ -129,6 +130,7 @@ class TestFinalResponseNode:
             conversation_history_key_factory=lambda _: conversation_history_key,
             output_key_factory=lambda _: nested_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create mock tool call with different content
@@ -209,6 +211,7 @@ class TestFinalResponseNode:
             conversation_history_key_factory=lambda _: conversation_history_key,
             output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create state with multiple tool calls
@@ -241,6 +244,7 @@ class TestFinalResponseNode:
             conversation_history_key_factory=lambda _: conversation_history_key,
             output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create state with wrong tool call
@@ -261,16 +265,51 @@ class TestFinalResponseNode:
         assert component_name in error_message
 
     @pytest.mark.asyncio
-    async def test_run_empty_tool_calls_raises_error(
+    async def test_run_schema_mode_no_tool_calls_raises_error(
         self,
         conversation_history_key,
         simple_output,
         base_flow_state,
-        mock_ai_message_empty_tools,
         ui_history,
         component_name,
     ):
-        """Test run raises ValueError when tool_calls is empty."""
+        """Test run raises ValueError when schema is set but model returns no tool calls."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = []
+        mock_message.text = "Text-only response"
+
+        node = FinalResponseNode(
+            name="test_node",
+            conversation_history_key_factory=lambda _: conversation_history_key,
+            output_key_factory=lambda _: simple_output,
+            ui_history=ui_history,
+            response_schema=AgentFinalOutput,
+        )
+
+        state = base_flow_state.copy()
+        state["conversation_history"] = {component_name: [mock_message]}
+
+        with pytest.raises(ValueError) as exc_info:
+            await node.run(state)
+
+        error_message = str(exc_info.value)
+        assert "Response schema requires a tool call" in error_message
+        assert component_name in error_message
+
+    @pytest.mark.asyncio
+    async def test_run_empty_tool_calls_uses_text_path(
+        self,
+        conversation_history_key,
+        simple_output,
+        base_flow_state,
+        ui_history,
+        component_name,
+    ):
+        """Test run with empty tool calls uses text-only response path."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = []
+        mock_message.text = "Text-only response"
+
         node = FinalResponseNode(
             name="test_node",
             conversation_history_key_factory=lambda _: conversation_history_key,
@@ -278,17 +317,19 @@ class TestFinalResponseNode:
             ui_history=ui_history,
         )
 
-        # Create state with empty tool calls
         state = base_flow_state.copy()
-        state["conversation_history"] = {component_name: [mock_ai_message_empty_tools]}
+        state["conversation_history"] = {component_name: [mock_message]}
 
-        # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
-            await node.run(state)
+        result = await node.run(state)
 
-        error_message = str(exc_info.value)
-        assert "No tool calls found in the last message" in error_message
-        assert component_name in error_message
+        # Verify text-only path: output set
+        assert "context" in result
+        assert result["context"]["result"] == "Text-only response"
+
+        ui_history.log.success.assert_called_once_with(
+            "Text-only response",
+            event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        )
 
     @pytest.mark.asyncio
     async def test_run_no_conversation_history_raises_error(
@@ -355,6 +396,7 @@ class TestFinalResponseNode:
             conversation_history_key_factory=lambda _: conversation_history_key,
             output_key_factory=lambda _: simple_output,
             ui_history=ui_history,
+            response_schema=AgentFinalOutput,
         )
 
         # Create first message (should be ignored)

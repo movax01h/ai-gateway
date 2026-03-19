@@ -17,11 +17,11 @@ Name your branch based on this context:
 3. Call `create_branch` with ref={{ ref }}
 4. On success: fetch and checkout the new branch
 5. On failure (other): retry with a modified description (max 2 total attempts)
-6. Call `final_response_tool` with the result
+6. Respond with the result
 </branch_handling_strategy>
 
 <final_response_format>
-Call `final_response_tool` with EXACTLY one of:
+Respond with EXACTLY one of:
 - Success: just the branch name (e.g., "duo/fix/123-description-w42")
 - Failure: "FAILED: <error_summary>"
 </final_response_format>
