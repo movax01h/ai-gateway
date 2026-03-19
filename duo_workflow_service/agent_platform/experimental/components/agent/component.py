@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal, Optional, Type, Union, override
+from typing import Annotated, ClassVar, Literal, Optional, Self, Type, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -95,6 +95,38 @@ class AgentComponentBase(BaseComponent):
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
+    _response_schema: Type[BaseAgentOutput] = PrivateAttr()
+
+    @model_validator(mode="after")
+    def validate_and_resolve_response_schema(self) -> Self:
+        """Validate response schema params and resolve the schema.
+
+        1. Validates that response_schema_id and response_schema_version are either both set or both None.
+        2. Resolves the response schema from the registry (or uses default AgentFinalOutput).
+        3. Validates that the schema tool name doesn't collide with existing tools.
+        """
+        if bool(self.response_schema_id) != bool(self.response_schema_version):
+            raise ValueError(
+                "response_schema_id and response_schema_version must be provided together. "
+                "Either provide both or omit both to default to AgentFinalOutput."
+            )
+
+        if self.response_schema_id and self.response_schema_version:
+            response_schema = self.schema_registry.get(
+                schema_id=self.response_schema_id,
+                schema_version=self.response_schema_version,
+            )
+            if response_schema.tool_title in self.toolset:
+                raise ValueError(
+                    f"Response schema tool title '{response_schema.tool_title}' "
+                    f"collides with existing tool: '{response_schema.tool_title}'"
+                )
+        else:
+            response_schema = AgentFinalOutput
+
+        self._response_schema = response_schema
+        return self
+
     def _conversation_history_key(self, _state: FlowState) -> IOKey:
         """Return the ``IOKey`` for this component's conversation history.
 
@@ -134,40 +166,6 @@ class AgentComponent(AgentComponentBase):
     ui_role_as: Literal["agent", "tool"] = "agent"
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
-    _response_schema: Type[BaseAgentOutput] = PrivateAttr()
-
-    @model_validator(mode="after")
-    def validate_and_resolve_response_schema(self):
-        """Validate response schema params and resolve the schema.
-
-        This validator:
-        1. Validates that response_schema_id and response_schema_version are either both set or both None
-        2. Resolves the response schema from the registry (or uses default AgentFinalOutput)
-        3. Validates that the schema tool name doesn't collide with existing tools
-        """
-        if bool(self.response_schema_id) != bool(self.response_schema_version):
-            raise ValueError(
-                "response_schema_id and response_schema_version must be provided together. "
-                "Either provide both or omit both to default to AgentFinalOutput."
-            )
-
-        # Resolve the response schema
-        if self.response_schema_id and self.response_schema_version:
-            response_schema = self.schema_registry.get(
-                schema_id=self.response_schema_id,
-                schema_version=self.response_schema_version,
-            )
-            # Check to see if name of schema tool collides with existing tools
-            if response_schema.tool_title in self.toolset:
-                raise ValueError(
-                    f"Response schema tool title '{response_schema.tool_title}' "
-                    f"collides with existing tool: '{response_schema.tool_title}'"
-                )
-        else:
-            response_schema = AgentFinalOutput
-
-        self._response_schema = response_schema
-        return self
 
     def _agent_node_router(self, state: FlowState) -> str:
         history: list[BaseMessage] = state[FlowStateKeys.CONVERSATION_HISTORY].get(

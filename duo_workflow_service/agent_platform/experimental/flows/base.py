@@ -17,6 +17,9 @@ from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     EndComponent,
 )
+from duo_workflow_service.agent_platform.experimental.components.supervisor.component import (
+    SupervisorAgentComponent,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
     load_component_class,
@@ -245,39 +248,125 @@ class Flow(AbstractWorkflow):
 
         components: dict[str, BaseComponent] = {"end": end_component}
 
+        # Single-pass construction with deferred queue for components
+        # that depend on other components (e.g. supervisors need subagents).
+        deferred: list[dict] = []
+
         for comp_config in self._config.components:
-            comp_name = comp_config["name"]  # explicit name field
-            comp_class = load_component_class(comp_config["type"])
+            comp_params = self._prepare_component_params(comp_config, tools_registry)
 
-            comp_params = {k: v for k, v in comp_config.items() if k != "type"}
+            if self._has_unresolved_dependencies(comp_config, components):
+                deferred.append(comp_config)
+                continue
 
-            comp_params.update(
-                {
-                    "prompt_registry": self._flow_prompt_registry,  # override DI
-                    "flow_id": self._workflow_id,
-                    "flow_type": self._workflow_type,
-                    "user": self._user,
-                }
-            )
+            self._instantiate_component(comp_config, comp_params, components)
 
-            if "toolset" in comp_params:
-                comp_params["toolset"] = self._parse_toolset(
-                    tools_registry, comp_params["toolset"]
-                )
-            elif "tool_name" in comp_params:
-                # If a tool_name is specified without a toolset, create a toolset containing just that tool.
-                comp_params["toolset"] = tools_registry.toolset(
-                    [comp_params["tool_name"]]
-                )
-
-            if comp_name in components:
-                raise ValueError(
-                    f"Duplicate component name: '{comp_name}'. Component names must be unique."
-                )
-
-            components[comp_name] = comp_class(**comp_params)
+        # Build deferred components — their dependencies are now available
+        for comp_config in deferred:
+            comp_params = self._prepare_component_params(comp_config, tools_registry)
+            self._instantiate_component(comp_config, comp_params, components)
 
         return components
+
+    def _prepare_component_params(
+        self, comp_config: dict, tools_registry: ToolsRegistry
+    ) -> dict:
+        """Prepare constructor parameters from a component config dict."""
+        comp_params = {k: v for k, v in comp_config.items() if k != "type"}
+
+        comp_params.update(
+            {
+                "prompt_registry": self._flow_prompt_registry,
+                "flow_id": self._workflow_id,
+                "flow_type": self._workflow_type,
+                "user": self._user,
+            }
+        )
+
+        if "toolset" in comp_params:
+            comp_params["toolset"] = self._parse_toolset(
+                tools_registry, comp_params["toolset"]
+            )
+        elif "tool_name" in comp_params:
+            comp_params["toolset"] = tools_registry.toolset([comp_params["tool_name"]])
+
+        return comp_params
+
+    def _has_unresolved_dependencies(
+        self,
+        comp_config: dict,
+        components: dict[str, BaseComponent],
+    ) -> bool:
+        """Check if a component has dependencies that haven't been built yet.
+
+        Currently only SupervisorAgentComponent has dependencies (managed_agents).
+        """
+        if comp_config["type"] != SupervisorAgentComponent.__name__:
+            return False
+
+        managed_agent_names = comp_config.get("managed_agents", [])
+        return any(name not in components for name in managed_agent_names)
+
+    def _instantiate_component(
+        self,
+        comp_config: dict,
+        comp_params: dict,
+        components: dict[str, BaseComponent],
+    ) -> None:
+        """Instantiate a single component and add it to the components dict."""
+        comp_name = comp_config["name"]
+        comp_class = load_component_class(comp_config["type"])
+
+        if comp_name in components:
+            raise ValueError(
+                f"Duplicate component name: '{comp_name}'. Component names must be unique."
+            )
+
+        # For supervisors, resolve subagent references and inject them
+        if comp_config["type"] == SupervisorAgentComponent.__name__:
+            subagents = self._resolve_subagents(comp_config, components)
+            comp_params["subagent_components"] = subagents
+
+        components[comp_name] = comp_class(**comp_params)
+
+    def _resolve_subagents(
+        self,
+        supervisor_config: dict,
+        components: dict[str, BaseComponent],
+    ) -> dict[str, BaseComponent]:
+        """Resolve managed subagent references for a supervisor.
+
+        Pops each managed_agents name from the components dict, transferring
+        ownership to the supervisor. This prevents subagents from appearing
+        in routers, being shared across supervisors, or being used as entry
+        points. Type validation is handled by SupervisorAgentComponent's
+        model validator.
+
+        Args:
+            supervisor_config: The supervisor's component config dict.
+            components: Already-built component instances (mutated — subagents
+                are removed).
+
+        Returns:
+            Dictionary mapping subagent names to their component instances.
+
+        Raises:
+            ValueError: If a managed agent name is not found in components.
+        """
+        supervisor_name = supervisor_config["name"]
+        managed_agent_names = supervisor_config.get("managed_agents", [])
+        subagents: dict[str, BaseComponent] = {}
+
+        for agent_name in managed_agent_names:
+            if agent_name not in components:
+                raise ValueError(
+                    f"Supervisor '{supervisor_name}' references managed agent "
+                    f"'{agent_name}' which is not defined in components."
+                )
+
+            subagents[agent_name] = components.pop(agent_name)
+
+        return subagents
 
     def _build_routers(
         self, components: dict[str, BaseComponent], graph: StateGraph
