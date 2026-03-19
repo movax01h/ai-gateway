@@ -245,7 +245,12 @@ class IOKey(BaseModel):
         current = state[self.target]  # type: ignore[literal-required]
         if self.subkeys:
             for key in self.subkeys:
-                current = current.get(key) if self.optional else current[key]
+                if self.optional:
+                    if current is None:
+                        return None
+                    current = current.get(key)
+                else:
+                    current = current[key]
         return current
 
     def to_nested_dict(self, value: Any) -> dict[str, Any]:
@@ -279,9 +284,16 @@ class IOKeyTemplate(IOKey):
     SENDS_RESPONSE_TO_COMPONENT_NAME_TEMPLATE: ClassVar[str] = (
         "<sends_response_to_component>"
     )
+    SUPERVISOR_NAME_TEMPLATE: ClassVar[str] = "<supervisor_name>"
+    SUBAGENT_NAME_TEMPLATE: ClassVar[str] = "<subagent_name>"
+    SUBSESSION_ID_TEMPLATE: ClassVar[str] = "<subsession_id>"
 
     def to_iokey(self, replacements: dict[str, str]) -> IOKey:
-        return IOKey(target=self.target, subkeys=self._resolved_subkeys(replacements))
+        return IOKey(
+            target=self.target,
+            subkeys=self._resolved_subkeys(replacements),
+            optional=self.optional,
+        )
 
     def _resolved_subkeys(self, replacements: dict[str, str]) -> list[str] | None:
         if not self.subkeys:

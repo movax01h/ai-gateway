@@ -304,6 +304,117 @@ class TestAgentComponentBase:
         assert iokey.subkeys == [component_name]
         assert iokey.optional is True
 
+    @pytest.mark.parametrize(
+        ("schema_id", "schema_version", "should_raise"),
+        [
+            ("test/schema", "^1.0.0", False),  # Both provided - valid
+            (None, None, False),  # Neither provided - valid
+            ("test/schema", None, True),  # Only ID - invalid
+            (None, "^1.0.0", True),  # Only version - invalid
+        ],
+    )
+    def test_id_and_version_are_provided(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_schema_registry,
+        mock_internal_event_client,
+        schema_id,
+        schema_version,
+        should_raise,
+    ):
+        """Both response_schema_id and response_schema_version must be set together or both omitted."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        if should_raise:
+            with pytest.raises(ValueError, match="must be provided together"):
+                ConcreteBase(
+                    name=component_name,
+                    flow_id=flow_id,
+                    flow_type=flow_type,
+                    user=user,
+                    inputs=["context:user_input"],
+                    prompt_id=prompt_id,
+                    prompt_version=prompt_version,
+                    toolset=mock_toolset,
+                    response_schema_id=schema_id,
+                    response_schema_version=schema_version,
+                    prompt_registry=mock_prompt_registry,
+                    internal_event_client=mock_internal_event_client,
+                )
+        else:
+            if schema_id and schema_version:
+                mock_schema = mock_schema_registry.get.return_value
+                mock_toolset.__contains__ = (
+                    lambda self, name: name != mock_schema.tool_title
+                )
+
+            component = ConcreteBase(
+                name=component_name,
+                flow_id=flow_id,
+                flow_type=flow_type,
+                user=user,
+                inputs=["context:user_input"],
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                toolset=mock_toolset,
+                response_schema_id=schema_id,
+                response_schema_version=schema_version,
+                schema_registry=mock_schema_registry,
+                prompt_registry=mock_prompt_registry,
+                internal_event_client=mock_internal_event_client,
+            )
+            assert component.response_schema_id == schema_id
+            assert component.response_schema_version == schema_version
+
+    def test_tool_name_collision_with_response_schema(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        prompt_version,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_schema_registry,
+        mock_internal_event_client,
+    ):
+        """Response schema tool title colliding with an existing tool raises ValueError."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        mock_schema = Mock()
+        mock_schema.tool_title = "colliding_response_tool"
+        mock_schema_registry.get.return_value = mock_schema
+        mock_toolset.__contains__ = lambda self, name: name == "colliding_response_tool"
+
+        with pytest.raises(ValueError, match="collides with existing tool"):
+            ConcreteBase(
+                name=component_name,
+                flow_id=flow_id,
+                flow_type=flow_type,
+                user=user,
+                inputs=["context:user_input"],
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                toolset=mock_toolset,
+                response_schema_id="test/schema",
+                response_schema_version="1.0.0",
+                schema_registry=mock_schema_registry,
+                prompt_registry=mock_prompt_registry,
+                internal_event_client=mock_internal_event_client,
+            )
+
 
 class TestAgentComponentInitialization:
     """Test suite for AgentComponent initialization."""
@@ -770,123 +881,6 @@ class TestAgentComponentResponseSchema:
         # Verify FinalResponseNode received correct schema
         final_call_kwargs = mock_final_response_node_cls.call_args[1]
         assert final_call_kwargs["response_schema"] == expected_schema
-
-    @pytest.mark.parametrize(
-        ("schema_id", "schema_version", "should_raise"),
-        [
-            ("test/schema", "^1.0.0", False),  # Both provided - valid
-            (None, None, False),  # Neither provided - valid
-            ("test/schema", None, True),  # Only ID - invalid
-            (None, "^1.0.0", True),  # Only version - invalid
-        ],
-    )
-    def test_id_and_version_are_provided(
-        self,
-        component_name,
-        flow_id,
-        flow_type,
-        user,
-        prompt_id,
-        prompt_version,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_schema_registry,
-        mock_internal_event_client,
-        schema_id,
-        schema_version,
-        should_raise,
-    ):
-        """Test validation of response_schema_id and response_schema_version parameters.
-
-        Both parameters must be provided together, or both omitted. Providing only one should raise a ValueError.
-        """
-        if should_raise:
-            with pytest.raises(ValueError, match="must be provided together"):
-                AgentComponent(
-                    name=component_name,
-                    flow_id=flow_id,
-                    flow_type=flow_type,
-                    user=user,
-                    inputs=["context:user_input"],
-                    prompt_id=prompt_id,
-                    prompt_version=prompt_version,
-                    toolset=mock_toolset,
-                    response_schema_id=schema_id,
-                    response_schema_version=schema_version,
-                    prompt_registry=mock_prompt_registry,
-                    internal_event_client=mock_internal_event_client,
-                )
-        else:
-            # Exclude response schema tool from toolset if schema is provided
-            if schema_id and schema_version:
-                mock_schema = mock_schema_registry.get.return_value
-                mock_toolset.__contains__ = (
-                    lambda self, name: name != mock_schema.tool_title
-                )
-
-            # Should not raise
-            component = AgentComponent(
-                name=component_name,
-                flow_id=flow_id,
-                flow_type=flow_type,
-                user=user,
-                inputs=["context:user_input"],
-                prompt_id=prompt_id,
-                prompt_version=prompt_version,
-                toolset=mock_toolset,
-                response_schema_id=schema_id,
-                response_schema_version=schema_version,
-                schema_registry=mock_schema_registry,
-                prompt_registry=mock_prompt_registry,
-                internal_event_client=mock_internal_event_client,
-            )
-            assert component.response_schema_id == schema_id
-            assert component.response_schema_version == schema_version
-
-    def test_tool_name_collision_with_response_schema(
-        self,
-        component_name,
-        flow_id,
-        flow_type,
-        user,
-        prompt_id,
-        prompt_version,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_schema_registry,
-        mock_internal_event_client,
-    ):
-        """Test that response schema colliding with tool name raises error."""
-        # Create a mock tool with name "colliding_response_tool"
-        mock_tool = Mock()
-        mock_tool.name = "colliding_response_tool"
-        mock_toolset.__contains__ = Mock(return_value=True)  # Simulate collision
-
-        # Mock schema with same tool_title
-        mock_schema = Mock()
-        mock_schema.tool_title = "colliding_response_tool"
-        mock_schema_registry.get.return_value = mock_schema
-
-        # Override toolset to report this specific tool exists (creating actual collision)
-        mock_toolset.__contains__ = lambda self, name: name == "colliding_response_tool"
-
-        # Error should occur during component initialization, not attach
-        with pytest.raises(ValueError, match="collides with existing tool"):
-            AgentComponent(
-                name=component_name,
-                flow_id=flow_id,
-                flow_type=flow_type,
-                user=user,
-                inputs=["context:user_input"],
-                prompt_id=prompt_id,
-                prompt_version=prompt_version,
-                toolset=mock_toolset,
-                response_schema_id="test/schema",
-                response_schema_version="1.0.0",
-                schema_registry=mock_schema_registry,
-                prompt_registry=mock_prompt_registry,
-                internal_event_client=mock_internal_event_client,
-            )
 
 
 class TestAgentComponentOutputs:

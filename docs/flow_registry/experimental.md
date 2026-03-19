@@ -691,6 +691,159 @@ routers:
       to: "end"  # Always end after error reporting
 ```
 
+### SupervisorAgentComponent
+
+The `SupervisorAgentComponent` orchestrates multiple specialised sub-agents via explicit
+delegation. The supervisor runs a standard ReAct loop but has access to a
+`delegate_task` tool in addition to its regular tools. When the LLM calls
+`delegate_task`, the framework:
+
+1. Assigns or resumes a numbered **subsession** for the named sub-agent
+1. Seeds the sub-agent's conversation history with the delegation prompt
+1. Routes execution to the sub-agent's ReAct loop
+1. On sub-agent completion, injects the result back into the supervisor's
+   history as a `ToolMessage` and returns control to the supervisor
+
+The supervisor can start new subsessions or resume prior ones by providing the
+`subsession_id` returned in the delegation result. All subagents are declared
+as `SubagentComponent` (see below) and listed under `managed_agents`.
+
+#### Required Parameters
+
+- **name**: Unique identifier for this component instance. Must not contain `:` or `.` characters.
+- **type**: Must be `"SupervisorAgentComponent"`
+- **prompt_id**: ID of the prompt template. The prompt should instruct the LLM
+  on when and how to use `delegate_task` and `final_response_tool`.
+- **managed_agents**: List of `SubagentComponent` names that this supervisor manages.
+  Every name must correspond to a component defined earlier in the `components` list.
+- **max_delegations**: Maximum number of `delegate_task` calls allowed before the
+  supervisor is forced to call `final_response_tool`. Must be ≥ 1.
+
+#### Optional Parameters
+
+- **prompt_version**: Semantic version constraint (e.g. `"^1.0.0"`). Omit to use a locally defined prompt.
+- **inputs**: List of input data sources (default: `["context:goal"]`)
+- **toolset**: Additional tools available to the supervisor alongside `delegate_task` and `final_response_tool`
+- **ui_log_events**: UI logging configuration — supports `on_agent_final_answer`,
+  `on_tool_execution_success`, `on_tool_execution_failed`
+- **ui_role_as**: Display role in UI (`"agent"` or `"tool"`, default `"agent"`)
+
+#### Constraints
+
+- `managed_agents` must contain at least one name.
+- Every name in `managed_agents` must reference a `SubagentComponent` defined in the
+  same flow config.
+- A `SubagentComponent` may be owned by at most one supervisor; the flow builder
+  removes it from the top-level component list once claimed.
+- The flow builder scans all components to resolve subagent dependencies, so `SubagentComponent`
+  entries may appear anywhere in the `components` list relative to their supervisor.
+
+#### Outputs
+
+- **conversation_history:{supervisor_name}**: The supervisor's own message history
+- **context:{supervisor_name}.final_answer**: The supervisor's final response
+- **status**: Updated workflow status
+
+#### UI Log Events
+
+- **on_agent_final_answer**: Logged when the supervisor calls `final_response_tool`
+- **on_tool_execution_success**: Logged when a regular tool (not `delegate_task`) succeeds
+- **on_tool_execution_failed**: Logged when a regular tool fails
+
+#### Complete SupervisorAgentComponent Example
+
+```yaml
+components:
+    - name: "developer"
+      type: SubagentComponent
+      description: "Implements code changes, creates and edits files."
+      prompt_id: "developer_agent"
+      toolset:
+          - "read_file"
+          - "edit_file"
+          - "create_file_with_contents"
+          - "list_dir"
+
+    - name: "tester"
+      type: SubagentComponent
+      description: "Writes and runs automated tests."
+      prompt_id: "tester_agent"
+      toolset:
+          - "read_file"
+          - "create_file_with_contents"
+          - "run_command"
+
+    - name: "supervisor"
+      type: SupervisorAgentComponent
+      prompt_id: "supervisor_agent"
+      managed_agents:
+          - "developer"
+          - "tester"
+      max_delegations: 20
+      toolset:
+          - "get_issue"
+      ui_log_events:
+          - "on_agent_final_answer"
+          - "on_tool_execution_success"
+          - "on_tool_execution_failed"
+
+routers:
+    - from: "supervisor"
+      to: "end"
+
+flow:
+    entry_point: "supervisor"
+```
+
+---
+
+### SubagentComponent
+
+The `SubagentComponent` is a specialised agent variant designed to be owned and
+managed by a `SupervisorAgentComponent`. It behaves like an `AgentComponent`
+(ReAct loop: agent ↔ tools, final_response) but:
+
+- Its conversation history is **subsession-scoped**, meaning each delegation creates
+  an isolated conversation slice keyed by `supervisor_name / subagent_name / subsession_id`.
+  Multiple runs of the same sub-agent coexist without overwriting each other.
+- It cannot appear as a flow entry point or in the `routers` section — the flow
+  builder transfers ownership to the supervisor at graph construction time.
+- It must be bound to a supervisor via `bind_to_supervisor` before the graph is
+  compiled; this happens automatically during `Flow._build_components`.
+
+#### Required Parameters
+
+- **name**: Unique identifier for this component instance.
+- **type**: Must be `"SubagentComponent"`
+- **description**: Human-readable description of what this sub-agent specialises in.
+  This text is surfaced to the supervisor's `delegate_task` tool so the LLM can
+  choose which agent to delegate to.
+- **prompt_id**: ID of the prompt template for this sub-agent.
+
+#### Optional Parameters
+
+- **prompt_version**: Semantic version constraint (e.g. `"^1.0.0"`). Omit for a locally defined prompt.
+- **inputs**: Input data sources available to the sub-agent (default: `["context:goal"]`)
+- **toolset**: Tools available to this sub-agent
+- **ui_log_events**: UI logging configuration — supports `UILogEventsAgent` events
+- **ui_role_as**: Display role in UI (`"agent"` or `"tool"`, default `"agent"`)
+
+#### Constraints
+
+- May appear anywhere in the `components` list — the flow builder scans all components to resolve supervisor dependencies before constructing the graph.
+- Must **not** be referenced in `routers` — it will not be present in the components
+  map when routers are built (it is transferred to the supervisor).
+- Must **not** be set as the `flow.entry_point`.
+
+#### Outputs
+
+The subagent's `final_answer` is written to a subsession-scoped key
+(`context/{supervisor}/{subagent}/{subsession_id}/final_answer`). This key exists
+in state and is technically reachable by other components, but requires knowing the
+numeric subsession ID at configuration time, which is only determined at runtime.
+In practice the result is consumed exclusively by the supervisor via `SubagentReturnNode`,
+which injects it back into the supervisor's conversation history as a `ToolMessage`.
+
 ## Flow Examples
 
 ### Human-in-the-Loop Code Review Flow

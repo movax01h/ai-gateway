@@ -1,13 +1,11 @@
 from functools import partial
-from typing import Any, ClassVar, Optional, Union, override
+from typing import Any, ClassVar, Self, override
 
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import inject
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
-from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import BasePromptRegistry
 from duo_workflow_service.agent_platform.experimental.components import (
     RouterProtocol,
     RoutingError,
@@ -36,8 +34,6 @@ from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
-from duo_workflow_service.tools import Toolset
-from lib.internal_events import InternalEventsClient
 
 
 @register_component(decorators=[inject])
@@ -68,19 +64,7 @@ class OneOffComponent(AgentComponentBase):
         _execution_result_key,
     )
 
-    prompt_id: str
-    prompt_version: Optional[str] = None
-    toolset: Toolset
     max_correction_attempts: int = 3
-    compaction: Union[CompactionConfig, bool] = False
-
-    prompt_registry: BasePromptRegistry = Provide[
-        ContainerApplication.pkg_prompts.prompt_registry
-    ]
-
-    internal_event_client: InternalEventsClient = Provide[
-        ContainerApplication.internal_event.client
-    ]
 
     ui_log_events: list[UILogEventsOneOff] = Field(default_factory=list)
 
@@ -92,6 +76,12 @@ class OneOffComponent(AgentComponentBase):
         if "inputs" not in data or not data["inputs"]:
             data["inputs"] = ["context:goal"]
         return data
+
+    @model_validator(mode="after")
+    @override
+    def validate_and_resolve_response_schema(self) -> Self:
+        """No-op: OneOffComponent does not use response schemas."""
+        return self
 
     @override
     def __entry_hook__(self) -> str:
