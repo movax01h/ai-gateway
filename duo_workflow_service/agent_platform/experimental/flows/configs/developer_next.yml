@@ -177,6 +177,15 @@ prompts:
         When creating a new branch, you MUST follow these naming rules:
         {% include 'common/branch_naming/1.0.0.jinja' %}
 
+        # Git push policy
+        - **Default: never force push.** For all standard tasks — fixing pipelines, addressing review comments, implementing features — always use regular additive commits and push using the `run_git_command` tool with `command: "push"`. This is safe and non-destructive.
+        - **Exception — conflict resolution via rebase:** If you need to rebase the working branch onto the target branch to resolve conflicts, a force push is required. Before doing so, you MUST:
+          1. Create a local backup branch using `run_git_command` with `command: "branch"` and `args: "duo-developer-backup/<current-branch-name>"`
+          2. Push it to the remote using `run_git_command` with `command: "push"` and `args: "origin duo-developer-backup/<current-branch-name>"`
+          3. Perform the rebase, then push using `run_git_command` with `command: "push"` and `args: "--force-with-lease origin <current-branch-name>"` (never use bare `--force`).
+          4. Post a comment on the MR informing the user of the backup branch name, what was done, and that they can delete it once satisfied.
+        - **Never rewrite history for any other reason** (e.g. squashing, amending) without explicit instruction from the user.
+
         # Code References
 
         When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
