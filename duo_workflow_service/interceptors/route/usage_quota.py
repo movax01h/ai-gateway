@@ -65,6 +65,12 @@ def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
     ):
         try:
             message = await anext(aiter(request))
+        except StopAsyncIteration:
+            grpc_context.set_code(StatusCode.OK)
+            grpc_context.set_details("workflow execution never started")
+            return
+
+        try:
             gl_events_context = GLReportingEventContext.from_workflow_definition(
                 message.startRequest.workflowDefinition,
                 is_ai_catalog_item=bool(message.startRequest.flowConfig),
