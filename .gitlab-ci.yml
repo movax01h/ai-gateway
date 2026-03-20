@@ -127,15 +127,6 @@ include:
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
-      runway_service_id: dws-loadtest
-      image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.18.6
-    rules: *skip-if-not-canonical
-  - local: .gitlab/ci/dws-loadtest.gitlab-ci.yml
-    rules: *skip-if-not-canonical
-  - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
-    file: "ci-tasks/service-project/runway.yml"
-    inputs:
       runway_service_id: ai-gateway-custom
       image: "$SELF_HOSTED_TARGET_IMAGE"
       runway_version: v4.18.6
