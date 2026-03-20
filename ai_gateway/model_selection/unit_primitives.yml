@@ -216,6 +216,8 @@ configurable_unit_primitives:
       - "gpt_5_mini"
       - "gpt_5_2"
       - "gpt_5_4"
+      - "gpt_5_4_mini"
+      - "gpt_5_4_nano"
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
@@ -249,6 +251,8 @@ configurable_unit_primitives:
       - "gpt_5_mini"
       - "gpt_5_2"
       - "gpt_5_4"
+      - "gpt_5_4_mini"
+      - "gpt_5_4_nano"
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
