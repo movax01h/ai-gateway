@@ -760,6 +760,7 @@ async def test_create_merge_request_note_with_note_id_reply(
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/discussions",
+        params={"page": "1", "per_page": 100},
         parse_json=False,
     )
 
