@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "fix_pipeline_next_decide_approach_response",
+    "description": "Response schema for the fix_pipeline_next_decide_approach agent that decides the approach for fixing a pipeline.",
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "description": "Use 'create_fix_on_new_mr' when confident a fix can be created and no merge_request_url is present. Use 'create_fix_on_existing_mr' when confident a fix can be created and a merge_request_url is present. Use 'add_comment' when not confident or unable to create a fix.",
+            "enum": ["add_comment", "create_fix_on_new_mr", "create_fix_on_existing_mr"],
+            "examples": ["add_comment", "create_fix_on_new_mr", "create_fix_on_existing_mr"]
+        }
+    },
+    "required": ["decision"]
+}

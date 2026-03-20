@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "validate_sast_fix_has_changes_response",
+    "description": "Response schema for the validate_sast_fix_has_changes agent that determines whether a vulnerability fix produced meaningful code changes.",
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "description": "The validation decision. Use 'proceed' when actual code changes were detected (via JSON files_modified or git diff/status). Use 'no_changes' when no changes were detected or git commands failed.",
+            "enum": ["proceed", "no_changes"],
+            "examples": ["proceed", "no_changes"]
+        }
+    },
+    "required": ["decision"]
+}

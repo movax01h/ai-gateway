@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "fix_pipeline_decide_comment_response",
+    "description": "Response schema for the fix_pipeline_decide_comment agent that decides whether to add a comment link to a merge request.",
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "description": "Use 'comment_link' when a merge_request_url is present. Use 'end' when no merge_request_url is present.",
+            "enum": ["comment_link", "end"],
+            "examples": ["comment_link", "end"]
+        }
+    },
+    "required": ["decision"]
+}

@@ -1,0 +1,24 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "ensure_clean_git_state_response",
+    "description": "Response schema for the ensure_clean_git_state agent that reports the result of cleaning up a Git repository state.",
+    "type": "object",
+    "properties": {
+        "status": {
+            "type": "string",
+            "description": "The result of the cleanup operation. Use 'clean' when the repository has been successfully restored to a clean state on the default branch. Use 'failed' when the cleanup could not be completed.",
+            "enum": ["clean", "failed"],
+            "examples": ["clean", "failed"]
+        },
+        "reason": {
+            "type": "string",
+            "description": "Explanation of why the cleanup failed. This field is required when status is 'failed' and should include the specific git error message or reason for failure. Leave empty or omit when status is 'clean'.",
+            "examples": [
+                "Authentication error: Permission denied (publickey)",
+                "Network error: Connection timeout during fetch",
+                "Repository not found: https://example.com/repo.git"
+            ]
+        }
+    },
+    "required": ["status"]
+}

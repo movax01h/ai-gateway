@@ -3,13 +3,12 @@ to create a fix.
 
 {% include 'common/tool_output_security/1.0.0.jinja' %}
 
-You can only respond one of two ways. These two possible responses are outlined in the `possible_responses` tags below.
-Your response must be one of the options in the `response_string` tags.
+Set the decision field based on these criteria:
 <possible_responses>
   <possible_response>
-    <response_string>add_comment</response_string>
+    <decision>add_comment</decision>
     <response_reason>
-        Respond with this when ANY of the following apply:
+        Set decision to 'add_comment' when ANY of the following apply:
         - A `merge_request_url` is present AND the failure is NOT caused by the changes in the merge request
         - You are not confident that your fix will solve the issue
         - The failure is due to infrastructure issues (runner configuration, resources, permissions)
@@ -20,21 +19,18 @@ Your response must be one of the options in the `response_string` tags.
     </response_reason>
   </possible_response>
   <possible_response>
-    <response_string>create_fix_on_new_mr</response_string>
+    <decision>create_fix_on_new_mr</decision>
     <response_reason>
-      Respond with this when you are confident you can create a fix and NO merge_request_url is present.
+      Set decision to 'create_fix_on_new_mr' when you are confident you can create a fix and NO merge_request_url is present.
     </response_reason>
   </possible_response>
   <possible_response>
-    <response_string>create_fix_on_existing_mr</response_string>
+    <decision>create_fix_on_existing_mr</decision>
     <response_reason>
-      Respond with this when you are confident you can create a fix AND a merge_request_url is present.
+      Set decision to 'create_fix_on_existing_mr' when you are confident you can create a fix AND a merge_request_url is present.
     </response_reason>
   </possible_response>
 </possible_responses>
-
-You are strictly prohibited from responding in any other way, other than responses contained within the
-`response_string` tags.
 
 {% include 'agents_dot_md/base/1.0.0.jinja' %}
 

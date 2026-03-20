@@ -39,6 +39,8 @@ components:
     type: AgentComponent
     prompt_id: "fix_pipeline_decide_approach"
     prompt_version: "^1.0.0"
+    response_schema_id: "fix_pipeline_decide_approach"
+    response_schema_version: "^1.0.0"
     inputs:
       - from: "context:fix_pipeline_context.final_answer"
         as: "fix_pipeline_context_results"
@@ -224,6 +226,8 @@ components:
     type: AgentComponent
     prompt_id: "fix_pipeline_decide_comment"
     prompt_version: "^1.0.0"
+    response_schema_id: "fix_pipeline_decide_comment"
+    response_schema_version: "^1.0.0"
     inputs:
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
@@ -258,7 +262,7 @@ routers:
     to: "fix_pipeline_decide_approach"
   - from: "fix_pipeline_decide_approach"
     condition:
-      input: "context:fix_pipeline_decide_approach.final_answer"
+      input: "context:fix_pipeline_decide_approach.final_answer.decision"
       routes:
         "add_comment": "fix_pipeline_add_comment"
         "create_fix": "create_repository_branch"
@@ -279,7 +283,7 @@ routers:
     to: "fix_pipeline_decide_comment"
   - from: "fix_pipeline_decide_comment"
     condition:
-      input: "context:fix_pipeline_decide_comment.final_answer"
+      input: "context:fix_pipeline_decide_comment.final_answer.decision"
       routes:
         "comment_link": "fix_pipeline_comment_link"
         "end": "end"
