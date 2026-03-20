@@ -41,14 +41,16 @@ release-docker-hub-image:self-managed-tag:
   rules:
     - if: $CI_COMMIT_TAG =~ /^self-hosted-/
 
-release-docker-fips-image:tag:
-  stage: release
+release-gitlab-registry-self-hosted-fips-image:tag:
   extends: .docker-release
-  variables:
-    TARGET_IMAGE: "$FIPS_TARGET_IMAGE"
-    RELEASE_VERSION: "$DOCKER_MODEL_GATEWAY:$CI_COMMIT_TAG"
+  stage: release
   rules:
     - if: $CI_COMMIT_TAG =~ /^self-hosted-/
+  variables:
+    TARGET_IMAGE: "${SELF_HOSTED_FIPS_TARGET_IMAGE}"
+    RELEASE_VERSION: "${DOCKER_MODEL_GATEWAY}/self-hosted-fips:${CI_COMMIT_TAG}"
+  needs:
+    - build:self-hosted-ai-gateway-fips-image
 
 release-docker-hub-image:self-managed-nightly:
   stage: release
@@ -67,16 +69,16 @@ release-docker-hub-self-hosted-fips-image:tag:
   rules:
     - if: $CI_COMMIT_TAG =~ /^self-hosted-/
 
-release-docker-hub-self-hosted-fips-image:latest:
+release-docker-hub-self-hosted-fips-image:nightly:
   stage: release
   extends: .docker-hub-release
   variables:
     TARGET_IMAGE: "$SELF_HOSTED_FIPS_TARGET_IMAGE"
-    RELEASE_VERSION: "gitlab/model-gateway-self-hosted-fips:latest"
+    RELEASE_VERSION: "gitlab/model-gateway-self-hosted-fips:$CI_COMMIT_SHORT_SHA"
   rules:
     - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   needs:
-    - build:self-hosted-ai-gateway-fips-image-latest
+    - build:self-hosted-ai-gateway-fips-image-nightly
 
 publish-node-client:
   stage: release
