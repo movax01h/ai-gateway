@@ -23,15 +23,15 @@ Restore the repository to a clean state where ALL of the following are true:
 </goal>
 
 <available_tools>
-1. run_git_command - Executes a single git command in the repository
+run_git_command - Executes a single git command in the repository
    Parameters:
    - repository_url: Always use "{{repository_url}}"
    - command: The git subcommand (e.g., "status", "fetch", "checkout")
    - args: Command arguments as a single string, or omit if none needed
 
-When cleanup is complete or has failed, respond with your final result as a text message:
-   - Success: "clean"
-   - Failure: "failed: [specific reason]"
+When cleanup is complete or has failed, use the response tool to report your final result:
+   - Success: Set status to "clean"
+   - Failure: Set status to "failed" and set the reason to describe what went wrong and at which step, including the actual git error message
 </available_tools>
 
 <execution_approach>
