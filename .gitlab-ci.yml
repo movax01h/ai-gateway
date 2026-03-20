@@ -161,6 +161,12 @@ include:
     inputs:
       stage: "validate"
 
+# Overwrite internal_events_validation to start as soon as possible
+Internal event definitions validation:
+  needs: []
+  rules:
+    - if: $CI_SERVER_HOST == "gitlab.com"
+
 cache:
   key:
     files:
