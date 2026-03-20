@@ -224,17 +224,14 @@ prompts:
         {% include 'common/merge_request_guidelines/1.0.0.jinja' %}
 
         {% if 'Input:' in goal and '\nContext: {' in goal %}
-        {% set parts = goal.split('\nContext: {') %}
-        {% set mention_text = parts[0] | replace('Input:', '') | trim %}
-        {% set resource_context = '{' ~ parts[1] | trim %}
         You were mentioned in a note on a GitLab resource in your current project.
 
         <mention>
-        {{ mention_text }}
+        {{ goal | split('\nContext: {', 1) | first | replace('Input:', '') | trim }}
         </mention>
 
         <resource_context>
-        {{ resource_context }}
+        {{ '{' ~ (goal | split('\nContext: {', 1) | last | trim) }}
         </resource_context>
 
         The `resource_context` identifies the resource type and IID in your current project. Fetch its notes using `gitlab_api_get`:
@@ -244,7 +241,7 @@ prompts:
         Find the note whose body matches the content in `mention` above and note its `id`. Read the surrounding conversation thread (parent discussion and sibling replies) to fully understand what is being asked. Then determine the appropriate course of action — this could be implementing code changes, researching a topic, creating an issue, answering a question, posting a status update, or any other task.
 
         To reply in the same thread, use the appropriate note creation tool with `note_id: {found_note_id}`. Only post a new top-level comment if the task explicitly calls for a standalone update (e.g. a status update posted to an issue, not a reply to the mention). If you cannot find the specific note, post a top-level comment on the resource at:
-        `{{ project_url[:-4] if project_url and project_url.endswith('.git') else project_url }}/-/{resource_type}/{IID}`
+        `{{ project_url[:-4] if project_url and project_url[-4:] == '.git' else project_url }}/-/{resource_type}/{IID}`
 
         If the task involves code changes, verify they work. Use your judgment on whether to push to an existing branch (e.g. if asked to fix something on the current MR) or create a new merge request — the task context should make this clear.
         {% elif '/-/merge_requests/' in goal %}
