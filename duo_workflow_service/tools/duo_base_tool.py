@@ -115,8 +115,7 @@ class DuoBaseTool(BaseTool):
         super().__init_subclass__(**kwargs)
         if "_arun" in cls.__dict__:
             raise TypeError(
-                f"{cls.__name__} must not override _arun. "
-                f"Implement _execute instead."
+                f"{cls.__name__} must not override _arun. Implement _execute instead."
             )
 
     def _apply_tool_options(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -328,20 +327,38 @@ class DuoBaseTool(BaseTool):
         Returns:
             A dict with discussionId key if found, or a dict with error key if not found
         """
+        per_page = 100
+        # Safety net: cap at 100 pages (per_page=100 * max_pages=100 = 10,000 discussions).
+        # In practice even the largest open-source MRs rarely exceed a few hundred
+        # threads, so this limit should never be reached. It exists solely to guard
+        # against an infinite loop if the GitLab API unexpectedly keeps returning
+        # a next-page header (e.g. due to a pagination bug on the server side).
+        max_pages = 100
         try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions",
-                parse_json=False,
-            )
-            if not response.is_success():
-                return {"error": f"Failed to fetch {resource_type} discussions"}
+            next_page = "1"
+            page_count = 0
+            while next_page and page_count < max_pages:
+                page_count += 1
+                response = await self.gitlab_client.aget(
+                    path=f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions",
+                    params={"page": next_page, "per_page": per_page},
+                    parse_json=False,
+                )
+                if not response.is_success():
+                    return {"error": f"Failed to fetch {resource_type} discussions"}
 
-            discussions = json.loads(response.body) if response.body else []
+                discussions = json.loads(response.body) if response.body else []
+                if not isinstance(discussions, list):
+                    return {
+                        "error": f"Unexpected response format from {resource_type} discussions API"
+                    }
 
-            for discussion in discussions:
-                for note in discussion.get("notes", []):
-                    if note.get("id") == note_id:
-                        return {"discussionId": discussion["id"]}
+                for discussion in discussions:
+                    for note in discussion.get("notes", []):
+                        if note.get("id") == note_id:
+                            return {"discussionId": discussion["id"]}
+
+                next_page = response.headers.get("X-Next-Page", "")
 
             resource_name = (
                 "merge request" if resource_type == "merge_requests" else "issue"

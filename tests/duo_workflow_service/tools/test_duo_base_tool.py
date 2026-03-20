@@ -75,7 +75,7 @@ def tool_with_client_fixture(gitlab_client_mock):
 def test_gitlab_client():
     tool = DummyTool(metadata={})
     with pytest.raises(RuntimeError):
-        tool.gitlab_client
+        tool.gitlab_client  # pylint: disable=pointless-statement
 
     client = MagicMock()
     tool = DummyTool(metadata={"gitlab_client": client})
@@ -138,7 +138,7 @@ def test_format_tool_display_message_non_duo_base_tool_child():
     mock_tool = MagicMock(spec=BaseTool)
     args = {"test": "value"}
 
-    assert format_tool_display_message(mock_tool, args) == None
+    assert format_tool_display_message(mock_tool, args) is None
 
 
 def test_format_tool_display_message_for_tool_without_args_schema():
@@ -161,8 +161,8 @@ class ErrorArgsModel(BaseModel):
 
     test: str
 
-    def __init__(self, **data):
-        raise Exception("Something went wrong")
+    def __init__(self, **data):  # pylint: disable=super-init-not-called
+        raise RuntimeError("Something went wrong")
 
 
 def test_format_tool_display_message_for_tool_with_pydantic_args_schema():
@@ -343,6 +343,7 @@ async def test_get_discussion_id_from_note_rest_success(
     mock_response = Mock()
     mock_response.is_success.return_value = True
     mock_response.body = json.dumps(discussions)
+    mock_response.headers = {"X-Next-Page": ""}
 
     gitlab_client_mock.aget.return_value = mock_response
 
@@ -356,6 +357,80 @@ async def test_get_discussion_id_from_note_rest_success(
     assert result == expected_result
     gitlab_client_mock.aget.assert_called_once_with(
         path=f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions",
+        params={"page": "1", "per_page": 100},
+        parse_json=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_pagination(
+    tool_with_client, gitlab_client_mock
+):
+    """Test pagination when note is on a later page."""
+    # First page of discussions
+    page1_discussions = [
+        {
+            "id": "discussion1",
+            "notes": [
+                {"id": 101, "body": "Comment 1"},
+                {"id": 102, "body": "Comment 2"},
+            ],
+        },
+        {
+            "id": "discussion2",
+            "notes": [
+                {"id": 201, "body": "Comment 3"},
+            ],
+        },
+    ]
+
+    # Second page of discussions (contains the note we're looking for)
+    page2_discussions = [
+        {
+            "id": "discussion3",
+            "notes": [
+                {"id": 301, "body": "Comment 4"},
+                {"id": 302, "body": "Comment 5"},
+            ],
+        },
+        {
+            "id": "discussion4",
+            "notes": [
+                {"id": 401, "body": "Comment 6"},
+            ],
+        },
+    ]
+
+    mock_response_page1 = Mock()
+    mock_response_page1.is_success.return_value = True
+    mock_response_page1.body = json.dumps(page1_discussions)
+    mock_response_page1.headers = {"X-Next-Page": "2"}
+
+    mock_response_page2 = Mock()
+    mock_response_page2.is_success.return_value = True
+    mock_response_page2.body = json.dumps(page2_discussions)
+    mock_response_page2.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.side_effect = [mock_response_page1, mock_response_page2]
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="merge_requests",
+        resource_iid=42,
+        note_id=301,  # This note is on page 2
+    )
+
+    assert result == {"discussionId": "discussion3"}
+    # Verify that we made two API calls (page 1 and page 2)
+    assert gitlab_client_mock.aget.call_count == 2
+    gitlab_client_mock.aget.assert_any_call(
+        path="/api/v4/projects/123/merge_requests/42/discussions",
+        params={"page": "1", "per_page": 100},
+        parse_json=False,
+    )
+    gitlab_client_mock.aget.assert_any_call(
+        path="/api/v4/projects/123/merge_requests/42/discussions",
+        params={"page": "2", "per_page": 100},
         parse_json=False,
     )
 
@@ -375,11 +450,12 @@ async def test_get_discussion_id_from_note_rest_not_found(
         },
     ]
 
-    mock_response = Mock()
-    mock_response.is_success.return_value = True
-    mock_response.body = json.dumps(discussions)
+    mock_response_page1 = Mock()
+    mock_response_page1.is_success.return_value = True
+    mock_response_page1.body = json.dumps(discussions)
+    mock_response_page1.headers = {"X-Next-Page": ""}
 
-    gitlab_client_mock.aget.return_value = mock_response
+    gitlab_client_mock.aget.return_value = mock_response_page1
 
     result = await tool_with_client._get_discussion_id_from_note_rest(
         project_id="123",
@@ -413,6 +489,74 @@ async def test_get_discussion_id_from_note_rest_api_failure(
     assert isinstance(result, dict)
     assert "error" in result
     assert "Failed to fetch issues discussions" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_api_failure_mid_pagination(
+    tool_with_client, gitlab_client_mock
+):
+    """Test that an API failure on a subsequent page is handled gracefully."""
+    page1_discussions = [
+        {
+            "id": "discussion1",
+            "notes": [{"id": 101, "body": "Comment 1"}],
+        },
+    ]
+
+    mock_response_page1 = Mock()
+    mock_response_page1.is_success.return_value = True
+    mock_response_page1.body = json.dumps(page1_discussions)
+    mock_response_page1.headers = {"X-Next-Page": "2"}
+
+    mock_response_page2 = Mock()
+    mock_response_page2.is_success.return_value = False
+
+    gitlab_client_mock.aget.side_effect = [mock_response_page1, mock_response_page2]
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="merge_requests",
+        resource_iid=42,
+        note_id=999,
+    )
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "Failed to fetch merge_requests discussions" in result["error"]
+    assert gitlab_client_mock.aget.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_max_pages_safety_net(
+    tool_with_client, gitlab_client_mock
+):
+    """Test that the max-pages safety net prevents infinite loops."""
+    page_with_one_discussion = [
+        {
+            "id": "discussion1",
+            "notes": [{"id": 101, "body": "Comment 1"}],
+        },
+    ]
+
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = json.dumps(page_with_one_discussion)
+    # Always return a next-page header to simulate a misbehaving API
+    mock_response.headers = {"X-Next-Page": "2"}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="merge_requests",
+        resource_iid=42,
+        note_id=999,
+    )
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "Note 999 not found" in result["error"]
+    assert gitlab_client_mock.aget.call_count == 100
 
 
 @pytest.mark.parametrize(
