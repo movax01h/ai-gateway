@@ -2,8 +2,9 @@
 """Tests for the developer_next and developer_unstable flow user prompt template rendering."""
 
 import pytest
-from jinja2 import Environment, StrictUndefined
+from langchain_core.prompts import ChatPromptTemplate
 
+from ai_gateway.prompts.base import jinja_env, prompt_template_to_messages
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
@@ -44,11 +45,50 @@ def render(template_str, **kwargs):
         "goal": "",
     }
     defaults.update(kwargs)
-    return (
-        Environment(undefined=StrictUndefined)
-        .from_string(template_str)
-        .render(**defaults)
-    )
+    return jinja_env.from_string(template_str).render(**defaults)
+
+
+@pytest.mark.parametrize("flow_name", ["developer_next", "developer_unstable"])
+class TestLangChainTemplateCompatibility:
+    """Ensure the prompt template works end-to-end through LangChain's ChatPromptTemplate.
+
+    These tests catch the class of bug where Jinja2 {% set %} variables are mis-detected as required LangChain input
+    variables, causing a KeyError at invocation time even though the template renders correctly via plain Jinja2.
+    """
+
+    AGENT_INPUTS = {
+        "goal": "https://gitlab.com/org/project/-/issues/1",
+        "project_id": PROJECT_ID,
+        "project_url": PROJECT_URL,
+        "agents_dot_md": None,
+        "workspace_agent_skills": None,
+        "agent_user_environment": None,
+        "today": "2026-03-20",
+        "primary_branch": "main",
+        "history": [],
+    }
+
+    def _build_chat_prompt_template(self, flow_name: str) -> ChatPromptTemplate:
+        config = FlowConfig.from_yaml_config(flow_name)
+        assert config.prompts is not None
+        prompt_template = config.prompts[0]["prompt_template"]
+        messages = prompt_template_to_messages(prompt_template)
+        return ChatPromptTemplate.from_messages(messages, template_format="jinja2")
+
+    def test_langchain_prompt_invocation_does_not_raise(self, flow_name):
+        """Invoking the prompt with normal agent inputs must not raise a KeyError."""
+        chat_prompt = self._build_chat_prompt_template(flow_name)
+        # This should not raise KeyError about missing variables
+        chat_prompt.invoke(self.AGENT_INPUTS)
+
+    def test_langchain_prompt_mention_goal_does_not_raise(self, flow_name):
+        """Mention-trigger goal must also not raise a KeyError."""
+        chat_prompt = self._build_chat_prompt_template(flow_name)
+        inputs = {
+            **self.AGENT_INPUTS,
+            "goal": "Input: Fix this bug\nContext: {Issue IID: 42}",
+        }
+        chat_prompt.invoke(inputs)
 
 
 class TestMentionTrigger:
