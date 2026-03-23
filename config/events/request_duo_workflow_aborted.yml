@@ -13,4 +13,5 @@ additional_properties:
 milestone: '18.3'
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/3093
 tiers:
+  - premium
   - ultimate
