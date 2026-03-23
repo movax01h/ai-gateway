@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,6 +11,7 @@ from lib.events.contextvar import (
     X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
     self_hosted_dap_billing_enabled,
 )
+from lib.langsmith_tracing import X_GITLAB_LANGSMITH_TRACE_HEADER
 from lib.mcp_server_tools.context import current_mcp_server_tools_context
 
 
@@ -22,17 +24,46 @@ def mock_config():
     return config
 
 
-@pytest.mark.asyncio
-async def test_client_type_header(mock_config):
-    """Test that client type header is properly set."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-client-type", "node-grpc"),
-    ]
+@pytest.fixture
+def langsmith_trace_headers():
+    """Realistic LangSmith trace headers as received from gRPC metadata."""
+    return {
+        "langsmith-trace": "20260311T174147261908Z019cddfd-8c7d-78c3-820e-5bcd59922f3d",
+        "baggage": {
+            "langsmith-metadata": {
+                "revision_id": "v0.21.1-647-gfd55e330-dirty",
+                "__ls_runner": "py_sdk_evaluate",
+                "num_repetitions": 1,
+                "example_version": "2026-03-09T17:26:43.199255+00:00",
+                "ls_method": "traceable",
+            },
+            "langsmith-project": "clear-coat-33",
+        },
+    }
 
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+
+@pytest.fixture
+def interceptor_setup(mock_config):
+    """Helper to set up interceptor test with given metadata."""
+
+    def _setup(metadata_list):
+        interceptor = MetadataContextInterceptor(mock_config)
+        handler_call_details = MagicMock()
+        handler_call_details.invocation_metadata = metadata_list
+        continuation = AsyncMock(return_value="mocked_response")
+        return interceptor, handler_call_details, continuation
+
+    return _setup
+
+
+@pytest.mark.asyncio
+async def test_client_type_header(interceptor_setup):
+    """Test that client type header is properly set."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-client-type", "node-grpc"),
+        ]
+    )
 
     with patch(
         "duo_workflow_service.interceptors.metadata_context_interceptor.client_type"
@@ -45,16 +76,13 @@ async def test_client_type_header(mock_config):
 
 
 @pytest.mark.asyncio
-async def test_gitlab_realm_header(mock_config):
+async def test_gitlab_realm_header(interceptor_setup):
     """Test that GitLab realm header is properly set."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-realm", "saas"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-realm", "saas"),
+        ]
+    )
 
     with patch(
         "duo_workflow_service.interceptors.metadata_context_interceptor.gitlab_realm"
@@ -67,16 +95,13 @@ async def test_gitlab_realm_header(mock_config):
 
 
 @pytest.mark.asyncio
-async def test_gitlab_version_header(mock_config):
+async def test_gitlab_version_header(interceptor_setup):
     """Test that GitLab version header is properly set."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-version", "16.5.0"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-version", "16.5.0"),
+        ]
+    )
 
     with patch(
         "duo_workflow_service.interceptors.metadata_context_interceptor.gitlab_version"
@@ -89,16 +114,13 @@ async def test_gitlab_version_header(mock_config):
 
 
 @pytest.mark.asyncio
-async def test_language_server_version_header(mock_config):
+async def test_language_server_version_header(interceptor_setup):
     """Test that language server version header is properly set with transformation."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-language-server-version", "1.2.3"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-language-server-version", "1.2.3"),
+        ]
+    )
 
     with (
         patch(
@@ -129,16 +151,13 @@ async def test_language_server_version_header(mock_config):
         ("", False),
     ],
 )
-async def test_verbose_ai_logs_header(mock_config, header_value, expected_bool):
+async def test_verbose_ai_logs_header(interceptor_setup, header_value, expected_bool):
     """Test that verbose AI logs header is properly converted to boolean."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-enabled-instance-verbose-ai-logs", header_value),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-enabled-instance-verbose-ai-logs", header_value),
+        ]
+    )
 
     with patch(
         "duo_workflow_service.interceptors.metadata_context_interceptor.current_verbose_ai_logs_context"
@@ -151,16 +170,13 @@ async def test_verbose_ai_logs_header(mock_config, header_value, expected_bool):
 
 
 @pytest.mark.asyncio
-async def test_prompt_caching_header(mock_config):
+async def test_prompt_caching_header(interceptor_setup):
     """Test that prompt caching header calls the setter function."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-model-prompt-cache-enabled", "true"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-model-prompt-cache-enabled", "true"),
+        ]
+    )
 
     with patch(
         "duo_workflow_service.interceptors.metadata_context_interceptor.set_prompt_caching_enabled_to_current_request"
@@ -173,22 +189,19 @@ async def test_prompt_caching_header(mock_config):
 
 
 @pytest.mark.asyncio
-async def test_all_headers_together(mock_config):
+async def test_all_headers_together(interceptor_setup):
     """Test that all headers are processed correctly when present together."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-client-type", "node-grpc"),
-        ("x-gitlab-realm", "saas"),
-        ("x-gitlab-version", "16.5.0"),
-        ("x-gitlab-language-server-version", "1.2.3"),
-        ("x-gitlab-enabled-instance-verbose-ai-logs", "true"),
-        ("x-gitlab-model-prompt-cache-enabled", "false"),
-        ("x-gitlab-enabled-mcp-server-tools", "postgres,context7"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-client-type", "node-grpc"),
+            ("x-gitlab-realm", "saas"),
+            ("x-gitlab-version", "16.5.0"),
+            ("x-gitlab-language-server-version", "1.2.3"),
+            ("x-gitlab-enabled-instance-verbose-ai-logs", "true"),
+            ("x-gitlab-model-prompt-cache-enabled", "false"),
+            ("x-gitlab-enabled-mcp-server-tools", "postgres,context7"),
+        ]
+    )
 
     with (
         patch(
@@ -234,16 +247,13 @@ async def test_all_headers_together(mock_config):
 
 
 @pytest.mark.asyncio
-async def test_missing_headers(mock_config):
+async def test_missing_headers(interceptor_setup):
     """Test that missing headers don't cause errors."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("other-header", "other-value"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("other-header", "other-value"),
+        ]
+    )
 
     with (
         patch(
@@ -330,19 +340,16 @@ async def test_self_hosted_dap_billing_header(
 
 
 @pytest.mark.asyncio
-async def test_empty_header_values(mock_config):
+async def test_empty_header_values(interceptor_setup):
     """Test that empty header values are handled correctly."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-client-type", ""),
-        ("x-gitlab-realm", ""),
-        ("x-gitlab-version", ""),
-        ("x-gitlab-enabled-mcp-server-tools", ""),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-client-type", ""),
+            ("x-gitlab-realm", ""),
+            ("x-gitlab-version", ""),
+            ("x-gitlab-enabled-mcp-server-tools", ""),
+        ]
+    )
 
     with (
         patch(
@@ -368,16 +375,13 @@ async def test_empty_header_values(mock_config):
 
 
 @pytest.mark.asyncio
-async def test_mcp_server_tools_header(mock_config):
+async def test_mcp_server_tools_header(interceptor_setup):
     """Test that MCP server tools header is properly parsed."""
-    interceptor = MetadataContextInterceptor(mock_config)
-    handler_call_details = MagicMock()
-    handler_call_details.invocation_metadata = [
-        ("x-gitlab-enabled-mcp-server-tools", "tool1,tool2,tool3"),
-    ]
-
-    continuation = AsyncMock()
-    continuation.return_value = "mocked_response"
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-enabled-mcp-server-tools", "tool1,tool2,tool3"),
+        ]
+    )
 
     result = await interceptor.intercept_service(continuation, handler_call_details)
 
@@ -388,3 +392,90 @@ async def test_mcp_server_tools_header(mock_config):
     }
     continuation.assert_called_once_with(handler_call_details)
     assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_langsmith_trace_header_valid(interceptor_setup, langsmith_trace_headers):
+    """Test that valid JSON langsmith-trace header is properly parsed and set in context."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            (X_GITLAB_LANGSMITH_TRACE_HEADER, json.dumps(langsmith_trace_headers)),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.set_langsmith_trace_headers"
+    ) as mock_set_headers:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_set_headers.assert_called_once_with(langsmith_trace_headers)
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_langsmith_trace_header_missing(interceptor_setup):
+    """Test that missing langsmith-trace header doesn't set context."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("other-header", "other-value"),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.set_langsmith_trace_headers"
+    ) as mock_set_headers:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_set_headers.assert_not_called()
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_langsmith_trace_header_logs_debug(
+    interceptor_setup, langsmith_trace_headers
+):
+    """Test that receiving langsmith-trace header logs at DEBUG level."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            (X_GITLAB_LANGSMITH_TRACE_HEADER, json.dumps(langsmith_trace_headers)),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.log"
+    ) as mock_log:
+        await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_log.debug.assert_called_once_with(
+            "Received langsmith tracing headers",
+            langsmith_trace=langsmith_trace_headers,
+        )
+
+
+@pytest.mark.asyncio
+async def test_langsmith_trace_header_invalid_json(interceptor_setup):
+    """Test that invalid JSON in langsmith-trace header logs a warning and doesn't set context."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            (X_GITLAB_LANGSMITH_TRACE_HEADER, "not-valid-json"),
+        ]
+    )
+
+    with (
+        patch(
+            "duo_workflow_service.interceptors.metadata_context_interceptor.log"
+        ) as mock_log,
+        patch(
+            "duo_workflow_service.interceptors.metadata_context_interceptor.set_langsmith_trace_headers"
+        ) as mock_set_headers,
+    ):
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_log.warning.assert_called_once_with(
+            "Failed to decode langsmith trace headers", trace_value="not-valid-json"
+        )
+        mock_set_headers.assert_not_called()
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"

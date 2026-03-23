@@ -1,6 +1,8 @@
+import json
 import time
 
 import grpc
+import structlog
 from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_HEADER
 
 from ai_gateway import Config
@@ -10,6 +12,10 @@ from lib.context import language_server_version as language_server_version_conte
 from lib.events.contextvar import (
     X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
     set_self_hosted_dap_billing_enabled,
+)
+from lib.langsmith_tracing import (
+    X_GITLAB_LANGSMITH_TRACE_HEADER,
+    set_langsmith_trace_headers,
 )
 from lib.language_server import LanguageServerVersion
 from lib.mcp_server_tools.context import (
@@ -21,6 +27,8 @@ from lib.prompts.caching import (
     set_prompt_caching_enabled_to_current_request,
 )
 from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER, current_verbose_ai_logs_context
+
+log = structlog.stdlib.get_logger("metadata_context_interceptor")
 
 
 class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
@@ -92,5 +100,17 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         enabled_tools = metadata.get(X_GITLAB_ENABLED_MCP_SERVER_TOOLS, "").split(",")
         enabled_tools = set(tool.strip() for tool in enabled_tools if tool.strip())
         set_enabled_mcp_server_tools(enabled_tools)
+
+        # LangSmith headers for distributed tracing
+        # The trace value is a JSON-encoded dict containing langsmith-trace and baggage headers
+        if trace_value := metadata.get(X_GITLAB_LANGSMITH_TRACE_HEADER):
+            try:
+                headers = json.loads(trace_value)
+                set_langsmith_trace_headers(headers)
+                log.debug("Received langsmith tracing headers", langsmith_trace=headers)
+            except json.JSONDecodeError:
+                log.warning(
+                    "Failed to decode langsmith trace headers", trace_value=trace_value
+                )
 
         return await continuation(handler_call_details)

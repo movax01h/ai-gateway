@@ -63,6 +63,7 @@ from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
+from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
 
 # Constants
@@ -171,7 +172,10 @@ class AbstractWorkflow(ABC):
                 FeatureFlag.AI_PROMPT_SCANNING
             )
 
-            with tracing_context(enabled=tracing_enabled):
+            # Setup langsmith parent tracing headers if any
+            parent_trace = get_langsmith_trace_headers()
+
+            with tracing_context(parent=parent_trace, enabled=tracing_enabled):
                 try:
                     # pylint: disable=unexpected-keyword-arg
                     await self._compile_and_run_graph(
