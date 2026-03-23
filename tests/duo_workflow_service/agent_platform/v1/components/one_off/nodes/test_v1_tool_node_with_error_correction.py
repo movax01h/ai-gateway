@@ -76,6 +76,20 @@ def tool_responses_key_fixture():
     return IOKey(target="context", subkeys=["test_component", "tool_responses"])
 
 
+@pytest.fixture(name="execution_result_key")
+def execution_result_key_fixture(component_name):
+    return IOKey(
+        target="context",
+        subkeys=[component_name, "execution_result"],
+    )
+
+
+@pytest.fixture(name="conversation_history_key")
+def conversation_history_key_fixture(component_name):
+    """Fixture for conversation history IOKey."""
+    return IOKey(target=FlowStateKeys.CONVERSATION_HISTORY, subkeys=[component_name])
+
+
 @pytest.fixture(name="tool_node_with_error_correction")
 def tool_node_with_error_correction_fixture(
     component_name,
@@ -89,6 +103,8 @@ def tool_node_with_error_correction_fixture(
     mock_logger,
     tool_calls_key,
     tool_responses_key,
+    execution_result_key,
+    conversation_history_key,
 ):
     """Fixture for ToolNodeWithErrorCorrection instance."""
     return ToolNodeWithErrorCorrection(
@@ -102,6 +118,8 @@ def tool_node_with_error_correction_fixture(
         max_correction_attempts=3,
         tool_calls_key=tool_calls_key,
         tool_responses_key=tool_responses_key,
+        execution_result_key=execution_result_key,
+        conversation_history_key=conversation_history_key,
     )
 
 
@@ -112,7 +130,9 @@ def flow_state_with_tool_calls_one_off_fixture(
     """Fixture for flow state with tool calls specific to OneOff."""
     return {
         "status": "execution",
-        "conversation_history": {component_name: [mock_ai_message_with_tool_calls]},
+        FlowStateKeys.CONVERSATION_HISTORY: {
+            component_name: [mock_ai_message_with_tool_calls]
+        },
         "ui_chat_log": [],
         "context": {},
     }
@@ -138,6 +158,7 @@ class TestToolNodeWithErrorCorrectionInitialization:
         flow_type,
         ui_history_one_off,
         mock_internal_event_client,
+        conversation_history_key,
     ):
         tool_node = ToolNodeWithErrorCorrection(
             name="test_tool_node",
@@ -147,6 +168,7 @@ class TestToolNodeWithErrorCorrectionInitialization:
             flow_type=flow_type,
             internal_event_client=mock_internal_event_client,
             ui_history=ui_history_one_off,
+            conversation_history_key=conversation_history_key,
             # Omitting: max_correction_attempts, tool_calls_key, tool_responses_key, execution_result_key
         )
 
@@ -154,6 +176,7 @@ class TestToolNodeWithErrorCorrectionInitialization:
         assert tool_node.tool_calls_key is None
         assert tool_node.tool_responses_key is None
         assert tool_node.execution_result_key is None
+        assert tool_node._conversation_history_key == conversation_history_key
 
 
 class TestToolNodeWithErrorCorrectionRun:
@@ -205,7 +228,8 @@ class TestToolNodeWithErrorCorrectionRun:
         # Verify ui_history methods were called
         ui_history_one_off.log._log_tool_call_input.assert_called_once()
         ui_history_one_off.log.success.assert_called_once()
-        ui_history_one_off.pop_state_updates.assert_called_once()
+        # pop_state_updates is called twice: once at the beginning and once at the end
+        assert ui_history_one_off.pop_state_updates.call_count == 2
 
     @pytest.mark.asyncio
     async def test_run_with_io_keys_storage(
@@ -391,6 +415,33 @@ class TestToolNodeWithErrorCorrectionRun:
         assert "tool exception occurred" in tool_message.content.lower()
 
     @pytest.mark.asyncio
+    async def test_run_with_empty_toolset(
+        self,
+        tool_node_with_error_correction,
+        base_flow_state,
+        component_name,
+    ):
+        """Test run when toolset is empty."""
+        # Configure toolset to be empty
+        tool_node_with_error_correction._toolset = []
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: []}
+
+        result = await tool_node_with_error_correction.run(state)
+
+        # Verify error message in conversation history
+        conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+        assert len(conversation_messages) == 1
+        assert isinstance(conversation_messages[0], HumanMessage)
+        assert "The agent has no tools configured" in conversation_messages[0].content
+
+        # Verify execution result is set to "failed"
+        assert result["context"][component_name]["execution_result"] == "failed"
+
+    @pytest.mark.asyncio
     async def test_run_no_tool_calls(
         self,
         tool_node_with_error_correction,
@@ -400,20 +451,22 @@ class TestToolNodeWithErrorCorrectionRun:
     ):
         """Test run with message that has no tool calls."""
         state = base_flow_state.copy()
-        state["conversation_history"] = {
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_ai_message_no_tool_calls]
         }
 
         result = await tool_node_with_error_correction.run(state)
 
-        # Verify result structure with no tool messages
+        # Verify error feedback message in conversation history
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        # Should have success message even with no tool calls
         assert len(conversation_messages) == 1
         assert isinstance(conversation_messages[0], HumanMessage)
-        assert "completed successfully" in conversation_messages[0].content
+        assert (
+            "Your last response failed to generate the requested tool calls"
+            in conversation_messages[0].content
+        )
 
     @pytest.mark.asyncio
     async def test_run_empty_conversation_history(
@@ -424,16 +477,55 @@ class TestToolNodeWithErrorCorrectionRun:
     ):
         """Test run with empty conversation history."""
         state = base_flow_state.copy()
-        state["conversation_history"] = {component_name: []}
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: []}
 
         result = await tool_node_with_error_correction.run(state)
 
-        # Should handle gracefully with success message
+        # Should handle gracefully with error feedback message
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
         assert len(conversation_messages) == 1
         assert isinstance(conversation_messages[0], HumanMessage)
+        assert (
+            "Your last response failed to generate the requested tool calls"
+            in conversation_messages[0].content
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_no_tool_calls_max_attempts_exceeded(
+        self,
+        tool_node_with_error_correction,
+        base_flow_state,
+        component_name,
+        mock_ai_message_no_tool_calls,
+    ):
+        """Test run with no tool calls when max retry attempts are exhausted."""
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_no_tool_calls]
+        }
+        # Set context to indicate we're at max attempts (attempt 3 out of 3)
+        state["context"] = {component_name: {"correction_attempts": 2}}
+
+        result = await tool_node_with_error_correction.run(state)
+
+        # Verify error feedback message in conversation history
+        conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+        assert len(conversation_messages) == 1
+        assert isinstance(conversation_messages[0], HumanMessage)
+        assert (
+            "Your last response failed to generate the requested tool calls"
+            in conversation_messages[0].content
+        )
+
+        # Verify execution result is set to "failed" when max attempts exceeded
+        assert result["context"][component_name]["execution_result"] == "failed"
+        # Verify context is properly merged in result
+        assert "context" in result
+        assert component_name in result["context"]
 
 
 class TestToolNodeWithErrorCorrectionErrorHandling:
@@ -588,7 +680,7 @@ class TestToolNodeWithErrorCorrectionContextTracking:
 
         # Verify correction_attempts was incremented
         assert result["context"][component_name]["correction_attempts"] == 2
-        # Verify other context data is preserved
+        # Verify other context data is preserved when context_dict is merged
         assert result["context"][component_name]["other_data"] == "value"
 
     @pytest.mark.asyncio
@@ -636,6 +728,7 @@ class TestToolNodeWithErrorCorrectionContextTracking:
         mock_logger,
         tool_calls_key,
         tool_responses_key,
+        conversation_history_key,
     ):
         """Test run sets execution status to failed when max attempts reached."""
         execution_result_key = IOKey(
@@ -654,6 +747,7 @@ class TestToolNodeWithErrorCorrectionContextTracking:
             tool_calls_key=tool_calls_key,
             tool_responses_key=tool_responses_key,
             execution_result_key=execution_result_key,
+            conversation_history_key=conversation_history_key,
         )
 
         # Create state with correction_attempts at max-1
