@@ -325,7 +325,10 @@ class DuoBaseTool(BaseTool):
             note_id: The ID of the note to find
 
         Returns:
-            A dict with discussionId key if found, or a dict with error key if not found
+            A dict with discussionId key if found
+
+        Raises:
+            ToolException: If the API call fails, the note is not found, or an error occurs
         """
         per_page = 100
         # Safety net: cap at 100 pages (per_page=100 * max_pages=100 = 10,000 discussions).
@@ -345,7 +348,7 @@ class DuoBaseTool(BaseTool):
                     parse_json=False,
                 )
                 if not response.is_success():
-                    return {"error": f"Failed to fetch {resource_type} discussions"}
+                    raise ToolException(f"Failed to fetch {resource_type} discussions")
 
                 discussions = json.loads(response.body) if response.body else []
                 if not isinstance(discussions, list):
@@ -363,10 +366,12 @@ class DuoBaseTool(BaseTool):
             resource_name = (
                 "merge request" if resource_type == "merge_requests" else "issue"
             )
-            return {"error": f"Note {note_id} not found in this {resource_name}."}
+            raise ToolException(f"Note {note_id} not found in this {resource_name}.")
 
+        except ToolException:
+            raise
         except Exception as e:
-            return {"error": str(e)}
+            raise ToolException(str(e)) from e
 
     @staticmethod
     def _process_http_response(identifier: str, response: Any) -> Any:

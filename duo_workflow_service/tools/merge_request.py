@@ -365,8 +365,6 @@ The body parameter is always required.
                 validation_result.merge_request_iid,
                 note_id,
             )
-            if "error" in discussion_result:
-                return json.dumps(discussion_result)
             discussion_id = discussion_result.get("discussionId")
 
         base_path = (
