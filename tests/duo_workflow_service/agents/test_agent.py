@@ -88,6 +88,7 @@ class TestAgent:
                 ]
             ),
             ANY,
+            cache_control_injection_points=[{"location": "message", "index": 0}],
         )
 
         assert result["conversation_history"][prompt_name] == [mock_response]
@@ -125,6 +126,7 @@ Human message"""
                 ]
             ),
             ANY,
+            cache_control_injection_points=[{"location": "message", "index": 0}],
         )
 
         assert result["conversation_history"][prompt_name] == [mock_response]
@@ -176,6 +178,7 @@ Human message"""
                 ]
             ),
             ANY,
+            cache_control_injection_points=[{"location": "message", "index": 0}],
         )
 
         assert result["conversation_history"][prompt_name] == [mock_response]
