@@ -74,8 +74,8 @@ def tool_with_client_fixture(gitlab_client_mock):
 
 def test_gitlab_client():
     tool = DummyTool(metadata={})
-    with pytest.raises(RuntimeError):
-        tool.gitlab_client  # pylint: disable=pointless-statement
+    with pytest.raises(RuntimeError, match="gitlab_client is not set"):
+        _ = tool.gitlab_client
 
     client = MagicMock()
     tool = DummyTool(metadata={"gitlab_client": client})
@@ -161,7 +161,8 @@ class ErrorArgsModel(BaseModel):
 
     test: str
 
-    def __init__(self, **data):  # pylint: disable=super-init-not-called
+    def model_post_init(self, __context):
+        """Raise an error after initialization to test error handling."""
         raise RuntimeError("Something went wrong")
 
 
@@ -457,16 +458,13 @@ async def test_get_discussion_id_from_note_rest_not_found(
 
     gitlab_client_mock.aget.return_value = mock_response_page1
 
-    result = await tool_with_client._get_discussion_id_from_note_rest(
-        project_id="123",
-        resource_type="issues",
-        resource_iid=42,
-        note_id=999,
-    )
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "Note 999 not found" in result["error"]
+    with pytest.raises(ToolException, match="Note 999 not found in this issue"):
+        await tool_with_client._get_discussion_id_from_note_rest(
+            project_id="123",
+            resource_type="issues",
+            resource_iid=42,
+            note_id=999,
+        )
 
 
 @pytest.mark.asyncio
@@ -479,16 +477,13 @@ async def test_get_discussion_id_from_note_rest_api_failure(
 
     gitlab_client_mock.aget.return_value = mock_response
 
-    result = await tool_with_client._get_discussion_id_from_note_rest(
-        project_id="123",
-        resource_type="issues",
-        resource_iid=42,
-        note_id=1,
-    )
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "Failed to fetch issues discussions" in result["error"]
+    with pytest.raises(ToolException, match="Failed to fetch issues discussions"):
+        await tool_with_client._get_discussion_id_from_note_rest(
+            project_id="123",
+            resource_type="issues",
+            resource_iid=42,
+            note_id=1,
+        )
 
 
 @pytest.mark.asyncio
@@ -513,16 +508,16 @@ async def test_get_discussion_id_from_note_rest_api_failure_mid_pagination(
 
     gitlab_client_mock.aget.side_effect = [mock_response_page1, mock_response_page2]
 
-    result = await tool_with_client._get_discussion_id_from_note_rest(
-        project_id="123",
-        resource_type="merge_requests",
-        resource_iid=42,
-        note_id=999,
-    )
+    with pytest.raises(
+        ToolException, match="Failed to fetch merge_requests discussions"
+    ):
+        await tool_with_client._get_discussion_id_from_note_rest(
+            project_id="123",
+            resource_type="merge_requests",
+            resource_iid=42,
+            note_id=999,
+        )
 
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "Failed to fetch merge_requests discussions" in result["error"]
     assert gitlab_client_mock.aget.call_count == 2
 
 
@@ -546,16 +541,14 @@ async def test_get_discussion_id_from_note_rest_max_pages_safety_net(
 
     gitlab_client_mock.aget.return_value = mock_response
 
-    result = await tool_with_client._get_discussion_id_from_note_rest(
-        project_id="123",
-        resource_type="merge_requests",
-        resource_iid=42,
-        note_id=999,
-    )
+    with pytest.raises(ToolException, match="Note 999 not found in this merge request"):
+        await tool_with_client._get_discussion_id_from_note_rest(
+            project_id="123",
+            resource_type="merge_requests",
+            resource_iid=42,
+            note_id=999,
+        )
 
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "Note 999 not found" in result["error"]
     assert gitlab_client_mock.aget.call_count == 100
 
 
@@ -574,13 +567,10 @@ async def test_get_discussion_id_from_note_rest_api_exception(
     """Test when API call raises an exception."""
     gitlab_client_mock.aget.side_effect = Exception(exception_msg)
 
-    result = await tool_with_client._get_discussion_id_from_note_rest(
-        project_id="123",
-        resource_type="issues",
-        resource_iid=42,
-        note_id=1,
-    )
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert exception_msg in result["error"]
+    with pytest.raises(ToolException, match=exception_msg):
+        await tool_with_client._get_discussion_id_from_note_rest(
+            project_id="123",
+            resource_type="issues",
+            resource_iid=42,
+            note_id=1,
+        )

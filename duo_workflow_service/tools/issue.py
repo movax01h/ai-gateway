@@ -503,8 +503,6 @@ The body parameter is always required.
                     issue_iid,
                     note_id,
                 )
-                if "error" in discussion_result:
-                    return json.dumps(discussion_result)
                 discussion_id = discussion_result.get("discussionId")
 
             base_path = f"/api/v4/projects/{project_id}/issues/{issue_iid}"
