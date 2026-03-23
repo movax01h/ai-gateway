@@ -588,19 +588,6 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
-  - name: Qwen2.5-Coder-7B
-    gitlab_identifier: qwen2p5-coder-7b
-    max_context_tokens: 131000
-    model_class_provider: litellm
-    family:
-      - qwen2p5-coder-7b
-    params:
-      model: "qwen2p5-coder-7b"
-      custom_llm_provider: fireworks_ai
-      temperature: 0.0
-      max_tokens: 4_096
-      max_retries: 10
-
   - name: Llama3
     gitlab_identifier: llama3
     max_context_tokens: 128000 # https://codesphere.com/articles/taking-advantage-of-the-long-context-of-llama-3-1-2

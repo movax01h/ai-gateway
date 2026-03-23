@@ -150,12 +150,6 @@ MODEL_SPECIFICATIONS = {
             "fim_format": "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]",
             "session_header": True,
         },
-        KindLiteLlmModel.QWEN_2_5: {
-            "timeout": 60,
-            "completion_type": ModelCompletionType.FIM,
-            "fim_format": "<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>",
-            "session_header": True,
-        },
     },
 }
 

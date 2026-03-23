@@ -8,6 +8,8 @@ from ai_gateway.api.v2.code.model_provider_handlers import (
     LiteLlmHandler,
     VertexHandler,
 )
+from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.litellm import KindLiteLlmModel
 
 
 class TestAnthropicHandler:
@@ -118,6 +120,28 @@ class TestFireworksHandler:
         FireworksHandler(payload, request, completion_params).update_completion_params()
 
         assert completion_params == want_completion_params
+
+    @pytest.mark.parametrize(
+        ("initial_model_name", "want_model_name"),
+        [
+            # Valid models should be preserved
+            (KindLiteLlmModel.CODESTRAL_2508, KindLiteLlmModel.CODESTRAL_2508),
+            (KindLiteLlmModel.CODESTRAL_2501, KindLiteLlmModel.CODESTRAL_2501),
+            # Invalid models should default to CODESTRAL_2501
+            ("invalid-model", KindLiteLlmModel.CODESTRAL_2501),
+            (None, KindLiteLlmModel.CODESTRAL_2501),
+        ],
+    )
+    def test_model_name_allowlist(self, initial_model_name, want_model_name):
+        """Test that FireworksHandler preserves valid model names and defaults invalid ones to CODESTRAL_2501."""
+        payload = Mock(context=[], model_name=initial_model_name)
+        request = Mock()
+        completion_params = {}
+
+        FireworksHandler(payload, request, completion_params).update_completion_params()
+
+        assert payload.model_name == want_model_name
+        assert payload.model_provider == KindModelProvider.FIREWORKS
 
 
 class TestVertexHandler:
