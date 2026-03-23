@@ -40,7 +40,7 @@ class PostSecretFpAnalysisToGitlab(DuoBaseTool):
         data = {
             "confidence_score": false_positive_likelihood,
             "description": explanation,
-            "detection_type": "secret_fp",  # Additional property for secret detection
+            "origin": "ai_secret_detection_fp_detection",  # Additional property for secret detection
         }
 
         try:
