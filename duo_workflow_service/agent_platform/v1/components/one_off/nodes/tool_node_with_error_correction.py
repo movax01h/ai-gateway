@@ -46,6 +46,7 @@ class ToolNodeWithErrorCorrection:
         tool_calls_key: IOKey | None = None,
         tool_responses_key: IOKey | None = None,
         execution_result_key: IOKey | None = None,
+        conversation_history_key: IOKey,
     ):
         self.name = name
         self._component_name = component_name
@@ -59,22 +60,71 @@ class ToolNodeWithErrorCorrection:
         self.tool_calls_key = tool_calls_key
         self.tool_responses_key = tool_responses_key
         self.execution_result_key = execution_result_key
+        self._conversation_history_key = conversation_history_key
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Execute tools with error correction tracking."""
+        result = {
+            **self._ui_history.pop_state_updates(),
+        }
+
+        if len(self._toolset) == 0:
+            human_message = HumanMessage(
+                content="The agent has no tools configured. Review agent privileges configuration. 0 attempts remaining"
+            )
+            conversation_history_dict = self._conversation_history_key.to_nested_dict(
+                [human_message]
+            )
+            result = merge_nested_dict(result, conversation_history_dict)
+            if self.execution_result_key:
+                status_dict = self.execution_result_key.to_nested_dict("failed")
+                result = merge_nested_dict(result, status_dict)
+            return result
+
         # Get current context for error tracking
         context = state.get("context", {}).get(self._component_name, {})
+        context_dict = IOKey(
+            target="context", subkeys=[self._component_name]
+        ).to_nested_dict(context)
         attempts = context.get("correction_attempts", 0)
 
         # Get conversation history
-        conversation_history = state[FlowStateKeys.CONVERSATION_HISTORY].get(
-            self._component_name, []
-        )
+        conversation_history = self._conversation_history_key.value_from_state(state)
 
         # Get tool calls from the last message
         last_message = conversation_history[-1] if conversation_history else None
         tool_calls = getattr(last_message, "tool_calls", []) if last_message else []
         tool_responses = []
+
+        # When LLM decides it cannot continue because of technical/tool limitations
+        if not tool_calls:
+            feedback_message = (
+                "Your last response failed to generate the requested tool calls. If you were unable to "
+                "generate tool calls because you encountered an unresolvable blocker (e.g., authentication "
+                "errors, missing credentials, unavailable external resources, or environmental constraints "
+                "beyond the scope of available tools), summarize what was completed, what failed, and why — "
+                "then stop. Do not attempt further tool calls. If your last response failed to generate tool "
+                "calls due to a transient issue (e.g., a formatting error, hallucination, or network "
+                "interruption), you MUST retry and generate valid tool calls now to continue your assignment."
+            )
+            error_feedback = self._create_error_feedback(
+                [feedback_message], [], attempts + 1, context
+            )
+
+            conversation_history_dict = self._conversation_history_key.to_nested_dict(
+                [error_feedback]
+            )
+            result = merge_nested_dict(result, conversation_history_dict)
+            result = merge_nested_dict(result, context_dict)
+
+            # If we are out of attempts then update execution status to failed
+            if (
+                attempts + 1 >= self.max_correction_attempts
+                and self.execution_result_key
+            ):
+                status_dict = self.execution_result_key.to_nested_dict("failed")
+                result = merge_nested_dict(result, status_dict)
+            return result
 
         # Execute each tool call
         for tool_call in tool_calls:
@@ -159,9 +209,6 @@ class ToolNodeWithErrorCorrection:
             }
 
             # Update context with correction attempts
-            context_dict = IOKey(
-                target="context", subkeys=[self._component_name]
-            ).to_nested_dict(context)
             result = merge_nested_dict(result, context_dict)
 
             # If we are out of attempts then update execution status to failed

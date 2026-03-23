@@ -5,6 +5,7 @@ from langgraph.graph import END, StateGraph
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.v1.components.base import (
+    AbortComponent,
     BaseComponent,
     EndComponent,
     RouterProtocol,
@@ -322,3 +323,76 @@ class TestEndComponent:
 
         # Verify the status was set to COMPLETED
         assert result["status"] == WorkflowStatusEnum.COMPLETED.value
+
+
+class TestAbortComponent:
+    """Test AbortComponent functionality."""
+
+    @pytest.fixture(name="abort_component")
+    def abort_component_fixture(self, flow_type, user):
+        """Fixture providing an AbortComponent instance."""
+        return AbortComponent(
+            name="abort",
+            flow_id="test-workflow",
+            flow_type=flow_type,
+            user=user,
+        )
+
+    def test_entry_hook_returns_abort_flow(self, abort_component):
+        """Test that __entry_hook__ returns 'abort_flow'."""
+        assert abort_component.__entry_hook__() == "abort_flow"
+
+    def test_attach_adds_node_and_edge(self, abort_component):
+        """Test that attach method adds node and edge to graph."""
+        mock_graph = Mock(spec=StateGraph)
+
+        abort_component.attach(mock_graph)
+
+        # Verify node was added with correct name and some callable function
+        mock_graph.add_node.assert_called_once()
+        call_args = mock_graph.add_node.call_args
+        assert call_args[0][0] == "abort_flow"  # Node name
+        assert callable(call_args[0][1])  # Function is callable
+
+        # Verify edge to END was added
+        mock_graph.add_edge.assert_called_once_with("abort_flow", END)
+
+    def test_attach_with_router_parameter(self, abort_component):
+        """Test that attach method works with optional router parameter."""
+        mock_graph = Mock(spec=StateGraph)
+        mock_router = Mock()
+
+        # Should work with router parameter (even though it's not used)
+        abort_component.attach(mock_graph, mock_router)
+
+        # Verify the graph methods were called
+        mock_graph.add_node.assert_called_once()
+        mock_graph.add_edge.assert_called_once_with("abort_flow", END)
+
+    @pytest.mark.asyncio
+    async def test_abort_component_sets_error_status(self, abort_component):
+        """Test that AbortComponent sets status to ERROR when executed in a real graph."""
+
+        # Create a real StateGraph with FlowState
+        graph = StateGraph(FlowState)
+
+        # Attach the abort component
+        abort_component.attach(graph)
+
+        # Set entry point and compile
+        graph.set_entry_point("abort_flow")
+        compiled_graph = graph.compile()
+
+        # Create initial state
+        initial_state = FlowState(
+            status=WorkflowStatusEnum.NOT_STARTED,
+            conversation_history={},
+            ui_chat_log=[],
+            context={"test": "data"},
+        )
+
+        # Run the graph
+        result = await compiled_graph.ainvoke(initial_state)
+
+        # Verify the status was set to ERROR
+        assert result["status"] == WorkflowStatusEnum.ERROR.value

@@ -14,6 +14,7 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry, InMemoryPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.v1.components.base import (
+    AbortComponent,
     BaseComponent,
     EndComponent,
 )
@@ -241,7 +242,18 @@ class Flow(AbstractWorkflow):
         )
         end_component.attach(graph)
 
-        components: dict[str, BaseComponent] = {"end": end_component}
+        abort_component = AbortComponent(
+            name="abort",
+            flow_id=self._workflow_id,
+            flow_type=self._workflow_type,
+            user=self._user,
+        )
+        abort_component.attach(graph)
+
+        components: dict[str, BaseComponent] = {
+            "end": end_component,
+            "abort": abort_component,
+        }
 
         for comp_config in self._config.components:
             comp_name = comp_config["name"]  # explicit name field
