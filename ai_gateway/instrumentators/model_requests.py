@@ -2,6 +2,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Optional
 
+import httpx
 import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import BaseMessage
@@ -39,6 +40,7 @@ ERROR_TYPE_OVERLOADED = "overloaded"
 ERROR_TYPE_HTTP_400 = "http_400"
 ERROR_TYPE_PERMISSION_ERROR = "permission_error"
 ERROR_TYPE_SERVICE_UNAVAILABLE = "service_unavailable"
+ERROR_TYPE_CONNECTION_ERROR = "connection_error"
 ERROR_TYPE_OTHER = "other"
 
 
@@ -206,6 +208,15 @@ class ModelRequestInstrumentator:
             # LiteLLM: "Overloaded"
             if "overloaded" in error_message.lower():
                 self.error_type = ERROR_TYPE_OVERLOADED
+                return
+
+            # Check for transient network/connection errors (e.g. httpx.ReadError)
+            # These have no HTTP status code and represent dropped connections
+            if isinstance(
+                exception,
+                (httpx.ReadError, httpx.ConnectError, httpx.RemoteProtocolError),
+            ):
+                self.error_type = ERROR_TYPE_CONNECTION_ERROR
                 return
 
             # Check if exception has a status_code or code attribute (works across

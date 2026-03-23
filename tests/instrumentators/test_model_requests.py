@@ -1,6 +1,7 @@
 import contextvars
 from unittest import mock
 
+import httpx
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import AIMessage
@@ -616,3 +617,19 @@ class TestRegisterError:
         container.register_error(exception)
         assert container.error is True
         assert container.error_type == "overloaded"
+
+    @pytest.mark.parametrize(
+        "exception",
+        [
+            httpx.ReadError("Connection reset by peer"),
+            httpx.ConnectError("Connection refused"),
+            httpx.RemoteProtocolError(
+                "peer closed connection without sending complete message body"
+            ),
+        ],
+    )
+    def test_register_error_httpx_connection_errors(self, container, exception):
+        """Test that httpx connection errors are classified as connection_error."""
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == "connection_error"
