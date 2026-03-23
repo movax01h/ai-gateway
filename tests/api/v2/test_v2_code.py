@@ -611,6 +611,27 @@ class TestCodeCompletions:
             (
                 2,
                 "foo",
+                [],
+                "fireworks_ai",
+                "codestral-2508",
+                "https://fireworks.endpoint",
+                "api-key",
+                None,
+                False,
+                True,
+                False,
+                200,
+                [
+                    {
+                        "text": "test completion",
+                        "index": 0,
+                        "finish_reason": "length",
+                    }
+                ],
+            ),
+            (
+                2,
+                "foo",
                 [
                     {
                         "type": "file",

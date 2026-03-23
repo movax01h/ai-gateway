@@ -45,7 +45,7 @@ class LiteLlmHandler(BaseModelProviderHandler):
 class FireworksHandler(BaseModelProviderHandler):
     @override
     def update_completion_params(self):
-        default_model = KindLiteLlmModel.QWEN_2_5
+        default_model = KindLiteLlmModel.CODESTRAL_2501
 
         self.completion_params.update(
             {"max_output_tokens": 48, "context_max_percent": 0.3}
@@ -57,8 +57,8 @@ class FireworksHandler(BaseModelProviderHandler):
         self.payload.model_provider = KindModelProvider.FIREWORKS
 
         if not self.payload.model_name or self.payload.model_name not in [
-            KindLiteLlmModel.QWEN_2_5,
             KindLiteLlmModel.CODESTRAL_2501,
+            KindLiteLlmModel.CODESTRAL_2508,
         ]:
             self.payload.model_name = default_model
 
