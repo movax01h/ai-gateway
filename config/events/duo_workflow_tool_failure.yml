@@ -13,4 +13,5 @@ additional_properties:
 milestone: '17.7'
 introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/175
 tiers:
+  - premium
   - ultimate
