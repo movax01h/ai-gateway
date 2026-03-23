@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from typing import (
     Any,
     AsyncIterator,
+    Awaitable,
+    Callable,
     List,
     MutableMapping,
     Optional,
@@ -11,6 +14,7 @@ from typing import (
     override,
 )
 
+import httpx
 import structlog
 from gitlab_cloud_connector import (
     CloudConnectorUser,
@@ -31,6 +35,14 @@ from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
+from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavailableError
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ai_gateway.config import ConfigModelLimits, ModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
@@ -58,6 +70,30 @@ __all__ = [
     "jinja2_formatter",
     "prompt_template_to_messages",
 ]
+
+_log = logging.getLogger(__name__)
+
+# Transient network errors that are safe to retry
+_RETRYABLE_NETWORK_ERRORS = (
+    httpx.ReadError,
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+    LiteLLMServiceUnavailableError,
+)
+
+
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=5),
+    retry=retry_if_exception_type(_RETRYABLE_NETWORK_ERRORS),
+    before_sleep=before_sleep_log(_log, logging.WARNING),
+)
+async def _ainvoke_with_retry(
+    invoke: Callable[[], Awaitable[BaseMessage]],
+) -> BaseMessage:
+    """Invoke a coroutine factory with retry on transient network errors."""
+    return await invoke()
 
 
 # cspell:ignore binops, binop, Sandboxed
@@ -398,10 +434,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 *[cb.on_before_llm_call() for cb in self.internal_callbacks]
             )
 
-            result = await super().ainvoke(
-                input,
-                config,
-                **kwargs,
+            # super() cannot be used inside a lambda; call RunnableBinding.ainvoke directly
+            result = await _ainvoke_with_retry(
+                lambda: RunnableBinding.ainvoke(self, input, config, **kwargs)
             )
 
             watcher.register_message(result)

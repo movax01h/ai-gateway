@@ -6,6 +6,7 @@ from typing import Any, Generator, Iterator, List, Optional, Type
 from unittest import mock
 from unittest.mock import Mock, call
 
+import httpx
 import pytest
 from anthropic import APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
@@ -16,7 +17,7 @@ from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
-from litellm.exceptions import Timeout
+from litellm.exceptions import MidStreamFallbackError, Timeout
 from pydantic import AnyUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 from structlog.testing import capture_logs
@@ -623,6 +624,62 @@ configurable_unit_primitives:
             match="Input to ChatPromptTemplate is missing variables {'name'}",
         ):
             await anext(prompt.astream({"content": "What's up?"}))
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_read_error(self, prompt: Prompt):
+        """Test that ainvoke retries on httpx.ReadError and succeeds on second attempt."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ReadError("Connection reset by peer")
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_raises_after_exhausting_retries_on_read_error(
+        self, prompt: Prompt
+    ):
+        """Test that ainvoke raises httpx.ReadError after all retry attempts fail."""
+        with mock.patch.object(
+            FakeModel,
+            "ainvoke",
+            side_effect=httpx.ReadError("Connection reset by peer"),
+        ):
+            with mock.patch("asyncio.sleep"):
+                with pytest.raises(httpx.ReadError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_mid_stream_fallback_error(self, prompt: Prompt):
+        """Test that ainvoke retries on litellm.MidStreamFallbackError (ServiceUnavailable subclass)."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise MidStreamFallbackError(
+                    "Overloaded", model="claude-3", llm_provider="anthropic"
+                )
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 2
 
     @pytest.mark.parametrize(
         "tool_choice",
