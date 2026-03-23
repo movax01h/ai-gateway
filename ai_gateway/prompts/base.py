@@ -40,7 +40,9 @@ from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvide
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
+    CACHE_CONTROL_SUPPORTED_PROVIDERS,
     CacheControlInjectionPointsConverter,
+    default_cache_control_injection_points,
     filter_cache_control_injection_points,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
@@ -210,7 +212,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         bind_tools_params: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
-        model_kwargs = self._build_model_kwargs(config.params, model_metadata)
+        model_kwargs = self._build_model_kwargs(
+            config.params, model_metadata, config.prompt_template, model_provider
+        )
 
         if "context_management" in model_kwargs and not self._is_anthropic_provider(
             model_provider, config.model.params
@@ -240,13 +244,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     **(bind_tools_params or {}),
                 )
 
-        prompt = (
+        prompt_tpl = (
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else self._build_prompt_template(config)
         )
         prompt = self._chain_cache_control_injection_points_converter(
-            model_kwargs, prompt, model_provider
+            model_kwargs, prompt_tpl, model_provider
         )
 
         log.debug(
@@ -269,7 +273,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model=model,
             unit_primitive=config.unit_primitive,
             bound=chain,
-            prompt_tpl=prompt,
+            prompt_tpl=prompt_tpl,
             **kwargs,
         )  # type: ignore[call-arg]
 
@@ -309,15 +313,26 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             return getattr(model_params, "custom_llm_provider", None) == "anthropic"
         return False
 
+    @staticmethod
     def _build_model_kwargs(
-        self,
         params: PromptParams | None,
         model_metadata: Optional[TypeModelMetadata],
+        prompt_template: dict[str, str] | None = None,
+        model_class_provider: str | None = None,
     ) -> MutableMapping[str, Any]:
         model_kwargs = {
             **(params.model_dump(exclude_none=True) if params else {}),
             **(model_metadata.to_params() if model_metadata else {}),
         }
+
+        if (
+            CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
+            and prompt_template
+            and model_class_provider in CACHE_CONTROL_SUPPORTED_PROVIDERS
+        ):
+            model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] = (
+                default_cache_control_injection_points(prompt_template)
+            )
 
         filter_cache_control_injection_points(model_kwargs)
 
