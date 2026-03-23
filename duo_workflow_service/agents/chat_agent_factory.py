@@ -60,5 +60,6 @@ def create_agent(
         prompt_adapter=DefaultPromptAdapter(prompt),
         tools_registry=tools_registry,
         system_template_override=system_template_override,
+        toolset=tools,
         compactor=compactor,
     )
