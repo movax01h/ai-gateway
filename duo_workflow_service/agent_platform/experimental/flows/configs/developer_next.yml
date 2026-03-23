@@ -2,6 +2,21 @@ version: "experimental"
 environment: ambient
 
 components:
+  # Configures git remote with authenticated URL so the agent can use plain git
+  # commands via run_command. This is a backward-compatibility measure for GitLab
+  # instances that predate the runner-level git setup introduced in
+  # https://gitlab.com/gitlab-org/gitlab/-/merge_requests/226743
+  - name: "git_setup"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "git config user.name \"${DUO_WORKFLOW_GIT_AUTHOR_USER_NAME:-Duo}\"; git config user.email \"${DUO_WORKFLOW_GIT_AUTHOR_EMAIL:-noreply@gitlab.com}\"; proto=\"${DUO_WORKFLOW_GIT_HTTP_BASE_URL%%://*}\"; host=\"${DUO_WORKFLOW_GIT_HTTP_BASE_URL#*://}\"; repo_url=\"${proto}://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD}@${host%/}/${CI_PROJECT_PATH}.git\"; git remote set-url origin \"${repo_url}\""
+        as: "command"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "developer_agent"
     type: AgentComponent
     prompt_id: "developer_agent_prompt"
@@ -40,7 +55,6 @@ components:
       - "think"
       - "todo_write"
       - "run_command"
-      - "run_git_command"
       - "gitlab_api_get"
       - "create_issue_note"
       - "create_merge_request_note"
@@ -54,11 +68,13 @@ components:
       - "on_agent_final_answer"
 
 routers:
+  - from: "git_setup"
+    to: "developer_agent"
   - from: "developer_agent"
     to: "end"
 
 flow:
-  entry_point: "developer_agent"
+  entry_point: "git_setup"
   inputs:
     - category: agent_platform_standard_context
       input_schema:
@@ -169,7 +185,6 @@ prompts:
         - Use specialized tools instead of run_command (your bash tool) commands when possible, as this provides a better user experience. For file operations, use dedicated tools: `read_file` for reading files instead of cat/head/tail, `edit_file` for editing instead of sed/awk, and `create_file_with_contents` for creating files instead of cat with heredoc or echo redirection. Reserve `run_command` exclusively for actual system commands and terminal operations that require shell execution.
         - When exploring the codebase to gather context, use `find_files` and `grep` extensively to search, then `read_file` to examine specific files. Start broad, then narrow down. If after reasonable search attempts (max 5 calls per search objective) you cannot find what you're looking for, try alternative approaches.
         - Do not re-read files you already have in your conversation context unless you have modified them.
-        - Use the specialized `run_git_command` tool for git operations to ensure correct git config.
 
         IMPORTANT: Always use the todo_write tool to plan and track tasks throughout the conversation.
 
@@ -178,11 +193,11 @@ prompts:
         {% include 'common/branch_naming/1.0.0.jinja' %}
 
         # Git push policy
-        - **Default: never force push.** For all standard tasks — fixing pipelines, addressing review comments, implementing features — always use regular additive commits and push using the `run_git_command` tool with `command: "push"`. This is safe and non-destructive.
+        - **Default: never force push.** For all standard tasks — fixing pipelines, addressing review comments, implementing features — always use regular additive commits and push using `run_command` with `git push`. This is safe and non-destructive.
         - **Exception — conflict resolution via rebase:** If you need to rebase the working branch onto the target branch to resolve conflicts, a force push is required. Before doing so, you MUST:
-          1. Create a local backup branch using `run_git_command` with `command: "branch"` and `args: "duo-developer-backup/<current-branch-name>"`
-          2. Push it to the remote using `run_git_command` with `command: "push"` and `args: "origin duo-developer-backup/<current-branch-name>"`
-          3. Perform the rebase, then push using `run_git_command` with `command: "push"` and `args: "--force-with-lease origin <current-branch-name>"` (never use bare `--force`).
+          1. Create a local backup branch: `git branch duo-developer-backup/<current-branch-name>`
+          2. Push it to the remote: `git push origin duo-developer-backup/<current-branch-name>`
+          3. Perform the rebase, then push with `git push --force-with-lease origin <current-branch-name>` (never use bare `--force`).
           4. Post a comment on the MR informing the user of the backup branch name, what was done, and that they can delete it once satisfied.
         - **Never rewrite history for any other reason** (e.g. squashing, amending) without explicit instruction from the user.
 
