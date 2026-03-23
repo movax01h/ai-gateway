@@ -1,6 +1,5 @@
 import asyncio
 import os
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
@@ -24,6 +23,7 @@ from duo_workflow_service.workflows.type_definitions import (
 )
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.langsmith_tracing import set_langsmith_trace_headers
 
 
 # Concrete implementation for testing
@@ -119,6 +119,24 @@ def workflow_fixture(user):
         workflow_type,
         user,
     )
+
+
+@pytest.fixture
+def langsmith_trace_headers():
+    """Realistic LangSmith trace headers as stored by the interceptor."""
+    return {
+        "langsmith-trace": "20260311T180532123456Z-abcd1234-5678-90ef-ghij-klmnopqrstuv",
+        "baggage": {
+            "langsmith-metadata": {
+                "revision_id": "v1.0.0",
+                "__ls_runner": "py_sdk_evaluate",
+                "num_repetitions": 3,
+                "example_version": "2026-03-11T18:05:32.123456+00:00",
+                "ls_method": "traceable",
+            },
+            "langsmith-project": "workflow-tests-42",
+        },
+    }
 
 
 @pytest.fixture(name="mock_project")
@@ -512,6 +530,60 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     mock_tracing_context.assert_called_once()
     call_kwargs = mock_tracing_context.call_args[1]
     assert call_kwargs["enabled"] == expected_tracing_enabled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extended_logging,langsmith_tracing_v2,has_parent_trace,expected_enabled",
+    [
+        (False, "", True, False),
+        (True, "", True, True),
+        (True, "", False, True),
+        (False, "false", True, False),
+    ],
+    ids=[
+        "parent_trace_present_extended_logging_false",
+        "parent_trace_present_extended_logging_true",
+        "no_parent_trace_extended_logging_true",
+        "langsmith_tracing_v2_false_with_parent_trace",
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.tracing_context")
+@patch.object(MockWorkflow, "_compile_and_run_graph")
+async def test_tracing_context_with_parent_trace_headers(
+    mock_compile_and_run_graph,
+    mock_tracing_context,
+    user,
+    langsmith_trace_headers,
+    extended_logging,
+    langsmith_tracing_v2,
+    has_parent_trace,
+    expected_enabled,
+):
+    """Test tracing_context is called with correct enabled and parent values."""
+    parent_trace = langsmith_trace_headers if has_parent_trace else None
+    set_langsmith_trace_headers(parent_trace)
+
+    workflow_id = "test-workflow-id"
+    metadata = {
+        "extended_logging": extended_logging,
+        "git_url": "https://example.com",
+        "git_sha": "abc123",
+    }
+    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
+
+    with patch.dict(
+        os.environ, {"LANGSMITH_TRACING_V2": langsmith_tracing_v2}, clear=False
+    ):
+        await workflow.run("Test goal")
+
+    mock_tracing_context.assert_called_once()
+    call_kwargs = mock_tracing_context.call_args[1]
+    assert call_kwargs["enabled"] is expected_enabled
+    assert call_kwargs["parent"] == parent_trace
+
+    set_langsmith_trace_headers(None)
 
 
 @pytest.mark.asyncio
