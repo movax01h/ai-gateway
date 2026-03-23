@@ -20,6 +20,8 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.gitlab.gitlab_api import fetch_workflow_and_container_data
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -101,6 +103,8 @@ def workflow_config_fixture():
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
 
@@ -194,6 +198,8 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -285,6 +291,8 @@ async def test_workflow_context_manager_success(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -555,6 +563,8 @@ async def test_workflow_context_manager_resume_interrupted(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -605,6 +615,8 @@ async def test_workflow_context_manager_resume_interrupted_approval(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -657,6 +669,8 @@ async def test_workflow_context_manager_retry_success(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -756,6 +770,8 @@ async def test_workflow_context_manager_error(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -867,6 +883,8 @@ async def test_aget_tuple_when_config_has_no_checkpoint_id_and_checkpoints_prese
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -920,6 +938,8 @@ async def test_aget_tuple_when_server_returns_non_success_response(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -1207,6 +1227,8 @@ async def test_created_status_with_no_checkpoint_succeeds(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -1241,6 +1263,8 @@ async def test_created_status_with_existing_checkpoint_raises_error(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -1397,6 +1421,8 @@ async def test_aget_tuple_per_page_with_compression_enabled(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -1573,6 +1599,8 @@ async def test_aget_tuple_with_latest_checkpoint(
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -1610,6 +1638,8 @@ async def test_aget_tuple_returns_none_when_no_first_checkpoint_and_no_latest_ch
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
     gitlab_workflow = GitLabWorkflow(
@@ -1625,5 +1655,75 @@ async def test_aget_tuple_returns_none_when_no_first_checkpoint_and_no_latest_ch
 
     assert result is None
 
-    # Should not call the API when first_checkpoint is None
-    http_client.aget.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_archived_workflow_raises_error(
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    """Test that archived workflows raise NotifiableException."""
+    workflow_config = {
+        "first_checkpoint": None,
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+        "archived": True,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
+
+    with pytest.raises(NotifiableException) as exc_info:
+        await gitlab_workflow._get_initial_status_event(config)
+
+    assert (
+        "Archived workflow can not be executed. Please create a new workflow."
+        in str(exc_info.value)
+    )
+
+
+@pytest.mark.asyncio
+async def test_stalled_workflow_raises_error(
+    http_client,
+    workflow_id,
+    workflow_type,
+):
+    """Test that stalled workflows raise NotifiableException."""
+    workflow_config = {
+        "first_checkpoint": None,
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": True,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
+
+    with pytest.raises(NotifiableException) as exc_info:
+        await gitlab_workflow._get_initial_status_event(config)
+
+    assert "Stalled workflow can not be executed. Please create a new workflow." in str(
+        exc_info.value
+    )

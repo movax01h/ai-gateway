@@ -88,6 +88,8 @@ def workflow_config_fixture():
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
         "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
     }
 
 

@@ -53,6 +53,8 @@ def workflow_config_fixture(agent_privileges_names: list[str]) -> dict[str, Any]
         "latest_checkpoint": None,
         "workflow_status": "",
         "gitlab_host": "gitlab.com",
+        "archived": False,
+        "stalled": False,
     }
 
 

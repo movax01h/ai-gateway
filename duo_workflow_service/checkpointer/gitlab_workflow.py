@@ -44,6 +44,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
 from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import (
     GitlabHttpClient,
@@ -396,14 +397,29 @@ class GitLabWorkflow(
         )
         status = self._workflow_config["workflow_status"]
 
+        if self._workflow_config["archived"]:
+            error_msg = (
+                "Archived workflow can not be executed. Please create a new workflow."
+            )
+            raise NotifiableException(error_msg) from UnsupportedStatusEvent(error_msg)
+
+        if self._workflow_config["stalled"]:
+            error_msg = (
+                "Stalled workflow can not be executed. Please create a new workflow."
+            )
+            raise NotifiableException(error_msg) from UnsupportedStatusEvent(error_msg)
+
         if status in [
             WorkflowStatusEnum.INPUT_REQUIRED,
             WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
             WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
         ]:
             if not checkpoint_tuple:
-                self._logger.warning(
-                    "Resuming a workflow, but first checkpoint is missing",
+                self._logger.error(
+                    "The workflow record of the GitLab database is a continuous state "
+                    "but there are no associtated checkopints."
+                    "This data integrity issue could be caused by the expiring mechanism of checkpoint records."
+                    "We try to execute this workflow, however, there might be an unexpected behavior.",
                     **self._workflow_config,
                 )
 
