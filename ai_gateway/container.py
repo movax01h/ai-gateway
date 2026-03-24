@@ -12,6 +12,7 @@ from ai_gateway.response_schemas.container import ContainerSchemas
 from ai_gateway.searches.container import ContainerSearches
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.x_ray.container import ContainerXRay
+from duo_workflow_service.audit_events.container import ContainerAuditEvent
 from lib.billing_events import ContainerBillingEvent
 from lib.internal_events import ContainerInternalEvent
 from lib.usage_quota import ContainerUsageQuota
@@ -47,6 +48,8 @@ class ContainerApplication(containers.DeclarativeContainer):
         config=config.billing_event,
         internal_event=internal_event,
     )
+
+    audit_event = providers.Container(ContainerAuditEvent, config=config.audit_event)
 
     integrations = providers.Container(
         ContainerIntegrations,

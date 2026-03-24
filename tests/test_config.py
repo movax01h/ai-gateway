@@ -6,6 +6,7 @@ import pytest
 from ai_gateway.config import (
     Config,
     ConfigAmazonQ,
+    ConfigAuditEvent,
     ConfigAuth,
     ConfigBillingEvent,
     ConfigCustomModels,
@@ -533,6 +534,33 @@ def test_config_billing_event(values: dict, expected: ConfigBillingEvent):
         config = Config(_env_file=None)
 
         assert config.billing_event == expected
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({}, ConfigAuditEvent()),
+        (
+            {
+                "AIGW_AUDIT_EVENT__ENABLED": "yes",
+                "AIGW_AUDIT_EVENT__BUFFER_SIZE": "50",
+                "AIGW_AUDIT_EVENT__FLUSH_INTERVAL_SECONDS": "5.0",
+                "AIGW_AUDIT_EVENT__MAX_RETRIES": "5",
+            },
+            ConfigAuditEvent(
+                enabled=True,
+                buffer_size=50,
+                flush_interval_seconds=5.0,
+                max_retries=5,
+            ),
+        ),
+    ],
+)
+def test_config_audit_event(values: dict, expected: ConfigAuditEvent):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.audit_event == expected
 
 
 # pylint: enable=direct-environment-variable-reference
