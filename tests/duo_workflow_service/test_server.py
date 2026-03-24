@@ -83,13 +83,7 @@ def create_mock_internal_event_client():
 def create_mock_billing_service():
     """Helper function to create a mock billing service for tests."""
     mock_billing_service = MagicMock()
-    mock_track_operations = MagicMock()
-    mock_billing_service.start_billing.return_value.__enter__ = MagicMock(
-        return_value=mock_track_operations
-    )
-    mock_billing_service.start_billing.return_value.__exit__ = MagicMock(
-        return_value=None
-    )
+    mock_billing_service.track_billing = MagicMock()
     return mock_billing_service
 
 
@@ -1738,51 +1732,27 @@ async def test_track_self_hosted_execute_workflow_billing_event(_mock_container)
     assert len(actions) == 1
     assert actions[0].requestID == "test-req-id"
 
-    # Verify billing service was called with correct parameters
-    mock_billing_service.start_billing.assert_called_once()
-    call_args = mock_billing_service.start_billing.call_args
+    # Verify billing service was called once with correct parameters
+    # We need to capture the GLReportingEventContext to verify it separately
+    # since it's a complex object that needs instance checking
+    call_args = mock_billing_service.track_billing.call_args
+    gl_context = call_args[0][2]
 
-    # Verify positional arguments
-    assert call_args[0][0] == user  # First positional arg is user
-
-    # Verify the GLReportingEventContext
-    gl_context = call_args[0][1]
     assert isinstance(gl_context, GLReportingEventContext)
     assert gl_context.feature_qualified_name == "test_feature"
     assert gl_context.feature_ai_catalog_item is True
 
-    # Verify keyword arguments
-    assert call_args[1]["event"] == BillingEvent.DAP_FLOW_ON_COMPLETION
-    assert call_args[1]["execution_env"] == ExecutionEnvironment.DAP
-    assert call_args[1]["category"] == "DuoWorkflowService"
-    assert call_args[1]["unit_of_measure"] == "request"
-    assert call_args[1]["quantity"] == 1
-
-    # Verify track_operations was called with correct parameters
-    mock_track_operations = (
-        mock_billing_service.start_billing.return_value.__enter__.return_value
+    # Now verify the complete call with assert_called_once_with
+    mock_billing_service.track_billing.assert_called_once_with(
+        "test-workflow-id",
+        user,
+        gl_context,
+        event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+        execution_env=ExecutionEnvironment.DAP,
+        category="DuoWorkflowService",
+        unit_of_measure="request",
+        quantity=1,
     )
-    mock_track_operations.assert_called_once()
-    track_call_args = mock_track_operations.call_args
-
-    # Verify workflow_id (first positional argument)
-    assert track_call_args[0][0] == "test-workflow-id"
-
-    # Verify keyword arguments for track_operations
-    assert "ai_model_metadata" in track_call_args[1]
-    assert "llm_token_usage" in track_call_args[1]
-
-    # Verify ai_model_metadata
-    ai_model_metadata = track_call_args[1]["ai_model_metadata"]
-    assert ai_model_metadata.identifier == "self-hosted-model"
-    assert ai_model_metadata.engine == "litellm"
-    assert ai_model_metadata.provider == "litellm"
-
-    # Verify llm_token_usage
-    llm_token_usage = track_call_args[1]["llm_token_usage"]
-    assert llm_token_usage.token_count == 1
-    assert llm_token_usage.prompt_tokens == 1
-    assert llm_token_usage.completion_tokens == 1
 
 
 @pytest.mark.asyncio
