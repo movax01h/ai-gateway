@@ -14,6 +14,7 @@ from typing import (
     override,
 )
 
+import anthropic
 import httpx
 import structlog
 from gitlab_cloud_connector import (
@@ -35,13 +36,14 @@ from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
+from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavailableError
 from tenacity import (
     before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
-    wait_exponential,
+    wait_incrementing,
 )
 
 from ai_gateway.config import ConfigModelLimits, ModelLimits
@@ -78,6 +80,8 @@ _RETRYABLE_NETWORK_ERRORS = (
     httpx.ReadError,
     httpx.ConnectError,
     httpx.RemoteProtocolError,
+    anthropic.APIConnectionError,
+    LiteLLMInternalServerError,
     LiteLLMServiceUnavailableError,
 )
 
@@ -85,7 +89,7 @@ _RETRYABLE_NETWORK_ERRORS = (
 @retry(
     reraise=True,
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=5),
+    wait=wait_incrementing(start=2, increment=5),
     retry=retry_if_exception_type(_RETRYABLE_NETWORK_ERRORS),
     before_sleep=before_sleep_log(_log, logging.WARNING),
 )
