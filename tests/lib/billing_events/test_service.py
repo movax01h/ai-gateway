@@ -1,190 +1,63 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from lib.billing_events import BillingEvent, BillingEventsClient
 from lib.billing_events.service import (
-    AIModelMetadata,
     BillingEventService,
-    BillingOperationsTracker,
     ExecutionEnvironment,
-    LLMTokenUsage,
+    LLMOperation,
 )
 from lib.events import GLReportingEventContext
 
 
-@pytest.fixture(name="mock_billing_client")
-def mock_billing_client_fixture():
+@pytest.fixture(name="billing_client")
+def mock_billing_client():
     """Fixture for a mocked BillingEventsClient."""
     return Mock(spec=BillingEventsClient)
 
 
 @pytest.fixture(name="billing_service")
-def billing_service_fixture(mock_billing_client):
+def mock_billing_service(billing_client):
     """Fixture for BillingEventService with mocked client."""
-    return BillingEventService(client=mock_billing_client)
+    return BillingEventService(client=billing_client)
 
 
 @pytest.fixture(name="gl_context")
-def gl_context_fixture():
+def mock_gl_context():
     """Fixture for GLReportingEventContext."""
     return GLReportingEventContext.from_workflow_definition(
         "software_development", is_ai_catalog_item=True
     )
 
 
-@pytest.fixture(name="ai_model_metadata")
-def ai_model_metadata_fixture():
-    """Fixture for AIModelMetadata."""
-    return AIModelMetadata(
-        identifier="claude-3-5-sonnet",
-        engine="anthropic",
-        provider="anthropic",
-    )
-
-
-@pytest.fixture(name="llm_token_usage")
-def llm_token_usage_fixture():
-    """Fixture for LLMTokenUsage."""
-    return LLMTokenUsage(
+@pytest.fixture(name="llm_operation")
+def mock_llm_operation():
+    """Fixture for LLMOperation."""
+    return LLMOperation(
+        model_id="claude-3-5-sonnet",
+        model_engine="anthropic",
+        model_provider="anthropic",
         token_count=150,
         prompt_tokens=100,
         completion_tokens=50,
     )
 
 
-class TestBillingOperationsTracker:
-    """Test suite for BillingOperationsTracker class."""
-
-    def test_track_single_operation(self, ai_model_metadata, llm_token_usage):
-        """Test tracking a single operation for a workflow."""
-        tracker = BillingOperationsTracker()
-        workflow_id = "workflow-123"
-
-        tracker(
-            workflow_id,
-            ai_model_metadata=ai_model_metadata,
-            llm_token_usage=llm_token_usage,
-        )
-
-        accumulated = tracker.accumulated()
-        assert workflow_id in accumulated
-        assert len(accumulated[workflow_id]) == 1
-
-        operation = accumulated[workflow_id][0]
-        assert operation["model_id"] == "claude-3-5-sonnet"
-        assert operation["model_engine"] == "anthropic"
-        assert operation["model_provider"] == "anthropic"
-        assert operation["token_count"] == 150
-        assert operation["prompt_tokens"] == 100
-        assert operation["completion_tokens"] == 50
-
-    def test_track_multiple_operations_same_workflow(
-        self, ai_model_metadata, llm_token_usage
-    ):
-        """Test tracking multiple operations for the same workflow."""
-        tracker = BillingOperationsTracker()
-        workflow_id = "workflow-456"
-
-        # First operation
-        tracker(
-            workflow_id,
-            ai_model_metadata=ai_model_metadata,
-            llm_token_usage=llm_token_usage,
-        )
-
-        # Second operation with different usage
-        second_usage = LLMTokenUsage(
-            token_count=200,
-            prompt_tokens=120,
-            completion_tokens=80,
-        )
-        tracker(
-            workflow_id,
-            ai_model_metadata=ai_model_metadata,
-            llm_token_usage=second_usage,
-        )
-
-        accumulated = tracker.accumulated()
-        assert len(accumulated[workflow_id]) == 2
-        assert accumulated[workflow_id][0]["token_count"] == 150
-        assert accumulated[workflow_id][1]["token_count"] == 200
-
-    def test_track_multiple_workflows(self, ai_model_metadata, llm_token_usage):
-        """Test tracking operations for multiple workflows."""
-        tracker = BillingOperationsTracker()
-        workflow_id_1 = "workflow-1"
-        workflow_id_2 = "workflow-2"
-
-        tracker(
-            workflow_id_1,
-            ai_model_metadata=ai_model_metadata,
-            llm_token_usage=llm_token_usage,
-        )
-
-        second_metadata = AIModelMetadata(
-            identifier="gpt-4",
-            engine="openai",
-            provider="openai",
-        )
-        tracker(
-            workflow_id_2,
-            ai_model_metadata=second_metadata,
-            llm_token_usage=llm_token_usage,
-        )
-
-        accumulated = tracker.accumulated()
-        assert len(accumulated) == 2
-        assert workflow_id_1 in accumulated
-        assert workflow_id_2 in accumulated
-        assert accumulated[workflow_id_1][0]["model_id"] == "claude-3-5-sonnet"
-        assert accumulated[workflow_id_2][0]["model_id"] == "gpt-4"
+def get_call_metadata(mock_client):
+    """Helper to extract metadata from billing client call."""
+    return mock_client.track_billing_event.call_args[1]["metadata"]
 
 
 class TestBillingEventService:
     """Test suite for BillingEventService class."""
 
-    def test_start_billing_context_manager_yields_tracker(
-        self, billing_service, user, gl_context
+    def test_track_billing_with_explicit_operations(
+        self, billing_service, billing_client, user, gl_context, llm_operation
     ):
-        """Test that start_billing yields a BillingOperationsTracker."""
-        with billing_service.start_billing(
-            user=user,
-            gl_context=gl_context,
-            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
-            execution_env=ExecutionEnvironment.DAP,
-            category="test_category",
-        ) as tracker:
-            assert isinstance(tracker, BillingOperationsTracker)
-
-    def test_start_billing_no_operations_tracked(
-        self, billing_service, mock_billing_client, user, gl_context
-    ):
-        """Test that no billing events are sent when no operations are tracked."""
-        with billing_service.start_billing(
-            user=user,
-            gl_context=gl_context,
-            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
-            execution_env=ExecutionEnvironment.DAP,
-            category="test_category",
-        ):
-            pass  # No operations tracked
-
-        mock_billing_client.track_billing_event.assert_not_called()
-
-    def test_start_billing_single_workflow_single_operation(
-        self,
-        billing_service,
-        mock_billing_client,
-        user,
-        gl_context,
-        ai_model_metadata,
-        llm_token_usage,
-    ):
-        """Test billing event sent for single workflow with single operation."""
-        workflow_id = "workflow-123"
-
-        with billing_service.start_billing(
+        """Test billing event with explicit LLM operations and custom parameters."""
+        billing_service.track_billing(
+            workflow_id="workflow-123",
             user=user,
             gl_context=gl_context,
             event=BillingEvent.DAP_FLOW_ON_COMPLETION,
@@ -192,103 +65,231 @@ class TestBillingEventService:
             category="test_category",
             unit_of_measure="execution",
             quantity=1,
-        ) as tracker:
-            tracker(
-                workflow_id,
-                ai_model_metadata=ai_model_metadata,
-                llm_token_usage=llm_token_usage,
-            )
+            llm_ops=[llm_operation],
+        )
 
-        mock_billing_client.track_billing_event.assert_called_once()
-        call_args = mock_billing_client.track_billing_event.call_args
+        billing_client.track_billing_event.assert_called_once_with(
+            user,
+            BillingEvent.DAP_FLOW_ON_COMPLETION,
+            "test_category",
+            unit_of_measure="execution",
+            quantity=1,
+            metadata={
+                "workflow_id": "workflow-123",
+                "feature_qualified_name": "software_development",
+                "feature_ai_catalog_item": True,
+                "execution_environment": ExecutionEnvironment.DAP.value,
+                "llm_operations": [
+                    {
+                        "model_id": "claude-3-5-sonnet",
+                        "model_engine": "anthropic",
+                        "model_provider": "anthropic",
+                        "token_count": 150,
+                        "prompt_tokens": 100,
+                        "completion_tokens": 50,
+                    }
+                ],
+            },
+        )
 
-        assert call_args[0][0] == user
-        assert call_args[0][1] == BillingEvent.DAP_FLOW_ON_COMPLETION
-        assert call_args[0][2] == "test_category"
-        assert call_args[1]["unit_of_measure"] == "execution"
-        assert call_args[1]["quantity"] == 1
-
-        metadata = call_args[1]["metadata"]
-        assert metadata["workflow_id"] == workflow_id
-        assert metadata["feature_qualified_name"] == "software_development"
-        assert metadata["feature_ai_catalog_item"] is True
-        assert metadata["execution_environment"] == ExecutionEnvironment.DAP.value
-        assert len(metadata["llm_operations"]) == 1
-        assert metadata["llm_operations"][0]["model_id"] == "claude-3-5-sonnet"
-        assert metadata["llm_operations"][0]["token_count"] == 150
-
-    def test_start_billing_single_workflow_multiple_operations(
-        self,
-        billing_service,
-        mock_billing_client,
-        user,
-        gl_context,
-        ai_model_metadata,
-        llm_token_usage,
+    def test_track_billing_with_multiple_operations(
+        self, billing_service, billing_client, user, gl_context, llm_operation
     ):
-        """Test billing event sent for single workflow with multiple operations."""
-        workflow_id = "workflow-456"
+        """Test billing event with multiple LLM operations."""
+        second_op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=200,
+            prompt_tokens=120,
+            completion_tokens=80,
+        )
 
-        with billing_service.start_billing(
+        billing_service.track_billing(
+            workflow_id="workflow-456",
             user=user,
             gl_context=gl_context,
             event=BillingEvent.DAP_FLOW_ON_COMPLETION,
             execution_env=ExecutionEnvironment.DAP,
             category="test_category",
-        ) as tracker:
-            # First operation
-            tracker(
-                workflow_id,
-                ai_model_metadata=ai_model_metadata,
-                llm_token_usage=llm_token_usage,
-            )
+            llm_ops=[llm_operation, second_op],
+        )
 
-            # Second operation
-            second_usage = LLMTokenUsage(
-                token_count=200,
-                prompt_tokens=120,
-                completion_tokens=80,
-            )
-            tracker(
-                workflow_id,
-                ai_model_metadata=ai_model_metadata,
-                llm_token_usage=second_usage,
-            )
-
-        mock_billing_client.track_billing_event.assert_called_once()
-        call_args = mock_billing_client.track_billing_event.call_args
-
-        metadata = call_args[1]["metadata"]
+        metadata = get_call_metadata(billing_client)
         assert len(metadata["llm_operations"]) == 2
         assert metadata["llm_operations"][0]["token_count"] == 150
         assert metadata["llm_operations"][1]["token_count"] == 200
 
-    def test_start_billing_exception_handling(
-        self,
-        billing_service,
-        mock_billing_client,
-        user,
-        gl_context,
-        ai_model_metadata,
-        llm_token_usage,
+    def test_track_billing_defaults_and_gl_context_variations(
+        self, billing_service, billing_client, user, llm_operation
     ):
-        """Test that exceptions during billing propagate from context manager."""
-        mock_billing_client.track_billing_event.side_effect = Exception("Billing error")
+        """Test default parameters and different GL context configurations."""
+        gl_context = GLReportingEventContext.from_workflow_definition(
+            "chat", is_ai_catalog_item=False
+        )
 
-        # Exception should propagate from the context manager
+        billing_service.track_billing(
+            workflow_id="workflow-test",
+            user=user,
+            gl_context=gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[llm_operation],
+        )
+
+        call_args = billing_client.track_billing_event.call_args
+        assert call_args[1]["unit_of_measure"] == "request"
+        assert call_args[1]["quantity"] == 1
+
+        metadata = call_args[1]["metadata"]
+        assert metadata["feature_qualified_name"] == "chat"
+        assert metadata["feature_ai_catalog_item"] is False
+
+    def test_track_billing_exception_handling(
+        self, billing_service, billing_client, user, gl_context, llm_operation
+    ):
+        """Test that exceptions during billing propagate."""
+        billing_client.track_billing_event.side_effect = Exception("Billing error")
+
         with pytest.raises(Exception, match="Billing error"):
-            with billing_service.start_billing(
+            billing_service.track_billing(
+                workflow_id="workflow-error",
                 user=user,
                 gl_context=gl_context,
                 event=BillingEvent.DAP_FLOW_ON_COMPLETION,
                 execution_env=ExecutionEnvironment.DAP,
                 category="test_category",
-            ) as tracker:
-                tracker(
-                    "workflow-error",
-                    ai_model_metadata=ai_model_metadata,
-                    llm_token_usage=llm_token_usage,
-                )
+                llm_ops=[llm_operation],
+            )
 
-        # Verify the call was attempted
-        mock_billing_client.track_billing_event.assert_called_once()
+        billing_client.track_billing_event.assert_called_once()
+
+    @patch("lib.billing_events.service.get_llm_operations")
+    def test_track_billing_with_context_operations(
+        self,
+        mock_get_llm_operations,
+        billing_service,
+        billing_client,
+        user,
+        gl_context,
+    ):
+        """Test billing event retrieves LLM operations from context when not explicitly provided."""
+        context_ops = [
+            {
+                "model_id": "gpt-4",
+                "model_engine": "openai",
+                "model_provider": "openai",
+                "token_count": 300,
+                "prompt_tokens": 200,
+                "completion_tokens": 100,
+            }
+        ]
+        mock_get_llm_operations.return_value = context_ops
+
+        billing_service.track_billing(
+            workflow_id="workflow-context",
+            user=user,
+            gl_context=gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+        )
+
+        mock_get_llm_operations.assert_called_once()
+        metadata = get_call_metadata(billing_client)
+        assert len(metadata["llm_operations"]) == 1
+        assert metadata["llm_operations"][0]["model_id"] == "gpt-4"
+        assert metadata["llm_operations"][0]["token_count"] == 300
+
+    @patch("lib.billing_events.service.get_llm_operations")
+    def test_track_billing_raises_error_when_no_operations_available(
+        self, mock_get_llm_operations, billing_service, user, gl_context
+    ):
+        """Test that ValueError is raised when no LLM operations are available."""
+        mock_get_llm_operations.return_value = None
+
+        with pytest.raises(
+            ValueError, match="No LLM operations available for billing tracking"
+        ):
+            billing_service.track_billing(
+                workflow_id="workflow-no-ops",
+                user=user,
+                gl_context=gl_context,
+                event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+                execution_env=ExecutionEnvironment.DAP,
+                category="test_category",
+            )
+
+    @patch("lib.billing_events.service.self_hosted_dap_billing_enabled")
+    @patch("lib.billing_events.service.get_llm_operations")
+    @pytest.mark.parametrize(
+        ("explicit_ops_provided", "expected_model"),
+        [
+            (False, "self-hosted-model"),  # Self-hosted takes priority over context
+            (True, "self-hosted-model"),  # Self-hosted takes priority over explicit
+        ],
+    )
+    def test_track_billing_operation_priority(
+        self,
+        mock_get_llm_operations,
+        mock_self_hosted_enabled,
+        billing_service,
+        billing_client,
+        user,
+        gl_context,
+        llm_operation,
+        explicit_ops_provided,
+        expected_model,
+    ):
+        """Test operation priority: self-hosted > explicit > context."""
+        mock_self_hosted_enabled.get.return_value = True
+        mock_get_llm_operations.return_value = [
+            {
+                "model_id": "context-model",
+                "model_engine": "openai",
+                "model_provider": "openai",
+                "token_count": 999,
+                "prompt_tokens": 500,
+                "completion_tokens": 499,
+            }
+        ]
+
+        billing_service.track_billing(
+            workflow_id="workflow-priority",
+            user=user,
+            gl_context=gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[llm_operation] if explicit_ops_provided else None,
+        )
+
+        mock_get_llm_operations.assert_not_called()
+        metadata = get_call_metadata(billing_client)
+        assert metadata["llm_operations"][0]["model_id"] == expected_model
+
+    @patch("lib.billing_events.service.get_llm_operations")
+    def test_track_billing_explicit_operations_skip_context(
+        self,
+        mock_get_llm_operations,
+        billing_service,
+        billing_client,
+        user,
+        gl_context,
+        llm_operation,
+    ):
+        """Test that explicit operations skip context retrieval."""
+        billing_service.track_billing(
+            workflow_id="workflow-explicit",
+            user=user,
+            gl_context=gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[llm_operation],
+        )
+
+        mock_get_llm_operations.assert_not_called()
+        metadata = get_call_metadata(billing_client)
+        assert metadata["llm_operations"][0]["model_id"] == "claude-3-5-sonnet"

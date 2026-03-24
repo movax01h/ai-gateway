@@ -81,7 +81,6 @@ from lib.billing_events import (
     BillingEvent,
     BillingEventService,
     ExecutionEnvironment,
-    SelfHostedBilling,
 )
 from lib.context import client_capabilities, language_server_version
 from lib.events import GLReportingEventContext
@@ -743,7 +742,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             )
 
             try:
-                with billing_service.start_billing(
+                billing_service.track_billing(
+                    client_event.workflowID,
                     user,
                     gl_context,
                     event=BillingEvent.DAP_FLOW_ON_COMPLETION,
@@ -751,18 +751,13 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     category=self.__class__.__name__,
                     unit_of_measure="request",
                     quantity=1,
-                ) as track_operations:
-                    track_operations(
-                        client_event.workflowID,
-                        ai_model_metadata=SelfHostedBilling.ai_model_metadata(),
-                        llm_token_usage=SelfHostedBilling.llm_token_usage(),
-                    )
+                )
 
-                    log.info(
-                        "Successfully sent billing event for self-hosted LLM auth",
-                        request_id=client_event.requestID,
-                        workflow_id=client_event.workflowID,
-                    )
+                log.info(
+                    "Successfully sent billing event for self-hosted LLM auth",
+                    request_id=client_event.requestID,
+                    workflow_id=client_event.workflowID,
+                )
             except Exception as e:
                 log_exception(
                     e,
