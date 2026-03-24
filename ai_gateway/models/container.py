@@ -34,15 +34,14 @@ def _init_vertex_grpc_client(
 
 
 def _init_async_fireworks_client(
-    model_keys: dict, model_endpoints: dict
+    model_keys: dict, fireworks_api_base_url: str
 ) -> AsyncOpenAI | None:
-    api_key = model_keys.get("fireworks_api_key")
-    base_url = model_endpoints.get("fireworks_current_region_endpoint", {}).get(
-        "endpoint", {}
-    )
-    if api_key and base_url:
+    api_key = model_keys.get("fireworks_provider_api_key")
+    if api_key and fireworks_api_base_url:
         return AsyncOpenAI(
-            api_key=api_key, base_url=base_url, http_client=httpx.AsyncClient()
+            api_key=api_key,
+            base_url=fireworks_api_base_url,
+            http_client=httpx.AsyncClient(),
         )
 
     return None
@@ -72,7 +71,7 @@ class ContainerModels(containers.DeclarativeContainer):
     async_fireworks_client = providers.Singleton(
         _init_async_fireworks_client,
         model_keys=config.model_keys,
-        model_endpoints=config.model_endpoints,
+        fireworks_api_base_url=config.fireworks_api_base_url,
     )
 
     http_client_anthropic = providers.Singleton(init_anthropic_client)
@@ -112,9 +111,9 @@ class ContainerModels(containers.DeclarativeContainer):
             custom_models_enabled=config.custom_models.enabled,
             disable_streaming=config.custom_models.disable_streaming,
             provider_keys=config.model_keys,
-            provider_endpoints=config.model_endpoints,
             async_fireworks_client=async_fireworks_client,
             vertex_model_location=config.vertex_text_model.location,
+            fireworks_api_base_url=config.fireworks_api_base_url,
         ),
         mocked=providers.Factory(mock.LLM),
     )
@@ -126,8 +125,8 @@ class ContainerModels(containers.DeclarativeContainer):
             custom_models_enabled=config.custom_models.enabled,
             disable_streaming=config.custom_models.disable_streaming,
             provider_keys=config.model_keys,
-            provider_endpoints=config.model_endpoints,
             async_fireworks_client=async_fireworks_client,
+            fireworks_api_base_url=config.fireworks_api_base_url,
         ),
         mocked=providers.Factory(mock.ChatModel),
     )

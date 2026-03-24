@@ -150,7 +150,6 @@ async def completions(
         internal_event_client,
         region,
         config.model_keys(),
-        config.model_endpoints(),
         config,
     )
 
@@ -430,7 +429,6 @@ def _resolve_agent_code_completions(
     prompt_registry: BasePromptRegistry,
     completions_agent_factory: Factory[CodeCompletions],
     model_keys: dict,
-    model_endpoints: dict,
     using_cache: bool,
     config: Config,
     gitlab_identifier: Optional[str] = None,
@@ -450,7 +448,7 @@ def _resolve_agent_code_completions(
             "identifier": payload.model_identifier,
             "provider": payload.model_provider or "text-completion-openai",
             "provider_keys": model_keys,
-            "model_endpoints": model_endpoints,
+            "fireworks_api_base_url": config.fireworks_api_base_url(),
             "using_cache": using_cache,
             "session_id": current_user.global_user_id,
         },
@@ -595,7 +593,6 @@ def _build_code_completions(
     internal_event_client: InternalEventsClient,
     region: str,
     model_keys: dict,
-    model_endpoints: dict,
     config: Config,
 ) -> tuple[CodeCompletions, dict]:
     unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
@@ -615,7 +612,6 @@ def _build_code_completions(
                 "identifier": payload.model_name,
                 "feature_setting": "code_completions",
                 "provider_keys": model_keys,
-                "model_endpoints": model_endpoints,
             },
             mock_model_responses=config.mock_model_responses,
         )
@@ -661,7 +657,6 @@ def _build_code_completions(
             prompt_registry=prompt_registry,
             completions_agent_factory=completions_agent_factory,
             model_keys=model_keys,
-            model_endpoints=model_endpoints,
             using_cache=using_cache,
             config=config,
             gitlab_identifier=gitlab_identifier,

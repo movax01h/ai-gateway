@@ -44,7 +44,6 @@ class TestCompletionLiteLLMInit:
             model="codestral-2501",
             completion_type=CompletionType.TEXT,
             model_keys="ignored",
-            model_endpoints="ignored",
             client="ignored",
             streaming="ignored",
             model_kwargs="ignored",

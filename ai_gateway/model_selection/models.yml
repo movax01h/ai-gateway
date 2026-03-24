@@ -13,6 +13,7 @@ models:
     params:
       model: "codestral-2501"
       custom_llm_provider: "fireworks_ai"
+      identifier: "accounts/gitlab/routers/codestral-2501"
       completion_type: fim
       fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
       temperature: 0.7
@@ -47,6 +48,7 @@ models:
     params:
       model: "codestral-2508"
       custom_llm_provider: "fireworks_ai"
+      identifier: "accounts/gitlab/routers/codestral-2508"
       completion_type: fim
       fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
       temperature: 0.7

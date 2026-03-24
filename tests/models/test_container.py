@@ -60,16 +60,12 @@ def test_init_vertex_grpc_client(args, expected_init):
     [
         (
             {
-                "model_keys": {"fireworks_api_key": "test_fireworks_key"},
-                "model_endpoints": {
-                    "fireworks_current_region_endpoint": {
-                        "endpoint": "https://test.fireworks.ai/"
-                    }
-                },
+                "model_keys": {"fireworks_provider_api_key": "test_fireworks_key"},
+                "fireworks_api_base_url": "https://api.fireworks.ai/inference/v1",
             },
             True,
         ),
-        ({}, False),
+        ({"fireworks_api_base_url": ""}, False),
     ],
 )
 def _init_async_fireworks_client(args, expected_init):

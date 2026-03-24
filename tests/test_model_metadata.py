@@ -65,19 +65,25 @@ def fireworks_model_fixture():
         name="fireworks_ai",
         max_context_tokens=200000,
         family=["codestral"],
-        params={"model": "test_model"},
+        params={
+            "model": "test_model",
+            "identifier": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+        },
     )
 
 
-@pytest.fixture(autouse=True)
-def get_llm_definitions(gitlab_model1, gitlab_model2, amazon_q_model, fireworks_model):
-    mock_models = {
+@pytest.fixture(name="mock_models")
+def mock_models_fixture(gitlab_model1, gitlab_model2, amazon_q_model, fireworks_model):
+    return {
         "gitlab_model1": gitlab_model1,
         "gitlab_model2": gitlab_model2,
         "amazon_q": amazon_q_model,
         "test_model": fireworks_model,
     }
 
+
+@pytest.fixture(autouse=True)
+def get_llm_definitions(mock_models):
     mock_definitions = {
         "duo_chat": UnitPrimitiveConfig(
             feature_setting="duo_chat",
@@ -86,12 +92,18 @@ def get_llm_definitions(gitlab_model1, gitlab_model2, amazon_q_model, fireworks_
         )
     }
 
+    def _get_model(name):
+        if name in mock_models:
+            return mock_models[name]
+        raise ValueError(f"Model {name} not found")
+
     with patch.multiple(
         ModelSelectionConfig,
         get_llm_definitions=mock.Mock(return_value=mock_models),
         get_unit_primitive_config_map=mock.Mock(return_value=mock_definitions),
-    ) as mock_method:
-        yield mock_method
+        get_model=mock.Mock(side_effect=_get_model),
+    ):
+        yield
 
 
 def test_create_amazon_q_model_metadata():
@@ -307,20 +319,24 @@ def test_create_model_metadata_without_provider():
 class TestFireworksModelMetadata:
     """Test Fireworks model metadata creation and validation."""
 
-    def test_create_fireworks_model_metadata_missing_identifier(self):
+    def test_create_fireworks_model_metadata_missing_identifier(self, mock_models):
         """Test that missing model identifier raises ValueError."""
+        # Override the model to have no identifier
+        model_no_id = ChatLiteLLMDefinition(
+            gitlab_identifier="fireworks_ai",
+            name="fireworks_ai",
+            max_context_tokens=200000,
+            family=["codestral"],
+            params={
+                "model": "test_model",
+            },
+        )
+        mock_models["test_model"] = model_no_id
+
         data = {
             "provider": "fireworks_ai",
             "name": "test_model",
-            "provider_keys": {"fireworks_api_key": "test-key"},
-            "model_endpoints": {
-                "fireworks_current_region_endpoint": {
-                    "test_model": {
-                        "endpoint": "https://api.fireworks.ai/inference/v1"
-                        # Missing "identifier" key
-                    }
-                }
-            },
+            "provider_keys": {"fireworks_provider_api_key": "test-key"},
         }
 
         with pytest.raises(
@@ -329,20 +345,24 @@ class TestFireworksModelMetadata:
         ):
             create_model_metadata(data)
 
-    def test_create_fireworks_model_metadata_empty_string_identifier(self):
+    def test_create_fireworks_model_metadata_empty_string_identifier(self, mock_models):
         """Test that empty string model identifier raises ValueError."""
+        model_empty_id = ChatLiteLLMDefinition(
+            gitlab_identifier="fireworks_ai",
+            name="fireworks_ai",
+            max_context_tokens=200000,
+            family=["codestral"],
+            params={
+                "model": "test_model",
+                "identifier": "",
+            },
+        )
+        mock_models["test_model"] = model_empty_id
+
         data = {
             "provider": "fireworks_ai",
             "name": "test_model",
-            "provider_keys": {"fireworks_api_key": "test-key"},
-            "model_endpoints": {
-                "fireworks_current_region_endpoint": {
-                    "test_model": {
-                        "endpoint": "https://api.fireworks.ai/inference/v1",
-                        "identifier": "",  # Empty string identifier
-                    }
-                }
-            },
+            "provider_keys": {"fireworks_provider_api_key": "test-key"},
         }
 
         with pytest.raises(
@@ -351,20 +371,24 @@ class TestFireworksModelMetadata:
         ):
             create_model_metadata(data)
 
-    def test_create_fireworks_model_metadata_none_identifier(self):
+    def test_create_fireworks_model_metadata_none_identifier(self, mock_models):
         """Test that None model identifier raises ValueError."""
+        model_none_id = ChatLiteLLMDefinition(
+            gitlab_identifier="fireworks_ai",
+            name="fireworks_ai",
+            max_context_tokens=200000,
+            family=["codestral"],
+            params={
+                "model": "test_model",
+                "identifier": None,
+            },
+        )
+        mock_models["test_model"] = model_none_id
+
         data = {
             "provider": "fireworks_ai",
             "name": "test_model",
-            "provider_keys": {"fireworks_api_key": "test-key"},
-            "model_endpoints": {
-                "fireworks_current_region_endpoint": {
-                    "test_model": {
-                        "endpoint": "https://api.fireworks.ai/inference/v1",
-                        "identifier": None,  # None identifier
-                    }
-                }
-            },
+            "provider_keys": {"fireworks_provider_api_key": "test-key"},
         }
 
         with pytest.raises(
@@ -373,21 +397,13 @@ class TestFireworksModelMetadata:
         ):
             create_model_metadata(data)
 
-    def test_create_fireworks_model_metadata_valid_identifier(self, fireworks_model):
+    def test_create_fireworks_model_metadata_valid_identifier(self):
         """Test that valid model identifier creates FireworksModelMetadata successfully."""
         data = {
             "provider": "fireworks_ai",
             "name": "test_model",
-            "provider_keys": {"fireworks_api_key": "test-key"},
-            "model_endpoints": {
-                "fireworks_current_region_endpoint": {
-                    "test_model": {
-                        "endpoint": "https://api.fireworks.ai/inference/v1",
-                        "identifier": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-                    }
-                }
-            },
-            "llm_definition": fireworks_model,
+            "provider_keys": {"fireworks_provider_api_key": "test-key"},
+            "fireworks_api_base_url": "https://api.fireworks.ai/inference/v1",
         }
 
         result = create_model_metadata(data)
@@ -402,20 +418,27 @@ class TestFireworksModelMetadata:
         assert result.api_key == "test-key"
         assert str(result.endpoint) == "https://api.fireworks.ai/inference/v1"
 
-    def test_create_fireworks_model_metadata_empty_identifier_with_mock_enabled(self):
+    def test_create_fireworks_model_metadata_empty_identifier_with_mock_enabled(
+        self, mock_models
+    ):
         """Test that empty model identifier is allowed when mock_model_responses is True."""
+        model_empty_id = ChatLiteLLMDefinition(
+            gitlab_identifier="fireworks_ai",
+            name="fireworks_ai",
+            max_context_tokens=200000,
+            family=["codestral"],
+            params={
+                "model": "test_model",
+                "identifier": "",
+            },
+        )
+        mock_models["test_model"] = model_empty_id
+
         data = {
             "provider": "fireworks_ai",
             "name": "test_model",
-            "provider_keys": {"fireworks_api_key": "test-key"},
-            "model_endpoints": {
-                "fireworks_current_region_endpoint": {
-                    "test_model": {
-                        "endpoint": "https://api.fireworks.ai/inference/v1",
-                        "identifier": "",  # Empty string identifier
-                    }
-                }
-            },
+            "provider_keys": {"fireworks_provider_api_key": "test-key"},
+            "fireworks_api_base_url": "https://api.fireworks.ai/inference/v1",
         }
 
         result = create_model_metadata(data, mock_model_responses=True)

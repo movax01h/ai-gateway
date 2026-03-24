@@ -20,17 +20,8 @@ def config_values_fixture():
     # test using a valid looking fireworks config so we can stub out the actual
     # call rather than the `from_model_name` classmethod
     return {
-        "model_keys": {"fireworks_api_key": "fw_api_key"},
-        "model_endpoints": {
-            "fireworks_regional_endpoints": {
-                "us-central1": {
-                    "codestral-2501": {
-                        "endpoint": "https://fireworks.endpoint.com/v1",
-                        "identifier": "accounts/fireworks/models/codestral-2501#accounts/deployment/deadbeef",
-                    },
-                },
-            }
-        },
+        "fireworks_api_base_url": "https://api.fireworks.ai/inference/v1",
+        "model_keys": {"fireworks_provider_api_key": "fw_api_key"},
         "vertex_search": {"fallback_datastore_version": "18.0"},
     }
 
@@ -156,17 +147,8 @@ class TestCustomModelEnabled:
     def config_values_fixture(self):
         yield {
             "custom_models": {"enabled": "true"},
-            "model_keys": {"fireworks_api_key": "fw_api_key"},
-            "model_endpoints": {
-                "fireworks_regional_endpoints": {
-                    "us-central1": {
-                        "codestral-2501": {
-                            "endpoint": "https://fireworks.endpoint.com/v1",
-                            "identifier": "accounts/fireworks/models/codestral-2501#accounts/deployment/deadbeef",
-                        },
-                    },
-                }
-            },
+            "fireworks_api_base_url": "https://api.fireworks.ai/inference/v1",
+            "model_keys": {"fireworks_provider_api_key": "fw_api_key"},
         }
 
     @pytest.mark.usefixtures(

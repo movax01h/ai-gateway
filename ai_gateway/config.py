@@ -19,7 +19,6 @@ __all__ = [
     "ConfigModelLimits",
     "ConfigCustomModels",
     "ConfigModelKeys",
-    "ConfigModelEndpoints",
     "ConfigCustomersDot",
 ]
 
@@ -116,7 +115,7 @@ class ConfigAgenticMock(BaseModel):
 
 class ConfigModelKeys(BaseModel):
     mistral_api_key: Optional[str] = None
-    fireworks_api_key: Optional[str] = None
+    fireworks_provider_api_key: Optional[str] = None
 
 
 def _build_location(default: str = "us-central1") -> str:
@@ -136,28 +135,6 @@ def _build_endpoint() -> str:
     other Cloud Run regions, this code will need to be updated to map to a nearby Vertex AI region instead.
     """
     return f"{_build_location()}-aiplatform.googleapis.com"
-
-
-class ConfigModelEndpoints(BaseModel):
-    def update_fireworks_current_region_endpoint(self, location: str):
-        regional_endpoints = self.fireworks_regional_endpoints or {}
-
-        matching_regions = [
-            region for region in regional_endpoints if location.startswith(region)
-        ]
-        # Default to us if configuration not found for this region
-        selected_region = matching_regions[0] if matching_regions else "us"
-        self.fireworks_current_region_endpoint = regional_endpoints.get(
-            selected_region, {}
-        )
-
-    # legacy, unused
-    fireworks_completion_endpoint: Optional[str] = None
-    fireworks_completion_identifier: Optional[str] = None
-    # current per-region configuration
-    fireworks_regional_endpoints: Optional[dict[str, dict[str, dict[str, str]]]] = {}
-    # dynamic based on GCP location
-    fireworks_current_region_endpoint: Optional[dict[str, dict[str, str]]] = {}
 
 
 class ConfigGoogleCloudPlatform(BaseModel):
@@ -219,6 +196,7 @@ class Config(BaseSettings):
     gitlab_api_url: str = "https://gitlab.com/api/v4/"
     customer_portal_url: str = "https://customers.gitlab.com"
     glgo_base_url: str = "http://auth.token.gitlab.com"
+    fireworks_api_base_url: str = "https://api.fireworks.ai/inference/v1"
     cloud_connector_service_name: str = "gitlab-ai-gateway"
     mock_model_responses: bool = False
     use_agentic_mock: bool = False
@@ -264,9 +242,6 @@ class Config(BaseSettings):
     model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)] = (
         ConfigModelKeys()
     )
-    model_endpoints: Annotated[
-        ConfigModelEndpoints, Field(default_factory=ConfigModelEndpoints)
-    ] = ConfigModelEndpoints()
     vertex_text_model: Annotated[
         ConfigVertexTextModel, Field(default_factory=ConfigVertexTextModel)
     ] = ConfigVertexTextModel()
@@ -300,10 +275,6 @@ class Config(BaseSettings):
         # pylint: disable=direct-environment-variable-reference
         os.environ["CLOUD_CONNECTOR_SERVICE_NAME"] = self.cloud_connector_service_name
         # pylint: enable=direct-environment-variable-reference
-
-        self.model_endpoints.update_fireworks_current_region_endpoint(
-            self.google_cloud_platform.location
-        )
 
     def _apply_global_configs(self, parent: BaseModel, children: list[BaseModel]):
         """Set a parent config to child configs if the field value is not specified."""

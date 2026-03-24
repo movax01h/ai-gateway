@@ -5,6 +5,7 @@ from litellm import CustomStreamWrapper, ModelResponse, acompletion
 from litellm.exceptions import APIConnectionError, InternalServerError
 from openai import AsyncOpenAI
 
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import (
     KindModelProvider,
     ModelAPIError,
@@ -273,8 +274,8 @@ class LiteLlmChatModel(ChatModelBase):
         identifier: Optional[str] = None,
         provider: Optional[KindModelProvider] = KindModelProvider.LITELLM,
         provider_keys: Optional[dict] = None,
-        provider_endpoints: Optional[dict] = None,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
+        fireworks_api_base_url: str = "",
     ):
         if not custom_models_enabled:
             if endpoint is not None or api_key is not None:
@@ -284,9 +285,9 @@ class LiteLlmChatModel(ChatModelBase):
             api_key = provider_keys.get("mistral_api_key")
 
         if provider == KindModelProvider.FIREWORKS:
-            api_key = provider_keys.get("fireworks_api_key")
+            api_key = provider_keys.get("fireworks_provider_api_key")
 
-            endpoint, identifier = _get_fireworks_config(provider_endpoints, name)
+            endpoint, identifier = _get_fireworks_config(name, fireworks_api_base_url)
             identifier = f"fireworks_ai/{identifier}"
 
         try:
@@ -513,9 +514,9 @@ class LiteLlmTextGenModel(TextGenModelBase):
         identifier: Optional[str] = None,
         provider: Optional[KindModelProvider] = KindModelProvider.LITELLM,
         provider_keys: Optional[dict] = None,
-        provider_endpoints: Optional[dict] = None,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
         using_cache: bool = True,
+        fireworks_api_base_url: str = "",
     ):
         if not custom_models_enabled:
             if endpoint is not None or api_key is not None:
@@ -525,12 +526,12 @@ class LiteLlmTextGenModel(TextGenModelBase):
             api_key = provider_keys.get("mistral_api_key")
 
         if provider == KindModelProvider.FIREWORKS:
-            api_key = provider_keys.get("fireworks_api_key")
+            api_key = provider_keys.get("fireworks_provider_api_key")
 
             if not api_key:
                 raise ValueError("Fireworks API key is missing from configuration.")
 
-            endpoint, identifier = _get_fireworks_config(provider_endpoints, name)
+            endpoint, identifier = _get_fireworks_config(name, fireworks_api_base_url)
             identifier = f"text-completion-openai/{identifier}"
 
         try:
@@ -560,11 +561,14 @@ class LiteLlmTextGenModel(TextGenModelBase):
         )
 
 
-def _get_fireworks_config(provider_endpoints: dict, model_name: str) -> tuple[str, str]:
-    """Get Fireworks endpoint and identifier based on region configuration.
+def _get_fireworks_config(
+    model_name: str, fireworks_api_base_url: str
+) -> tuple[str, str]:
+    """Get Fireworks endpoint and identifier from model selection config.
 
     Args:
-        provider_endpoints: Dictionary containing provider endpoint configurations
+        model_name: The model name to look up (e.g. "codestral-2501")
+        fireworks_api_base_url: The Fireworks API base URL
 
     Returns:
         tuple: (endpoint, identifier) for Fireworks configuration
@@ -572,26 +576,15 @@ def _get_fireworks_config(provider_endpoints: dict, model_name: str) -> tuple[st
     Raises:
         ValueError: If required configuration is missing
     """
-    # Get endpoint configuration for selected region
-    region_config = provider_endpoints.get("fireworks_current_region_endpoint", {})
+    configs = ModelSelectionConfig.instance()
 
-    if not region_config:
-        raise ValueError("Fireworks regional endpoints configuration is missing.")
+    for llm_def in configs.get_llm_definitions().values():
+        if llm_def.params.model == model_name and llm_def.params.identifier:
+            return fireworks_api_base_url, llm_def.params.identifier
 
-    model_config = region_config.get(model_name)
-
-    if not model_config:
-        raise ValueError(
-            f"Fireworks model configuration is missing for model {model_name}."
-        )
-
-    endpoint = model_config.get("endpoint")
-    identifier = model_config.get("identifier")
-
-    if not endpoint or not identifier:
-        raise ValueError("Fireworks endpoint or identifier missing in region config.")
-
-    return endpoint, identifier
+    raise ValueError(
+        f"Fireworks model configuration is missing for model {model_name}."
+    )
 
 
 def _init_litellm_model_metadata(
