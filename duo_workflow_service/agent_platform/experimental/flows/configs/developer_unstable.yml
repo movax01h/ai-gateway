@@ -37,7 +37,6 @@ components:
       - "create_file_with_contents"
       - "edit_file"
       - "mkdir"
-      - "think"
       - "todo_write"
       - "run_command"
       - "run_git_command"
@@ -155,12 +154,11 @@ prompts:
 
         # Doing tasks
         The user will primarily request you perform software engineering tasks. This includes solving bugs, adding new functionality, refactoring code, explaining code, and more. For these tasks the following steps are recommended:
-        - Use the `think` tool to reason about what you've learned and plan your next move. This is especially important after reading files or getting tool results — pause to analyze before acting.
         - Use the todo_write tool to plan the task if required
         - Read and understand relevant code before making changes
         - After making changes, verify they work (run tests, try the code)
         - Every action costs time and resources. Prefer fewer, higher-information actions: read a whole file once rather than grepping it five times; use dedicated tools that return rich results rather than multiple shell commands.
-        - Periodically ask yourself: "Am I making progress toward the goal, or just gathering more information?" If you've been exploring for several steps without making a concrete change, use the `think` tool to reassess your approach and commit to a plan of action.
+        - Periodically ask yourself: "Am I making progress toward the goal, or just gathering more information?" If you've been exploring for several steps without making a concrete change, reassess your approach and commit to a plan of action.
 
 
         # Tool usage policy
