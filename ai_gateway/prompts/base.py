@@ -67,6 +67,7 @@ __all__ = [
     "Prompt",
     "BasePromptRegistry",
     "BasePromptCallbackHandler",
+    "TOOL_OUTPUT_SECURITY_INCLUDE",
     "jinja2_formatter",
     "prompt_template_to_messages",
 ]
@@ -145,6 +146,10 @@ jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
 jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
 jinja_env.filters["split"] = split_filter
 
+TOOL_OUTPUT_SECURITY_INCLUDE = (
+    jinja_env.get_template("common/tool_output_security/1.0.0.jinja").render() + "\n\n"
+)
+
 log = structlog.stdlib.get_logger("prompts")
 
 
@@ -177,10 +182,17 @@ DEFAULT_FORMATTER_MAPPING["jinja2"] = jinja2_formatter
 def prompt_template_to_messages(
     tpl: dict[str, str],
 ) -> Sequence[MessageLikeRepresentation]:
-    return [
-        MessagesPlaceholder(content) if role == "placeholder" else (role, content)
-        for role, content in tpl.items()
-    ]
+    messages: list[MessageLikeRepresentation] = []
+    security_injected = False
+    for role, content in tpl.items():
+        if role == "placeholder":
+            messages.append(MessagesPlaceholder(content))
+        else:
+            if not security_injected and role.startswith("system"):
+                content = TOOL_OUTPUT_SECURITY_INCLUDE + content
+                security_injected = True
+            messages.append((role, content))
+    return messages
 
 
 class PromptLoggingHandler(BaseCallbackHandler):

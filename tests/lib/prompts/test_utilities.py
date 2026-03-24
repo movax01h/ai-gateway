@@ -2,7 +2,10 @@
 
 from langchain_core.prompts import MessagesPlaceholder
 
-from lib.prompts.utilities import prompt_template_to_messages
+from lib.prompts.utilities import (
+    TOOL_OUTPUT_SECURITY_INCLUDE,
+    prompt_template_to_messages,
+)
 
 
 class TestPromptTemplateToMessages:
@@ -18,7 +21,10 @@ class TestPromptTemplateToMessages:
         result = prompt_template_to_messages(tpl)
 
         assert len(result) == 2
-        assert result[0] == ("system", "You are a helpful assistant")
+        assert result[0] == (
+            "system",
+            TOOL_OUTPUT_SECURITY_INCLUDE + "You are a helpful assistant",
+        )
         assert result[1] == ("user", "Hello!")
 
     def test_placeholder_conversion(self):
@@ -32,7 +38,10 @@ class TestPromptTemplateToMessages:
         result = prompt_template_to_messages(tpl)
 
         assert len(result) == 3
-        assert result[0] == ("system", "You are a helpful assistant")
+        assert result[0] == (
+            "system",
+            TOOL_OUTPUT_SECURITY_INCLUDE + "You are a helpful assistant",
+        )
         assert isinstance(result[1], MessagesPlaceholder)
         assert result[1].variable_name == "history"
         assert result[2] == ("user", "Hello!")
@@ -55,7 +64,10 @@ class TestPromptTemplateToMessages:
 
         result = prompt_template_to_messages(tpl)
 
-        assert result[0] == ("system", "You are {{ role }}")
+        assert result[0] == (
+            "system",
+            TOOL_OUTPUT_SECURITY_INCLUDE + "You are {{ role }}",
+        )
         assert result[1] == (
             "user",
             "{% if condition %}Hello{% else %}Goodbye{% endif %}",
@@ -73,7 +85,41 @@ class TestPromptTemplateToMessages:
         result = prompt_template_to_messages(tpl)
 
         assert len(result) == 4
-        assert result[0] == ("system", "System message")
+        assert result[0] == (
+            "system",
+            TOOL_OUTPUT_SECURITY_INCLUDE + "System message",
+        )
         assert result[1] == ("assistant", "Assistant message")
         assert result[2] == ("human", "Human message")
         assert result[3] == ("user", "User message")
+
+    def test_security_injected_only_once(self):
+        """Test that security include is only prepended to the first system message."""
+        tpl = {
+            "system_static": "Static system content",
+            "system_dynamic": "Dynamic system content",
+            "user": "Hello!",
+        }
+
+        result = prompt_template_to_messages(tpl)
+
+        assert len(result) == 3
+        assert result[0] == (
+            "system_static",
+            TOOL_OUTPUT_SECURITY_INCLUDE + "Static system content",
+        )
+        assert result[1] == ("system_dynamic", "Dynamic system content")
+        assert result[2] == ("user", "Hello!")
+
+    def test_no_security_injection_without_system_role(self):
+        """Test that security include is not added when there's no system role."""
+        tpl = {
+            "user": "Hello!",
+            "assistant": "Hi there!",
+        }
+
+        result = prompt_template_to_messages(tpl)
+
+        assert len(result) == 2
+        assert result[0] == ("user", "Hello!")
+        assert result[1] == ("assistant", "Hi there!")

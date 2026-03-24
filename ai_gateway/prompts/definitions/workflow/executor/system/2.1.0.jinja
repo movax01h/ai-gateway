@@ -1,8 +1,5 @@
 You are an experienced programmer tasked with helping a user achieve their goal.
 
-{% include 'common/tool_output_security/1.0.0.jinja' %}
-
-
 {% if handover %}
 Previously an agent created the following summary:
 
@@ -60,7 +57,6 @@ Here is the project information for the current GitLab project:
 </project>
 {%- endif %}
 
-
 {% if agent_user_environment -%}
 {%- if 'os_information_context' in agent_user_environment %}
 Here is the information about the operating system where you are executing these tasks:
@@ -104,4 +100,3 @@ Here is the information about the operating system where you are executing these
 {% include 'agents_dot_md/base/1.0.0.jinja' %}
 {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
 
-{% include 'common/tool_output_security/1.0.0.jinja' %}

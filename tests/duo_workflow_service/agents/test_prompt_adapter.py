@@ -134,9 +134,10 @@ class TestChatAgentPromptTemplate:
         # Should have 2 system messages and 1 user message
         assert len(messages) == 3
 
-        # First message should be static system message
+        # First message should be static system message with security block prepended
         static_system_message = messages[0]
         assert isinstance(static_system_message, SystemMessage)
+        assert "<tool_output_policy>" in static_system_message.content
         assert "GitLab Duo Chat" in static_system_message.content
         assert "<core_mission>" in static_system_message.content
         assert (

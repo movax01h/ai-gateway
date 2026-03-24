@@ -8,6 +8,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt, jinja2_formatter
+from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
@@ -59,7 +60,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         # Create separate system messages for static and dynamic parts
         if "system_static" in self.prompt_template:
             static_content_text = jinja2_formatter(
-                self.prompt_template["system_static"],
+                TOOL_OUTPUT_SECURITY_INCLUDE + self.prompt_template["system_static"],
                 system_template_override=_kwargs.get("system_template_override"),
                 gitlab_instance_type=(
                     gitlab_instance_info.instance_type

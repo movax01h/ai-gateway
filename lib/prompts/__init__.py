@@ -9,7 +9,10 @@ from lib.prompts.caching import (
     prompt_caching_enabled_in_current_request,
     set_prompt_caching_enabled_to_current_request,
 )
-from lib.prompts.utilities import prompt_template_to_messages
+from lib.prompts.utilities import (
+    TOOL_OUTPUT_SECURITY_INCLUDE,
+    prompt_template_to_messages,
+)
 
 __all__ = [
     # Caching
@@ -18,5 +21,6 @@ __all__ = [
     "prompt_caching_enabled_in_current_request",
     "set_prompt_caching_enabled_to_current_request",
     # Utilities
+    "TOOL_OUTPUT_SECURITY_INCLUDE",
     "prompt_template_to_messages",
 ]

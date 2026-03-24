@@ -28,7 +28,7 @@ class FakeModel(SimpleChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> str:
-        assert self.expected_message == messages[0].content
+        assert self.expected_message in messages[0].content
 
         return self.response
 
