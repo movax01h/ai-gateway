@@ -99,7 +99,7 @@ LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER = {
     # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/1761
     "vertex-ai/codestral-2508": "codestral_2508_vertex",  # Set from the model provider handler for default case
     "fireworks_ai/codestral-2501": "codestral_2501_fireworks",
-    "fireworks_ai/codestral-2508": "codestral_2508_fireworks",
+    "fireworks_ai/codestral-2508": "codestral_2501_fireworks",  # Temporary use because of Fireworks scalability issues
     "anthropic/claude-sonnet-4-20250514": "claude_sonnet_4_20250514",
 }
 
