@@ -21,6 +21,7 @@ __all__ = [
     "ConfigModelKeys",
     "ConfigModelEndpoints",
     "ConfigCustomersDot",
+    "ConfigAuditEvent",
 ]
 
 ENV_PREFIX = "AIGW"
@@ -88,6 +89,13 @@ class ConfigBillingEvent(BaseModel):
     endpoint: Optional[str] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
+
+
+class ConfigAuditEvent(BaseModel):
+    enabled: bool = False
+    buffer_size: int = 100
+    flush_interval_seconds: float = 10.0
+    max_retries: int = 3
 
 
 # TODO: Migrate to InternalEvent
@@ -252,6 +260,9 @@ class Config(BaseSettings):
     billing_event: Annotated[
         ConfigBillingEvent, Field(default_factory=ConfigBillingEvent)
     ] = ConfigBillingEvent()
+    audit_event: Annotated[
+        ConfigAuditEvent, Field(default_factory=ConfigAuditEvent)
+    ] = ConfigAuditEvent()
     google_cloud_platform: Annotated[
         ConfigGoogleCloudPlatform, Field(default_factory=ConfigGoogleCloudPlatform)
     ] = ConfigGoogleCloudPlatform()
