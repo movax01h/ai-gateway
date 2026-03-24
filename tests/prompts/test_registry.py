@@ -26,6 +26,7 @@ from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
+from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
@@ -734,7 +735,7 @@ class TestLocalPromptRegistry:
                 None,
                 True,
                 "Test prompt 1.0.1",
-                [("system", "Template1")],
+                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
                 "claude-3-5-sonnet-20241022",
                 {
                     "cache_control_injection_points": [
@@ -755,7 +756,7 @@ class TestLocalPromptRegistry:
                 None,
                 True,
                 "Test prompt 1.0.2-dev",
-                [("system", "Template1")],
+                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
                 "claude-3-5-sonnet-20241022",
                 {
                     "cache_control_injection_points": [
@@ -776,7 +777,7 @@ class TestLocalPromptRegistry:
                 None,
                 True,
                 "Test prompt 1.0.0",
-                [("system", "Template1")],
+                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
                 "claude-3-5-sonnet-20241022",
                 {
                     "cache_control_injection_points": [
@@ -797,7 +798,7 @@ class TestLocalPromptRegistry:
                 None,
                 True,
                 "Test prompt 0.0.1",
-                [("system", "Template1")],
+                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
                 "claude-3-haiku-20240307",
                 {},
                 {
@@ -814,7 +815,10 @@ class TestLocalPromptRegistry:
                 None,
                 False,
                 "Chat react prompt",
-                [("system", "Template1"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("user", "Template2"),
+                ],
                 "claude-3-haiku-20240307",
                 {"stop": ["Foo", "Bar"], "timeout": 60},
                 {
@@ -836,7 +840,10 @@ class TestLocalPromptRegistry:
                 },
                 False,
                 "Amazon Q React prompt",
-                [("system", "Template1"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("user", "Template2"),
+                ],
                 "amazon_q",
                 {
                     "role_arn": "role-arn",
@@ -859,7 +866,10 @@ class TestLocalPromptRegistry:
                 },
                 True,
                 "Chat react custom prompt",
-                [("system", "Template1"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("user", "Template2"),
+                ],
                 "custom",
                 {
                     "stop": ["Foo", "Bar"],
@@ -894,7 +904,10 @@ class TestLocalPromptRegistry:
                 },
                 False,
                 "Chat react custom prompt",
-                [("system", "Template1"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("user", "Template2"),
+                ],
                 "custom",
                 {
                     "stop": ["Foo", "Bar"],
@@ -929,7 +942,10 @@ class TestLocalPromptRegistry:
                 },
                 False,
                 "Chat react custom prompt",
-                [("system", "Template1"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("user", "Template2"),
+                ],
                 "custom",
                 {
                     "stop": ["Foo", "Bar"],
@@ -961,7 +977,10 @@ class TestLocalPromptRegistry:
                 },
                 False,
                 "Chat react claude_3 prompt",  # Should map to claude_3 variant
-                [("system", "Template1"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("user", "Template2"),
+                ],
                 "general",  # The model_metadata.name overrides the prompt file's model name
                 {
                     "stop": ["Foo", "Bar"],
@@ -988,7 +1007,10 @@ class TestLocalPromptRegistry:
                 },
                 False,
                 "Chat react claude_4_5 prompt",  # Should use claude_4_5 specific prompt
-                [("system", "Claude 4.5 Template"), ("user", "Template2")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Claude 4.5 Template"),
+                    ("user", "Template2"),
+                ],
                 "claude-sonnet-4-5-20250929",
                 {
                     "stop": ["Foo", "Bar"],
@@ -1015,7 +1037,13 @@ class TestLocalPromptRegistry:
                 },
                 False,
                 "Chat react claude_vertex_4_5 prompt",  # Should use claude_vertex_4_5 specific prompt
-                [("system", "Claude Vertex 4.5 Template"), ("user", "Template2")],
+                [
+                    (
+                        "system",
+                        TOOL_OUTPUT_SECURITY_INCLUDE + "Claude Vertex 4.5 Template",
+                    ),
+                    ("user", "Template2"),
+                ],
                 "claude-sonnet-4-5@20250929",
                 {
                     "stop": ["Foo", "Bar"],

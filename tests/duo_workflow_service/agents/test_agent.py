@@ -5,7 +5,7 @@ from anthropic import APIStatusError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
-from ai_gateway.prompts.base import Prompt
+from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, Prompt
 from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
 from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.event import WorkflowEvent
@@ -83,7 +83,9 @@ class TestAgent:
         mock_ainvoke.assert_called_once_with(
             ChatPromptValue(
                 messages=[
-                    SystemMessage(content="You are AGI entity capable of anything"),
+                    SystemMessage(
+                        content=f"{TOOL_OUTPUT_SECURITY_INCLUDE}You are AGI entity capable of anything"
+                    ),
                     HumanMessage(content=f"Your goal is: {goal}"),
                 ]
             ),
@@ -119,7 +121,9 @@ Human message"""
         mock_ainvoke.assert_called_once_with(
             ChatPromptValue(
                 messages=[
-                    SystemMessage(content="You are AGI entity capable of anything"),
+                    SystemMessage(
+                        content=f"{TOOL_OUTPUT_SECURITY_INCLUDE}You are AGI entity capable of anything"
+                    ),
                     HumanMessage(
                         content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
                     ),
@@ -172,7 +176,9 @@ Human message"""
         mock_ainvoke.assert_called_once_with(
             ChatPromptValue(
                 messages=[
-                    SystemMessage(content="You are AGI entity capable of anything"),
+                    SystemMessage(
+                        content=f"{TOOL_OUTPUT_SECURITY_INCLUDE}You are AGI entity capable of anything"
+                    ),
                     HumanMessage(content=f"Your goal is: {goal}"),
                     HumanMessage(content="Existing chat"),
                 ]
