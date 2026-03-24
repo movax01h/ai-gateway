@@ -8,7 +8,7 @@ from unittest.mock import Mock, call
 
 import httpx
 import pytest
-from anthropic import APITimeoutError, AsyncAnthropic
+from anthropic import APIConnectionError, APITimeoutError, AsyncAnthropic
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2.exceptions import SecurityError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -17,6 +17,7 @@ from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
+from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import MidStreamFallbackError, Timeout
 from pydantic import AnyUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
@@ -688,6 +689,51 @@ configurable_unit_primitives:
             if call_count == 1:
                 raise MidStreamFallbackError(
                     "Overloaded", model="claude-3", llm_provider="anthropic"
+                )
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_api_connection_error(self, prompt: Prompt):
+        """Test that ainvoke retries on anthropic.APIConnectionError."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise APIConnectionError(request=request)
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_internal_server_error(self, prompt: Prompt):
+        """Test that ainvoke retries on litellm.InternalServerError (e.g. Vertex AI 500)."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise LiteLLMInternalServerError(
+                    "Internal error encountered.",
+                    model="claude-haiku-4-5",
+                    llm_provider="vertex_ai",
                 )
             return success_response
 
