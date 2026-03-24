@@ -200,6 +200,20 @@ class Workflow(AbstractWorkflow):
 
         return Routes.STOP
 
+    def _get_effective_preapproved_tools(self) -> list[str]:
+        """Return preapproved tools, enforcing admin setting defense-in-depth."""
+        tool_approval_enabled = self._workflow_metadata.get(
+            "tool_approval_for_session_enabled", False
+        )
+        if not tool_approval_enabled:
+            if self._preapproved_tools:
+                logger.warning(
+                    "[Tool Approval] Defense-in-depth: Client sent preapproved tools "
+                    "but tool_approval_for_session_enabled is disabled. Rejecting."
+                )
+            return []
+        return self._preapproved_tools or []
+
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
         initial_ui_chat_log = UiChatLog(
             message_sub_type=None,
@@ -232,7 +246,7 @@ class Workflow(AbstractWorkflow):
             project=self._project,
             namespace=self._namespace,
             approval=None,
-            preapproved_tools=self._preapproved_tools,
+            preapproved_tools=self._get_effective_preapproved_tools(),
         )
 
     async def get_graph_input(
@@ -251,7 +265,7 @@ class Workflow(AbstractWorkflow):
             case _:
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
-                    "preapproved_tools": self._preapproved_tools,
+                    "preapproved_tools": self._get_effective_preapproved_tools(),
                 }
                 next_step = "agent"
 
