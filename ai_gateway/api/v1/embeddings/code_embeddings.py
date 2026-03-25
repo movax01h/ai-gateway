@@ -7,7 +7,10 @@ from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.embeddings.typing import EmbeddingsRequest, EmbeddingsResponse
 from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.models.base import KindModelProvider
-from ai_gateway.models.v2.embedding_litellm import EmbeddingBadRequestError
+from ai_gateway.models.v2.embedding_litellm import (
+    EmbeddingBadRequestError,
+    EmbeddingRateLimitError,
+)
 from ai_gateway.prompts.base import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
 from lib.context.auth import StarletteUser, get_current_user
@@ -48,6 +51,11 @@ async def code_embeddings(
     except EmbeddingBadRequestError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except EmbeddingRateLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
         )
 

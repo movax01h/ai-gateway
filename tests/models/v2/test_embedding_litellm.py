@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage
 from ai_gateway.models.v2.embedding_litellm import (
     EmbeddingBadRequestError,
     EmbeddingLiteLLM,
+    EmbeddingRateLimitError,
 )
 
 
@@ -179,5 +180,20 @@ class TestEmbeddingLiteLLMAsyncInvoke:
             model="test-embedding-model", custom_llm_provider="openai"
         )
 
-        with pytest.raises(EmbeddingBadRequestError, match=error_message) as exc_info:
+        with pytest.raises(EmbeddingBadRequestError, match=error_message):
+            await model.ainvoke(input={"contents": ["test text"]})
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_rate_limit_error(self, mock_litellm_aembedding):
+        error_message = "Resource exhausted, please try again later"
+
+        mock_litellm_aembedding.side_effect = litellm.RateLimitError(
+            message=error_message, model="test-embedding-model", llm_provider="openai"
+        )
+
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        with pytest.raises(EmbeddingRateLimitError, match=error_message):
             await model.ainvoke(input={"contents": ["test text"]})

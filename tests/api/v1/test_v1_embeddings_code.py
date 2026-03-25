@@ -167,3 +167,24 @@ class TestCodeEmbeddings:
         assert response.json() == {
             "detail": f"litellm.BadRequestError: {error_message}"
         }
+
+    def test_too_many_requests_error(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        route: str,
+    ):
+        error_message = "Rate limit error from litellm"
+        mock_litellm_aembedding.side_effect = litellm.RateLimitError(
+            message=error_message, model="test-embedding-model", llm_provider="openai"
+        )
+
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+        response = self._post_request(
+            mock_client=mock_client, route=route, params=params
+        )
+
+        assert response.status_code == 429
+        assert response.json() == {"detail": f"litellm.RateLimitError: {error_message}"}

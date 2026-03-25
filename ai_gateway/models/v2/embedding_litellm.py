@@ -12,12 +12,16 @@ import litellm
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig, RunnableSerializable
 
-__all__ = ["EmbeddingLiteLLM", "EmbeddingBadRequestError"]
+__all__ = ["EmbeddingLiteLLM", "EmbeddingBadRequestError", "EmbeddingRateLimitError"]
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingBadRequestError(Exception):
+    pass
+
+
+class EmbeddingRateLimitError(Exception):
     pass
 
 
@@ -136,7 +140,9 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         try:
             response = await litellm.aembedding(**embedding_args)
         except litellm.BadRequestError as e:
-            raise EmbeddingBadRequestError(e.message) from e
+            raise EmbeddingBadRequestError(str(e)) from e
+        except litellm.RateLimitError as e:
+            raise EmbeddingRateLimitError(str(e)) from e
 
         predictions = self._extract_predictions(response)
 
