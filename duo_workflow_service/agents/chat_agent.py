@@ -248,6 +248,43 @@ class ChatAgent:
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = state.get("approval", None)
 
+        # When the conversation ends with an AIMessage (no new user input), we have two scenarios:
+        # 1. AIMessage has pending tool_calls: This occurs when the workflow was interrupted
+        #    mid-execution (e.g., during RETRY after connection loss). We insert synthetic
+        #    ToolMessages to satisfy LLM's expectation of tool results, allowing it to
+        #    respond gracefully about the interruption.
+        # 2. AIMessage has no tool_calls: The AI already responded, and there's no new user
+        #    input to process. Return INPUT_REQUIRED to wait for actual user input.
+        if not approval_state:
+            history = state.get("conversation_history", {}).get(self.name, [])
+            if history and isinstance(history[-1], AIMessage):
+                last_ai = history[-1]
+
+                if getattr(last_ai, "tool_calls", None):
+                    log.warning(
+                        "Agent called with pending tool_calls - inserting cancellation messages",
+                        tool_call_count=len(last_ai.tool_calls),
+                    )
+                    synthetic_tool_messages = [
+                        ToolMessage(
+                            content="Tool execution was interrupted. Please try running the tool again.",
+                            tool_call_id=tc.get("id"),
+                        )
+                        for tc in last_ai.tool_calls
+                    ]
+                    state["conversation_history"][self.name].extend(
+                        synthetic_tool_messages
+                    )
+                else:
+                    log.info(
+                        "No new user input detected, skipping LLM call",
+                        last_message_type=type(last_ai).__name__,
+                    )
+                    return {
+                        "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                        "ui_chat_log": [],
+                    }
+
         self._handle_wrong_messages_order_for_tool_execution(state)
 
         # Handle approval rejection

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
@@ -833,6 +834,112 @@ async def test_chat_agent_notifiable_exception_non_5xx_error(chat_agent, input):
         "if the issue persists."
     )
     assert exc_info.value.__cause__ is original_error
+
+
+class TestAgentRetryWithPendingToolCalls:
+    """Test agent behavior when resuming/retrying with pending tool_calls."""
+
+    @pytest.mark.asyncio
+    async def test_agent_inserts_synthetic_tool_messages_on_pending_calls(self):
+        """Test agent inserts synthetic ToolMessages when called with pending tool_calls."""
+        mock_model = Mock()
+        mock_model._is_auto_approved_by_agentic_mock_model = True
+
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_model.return_value = mock_model
+
+        mock_tools_registry = Mock(spec=ToolsRegistry)
+        mock_toolset = Mock(spec=Toolset)
+        mock_toolset.validate_tool_call.return_value = None
+
+        chat_agent = ChatAgent(
+            name="test_agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=mock_tools_registry,
+            system_template_override=None,
+            toolset=mock_toolset,
+        )
+
+        state = {
+            "conversation_history": {
+                "test_agent": [
+                    HumanMessage(content="create a file"),
+                    AIMessage(
+                        content="I'll create the file.",
+                        tool_calls=[
+                            {"id": "call_1", "name": "create_file", "args": {}},
+                            {"id": "call_2", "name": "write_content", "args": {}},
+                        ],
+                    ),
+                ]
+            },
+            "approval": None,
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+        }
+
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(
+                content="The tool execution was interrupted. How would you like to proceed?",
+                id="response-msg",
+            )
+        )
+
+        result = await chat_agent.run(state)
+
+        history = state["conversation_history"]["test_agent"]
+        assert len(history) == 4
+        assert isinstance(history[2], ToolMessage)
+        assert isinstance(history[3], ToolMessage)
+        assert "interrupted" in history[2].content
+        assert history[2].tool_call_id == "call_1"
+        assert history[3].tool_call_id == "call_2"
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+
+    @pytest.mark.asyncio
+    async def test_agent_skips_llm_call_when_last_message_is_ai_without_tool_calls(
+        self,
+    ):
+        """Test agent returns INPUT_REQUIRED when last message is AIMessage without tool_calls."""
+        mock_prompt_adapter = Mock()
+        mock_tools_registry = Mock(spec=ToolsRegistry)
+        mock_toolset = Mock(spec=Toolset)
+        mock_toolset.validate_tool_call.return_value = None
+
+        chat_agent = ChatAgent(
+            name="test_agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=mock_tools_registry,
+            system_template_override=None,
+            toolset=mock_toolset,
+        )
+
+        state = {
+            "conversation_history": {
+                "test_agent": [
+                    HumanMessage(content="hello"),
+                    AIMessage(content="Hello! How can I help you?"),
+                ]
+            },
+            "approval": None,
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+        }
+
+        result = await chat_agent.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert result["ui_chat_log"] == []
+        mock_prompt_adapter.get_response.assert_not_called()
 
 
 class TestChatAgentCompaction:
