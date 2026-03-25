@@ -1917,14 +1917,14 @@ reference = "gitlab_cloud_connector"
 
 [[package]]
 name = "gitmatch"
-version = "0.2.1"
+version = "0.3.0"
 description = "Gitignore-style path matching"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "gitmatch-0.2.1-py3-none-any.whl", hash = "sha256:c74b370d78356e587c87374ded757ce953c5dd84b458ddea7e65918d7cd11972"},
-    {file = "gitmatch-0.2.1.tar.gz", hash = "sha256:46d2c5e25d579580ebed15632ceaaae696fa437f8b52634fb042d1b4fa432f52"},
+    {file = "gitmatch-0.3.0-py3-none-any.whl", hash = "sha256:ee33a6521e36008f330cb658227522af22c8e2c3bf19475483c009dec81ed9cd"},
+    {file = "gitmatch-0.3.0.tar.gz", hash = "sha256:f3da0fe64c1ee74b276e2aa61be8a6abf5a41eacf8d931b7953b2333d47138ce"},
 ]
 
 [package.source]
@@ -9903,4 +9903,4 @@ reference = "litellm"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "d951065440cd162731614cdf3e6a12832c785042d94f93e23cd44123e82b61d9"
+content-hash = "a9693bbdb6611abf4f97e849dc7c190623e2150b86120e2acf8111d32e2bcd01"
