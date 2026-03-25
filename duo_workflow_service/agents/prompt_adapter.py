@@ -17,7 +17,7 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
-from lib.context import current_model_metadata_context
+from lib.context import get_model_metadata
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
 
 VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
@@ -54,7 +54,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         # Get GitLab instance info from context
         gitlab_instance_info = GitLabServiceContext.get_current_instance_info()
 
-        model_metadata = current_model_metadata_context.get()
+        model_metadata = get_model_metadata()
 
         # Handle system messages with static and dynamic parts
         # Create separate system messages for static and dynamic parts

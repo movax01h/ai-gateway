@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel
@@ -21,6 +23,7 @@ class _GetModelResponseModel(BaseModel):
 class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
     default_model: str
+    models_for_size_preference: dict[Literal["small", "large"], str]
     selectable_models: list[str]
     beta_models: list[str]
     dev: DevConfig | None

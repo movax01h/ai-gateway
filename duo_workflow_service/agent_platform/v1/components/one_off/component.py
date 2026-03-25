@@ -29,6 +29,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.tools import Toolset
+from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
 
 
@@ -95,10 +96,13 @@ class OneOffComponent(BaseComponent):
         tools = self.toolset.bindable
         tool_choice = "any"
 
+        model_metadata = get_model_metadata(self.model_size_preference)
+
         prompt = self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
             self.prompt_version,
+            model_metadata=model_metadata,
             tools=tools,  # type: ignore[arg-type]
             tool_choice=tool_choice,
             internal_event_extra={

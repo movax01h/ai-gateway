@@ -500,10 +500,10 @@ class TestChatAgentPromptTemplate:
                 return_value=mock_gitlab_info,
             ),
             patch(
-                "duo_workflow_service.agents.prompt_adapter.current_model_metadata_context"
-            ) as mock_context,
+                "duo_workflow_service.agents.prompt_adapter.get_model_metadata",
+                return_value=model_metadata,
+            ),
         ):
-            mock_context.get.return_value = model_metadata
 
             result = template.invoke(
                 sample_chat_workflow_state,
@@ -580,10 +580,10 @@ class TestPromptAdapterFriendlyName:
     @patch(
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
     )
-    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
     def test_chat_agent_prompt_template_injects_friendly_name(
         self,
-        mock_context,
+        mock_get_model_metadata,
         mock_instance_info,
         mock_gitlab_instance_info,
         model_metadata: ModelMetadata,
@@ -593,7 +593,7 @@ class TestPromptAdapterFriendlyName:
         prompt_config,
     ):
         """Test that ChatAgentPromptTemplate injects friendly_name into template."""
-        mock_context.get.return_value = model_metadata
+        mock_get_model_metadata.return_value = model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
         adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
@@ -627,17 +627,17 @@ class TestPromptAdapterFriendlyName:
     @patch(
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
     )
-    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
     def test_chat_agent_prompt_template_fallback_when_no_model_metadata(
         self,
-        mock_context,
+        mock_get_model_metadata,
         mock_instance_info,
         mock_gitlab_instance_info,
         model_provider,
         prompt_config,
     ):
         """Test that ChatAgentPromptTemplate handles missing model metadata gracefully."""
-        mock_context.get.return_value = None
+        mock_get_model_metadata.return_value = None
         mock_instance_info.return_value = mock_gitlab_instance_info
 
         adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
@@ -669,10 +669,10 @@ class TestPromptAdapterFriendlyName:
     @patch(
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
     )
-    @patch("duo_workflow_service.agents.prompt_adapter.current_model_metadata_context")
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
     def test_chat_agent_prompt_template_fallback_when_no_friendly_name(
         self,
-        mock_context,
+        mock_get_model_metadata,
         mock_instance_info,
         mock_gitlab_instance_info,
         model_provider,
@@ -685,7 +685,7 @@ class TestPromptAdapterFriendlyName:
         model_metadata.friendly_name = None
 
         # Setup mocks
-        mock_context.get.return_value = model_metadata
+        mock_get_model_metadata.return_value = model_metadata
         mock_instance_info.return_value = mock_gitlab_instance_info
 
         adapter = ChatAgentPromptTemplate(model_provider, prompt_config)

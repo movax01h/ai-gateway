@@ -113,10 +113,8 @@ def base_flow_state_fixture(prompt_variables):
 def flow_state_with_history_fixture(base_flow_state, component_name):
     """Fixture for flow state with conversation history."""
     state = base_flow_state.copy()
-    mock_message = Mock(spec=AIMessage)
-    mock_message.content = "Previous response"
-    mock_message.additional_kwargs = {}
-    state["conversation_history"] = {component_name: [mock_message]}
+    prior_message = AIMessage(content="Previous response")
+    state["conversation_history"] = {component_name: [prior_message]}
     return state
 
 
