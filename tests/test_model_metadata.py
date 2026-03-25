@@ -10,7 +10,9 @@ from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     FireworksModelMetadata,
     ModelMetadata,
+    ModelMetadataBySize,
     create_model_metadata,
+    create_model_metadata_by_size,
 )
 from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
 from ai_gateway.model_selection.model_selection_config import (
@@ -89,7 +91,7 @@ def get_llm_definitions(mock_models):
             feature_setting="duo_chat",
             unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
             default_model="gitlab_model1",
-        )
+        ),
     }
 
     def _get_model(name):
@@ -645,3 +647,66 @@ class TestFriendlyName:
 
             assert isinstance(result, ModelMetadata)
             assert result.friendly_name == "GitLab Identifier Model"
+
+
+class TestCreateModelMetadataBySize:
+    @pytest.fixture(autouse=True)
+    def setup_config(self, gitlab_model1, gitlab_model2):
+        mock_models = {
+            "gitlab_model1": gitlab_model1,
+            "gitlab_model2": gitlab_model2,
+        }
+        mock_definitions = {
+            "duo_chat": UnitPrimitiveConfig(
+                feature_setting="duo_chat",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                default_model="gitlab_model1",
+                models_for_size_preference={
+                    "small": "gitlab_model2",
+                    "large": "gitlab_model1",
+                },
+            ),
+            "no_size_feature": UnitPrimitiveConfig(
+                feature_setting="no_size_feature",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                default_model="gitlab_model1",
+            ),
+        }
+        with patch.multiple(
+            ModelSelectionConfig,
+            get_llm_definitions=mock.Mock(return_value=mock_models),
+            get_unit_primitive_config_map=mock.Mock(return_value=mock_definitions),
+        ):
+            yield
+
+    def test_with_feature_setting_builds_by_size(self, gitlab_model1, gitlab_model2):
+        data = {"provider": "gitlab", "feature_setting": "duo_chat"}
+
+        result = create_model_metadata_by_size(data)
+
+        assert isinstance(result, ModelMetadataBySize)
+        assert result.default.llm_definition == gitlab_model1
+        assert result.by_size["small"].llm_definition == gitlab_model2
+        assert result.by_size["large"].llm_definition == gitlab_model1
+
+    def test_without_size_preference_config(self, gitlab_model1):
+        data = {"provider": "gitlab", "feature_setting": "no_size_feature"}
+
+        result = create_model_metadata_by_size(data)
+
+        assert isinstance(result, ModelMetadataBySize)
+        assert result.default.llm_definition == gitlab_model1
+        assert result.by_size == {}
+
+    def test_without_feature_setting(self, gitlab_model1):
+        data = {"provider": "gitlab", "name": "gitlab_model1"}
+
+        result = create_model_metadata_by_size(data)
+
+        assert isinstance(result, ModelMetadataBySize)
+        assert result.default.llm_definition == gitlab_model1
+        assert result.by_size == {}
+
+    def test_invalid_data_raises(self):
+        with pytest.raises(ValueError, match="provider must be present"):
+            create_model_metadata_by_size(None)

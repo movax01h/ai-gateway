@@ -12,6 +12,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKeyTemplate,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from lib.context import ModelSizeBucket
 from lib.events import GLReportingEventContext
 
 __all__ = ["RouterProtocol", "BaseComponent", "EndComponent", "AbortComponent"]
@@ -40,6 +41,7 @@ class BaseComponent(BaseModel, ABC):
     flow_id: str
     flow_type: GLReportingEventContext
     user: CloudConnectorUser
+    model_size_preference: ModelSizeBucket | None = None
 
     @model_validator(mode="before")
     @classmethod

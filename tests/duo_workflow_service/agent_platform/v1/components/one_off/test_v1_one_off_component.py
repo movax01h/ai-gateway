@@ -201,6 +201,7 @@ class TestOneOffComponentAttachNodes:
             user,
             prompt_id,
             prompt_version,
+            model_metadata=None,
             tools=mock_toolset.bindable,
             tool_choice="any",
             internal_event_extra={

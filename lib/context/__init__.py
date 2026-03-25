@@ -15,7 +15,12 @@ from lib.context.llm_operations import (
     llm_operations,
     token_usage,
 )
-from lib.context.model import current_model_metadata_context
+from lib.context.model import (
+    ModelSizeBucket,
+    current_model_metadata_context,
+    current_model_metadata_with_size_context,
+    get_model_metadata,
+)
 from lib.context.request_metadata import (
     METADATA_LABELS,
     LLMFinishReason,
@@ -51,5 +56,8 @@ __all__ = [
     "StarletteUser",
     "get_current_user",
     # model
+    "current_model_metadata_with_size_context",
     "current_model_metadata_context",
+    "get_model_metadata",
+    "ModelSizeBucket",
 ]

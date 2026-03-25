@@ -116,8 +116,11 @@ class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
     default_model: str
-    selectable_models: list[str] = []
-    beta_models: list[str] = []
+    models_for_size_preference: dict[Literal["small", "large"], str] = Field(
+        default_factory=dict
+    )
+    selectable_models: list[str] = Field(default_factory=list)
+    beta_models: list[str] = Field(default_factory=list)
     dev: DevConfig | None = None
 
 
@@ -175,12 +178,17 @@ class ModelSelectionConfig:
         models_ids: set,
     ) -> list[str]:
         errors: set[str] = set()
-        for upc in unit_primitive_configs:
+        for unit_primitive_config in unit_primitive_configs:
             ids = chain(
-                [upc.default_model],
-                upc.selectable_models,
-                upc.beta_models,
-                upc.dev.selectable_models if upc.dev else [],
+                [unit_primitive_config.default_model],
+                unit_primitive_config.models_for_size_preference.values(),
+                unit_primitive_config.selectable_models,
+                unit_primitive_config.beta_models,
+                (
+                    unit_primitive_config.dev.selectable_models
+                    if unit_primitive_config.dev
+                    else []
+                ),
             )
             errors.update(model_id for model_id in ids if model_id not in models_ids)
         if errors:
@@ -196,7 +204,7 @@ class ModelSelectionConfig:
             f"Feature '{upc.feature_setting}' has default model "
             f"'{upc.default_model}' that is not in selectable_models."
             for upc in unit_primitive_configs
-            if upc.default_model not in upc.selectable_models
+            if upc.selectable_models and upc.default_model not in upc.selectable_models
         ]
         if errors:
             return [

@@ -64,6 +64,7 @@ from lib.billing_events.client import BillingEventsClient
 from lib.context import (
     StarletteUser,
     current_model_metadata_context,
+    current_model_metadata_with_size_context,
     llm_operations,
     token_usage,
 )
@@ -131,8 +132,8 @@ def test_client_fixture(fast_api_router, stub_auth_provider):
 
 @pytest.fixture(name="model_metadata_context")
 def model_metadata_context_fixture():
-    current_model_metadata_context.set(None)
-    yield current_model_metadata_context
+    current_model_metadata_with_size_context.set(None)
+    yield current_model_metadata_with_size_context
 
 
 @pytest.fixture(name="mock_track_internal_event")
@@ -842,6 +843,7 @@ def disable_cached_logger():
 
 def reset_context_vars():
     current_feature_flag_context.set(set[str]())
+    current_model_metadata_with_size_context.set(None)
     current_model_metadata_context.set(None)
     token_usage.set(None)
     llm_operations.set(None)

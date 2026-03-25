@@ -223,7 +223,7 @@ def test_get_model_for_feature_no_feature(selection_config):
 
 @pytest.mark.usefixtures("mock_fs")
 def test_validate_without_error():
-    assert ModelSelectionConfig().validate() is None
+    ModelSelectionConfig().validate()
 
 
 def test_validate_with_error(fs: FakeFilesystem):
@@ -480,3 +480,231 @@ def test_fireworks_models_have_max_retries_10():
         assert (
             definition.params.max_retries == 10
         ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
+
+
+def test_get_model_for_feature_with_size_preference_config(selection_config):
+    """get_model_for_feature should use default_model when models_for_size_preference is set."""
+    models_config = UnitPrimitiveConfig(
+        feature_setting="test_config",
+        unit_primitives=[],
+        default_model="gitlab-model-2",
+        models_for_size_preference={
+            "small": "gitlab-model-1",
+            "large": "gitlab-model-2",
+        },
+        selectable_models=["gitlab-model-1", "gitlab-model-2"],
+    )
+    with patch.object(
+        selection_config,
+        "get_unit_primitive_config_map",
+        return_value={"test_config": models_config},
+    ):
+        result = selection_config.get_model_for_feature("test_config")
+        assert result.gitlab_identifier == "gitlab-model-2"
+
+
+def test_validate_with_size_preference_field(fs: FakeFilesystem):
+    """Validate() should check model IDs in models_for_size_preference."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent(
+            """
+            models:
+              - name: Small Model
+                gitlab_identifier: small-model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Small model description."
+                params:
+                  model: claude-haiku
+              - name: Large Model
+                gitlab_identifier: large-model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$$"
+                description: "Large model description."
+                params:
+                  model: claude-sonnet
+            """
+        ),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives:
+              - feature_setting: "test_model_size"
+                unit_primitives:
+                  - "ask_commit"
+                default_model: "large-model"
+                models_for_size_preference:
+                  small: "small-model"
+                  large: "large-model"
+                selectable_models:
+                  - "small-model"
+                  - "large-model"
+            """
+        ),
+    )
+    # editorconfig-checker-enable
+
+    ModelSelectionConfig().validate()
+
+
+def test_validate_with_invalid_size_preference_field(fs: FakeFilesystem):
+    """Validate() should report model IDs in models_for_size_preference that don't exist."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent(
+            """
+            models:
+              - name: Large Model
+                gitlab_identifier: large-model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                params:
+                  model: claude-sonnet
+            """
+        ),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives:
+              - feature_setting: "test_model_size"
+                unit_primitives:
+                  - "ask_commit"
+                default_model: "large-model"
+                models_for_size_preference:
+                  small: "non-existent-small"
+                  large: "large-model"
+                selectable_models:
+                  - "non-existent-small"
+                  - "large-model"
+            """
+        ),
+    )
+    # editorconfig-checker-enable
+
+    with pytest.raises(ValueError) as excinfo:
+        ModelSelectionConfig().validate()
+
+    assert "non-existent-small" in str(excinfo.value)
+
+
+@pytest.fixture
+def size_preference_model_dir(fs: FakeFilesystem):
+    """Shared fixture for size preference validation tests.
+
+    Creates a minimal models.yml with small and large models for testing models_for_size_preference validation
+    scenarios.
+    """
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent(
+            """
+            models:
+              - name: Small Model
+                gitlab_identifier: small-model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Small model description."
+                params:
+                  model: claude-haiku
+              - name: Large Model
+                gitlab_identifier: large-model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$$"
+                description: "Large model description."
+                params:
+                  model: claude-sonnet
+            """
+        ),
+    )
+    # editorconfig-checker-enable
+
+    return model_selection_dir
+
+
+def test_validate_size_preference_without_selectable_models_passes(
+    size_preference_model_dir: Path,  # pylint: disable=redefined-outer-name
+    fs: FakeFilesystem,
+):
+    """Server-side size routing without selectable_models should pass validation.
+
+    A feature using models_for_size_preference for pure server-side routing has no UI model picker, so requiring
+    default_model to be in selectable_models is incorrect. Validation must only enforce that constraint when
+    selectable_models is non-empty.
+    """
+    # editorconfig-checker-disable
+    fs.create_file(
+        size_preference_model_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives:
+              - feature_setting: "test_model_size"
+                unit_primitives:
+                  - "ask_commit"
+                default_model: "large-model"
+                models_for_size_preference:
+                  small: "small-model"
+                  large: "large-model"
+            """
+        ),
+    )
+    # editorconfig-checker-enable
+
+    ModelSelectionConfig().validate()  # must not raise
+
+
+def test_validate_size_preference_models_not_required_in_selectable(
+    size_preference_model_dir: Path,  # pylint: disable=redefined-outer-name
+    fs: FakeFilesystem,
+):
+    """models_for_size_preference values don't need to appear in selectable_models.
+
+    Size-preference models are resolved server-side; selectable_models is the UI model picker list. They are orthogonal:
+    a model can be used for size routing without being exposed to users as a UI choice, and vice-versa.
+    """
+    # editorconfig-checker-disable
+    # large-model is selectable; small-model is only used for size routing
+    fs.create_file(
+        size_preference_model_dir / "unit_primitives.yml",
+        contents=dedent(
+            """
+            configurable_unit_primitives:
+              - feature_setting: "test_model_size"
+                unit_primitives:
+                  - "ask_commit"
+                default_model: "large-model"
+                models_for_size_preference:
+                  small: "small-model"
+                selectable_models:
+                  - "large-model"
+            """
+        ),
+    )
+    # editorconfig-checker-enable
+
+    ModelSelectionConfig().validate()  # must not raise

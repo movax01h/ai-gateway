@@ -258,7 +258,8 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `feature_setting`: An identifier used to refer to the feature name
 - `unit_primitives`: the list of unit primitives that belong to this group, as defined in
   the [cloud_connector](https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/blob/main/src/python/gitlab_cloud_connector/gitlab_features.py#L19)
-- `default_model`: the `gitlab_identifier` of the model that is used if the user has not selected a different model
+- `default_model`: (required) the `gitlab_identifier` of the model used when no size preference is specified or the requested size is not configured.
+- `models_for_size_preference`: (optional) a map of size buckets (`small`, `large`) to `gitlab_identifier` values, enabling per-task model size routing (see [Model size configuration](#model-size-configuration)).
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
@@ -287,6 +288,52 @@ configurable_unit_primitives:
       group_ids:
         - 9970
   ```
+
+## Model size configuration
+
+Features that route different tasks to different model sizes (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_size_preference` alongside the required `default_model`.
+
+### Configuring size buckets in `unit_primitives.yml`
+
+Use `models_for_size_preference` to assign a `gitlab_identifier` to `small` and/or `large` size buckets. `default_model` is always required and is used when no size preference is specified or the requested size is not configured:
+
+```yaml
+configurable_unit_primitives:
+  - feature_setting: "duo_agent_platform"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: claude_sonnet_4_6
+    models_for_size_preference:
+      small: claude_haiku_4_5_20251001
+      large: claude_sonnet_4_6
+```
+
+### How size resolution works
+
+The `ModelMetadataBySize` class wraps one or more `ModelMetadata` instances and exposes a `get(model_size)` method that resolves the right model for a given size bucket.
+If a task requests a size that is not in `models_for_size_preference`, `default_model` is returned instead.
+
+### Expressing size preference in components
+
+Components in `duo_workflow_service` declare their preferred model size via the `model_size_preference` field on `BaseComponent`. It defaults to `None`, which resolves to the feature's `default_model`.
+
+```python
+class MyComponent(AgentComponent):
+    model_size_preference: ModelSizeBucket | None = "small"
+```
+
+At runtime the component calls `get_model_metadata(self.model_size_preference)` to obtain the appropriately-sized `ModelMetadata` for that invocation.
+
+### Context helpers
+
+The resolved `ModelMetadataBySize` is stored in `current_model_metadata_with_size_context` (set by `ModelMetadataInterceptor`). Use the `get_model_metadata(model_size)` helper from `lib.context` to retrieve the right instance for the current request:
+
+```python
+from lib.context import get_model_metadata
+
+metadata = get_model_metadata("small")  # returns None if context is not set
+metadata = get_model_metadata()         # returns the default model
+```
 
 ### Documentation
 

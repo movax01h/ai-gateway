@@ -1,10 +1,17 @@
 from abc import abstractmethod
 from typing import Annotated, Any, Dict, Literal, Optional, override
 
-from pydantic import AnyUrl, BaseModel, StringConstraints, UrlConstraints
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    UrlConstraints,
+)
 
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
-from lib.context import StarletteUser
+from lib.context import ModelSizeBucket, StarletteUser
 
 PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
 
@@ -117,6 +124,58 @@ class ModelMetadata(BaseModelMetadata):
 
 
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
+
+
+class ModelMetadataBySize(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    default: TypeModelMetadata
+    by_size: Dict[Literal["small", "large"], TypeModelMetadata] = Field(
+        default_factory=dict
+    )
+
+    def get(self, model_size: ModelSizeBucket | None = None) -> TypeModelMetadata:
+        if model_size is None:
+            return self.default
+        return self.by_size.get(model_size, self.default)
+
+    def add_user(self, user: StarletteUser) -> None:
+        self.default.add_user(user)
+        for metadata in self.by_size.values():
+            metadata.add_user(user)
+
+
+def create_model_metadata_by_size(
+    data: dict[str, Any] | None, mock_model_responses: bool = False
+) -> ModelMetadataBySize:
+    """Create a ModelMetadataBySize from request data, enriching with size preferences from YAML config.
+
+    If the data contains a `feature_setting`, looks up `models_for_size_preference` in the YAML
+    config and creates ModelMetadata objects for each size bucket.
+    """
+    if not data or "provider" not in data:
+        raise ValueError("Argument error: provider must be present.")
+
+    # Read feature_setting before create_model_metadata pops it from data
+    feature_setting = data.get("feature_setting")
+
+    default_metadata = create_model_metadata(data, mock_model_responses)
+
+    by_size: Dict[Literal["small", "large"], TypeModelMetadata] = {}
+    if feature_setting:
+        configs = ModelSelectionConfig.instance()
+        unit_primitive_config = configs.get_unit_primitive_config_map().get(
+            feature_setting
+        )
+        if unit_primitive_config:
+            for (
+                size,
+                model_id,
+            ) in unit_primitive_config.models_for_size_preference.items():
+                size_data: Dict[str, Any] = {"provider": "gitlab", "name": model_id}
+                by_size[size] = create_model_metadata(size_data, mock_model_responses)
+
+    return ModelMetadataBySize(default=default_metadata, by_size=by_size)
 
 
 def create_model_metadata(
