@@ -32,6 +32,10 @@ setup_script:
   # Install Python dependencies
   - poetry install --with test,lint,eval --no-interaction --no-ansi
 
+  # Having lefthook here avoids problems with broken commits
+  - npm install -g lefthook@1.12.3
+  - lefthook install
+
   # Install Anthropic Sandbox Runtime
   - npm install -g @anthropic-ai/sandbox-runtime@0.0.20
   - test -s "$(npm root -g)/@anthropic-ai/sandbox-runtime/package.json"
