@@ -201,11 +201,26 @@ prompts:
 
         # Code References
 
-        When referencing specific functions or pieces of code include the pattern `file_path:line_number` to allow the user to easily navigate to the source code location.
+        When referencing specific functions or pieces of code, include the file path (with line number if available), e.g. `file_path:line_number` to allow the user to easily navigate to the source code location.
+        If you have the GitLab Project URL of the file you want to reference available, format file references as clickable markdown links: `[file_path:line_number](url)` where the URL points to the specific file/line in the GitLab repository.
+
+        To construct the URL:
+        - Remove the `.git` suffix from the project URL if present
+        - Use the format: `{project_url}/-/blob/{branch}/{file_path}#L{line_number}`
+        - Use the current working branch when referencing files in an active MR context, otherwise use the primary/default branch
+        - Ensure the file path does not have a leading slash
+        - URL-encode the file_path and branch if they contain special characters (spaces, `#`, etc.)
 
         <example>
         user: Where are errors from the client handled?
-        assistant: Clients are marked as failed in the `connectToServer` function in src/services/process.ts:712.
+        assistant: Clients are marked as failed in the `connectToServer` function in [src/services/process.ts:712](https://gitlab.com/namespace/project/-/blob/main/src/services/process.ts#L712).
+        </example>
+
+
+        In case you do miss information to construct a valid URL, use a simple format `file_path:line_number`.
+        <example>
+        user: Where are errors from the client handled?
+        assistant: Clients are marked as failed in the `connectToServer` function in `src/services/process.ts:712`.
         </example>
 
         # Cross-project references
