@@ -1,3 +1,4 @@
+import json
 from unittest.mock import ANY, MagicMock, Mock, patch
 from uuid import UUID
 
@@ -599,14 +600,14 @@ async def test_get_graph_input_start(mock_uuid, workflow_with_project):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status", [WorkflowStatusEventEnum.RETRY, WorkflowStatusEventEnum.RESUME]
-)
 @patch("duo_workflow_service.workflows.chat.workflow.uuid4")
-async def test_get_graph_input(mock_uuid, workflow_with_project, status):
+async def test_get_graph_input_resume_with_goal(mock_uuid, workflow_with_project):
+    """Test RESUME adds HumanMessage and ui_chat_log when goal is provided."""
     mock_uuid.return_value = UUID("11111111-2222-3333-4444-555555555555")
 
-    result = await workflow_with_project.get_graph_input("New input", status, None)
+    result = await workflow_with_project.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RESUME, None
+    )
 
     assert result.goto == "agent"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
@@ -627,6 +628,69 @@ async def test_get_graph_input(mock_uuid, workflow_with_project, status):
     )
     assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1
     assert result.update["ui_chat_log"][-1]["additional_context"][0].category == "file"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_retry_with_empty_goal(workflow_with_project):
+    """Test RETRY with empty goal (connection retry) does not add HumanMessage."""
+    result = await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RETRY, None
+    )
+
+    assert result.goto == "agent"
+    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert "conversation_history" not in result.update
+    assert "ui_chat_log" not in result.update
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_retry_with_goal_adds_human_message(
+    workflow_with_project,
+):
+    """Test RETRY with non-empty goal (user message after cancel) adds HumanMessage."""
+    result = await workflow_with_project.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RETRY, None
+    )
+
+    assert result.goto == "agent"
+    assert result.update["status"] == WorkflowStatusEnum.EXECUTION
+    assert "conversation_history" in result.update
+    assert "ui_chat_log" in result.update
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_retry_always_goes_to_agent(workflow_with_project):
+    """Test RETRY always routes to agent regardless of checkpoint content.
+
+    The agent handles pending tool_calls by inserting synthetic ToolMessages.
+    """
+    checkpoint_with_tool_calls = {
+        "checkpoint": json.dumps(
+            {
+                "channel_values": {
+                    "conversation_history": {
+                        "test_prompt": [
+                            {
+                                "type": "AIMessage",
+                                "content": "",
+                                "tool_calls": [
+                                    {"id": "call_1", "name": "some_tool", "args": {}}
+                                ],
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+    }
+
+    result = await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RETRY, checkpoint_with_tool_calls
+    )
+
+    assert result.goto == "agent"
+    assert "conversation_history" not in result.update
+    assert "ui_chat_log" not in result.update
 
 
 @pytest.mark.asyncio

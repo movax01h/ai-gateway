@@ -257,17 +257,17 @@ class Workflow(AbstractWorkflow):
                 f"Received empty goal with status_event: {status_event} from frontend."
             )
 
-        new_chat_message = goal
-
         match status_event:
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
+
             case _:
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
                     "preapproved_tools": self._get_effective_preapproved_tools(),
                 }
                 next_step = "agent"
+                new_chat_message = goal
 
                 match self._approval and self._approval.WhichOneof("user_decision"):
                     case "approval":
@@ -278,16 +278,17 @@ class Workflow(AbstractWorkflow):
                             message=new_chat_message
                         )
                     case _:
-                        state_update["conversation_history"] = {
-                            self._agent.name: [
-                                HumanMessage(
-                                    content=goal,
-                                    additional_kwargs={
-                                        "additional_context": self._additional_context
-                                    },
-                                )
-                            ]
-                        }
+                        if goal:
+                            state_update["conversation_history"] = {
+                                self._agent.name: [
+                                    HumanMessage(
+                                        content=goal,
+                                        additional_kwargs={
+                                            "additional_context": self._additional_context
+                                        },
+                                    )
+                                ]
+                            }
 
                 if new_chat_message and new_chat_message != "null":
                     new_message_chat_log = UiChatLog(
