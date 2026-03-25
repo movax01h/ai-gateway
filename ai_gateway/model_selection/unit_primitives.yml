@@ -29,7 +29,7 @@ configurable_unit_primitives:
   - feature_setting: "code_completions"
     unit_primitives:
       - "complete_code"
-    default_model: "codestral_2501_fireworks"
+    default_model: "codestral_2508_fireworks"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
