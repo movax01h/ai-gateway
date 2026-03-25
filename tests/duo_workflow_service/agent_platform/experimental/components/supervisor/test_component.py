@@ -93,6 +93,9 @@ def _make_supervisor(
     managed_agent_names,
     max_delegations,
     subagent_components,
+    mock_schema_registry,
+    response_schema_id=None,
+    response_schema_version=None,
 ):
     """Helper to construct a SupervisorAgentComponent with common params."""
     return SupervisorAgentComponent(
@@ -108,7 +111,52 @@ def _make_supervisor(
         managed_agents=managed_agent_names,
         max_delegations=max_delegations,
         subagent_components=subagent_components,
+        schema_registry=mock_schema_registry,
+        response_schema_id=response_schema_id,
+        response_schema_version=response_schema_version,
     )
+
+
+@pytest.fixture(name="make_supervisor")
+def make_supervisor_fixture(
+    supervisor_name,
+    flow_id,
+    flow_type,
+    user,
+    mock_toolset,
+    mock_prompt_registry,
+    mock_internal_event_client,
+    managed_agent_names,
+    max_delegations,
+    mock_sub_agents,
+    mock_schema_registry,
+):
+    """Fixture that returns a factory for creating a SupervisorAgentComponent.
+
+    Captures all common supervisor construction arguments so individual tests only need to supply optional overrides
+    (subagent_components, schema params).
+    """
+
+    def factory(
+        subagent_components=None, response_schema_id=None, response_schema_version=None
+    ):
+        return _make_supervisor(
+            supervisor_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            managed_agent_names,
+            max_delegations,
+            subagent_components if subagent_components is not None else mock_sub_agents,
+            mock_schema_registry,
+            response_schema_id=response_schema_id,
+            response_schema_version=response_schema_version,
+        )
+
+    return factory
 
 
 # --- Node class mock fixtures ---
@@ -210,6 +258,7 @@ class TestSupervisorAgentComponentInit:
         managed_agent_names,
         max_delegations,
         mock_sub_agents,
+        mock_schema_registry,
         developer_name,
         tester_name,
         managed_agents,
@@ -240,39 +289,12 @@ class TestSupervisorAgentComponentInit:
                 managed_agents if managed_agents is not None else managed_agent_names,
                 max_delegations,
                 subagent_components_by_key[subagent_components_key],
+                mock_schema_registry,
             )
 
 
 class TestSupervisorExecutionFlow:
     """Tests for SupervisorAgentComponent execution via a real compiled graph."""
-
-    @pytest.fixture(name="supervisor")
-    def supervisor_fixture(
-        self,
-        supervisor_name,
-        flow_id,
-        flow_type,
-        user,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_internal_event_client,
-        managed_agent_names,
-        max_delegations,
-        mock_sub_agents,
-    ):
-        """Supervisor instance used across execution-flow tests."""
-        return _make_supervisor(
-            supervisor_name,
-            flow_id,
-            flow_type,
-            user,
-            mock_toolset,
-            mock_prompt_registry,
-            mock_internal_event_client,
-            managed_agent_names,
-            max_delegations,
-            mock_sub_agents,
-        )
 
     def _compile(self, supervisor, mock_router):
         """Attach supervisor to a real StateGraph, set entry point, compile."""
@@ -281,21 +303,55 @@ class TestSupervisorExecutionFlow:
         graph.set_entry_point(supervisor.__entry_hook__())
         return graph.compile()
 
+    @pytest.mark.parametrize(
+        ("response_schema_id", "response_schema_version", "final_tool_calls"),
+        [
+            (None, None, []),
+            (
+                "general/structured_response",
+                "1.0.0",
+                [
+                    {
+                        "id": "schema_call_789",
+                        "name": "custom_response_tool",
+                        "args": {"summary": "All done", "score": 10},
+                    }
+                ],
+            ),
+        ],
+    )
     def test_agent_routes_directly_to_final_response(
         self,
-        supervisor,
         all_node_mocks,
         mock_router,
         base_flow_state,
         supervisor_name,
+        mock_toolset,
+        make_supervisor,
+        response_schema_id,
+        response_schema_version,
+        final_tool_calls,
     ):
         """When the agent emits a text-only response (no tool calls), execution exits via the router."""
         nodes = all_node_mocks
 
+        # Fix mock_toolset to not report collision with schema tool
+        mock_toolset.__contains__.side_effect = (
+            lambda name: name != "custom_response_tool"
+        )
+
+        # Create supervisor with schema params
+        supervisor = make_supervisor(
+            response_schema_id=response_schema_id,
+            response_schema_version=response_schema_version,
+        )
+
         nodes["agent"].run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
-                supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
+                supervisor_name: [
+                    AIMessage(content="All done.", tool_calls=final_tool_calls)
+                ]
             },
         }
         nodes["final_response"].run.return_value = {**base_flow_state}
@@ -310,17 +366,49 @@ class TestSupervisorExecutionFlow:
         nodes["delegation"].run.assert_not_called()
         mock_router.route.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("response_schema_id", "response_schema_version", "final_tool_calls"),
+        [
+            (None, None, []),
+            (
+                "general/structured_response",
+                "1.0.0",
+                [
+                    {
+                        "id": "schema_call_789",
+                        "name": "custom_response_tool",
+                        "args": {"summary": "All done", "score": 10},
+                    }
+                ],
+            ),
+        ],
+    )
     def test_agent_routes_to_tools_then_final_response(
         self,
-        supervisor,
         all_node_mocks,
         mock_router,
         base_flow_state,
         supervisor_name,
         regular_tool_call,
+        mock_toolset,
+        make_supervisor,
+        response_schema_id,
+        response_schema_version,
+        final_tool_calls,
     ):
         """Agent → tools → agent → final_response → exit."""
         nodes = all_node_mocks
+
+        # Fix mock_toolset to not report collision with schema tool
+        mock_toolset.__contains__ = Mock(
+            side_effect=lambda name: name != "custom_response_tool"
+        )
+
+        # Create supervisor with schema params
+        supervisor = make_supervisor(
+            response_schema_id=response_schema_id,
+            response_schema_version=response_schema_version,
+        )
 
         nodes["agent"].run.side_effect = [
             {
@@ -334,7 +422,9 @@ class TestSupervisorExecutionFlow:
             {
                 **base_flow_state,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
+                    supervisor_name: [
+                        AIMessage(content="All done.", tool_calls=final_tool_calls)
+                    ]
                 },
             },
         ]
@@ -351,14 +441,35 @@ class TestSupervisorExecutionFlow:
         nodes["delegation"].run.assert_not_called()
         mock_router.route.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("response_schema_id", "response_schema_version", "final_tool_calls"),
+        [
+            (None, None, []),
+            (
+                "general/structured_response",
+                "1.0.0",
+                [
+                    {
+                        "id": "schema_call_789",
+                        "name": "custom_response_tool",
+                        "args": {"summary": "All done", "score": 10},
+                    }
+                ],
+            ),
+        ],
+    )
     def test_agent_routes_to_delegation_then_back_to_agent_then_final_response(
         self,
-        supervisor,
         all_node_mocks,
         mock_router,
         base_flow_state,
         supervisor_name,
         delegate_tool_call,
+        mock_toolset,
+        make_supervisor,
+        response_schema_id,
+        response_schema_version,
+        final_tool_calls,
     ):
         """Agent → delegation → (no active subagent) → agent → final_response → exit.
 
@@ -367,6 +478,17 @@ class TestSupervisorExecutionFlow:
         subagent).
         """
         nodes = all_node_mocks
+
+        # Fix mock_toolset to not report collision with schema tool
+        mock_toolset.__contains__ = Mock(
+            side_effect=lambda name: name != "custom_response_tool"
+        )
+
+        # Create supervisor with schema params
+        supervisor = make_supervisor(
+            response_schema_id=response_schema_id,
+            response_schema_version=response_schema_version,
+        )
 
         nodes["agent"].run.side_effect = [
             {
@@ -380,7 +502,9 @@ class TestSupervisorExecutionFlow:
             {
                 **base_flow_state,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
+                    supervisor_name: [
+                        AIMessage(content="All done.", tool_calls=final_tool_calls)
+                    ]
                 },
             },
         ]
@@ -409,7 +533,6 @@ class TestSupervisorExecutionFlow:
 
     def test_subagents_are_bound_and_attached(
         self,
-        supervisor,
         all_node_mocks,
         mock_router,
         mock_sub_agents,
@@ -417,9 +540,34 @@ class TestSupervisorExecutionFlow:
         supervisor_name,
         developer_name,
         tester_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        managed_agent_names,
+        max_delegations,
+        mock_schema_registry,
     ):
         """Attach() calls bind_to_supervisor then attach on every subagent component."""
         nodes = all_node_mocks
+
+        # Create supervisor
+        supervisor = _make_supervisor(
+            supervisor_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            managed_agent_names,
+            max_delegations,
+            mock_sub_agents,
+            mock_schema_registry,
+        )
+
         nodes["agent"].run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
@@ -438,16 +586,40 @@ class TestSupervisorExecutionFlow:
 
     def test_subagent_router_routes_back_to_subagent_return(
         self,
-        supervisor,
         all_node_mocks,
         mock_router,
         mock_sub_agents,
         base_flow_state,
         supervisor_name,
         developer_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        managed_agent_names,
+        max_delegations,
+        mock_schema_registry,
     ):
         """The router passed to each subagent always routes back to #subagent_return."""
         nodes = all_node_mocks
+
+        # Create supervisor
+        supervisor = _make_supervisor(
+            supervisor_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            managed_agent_names,
+            max_delegations,
+            mock_sub_agents,
+            mock_schema_registry,
+        )
+
         nodes["agent"].run.return_value = {
             **base_flow_state,
             FlowStateKeys.CONVERSATION_HISTORY: {
@@ -462,48 +634,37 @@ class TestSupervisorExecutionFlow:
         sub_router = mock_sub_agents[developer_name].attach.call_args[0][1]
         assert sub_router.route(base_flow_state) == f"{supervisor_name}#subagent_return"
 
-    @pytest.fixture(name="routing_supervisor")
-    def routing_supervisor_fixture(
-        self,
-        supervisor_name,
-        flow_id,
-        flow_type,
-        user,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_internal_event_client,
-        managed_agent_names,
-        max_delegations,
-        developer_name,
-        tester_name,
-    ):
-        """Supervisor wired with RoutingMockSubagentComponent for the developer subagent."""
-        routing_sub_agents = {
-            developer_name: RoutingMockSubagentComponent(name=developer_name),
-            tester_name: MockSubagentComponent(name=tester_name),
-        }
-        return _make_supervisor(
-            supervisor_name,
-            flow_id,
-            flow_type,
-            user,
-            mock_toolset,
-            mock_prompt_registry,
-            mock_internal_event_client,
-            managed_agent_names,
-            max_delegations,
-            routing_sub_agents,
-        )
-
+    @pytest.mark.parametrize(
+        ("response_schema_id", "response_schema_version", "final_tool_calls"),
+        [
+            (None, None, []),
+            (
+                "general/structured_response",
+                "1.0.0",
+                [
+                    {
+                        "id": "schema_call_789",
+                        "name": "custom_response_tool",
+                        "args": {"summary": "All done", "score": 10},
+                    }
+                ],
+            ),
+        ],
+    )
     def test_full_subagent_delegation_loop(
         self,
-        routing_supervisor,
         all_node_mocks,
         mock_router,
         base_flow_state,
         supervisor_name,
         developer_name,
         delegate_tool_call,
+        mock_toolset,
+        tester_name,
+        make_supervisor,
+        response_schema_id,
+        response_schema_version,
+        final_tool_calls,
     ):
         """Full loop: agent → delegation → subagent node → subagent_return → agent → final_response.
 
@@ -512,6 +673,22 @@ class TestSupervisorExecutionFlow:
         without needing a fully wired SubagentComponent.
         """
         nodes = all_node_mocks
+
+        # Fix mock_toolset to not report collision with schema tool
+        mock_toolset.__contains__ = Mock(
+            side_effect=lambda name: name != "custom_response_tool"
+        )
+
+        # Create routing supervisor with schema params
+        routing_sub_agents = {
+            developer_name: RoutingMockSubagentComponent(name=developer_name),
+            tester_name: MockSubagentComponent(name=tester_name),
+        }
+        routing_supervisor = make_supervisor(
+            subagent_components=routing_sub_agents,
+            response_schema_id=response_schema_id,
+            response_schema_version=response_schema_version,
+        )
 
         nodes["agent"].run.side_effect = [
             # First call: delegate to developer subagent
@@ -523,11 +700,13 @@ class TestSupervisorExecutionFlow:
                     ]
                 },
             },
-            # Second call: after subagent_return, emit text-only final response
+            # Second call: after subagent_return, emit final response
             {
                 **base_flow_state,
                 FlowStateKeys.CONVERSATION_HISTORY: {
-                    supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
+                    supervisor_name: [
+                        AIMessage(content="All done.", tool_calls=final_tool_calls)
+                    ]
                 },
             },
         ]
@@ -566,13 +745,39 @@ class TestSupervisorExecutionFlow:
 
     def test_routing_errors_propagate(
         self,
-        supervisor,
         all_node_mocks,
         mock_router,
         base_flow_state,
+        supervisor_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        managed_agent_names,
+        max_delegations,
+        mock_sub_agents,
+        mock_schema_registry,
     ):
         """RoutingError from _agent_node_router propagates out of graph execution."""
         nodes = all_node_mocks
+
+        # Create supervisor
+        supervisor = _make_supervisor(
+            supervisor_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            managed_agent_names,
+            max_delegations,
+            mock_sub_agents,
+            mock_schema_registry,
+        )
+
         # Agent returns state with no conversation history → router raises RoutingError
         nodes["agent"].run.return_value = {**base_flow_state}
 
