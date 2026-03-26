@@ -8,7 +8,13 @@ from unittest.mock import Mock, call
 
 import httpx
 import pytest
-from anthropic import APIConnectionError, APITimeoutError, AsyncAnthropic
+from anthropic import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncAnthropic,
+    BadRequestError,
+)
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2.exceptions import SecurityError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -678,6 +684,29 @@ configurable_unit_primitives:
                     await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
     @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_timeout(self, prompt: Prompt):
+        """Test that ainvoke retries on httpx.TimeoutException (covers ReadTimeout, ConnectTimeout, etc.)."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ReadTimeout(
+                    "Timeout on reading data from socket", request=request
+                )
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 2
+
+    @pytest.mark.asyncio
     async def test_ainvoke_retries_on_mid_stream_fallback_error(self, prompt: Prompt):
         """Test that ainvoke retries on litellm.MidStreamFallbackError (ServiceUnavailable subclass)."""
         success_response = AIMessage(content="Hello!")
@@ -743,6 +772,46 @@ configurable_unit_primitives:
 
         assert result == success_response
         assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_anthropic_overloaded_error(self, prompt: Prompt):
+        """Test that ainvoke retries on anthropic.APIStatusError with 529 status code."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        response = httpx.Response(529, request=request)
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise APIStatusError("Overloaded", response=response, body=None)
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_does_not_retry_on_anthropic_non_retryable_status(
+        self, prompt: Prompt
+    ):
+        """Test that ainvoke does not retry on non-retryable anthropic.APIStatusError (e.g. 400)."""
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        response = httpx.Response(400, request=request)
+
+        with mock.patch.object(
+            FakeModel,
+            "ainvoke",
+            side_effect=BadRequestError(  # 400, not retryable
+                "Bad request", response=response, body=None
+            ),
+        ):
+            with pytest.raises(BadRequestError):
+                await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
     @pytest.mark.parametrize(
         "tool_choice",

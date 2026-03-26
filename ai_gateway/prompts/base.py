@@ -14,9 +14,10 @@ from typing import (
     override,
 )
 
-import anthropic
 import httpx
 import structlog
+from anthropic import APIConnectionError as AnthropicAPIConnectionError
+from anthropic import APIStatusError as AnthropicAPIStatusError
 from gitlab_cloud_connector import (
     CloudConnectorUser,
     GitLabUnitPrimitive,
@@ -41,7 +42,7 @@ from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavaila
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_incrementing,
 )
@@ -81,17 +82,30 @@ _RETRYABLE_NETWORK_ERRORS = (
     httpx.ReadError,
     httpx.ConnectError,
     httpx.RemoteProtocolError,
-    anthropic.APIConnectionError,
+    httpx.TimeoutException,
+    AnthropicAPIConnectionError,
     LiteLLMInternalServerError,
     LiteLLMServiceUnavailableError,
 )
+
+# AnthropicAPIStatusError subclasses don't cover all retryable status codes
+# (e.g. 529 overloaded surfaces as the base class), so we check by status code
+_RETRYABLE_ANTHROPIC_STATUS_CODES = {500, 529}
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, _RETRYABLE_NETWORK_ERRORS):
+        return True
+    if isinstance(exc, AnthropicAPIStatusError):
+        return exc.status_code in _RETRYABLE_ANTHROPIC_STATUS_CODES
+    return False
 
 
 @retry(
     reraise=True,
     stop=stop_after_attempt(3),
     wait=wait_incrementing(start=2, increment=5),
-    retry=retry_if_exception_type(_RETRYABLE_NETWORK_ERRORS),
+    retry=retry_if_exception(_is_retryable),
     before_sleep=before_sleep_log(_log, logging.WARNING),
 )
 async def _ainvoke_with_retry(
