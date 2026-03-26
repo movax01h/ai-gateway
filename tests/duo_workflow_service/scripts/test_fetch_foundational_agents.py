@@ -7,6 +7,9 @@ from unittest.mock import Mock, patch
 import pytest
 from requests import HTTPError
 
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    DEFAULT_FLOW_VERSION,
+)
 from duo_workflow_service.scripts.fetch_foundational_agents import (
     FETCH_AGENT_OPERATION_NAME,
     FETCH_AGENT_QUERY,
@@ -253,7 +256,7 @@ class TestSaveWorkflowToFile:
     """Test cases for save_workflow_to_file function."""
 
     def test_save_workflow_to_file(self):
-        """Test saving workflow definition to file."""
+        """Test saving workflow definition to versioned subdirectory."""
         agent_id = "test_agent"
         flow_def = "version: v1\ncomponents:\n  - name: test_agent"
 
@@ -265,7 +268,10 @@ class TestSaveWorkflowToFile:
 
             filepath = save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
 
-            expected_filepath = os.path.join(temp_dir, "test_agent.yml")
+            # New structure: {DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml
+            expected_filepath = os.path.join(
+                temp_dir, "test_agent", f"{DEFAULT_FLOW_VERSION}.yml"
+            )
             assert filepath == expected_filepath
             assert os.path.exists(filepath)
 
@@ -277,13 +283,33 @@ class TestSaveWorkflowToFile:
             # Verify model validation was called
             mock_flow_config_model.model_validate.assert_called_once()
 
+    def test_save_workflow_to_file_creates_subdirectory(self):
+        """Test that save_workflow_to_file creates the versioned subdirectory."""
+        agent_id = "new_agent"
+        flow_def = "version: v1\ncomponents:\n  - name: new_agent"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_flow_config_model = Mock()
+            mock_flow_config_model.DIRECTORY_PATH = temp_dir
+            mock_flow_config_model.model_validate = Mock(return_value=None)
+
+            agent_dir = os.path.join(temp_dir, agent_id)
+            assert not os.path.exists(agent_dir)
+
+            save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
+
+            assert os.path.isdir(agent_dir)
+
     def test_save_workflow_to_file_if_file_exists(self):
-        """Test saving workflow definition when file already exists."""
+        """Test saving workflow definition when versioned file already exists."""
         agent_id = "test_agent"
         flow_def = "version: v1\ncomponents:\n  - name: test_agent"
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            filepath = os.path.join(temp_dir, "test_agent.yml")
+            # Pre-create the versioned subdirectory and file
+            agent_dir = os.path.join(temp_dir, agent_id)
+            os.makedirs(agent_dir)
+            filepath = os.path.join(agent_dir, f"{DEFAULT_FLOW_VERSION}.yml")
             with open(filepath, "w") as f:
                 f.write("existing content")
 
@@ -450,7 +476,9 @@ class TestFetchAgents:
             "agent_1",
             "version: v1\ncomponents:\n  - name: agent1",
         )
-        mock_save_workflow.return_value = "/tmp/output/agent_1.yml"
+        mock_save_workflow.return_value = (
+            f"/tmp/output/agent_1/{DEFAULT_FLOW_VERSION}.yml"
+        )
 
         fetch_agents()
 
@@ -464,7 +492,7 @@ class TestFetchAgents:
 
         # Verify success message printed to stderr
         mock_print.assert_called_once_with(
-            "Successfully saved workflow definition(s): ['/tmp/output/agent_1.yml']",
+            f"Successfully saved workflow definition(s): ['/tmp/output/agent_1/{DEFAULT_FLOW_VERSION}.yml']",
             file=sys.stderr,
         )
 

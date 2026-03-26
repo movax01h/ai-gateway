@@ -65,7 +65,8 @@ def analytics_system_template():
         / "v1"
         / "flows"
         / "configs"
-        / "analytics_agent.yml"
+        / "analytics_agent"
+        / "1.0.0.yml"
     )
     with open(config_path) as f:
         config = yaml.safe_load(f)

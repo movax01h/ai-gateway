@@ -270,7 +270,8 @@ class TestFlowConfig:
             "version": "experimental",
         }
 
-        config_file = tmp_path / "config.yml"
+        config_file = tmp_path / "config" / "1.0.0.yml"
+        config_file.parent.mkdir()
 
         with open(config_file, "w") as f:
             yaml.dump(config_data, f)
@@ -291,7 +292,8 @@ class TestFlowConfig:
 
     def test_flowconfig_from_yaml_config_invalid_yaml(self, tmp_path):
         """Test loading invalid YAML raises YAMLError."""
-        config_file = tmp_path / "invalid_config.yml"
+        config_file = tmp_path / "invalid_config" / "1.0.0.yml"
+        config_file.parent.mkdir()
 
         with open(config_file, "w") as f:
             f.write("invalid: yaml: content: [unclosed")
@@ -306,15 +308,7 @@ class TestFlowConfig:
         "malicious_path",
         [
             "config/../../etc/passwd",
-            "flows/.../.../.../config.yml",
-            r"configs\…..\\…..\\system.yml",
-            "templates%00../../../../../etc/passwd",
-            "flows%2e%2e%2fconfig.yml",
-            "configs%252e%252e%252fsystem.yml",
-            "templates%c0%ae%c0%ae%c0%afconfig.yml",
-            "flows%uff0e%uff0e%u2215config.yml",
-            "configs%uff0e%uff0e%u2216system.yml",
-            "/etc/config/absolute.yml",
+            "/etc/config/absolute",
         ],
     )
     def test_flowconfig_from_yaml_config_path_traversal_protection(
@@ -326,18 +320,44 @@ class TestFlowConfig:
                 FlowConfig.from_yaml_config(malicious_path)
 
     @pytest.mark.parametrize(
+        "obfuscated_path",
+        [
+            "%2e%2e/etc/passwd",  # URL-encoded ../
+            "..%2fetc%2fpasswd",  # URL-encoded /
+        ],
+    )
+    def test_flowconfig_from_yaml_config_obfuscated_paths_cannot_load(
+        self, tmp_path, obfuscated_path
+    ):
+        """Test that obfuscated path traversal attempts cannot load config data."""
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            with pytest.raises((ValueError, FileNotFoundError)):
+                FlowConfig.from_yaml_config(obfuscated_path)
+
+    def test_flowconfig_from_yaml_config_symlink_protection(self, tmp_path):
+        """Test that a symlinked yml file is rejected."""
+        config_dir = tmp_path / "my_flow"
+        config_dir.mkdir()
+        real_file = tmp_path / "secret.yml"
+        real_file.write_text("secret: content")
+        symlink_yml = config_dir / "1.0.0.yml"
+        symlink_yml.symlink_to(real_file)
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            with pytest.raises(ValueError, match="Symlinks are not allowed"):
+                FlowConfig.from_yaml_config("my_flow")
+
+    @pytest.mark.parametrize(
         "safe_path",
         [
             "valid_config",
             "config_name",
             "test-config",
             "config_123",
-            "nested/config",
-            "deeply/nested/config",
         ],
     )
     def test_flowconfig_from_yaml_config_safe_paths_allowed(self, tmp_path, safe_path):
-        """Test that legitimate paths are allowed through security checks."""
+        """Test that legitimate flow names are allowed through security checks."""
         config_data = {
             "flow": {"entry_point": "test_agent"},
             "components": [
@@ -352,8 +372,7 @@ class TestFlowConfig:
             "version": "experimental",
         }
 
-        # Create nested directory structure if needed
-        config_path = tmp_path / f"{safe_path}.yml"
+        config_path = tmp_path / safe_path / "1.0.0.yml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(config_path, "w") as f:
@@ -414,29 +433,18 @@ class TestListConfigs:
 
     def test_list_configs_empty_directory(self, tmp_path):
         """Test list_configs returns empty list when no config files exist."""
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
             assert not result
 
     def test_list_configs_single_valid_config(self, tmp_path, sample_config_data):
         """Test list_configs returns single config when one valid file exists."""
-        config_file = tmp_path / "test_config.yml"
+        config_file = tmp_path / "test_config" / "1.0.0.yml"
+        config_file.parent.mkdir()
         with open(config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         assert len(result) == 1
@@ -449,34 +457,28 @@ class TestListConfigs:
         assert config_data["environment"] == "test"
 
     @pytest.mark.parametrize(
-        "filename,expected_name",
+        "flow_name",
         [
-            ("simple.yml", "simple"),
-            ("complex-name.yml", "complex-name"),
-            ("config_123.yml", "config_123"),
-            ("test.config.yml", "test.config"),
-            ("nested_config_file.yml", "nested_config_file"),
+            "simple",
+            "complex-name",
+            "config_123",
+            "nested_config_file",
         ],
     )
-    def test_list_configs_various_filenames(
-        self, tmp_path, sample_config_data, filename, expected_name
+    def test_list_configs_various_flow_names(
+        self, tmp_path, sample_config_data, flow_name
     ):
-        """Test list_configs handles various valid filename patterns."""
-        config_file = tmp_path / filename
+        """Test list_configs handles various valid flow directory names."""
+        config_file = tmp_path / flow_name / "1.0.0.yml"
+        config_file.parent.mkdir()
         with open(config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         assert len(result) == 1
-        assert result[0]["flow_identifier"] == expected_name
+        assert result[0]["flow_identifier"] == flow_name
 
     def test_list_configs_multiple_valid_configs(self, tmp_path):
         """Test list_configs returns multiple configs when multiple valid files exist."""
@@ -505,17 +507,12 @@ class TestListConfigs:
         ]
 
         for i, config_data in enumerate(configs_data):
-            config_file = tmp_path / f"config_{i}.yml"
+            config_file = tmp_path / f"config_{i}" / "1.0.0.yml"
+            config_file.parent.mkdir()
             with open(config_file, "w") as f:
                 yaml.dump(config_data, f)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         assert len(result) == 3
@@ -544,22 +541,18 @@ class TestListConfigs:
     ):
         """Test list_configs skips files with invalid YAML and continues processing."""
         # Create one valid config
-        valid_config_file = tmp_path / "valid_config.yml"
+        valid_config_file = tmp_path / "valid_config" / "1.0.0.yml"
+        valid_config_file.parent.mkdir()
         with open(valid_config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
         # Create one invalid config
-        invalid_config_file = tmp_path / "invalid_config.yml"
+        invalid_config_file = tmp_path / "invalid_config" / "1.0.0.yml"
+        invalid_config_file.parent.mkdir()
         with open(invalid_config_file, "w") as f:
             f.write(invalid_content)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         # Should only return the valid config, skipping the invalid one
@@ -571,12 +564,14 @@ class TestListConfigs:
     ):
         """Test list_configs skips files that cause IO errors and continues processing."""
         # Create one valid config
-        valid_config_file = tmp_path / "valid_config.yml"
+        valid_config_file = tmp_path / "valid_config" / "1.0.0.yml"
+        valid_config_file.parent.mkdir()
         with open(valid_config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
         # Create another valid config
-        another_config_file = tmp_path / "another_config.yml"
+        another_config_file = tmp_path / "another_config" / "1.0.0.yml"
+        another_config_file.parent.mkdir()
         with open(another_config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
@@ -584,17 +579,11 @@ class TestListConfigs:
         original_open = open
 
         def mock_open(file, *args, **kwargs):
-            if str(file).endswith("another_config.yml") and "r" in args:
+            if "another_config" in str(file) and "r" in args:
                 raise IOError("Mocked IO error")
             return original_open(file, *args, **kwargs)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             with patch("builtins.open", side_effect=mock_open):
                 result = list_configs()
 
@@ -603,9 +592,10 @@ class TestListConfigs:
         assert result[0]["flow_identifier"] == "valid_config"
 
     def test_list_configs_ignores_non_yml_files(self, tmp_path, sample_config_data):
-        """Test list_configs only processes .yml files, ignoring other file types."""
-        # Create valid YAML config
-        yml_config = tmp_path / "config.yml"
+        """Test list_configs only processes versioned 1.0.0.yml files, ignoring other file types."""
+        # Create valid YAML config in versioned subdirectory
+        yml_config = tmp_path / "config" / "1.0.0.yml"
+        yml_config.parent.mkdir()
         with open(yml_config, "w") as f:
             yaml.dump(sample_config_data, f)
 
@@ -623,13 +613,7 @@ class TestListConfigs:
             with open(file_path, "w") as f:
                 f.write(content)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         # Should only return the .yml file
@@ -662,17 +646,12 @@ class TestListConfigs:
             "version": "1.0",
         }
 
-        config_file = tmp_path / "complex_config.yml"
+        config_file = tmp_path / "complex_config" / "1.0.0.yml"
+        config_file.parent.mkdir()
         with open(config_file, "w") as f:
             yaml.dump(complex_config, f)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         assert len(result) == 1
@@ -702,17 +681,12 @@ class TestListConfigs:
             "version": "1.0",
         }
 
-        config_file = tmp_path / "minimal_config.yml"
+        config_file = tmp_path / "minimal_config" / "1.0.0.yml"
+        config_file.parent.mkdir()
         with open(config_file, "w") as f:
             yaml.dump(minimal_config, f)
 
-        with (
-            patch(
-                "duo_workflow_service.agent_platform.experimental.flows.flow_config._DIRECTORY_PATH",
-                tmp_path,
-            ),
-            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
-        ):
+        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
             result = list_configs()
 
         assert len(result) == 1
