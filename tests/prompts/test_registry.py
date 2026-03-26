@@ -446,8 +446,8 @@ def model_factories_fixture():
             amazon_q_client_factory=Mock(spec=AmazonQClientFactory),
             **kwargs,
         ),
-        ModelClassProvider.LITE_LLM_COMPLETION: lambda model, **kwargs: CompletionLiteLLM(
-            model=model, **kwargs
+        ModelClassProvider.LITE_LLM_COMPLETION: lambda model, **kwargs: (
+            CompletionLiteLLM(model=model, **kwargs)
         ),
         ModelClassProvider.LITE_LLM_EMBEDDING: lambda model, **kwargs: EmbeddingLiteLLM(
             model=model, **kwargs
@@ -485,7 +485,7 @@ def registry_fixture(
     )
 
 
-class TestLocalPromptRegistry:
+class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
     @pytest.mark.usefixtures("mock_fs")
     @pytest.mark.parametrize(
         ("override_key", "prompt_template_factory"),
@@ -627,7 +627,6 @@ class TestLocalPromptRegistry:
         expected_identifier: str,
     ):
         with patch("ai_gateway.prompts.registry.log") as mock_log:
-
             registry.get(
                 "chat/react",
                 "^1.0.0",
@@ -649,7 +648,6 @@ class TestLocalPromptRegistry:
             patch("ai_gateway.prompts.registry.log") as mock_log,
             patch("ai_gateway.prompts.registry.current_event_context") as mock_context,
         ):
-
             mock_event_context = Mock()
             mock_event_context.feature_enabled_by_namespace_ids = [123, 456]
             mock_context.get.return_value = mock_event_context
@@ -672,7 +670,6 @@ class TestLocalPromptRegistry:
             patch("ai_gateway.prompts.registry.log") as mock_log,
             patch("ai_gateway.prompts.registry.current_event_context") as mock_context,
         ):
-
             mock_event_context = Mock(spec=[])
             mock_context.get.return_value = mock_event_context
 
@@ -1347,3 +1344,72 @@ class TestLocalPromptRegistry:
 
         assert "unrecognized model class provider" in str(exc_info.value)
         assert unrecognized_provider in str(exc_info.value)
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_duo_chat_max_tokens_override_applied_to_chat_prompts(
+        self,
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+    ):
+        """Test that duo_chat_max_tokens override is passed to Prompt for chat/* prompts."""
+        registry = LocalPromptRegistry.from_local_yaml(
+            prompt_template_factories={},
+            model_factories=model_factories,
+            internal_event_client=internal_event_client,
+            model_limits=model_limits,
+            custom_models_enabled=False,
+            disable_streaming=False,
+            duo_chat_max_tokens=8192,
+        )
+
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            registry.get(
+                prompt_id="chat/react",
+                prompt_version="^1.0.0",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("max_tokens_override") == 8192
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_duo_chat_max_tokens_override_not_applied_to_non_chat_prompts(
+        self,
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+    ):
+        """Test that duo_chat_max_tokens override is NOT passed to Prompt for non-chat prompts."""
+        registry = LocalPromptRegistry.from_local_yaml(
+            prompt_template_factories={},
+            model_factories=model_factories,
+            internal_event_client=internal_event_client,
+            model_limits=model_limits,
+            custom_models_enabled=False,
+            disable_streaming=False,
+            duo_chat_max_tokens=8192,
+        )
+
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            registry.get(
+                prompt_id="test",
+                prompt_version="^1.0.0",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("max_tokens_override") is None
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_duo_chat_max_tokens_none_when_not_configured(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        """Test that max_tokens_override is None when duo_chat_max_tokens is not configured."""
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            registry.get(
+                prompt_id="chat/react",
+                prompt_version="^1.0.0",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("max_tokens_override") is None

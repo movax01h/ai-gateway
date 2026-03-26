@@ -76,4 +76,5 @@ class ContainerPrompts(containers.DeclarativeContainer):
         custom_models_enabled=config.custom_models.enabled,
         disable_streaming=config.custom_models.disable_streaming,
         bind_tools_cache=bind_tools_cache,
+        duo_chat_max_tokens=config.duo_chat.max_tokens,
     )
