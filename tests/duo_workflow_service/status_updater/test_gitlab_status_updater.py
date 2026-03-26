@@ -8,6 +8,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.status_updater.gitlab_status_updater import (
+    ForbiddenStatusEvent,
     GitLabStatusUpdater,
 )
 
@@ -89,3 +90,19 @@ async def test_update_workflow_status_http_connection_error(gitlab_status_update
         body='{"status_event": "start"}',
         parse_json=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_update_workflow_status_when_403_response_error(gitlab_status_updater):
+    gitlab_status_updater._client.apatch = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=403, body={"message": "Unauthorized"}
+        )
+    )
+
+    with pytest.raises(ForbiddenStatusEvent):
+        result = await gitlab_status_updater.update_workflow_status(
+            workflow_id="391", status_event=WorkflowStatusEventEnum.START
+        )
+
+        assert result is None

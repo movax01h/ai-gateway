@@ -43,7 +43,7 @@ def mock_usage_quota_service(mock_duo_workflow_service_container):
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.log")
-@patch("duo_workflow_service.server.current_event_context")
+@patch("duo_workflow_service.server_helpers.current_event_context")
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_enhanced_logging_with_context(
@@ -138,13 +138,15 @@ async def test_execute_workflow_enhanced_logging_with_context(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.log")
-@patch("duo_workflow_service.server.current_event_context")
+@patch("duo_workflow_service.server_helpers.log")
+@patch("duo_workflow_service.server_helpers.current_event_context")
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_workflow_class")
 async def test_execute_workflow_enhanced_logging_without_context(
     mock_resolve_workflow,
     mock_abstract_workflow_class,
     mock_current_event_context,
+    mock_helpers_log,
     mock_log,
 ):
     """Test that the enhanced logging handles missing event context gracefully."""
@@ -193,7 +195,7 @@ async def test_execute_workflow_enhanced_logging_without_context(
     # Verify the debug log was called for missing context
     debug_calls = [
         debug_call
-        for debug_call in mock_log.debug.call_args_list
+        for debug_call in mock_helpers_log.debug.call_args_list
         if len(debug_call[0]) > 0 and "Event context not available" in debug_call[0][0]
     ]
     assert len(debug_calls) == 1, "Debug log for missing event context not found"
