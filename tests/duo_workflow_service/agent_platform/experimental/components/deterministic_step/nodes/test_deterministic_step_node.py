@@ -1,11 +1,12 @@
+# pylint: disable=unused-argument
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
-from duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node import (
-    DeterministicStepNode,
+from duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes import (
+    deterministic_step_node as dsn_module,
 )
 from duo_workflow_service.agent_platform.experimental.components.deterministic_step.ui_log import (
     UILogEventsDeterministicStep,
@@ -13,12 +14,15 @@ from duo_workflow_service.agent_platform.experimental.components.deterministic_s
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys, IOKey
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 
+DeterministicStepNode = dsn_module.DeterministicStepNode
+
 
 @pytest.fixture(name="mock_prompt_security")
 def mock_prompt_security_fixture():
     """Fixture for mocking apply_security_scanning."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node.apply_security_scanning"
+        "duo_workflow_service.agent_platform.experimental.components."
+        "deterministic_step.nodes.deterministic_step_node.apply_security_scanning"
     ) as mock_security:
         mock_security.return_value = "Sanitized response"
         yield mock_security
@@ -28,7 +32,8 @@ def mock_prompt_security_fixture():
 def mock_logger_fixture():
     """Fixture for mocking structlog logger."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node.structlog"
+        "duo_workflow_service.agent_platform.experimental.components."
+        "deterministic_step.nodes.deterministic_step_node.structlog"
     ) as mock_structlog:
         mock_logger = Mock()
         mock_structlog.stdlib.get_logger.return_value = mock_logger
@@ -39,7 +44,8 @@ def mock_logger_fixture():
 def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node.duo_workflow_metrics"
+        "duo_workflow_service.agent_platform.experimental.components."
+        "deterministic_step.nodes.deterministic_step_node.duo_workflow_metrics"
     ) as mock_metrics:
         mock_context_manager = Mock()
         mock_context_manager.__enter__ = Mock(return_value=mock_context_manager)
@@ -52,7 +58,8 @@ def mock_tool_monitoring_fixture():
 def mock_get_vars_from_state_fixture():
     """Fixture for mocking get_vars_from_state."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes.deterministic_step_node.get_vars_from_state"
+        "duo_workflow_service.agent_platform.experimental.components."
+        "deterministic_step.nodes.deterministic_step_node.get_vars_from_state"
     ) as mock_get_vars:
         mock_get_vars.return_value = {"param": "value"}
         yield mock_get_vars
