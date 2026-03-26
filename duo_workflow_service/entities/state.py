@@ -13,7 +13,6 @@ from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import current_model_metadata_context
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 logger = structlog.stdlib.get_logger("workflow")
 
@@ -163,7 +162,6 @@ def get_model_max_context_token_limit() -> int:
     token_limit = (
         model_metadata.llm_definition.max_context_tokens
         if model_metadata is not None
-        and is_feature_enabled(FeatureFlag.AI_PER_MODEL_CONTEXT_WINDOW)
         else LEGACY_MAX_CONTEXT_TOKENS
     )
     logger.info("Current model context window limit.", token_limit=token_limit)
