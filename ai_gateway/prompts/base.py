@@ -658,7 +658,11 @@ class BasePromptRegistry(ABC):
             # TODO: Remove this exception once the prompt registry properly supports Fireworks.
             # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/906
             self.validations = set(
-                {"codestral_2501_fireworks", "text_embedding_005_vertex"}
+                {
+                    "codestral_2501_fireworks",
+                    "codestral_2508_fireworks",
+                    "text_embedding_005_vertex",
+                }
             )
 
         # Collect invocations to execute them in parallel
