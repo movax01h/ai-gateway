@@ -62,6 +62,13 @@ from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitori
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server_capabilities import get_dws_capabilities
+from duo_workflow_service.server_helpers import (
+    build_logging_context,
+    clean_start_request,
+)
+from duo_workflow_service.status_updater.gitlab_status_updater import (
+    ForbiddenStatusEvent,
+)
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
 from duo_workflow_service.tools.duo_base_tool import (
     STABLE_VERSION_THRESHOLD,
@@ -87,7 +94,6 @@ from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
-    current_event_context,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 from lib.usage_quota import UsageQuotaEvent
@@ -134,67 +140,6 @@ CUSTOMERSDOT_URL: str | None = (
         "https://customers.gitlab.com",
     )
 )
-
-
-def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
-    request = contract_pb2.ClientEvent()
-    request.CopyFrom(start_workflow_request)
-    # Remove fields from being logged to prevent logging sensitive user content
-    request.startRequest.ClearField("goal")
-    request.startRequest.ClearField("flowConfig")
-    request.startRequest.ClearField("workflowMetadata")
-    request.startRequest.ClearField("additional_context")
-    return request
-
-
-def build_logging_context(workflow_id: str, workflow_definition: str) -> dict:
-    """Build enhanced logging context with event context information."""
-    event_context = current_event_context.get()
-
-    extra_context = {
-        "workflow_id": workflow_id,
-        "workflow_definition": workflow_definition,
-    }
-
-    if event_context is not None:
-        extra_context.update(
-            {
-                "instance_id": (
-                    str(event_context.instance_id)
-                    if event_context.instance_id is not None
-                    else "None"
-                ),
-                "host_name": (
-                    str(event_context.host_name)
-                    if event_context.host_name is not None
-                    else "None"
-                ),
-                "realm": (
-                    str(event_context.realm)
-                    if event_context.realm is not None
-                    else "None"
-                ),
-                "is_gitlab_team_member": (
-                    str(event_context.is_gitlab_team_member)
-                    if event_context.is_gitlab_team_member is not None
-                    else "None"
-                ),
-                "global_user_id": (
-                    str(event_context.global_user_id)
-                    if event_context.global_user_id is not None
-                    else "None"
-                ),
-                "correlation_id": (
-                    str(event_context.correlation_id)
-                    if event_context.correlation_id is not None
-                    else "None"
-                ),
-            }
-        )
-    else:
-        log.debug("Event context not available for enhanced logging")
-
-    return extra_context
 
 
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
@@ -428,6 +373,20 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             elif str(workflow.last_error) == OUTGOING_MESSAGE_TOO_LARGE:
                 context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
                 context.set_details("Outgoing message too large.")
+            # ForbiddenStatusEvent (HTTP 403) indicates Rails API rejected a status update request.
+            # This typically occurs when using deprecated direct connections, as Rails requires all workflow
+            # requests (including checkpoints) to route through Workhorse (websocket). We distinguish between:
+            # - Workflow startup failure: Return PERMISSION_DENIED to signal client-side configuration issue
+            # - Mid-workflow failure: Return INTERNAL error as this suggests a service setup problem
+            elif (
+                workflow.last_error
+                and isinstance(workflow.last_error, ForbiddenStatusEvent)
+                and workflow.last_error.status_event == "start"
+            ):
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(
+                    "workflow execution didn't start due to forbidden response"
+                )
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(

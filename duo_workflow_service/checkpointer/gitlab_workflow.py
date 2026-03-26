@@ -54,6 +54,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.status_updater.gitlab_status_updater import (
+    ForbiddenStatusEvent,
     GitLabStatusUpdater,
     UnsupportedStatusEvent,
 )
@@ -335,7 +336,7 @@ class GitLabWorkflow(
                 additional_properties=additional_properties,
             )
             return self
-        except UnsupportedStatusEvent as e:
+        except (UnsupportedStatusEvent, ForbiddenStatusEvent) as e:
             reject_properties = InternalEventAdditionalProperties(
                 label=EventLabelEnum.WORKFLOW_REJECT_LABEL.value,
                 property=repr(e),

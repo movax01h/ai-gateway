@@ -15,6 +15,12 @@ class UnsupportedStatusEvent(Exception):
     pass
 
 
+class ForbiddenStatusEvent(Exception):
+    def __init__(self, message: str, status_event: str):
+        super().__init__(message)
+        self.status_event = status_event
+
+
 class GitLabStatusUpdater:
     def __init__(
         self,
@@ -71,6 +77,13 @@ class GitLabStatusUpdater:
             raise UnsupportedStatusEvent(
                 f"Session status cannot be updated due to bad status event: {status_event}, error: {result.body}"
             )
+
+        if result.status_code == 403:
+            exception = ForbiddenStatusEvent(
+                "Sessions status cannot be updated due to 403 response",
+                status_event=status_event,
+            )
+            raise exception
 
         if result.status_code != 200:
             raise Exception(

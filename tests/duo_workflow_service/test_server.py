@@ -38,6 +38,9 @@ from duo_workflow_service.server import (
     setup_signal_handlers,
     validate_llm_access,
 )
+from duo_workflow_service.status_updater.gitlab_status_updater import (
+    ForbiddenStatusEvent,
+)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
@@ -680,6 +683,26 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
             None,
             grpc.StatusCode.RESOURCE_EXHAUSTED,
             "Outgoing message too large",
+        ),
+        (
+            ForbiddenStatusEvent(
+                message="Sessions status cannot be updated due to 403 response",
+                status_event="start",
+            ),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "workflow execution didn't start due to forbidden response",
+        ),
+        (
+            ForbiddenStatusEvent(
+                message="Sessions status cannot be updated due to 403 response",
+                status_event="finish",
+            ),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: ForbiddenStatusEvent: Sessions status cannot be updated due to 403 response",
         ),
     ],
 )
