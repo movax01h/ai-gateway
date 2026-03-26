@@ -276,6 +276,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         tool_choice: Optional[str] = None,
         bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
         bind_tools_params: Optional[dict[str, Any]] = None,
+        max_tokens_override: Optional[int] = None,
         **kwargs: Any,
     ):
         model_kwargs = self._build_model_kwargs(
@@ -288,7 +289,11 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_kwargs.pop("context_management")
 
         model = self._build_model(
-            model_factory, config.model, model_metadata, disable_streaming
+            model_factory,
+            config.model,
+            model_metadata,
+            disable_streaming,
+            max_tokens_override,
         )
 
         if tools and isinstance(model, BaseChatModel):
@@ -410,6 +415,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         config: ModelConfig,
         model_metadata: Optional[TypeModelMetadata],
         disable_streaming: bool,
+        max_tokens_override: Optional[int] = None,
     ) -> Model:
         # The params in the prompt file have higher precedence than the ones in the model definition
         llm_params = (
@@ -425,6 +431,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 exclude={"model_class_provider"}, exclude_none=True, by_alias=True
             ),
         }
+
+        if max_tokens_override is not None:
+            model_factory_args["max_tokens"] = max_tokens_override
+
         return model_factory(**model_factory_args)
 
     @property

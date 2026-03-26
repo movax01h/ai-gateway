@@ -18,6 +18,7 @@ __all__ = [
     "ConfigVertexTextModel",
     "ConfigModelLimits",
     "ConfigCustomModels",
+    "ConfigDuoChat",
     "ConfigModelKeys",
     "ConfigCustomersDot",
     "ConfigAuditEvent",
@@ -109,6 +110,15 @@ class ConfigSnowplow(ConfigInternalEvent):
 class ConfigCustomModels(BaseModel):
     enabled: bool = False
     disable_streaming: bool = False
+
+
+class ConfigDuoChat(BaseModel):
+    max_tokens: Optional[int] = None
+
+
+class ConfigAbuseDetection(BaseModel):
+    enabled: bool = False
+    sampling_rate: float = 0.1  # 1/10 of requests are sampled
 
 
 class ConfigCustomersDot(BaseModel):
@@ -250,6 +260,9 @@ class Config(BaseSettings):
     custom_models: Annotated[
         ConfigCustomModels, Field(default_factory=ConfigCustomModels)
     ] = ConfigCustomModels()
+    duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)] = (
+        ConfigDuoChat()
+    )
     model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)] = (
         ConfigModelKeys()
     )
