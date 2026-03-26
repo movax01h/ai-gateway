@@ -156,8 +156,8 @@ def _conversation_history_reducer(
 
 
 def get_model_max_context_token_limit() -> int:
-    # If feature flag is enabled, trim to max context window for the specific model
-    # Otherwise trim to the old 400K context window size for all models.
+    # Returns model-specific max_context_tokens if model_metadata is available and
+    # AI_PER_MODEL_CONTEXT_WINDOW feature flag is enabled, otherwise LEGACY_MAX_CONTEXT_TOKENS.
     model_metadata = current_model_metadata_context.get()
     token_limit = (
         model_metadata.llm_definition.max_context_tokens

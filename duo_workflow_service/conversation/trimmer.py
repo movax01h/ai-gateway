@@ -16,7 +16,7 @@ from duo_workflow_service.tracking.errors import log_exception
 
 logger = structlog.stdlib.get_logger("conversation_trimmer")
 
-LEGACY_MAX_CONTEXT_TOKENS = 400_000  # old default for backwards compatibility
+LEGACY_MAX_CONTEXT_TOKENS = 200_000  # old default for backwards compatibility
 TRIM_THRESHOLD = 0.7  # Only run expensive trimming when utilization exceeds this
 MAX_SINGLE_MESSAGE_TOKEN_SHARE = 0.65  # If a single message exceeds this percentage of the context window, pre-trim it
 
