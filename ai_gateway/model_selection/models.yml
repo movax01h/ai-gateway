@@ -129,7 +129,7 @@ models:
     proxy_provider: anthropic
     model_class_provider: anthropic
     family:
-      - claude_4_5
+      - claude
     params:
       model: "claude-opus-4-5-20251101"
       temperature: 0.0
@@ -143,7 +143,7 @@ models:
     max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
     model_class_provider: litellm
     family:
-      - claude_4_5
+      - claude
     params:
       model: "claude-opus-4-5@20251101"
       custom_llm_provider: "vertex_ai"
@@ -162,7 +162,7 @@ models:
     proxy_provider: anthropic
     model_class_provider: anthropic
     family:
-      - claude_4_5
+      - claude
     params:
       model: "claude-opus-4-6"
       temperature: 0.0
@@ -176,7 +176,7 @@ models:
     max_context_tokens: 1_000_000
     model_class_provider: litellm
     family:
-      - claude_4_5
+      - claude
     params:
       model: "claude-opus-4-6"
       custom_llm_provider: "vertex_ai"
@@ -193,7 +193,7 @@ models:
     proxy_provider: anthropic
     model_class_provider: anthropic
     family:
-      - claude_4_5
+      - claude
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     params:
@@ -208,7 +208,7 @@ models:
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     family:
-      - claude_4_5
+      - claude
     model_class_provider: litellm
     params:
       model: "claude-sonnet-4-6"
@@ -227,7 +227,7 @@ models:
     proxy_provider: anthropic
     model_class_provider: anthropic
     family:
-      - claude_4_5
+      - claude
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     params:
@@ -243,7 +243,7 @@ models:
     max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-5
     # Note: max context window tokens of 1M are supported in Beta
     family:
-      - claude_4_5
+      - claude
     model_class_provider: litellm
     params:
       model: "claude-sonnet-4-5@20250929"
@@ -263,7 +263,7 @@ models:
     cost_indicator: "$$$"
     max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-5-20250929-v1:0
     family:
-      - claude_4_5
+      - claude
     model_class_provider: litellm
     params:
       model: bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -279,7 +279,7 @@ models:
     proxy_provider: anthropic
     model_class_provider: anthropic
     family:
-      - claude_4_5
+      - claude
     description: "Fast, cost-effective responses."
     cost_indicator: "$"
     params:
@@ -294,7 +294,7 @@ models:
     cost_indicator: "$"
     max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
     family:
-      - claude_4_5
+      - claude
     model_class_provider: litellm
     params:
       model: "claude-haiku-4-5@20251001"
@@ -312,7 +312,7 @@ models:
     cost_indicator: "$"
     max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-4-5-20251001-v1:0
     family:
-      - claude_4_5
+      - claude
     model_class_provider: litellm
     params:
       model: bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0
