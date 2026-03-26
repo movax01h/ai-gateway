@@ -1,109 +1,29 @@
-import json
 from pathlib import Path
-from typing import Callable, ClassVar, List, Optional, Self
-
-import yaml
-from pydantic import BaseModel
+from typing import Callable, ClassVar, List, Optional
 
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
     ComponentRegistry,
 )
-
-__all__ = ["FlowConfig", "PartialFlowConfig", "load_component_class", "list_configs"]
-
-
-_PREFIX_BLOCLIST = (
-    "..",
-    "/.../",
-    r"\…..\\",
-    "%00../../../../../",
-    "%2e%2e%2f",
-    "%252e%252e%252f",
-    "%c0%ae%c0%ae%c0%af",
-    "%uff0e%uff0e%u2215",
-    "%uff0e%uff0e%u2216",
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    BaseFlowConfig,
+    FlowConfigInput,
+    FlowConfigMetadata,
+    list_flow_configs,
 )
 
-_DIRECTORY_PATH = Path(__file__).resolve().parent / "configs"
-
-INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
-
-
-class FlowConfigInputSchema(BaseModel):
-    type: str
-    format: Optional[str] = None
-    description: Optional[str] = None
-
-
-class FlowConfigInput(BaseModel):
-    category: str
-    input_schema: dict[str, FlowConfigInputSchema]
+__all__ = [
+    "FlowConfig",
+    "FlowConfigInput",
+    "FlowConfigMetadata",
+    "PartialFlowConfig",
+    "load_component_class",
+    "list_configs",
+]
 
 
-class FlowConfigMetadata(BaseModel):
-    entry_point: Optional[str] = None
-    inputs: Optional[list[FlowConfigInput]] = None
-
-
-class FlowConfig(BaseModel):
-    DIRECTORY_PATH: ClassVar[Path] = _DIRECTORY_PATH
-    flow: FlowConfigMetadata
-    components: list[dict]
-    routers: list[dict]
-    environment: str
-    version: str
-    prompts: Optional[list[dict]] = None
-
-    def input_json_schemas_by_category(self):
-        json_schemas_by_category: dict[str, dict] = {}
-
-        if not self.flow.inputs:
-            return json_schemas_by_category
-
-        for item in self.flow.inputs:
-            schema = {
-                key: value.model_dump(exclude_none=True)
-                for key, value in item.input_schema.items()
-            }
-
-            # Create standard jsonschema structure,
-            # with all properties being required.
-            jsonschema = {
-                "$schema": INPUT_JSONSCHEMA_VERSION,
-                "additionalProperties": False,
-                "type": "object",
-                "properties": schema,
-                "required": list(schema.keys()),
-            }
-
-            json_schemas_by_category[item.category] = jsonschema
-
-        return json_schemas_by_category
-
-    @classmethod
-    def from_yaml_config(cls, path: str) -> Self:
-        try:
-            # Validate path before resolving to prevent directory traversal
-            if any(prefix in path for prefix in _PREFIX_BLOCLIST) or path.startswith(
-                "/"
-            ):
-                raise ValueError(f"Path traversal detected: {path}")
-
-            base_path = cls.DIRECTORY_PATH.resolve()
-            yaml_path = (base_path / f"{path}.yml").resolve()
-
-            if not yaml_path.is_relative_to(base_path):
-                raise ValueError(f"Path traversal detected: {path}")
-
-            with open(yaml_path, "r", encoding="utf-8") as file:
-                yaml_content = yaml.safe_load(file)
-
-            return cls(**yaml_content)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"{path} file not found in {cls.DIRECTORY_PATH}")
-        except yaml.YAMLError as e:
-            raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
+class FlowConfig(BaseFlowConfig):
+    DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
 
 
 class PartialFlowConfig(FlowConfig):
@@ -133,7 +53,7 @@ def load_component_class(
     Returns:
         The component class registered under the given name. This can be either
         a direct BaseComponent subclass or a callable that returns a BaseComponent
-        instance (if decorators were applied during registration).
+        instance (if decorators were added during registration).
 
     Raises:
         KeyError: If no component is registered under the given name.
@@ -156,22 +76,4 @@ def load_component_class(
 
 
 def list_configs() -> List[dict[str, str]]:
-    configs = []
-    for config_file in _DIRECTORY_PATH.glob("*.yml"):
-        try:
-            config = FlowConfig.from_yaml_config(config_file.stem)
-            with open(config_file, "r", encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
-            config_json = json.dumps(config_data, indent=2)
-            configs.append(
-                {
-                    "flow_identifier": config_file.stem,
-                    "version": config.version,
-                    "environment": config.environment,
-                    "config": config_json,
-                }
-            )
-        except (yaml.YAMLError, IOError):
-            continue
-
-    return configs
+    return list_flow_configs(FlowConfig)

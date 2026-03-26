@@ -22,6 +22,23 @@ Flow Registry configs declares used version via `version` attribute.
 Each version is being implemented by an independent Python package in AI Gateway repository, flow configs
 location must adhere to a declared version.
 
+### Flow Versioning
+
+Within each platform version, individual flows use versioned subdirectories.
+To create a flow, create a subdirectory with the flow name and place versioned YAML files inside. The initial version must be `1.0.0.yml`, following the same convention as the Prompt Registry:
+
+```plaintext
+configs/
+  developer/
+    1.0.0.yml                    # Initial version (required)
+    1.1.0.yml                    # Backward-compatible enhancement
+    2.0.0.yml                    # Breaking changes
+```
+
+**Note: For now, we only do support version `1.0.0.yml`. There is work ongoing for full version support.**
+
+The API version (v1, experimental) is already determined by the root path (`agent_platform/v1` vs `agent_platform/experimental`), so it's not included in the directory structure.
+
 ## Development Plan
 
 Currently, we are in an ideation phase for Agent Flows. Please
@@ -329,7 +346,7 @@ To run and debug your flow within your local GDK:
 - Set up a
   local [Agent Platform](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md)
   to work with Remote Flows
-- Create flow, note the name and version (in the form `<flow_config_file_name_without_extension>/<version>` eg: `prototype/experimental`)
+- Create flow, note the name and version (in the form `<flow_name>/<api_version>` eg: `prototype/experimental`)
 - Run this `curl` command to start your flow:
 
 ```shell

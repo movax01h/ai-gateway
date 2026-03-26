@@ -25,6 +25,9 @@ from duo_workflow_service.agent_platform.experimental.flows import (
     FlowConfig as ExperimentalFlowConfig,
 )
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    DEFAULT_FLOW_VERSION,
+)
 
 FETCH_AGENT_OPERATION_NAME = "aiCatalogAgent"
 FETCH_AGENT_QUERY = """
@@ -110,18 +113,27 @@ def save_workflow_to_file(
     flow_def: str,
     flow_config_model: type[V1FlowConfig] | type[ExperimentalFlowConfig],
 ) -> str:
-    """Save a workflow definition to a YAML file."""
-    filename: str = f"{agent_id}.yml"
-    filepath: str = os.path.join(flow_config_model.DIRECTORY_PATH, filename)
+    """Save a workflow definition to a versioned YAML file.
+
+    Configs are stored in a versioned subdirectory structure:
+    ``{DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml``
+
+    This matches the flow registry layout introduced by the semver restructuring,
+    where each flow name gets its own directory and versions are separate files
+    within that directory.
+    """
+    agent_dir: str = os.path.join(flow_config_model.DIRECTORY_PATH, agent_id)
+    filepath: str = os.path.join(agent_dir, f"{DEFAULT_FLOW_VERSION}.yml")
 
     if os.path.exists(filepath):
         raise FileExistsError(f"File {filepath} already exists")
-    # parse yaml string to a dictionary
 
+    # parse yaml string to a dictionary
     flow_config_dict = yaml.safe_load(flow_def)
     # validate the dictionary against the pydantic model
     flow_config_model.model_validate(flow_config_dict)
 
+    os.makedirs(agent_dir, exist_ok=True)
     with open(filepath, "w") as f:
         f.write(flow_def)
     return filepath

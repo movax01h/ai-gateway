@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Callable, ClassVar, List, Literal, Optional, Self
 
+import structlog
 import yaml
 from pydantic import BaseModel
 
@@ -11,23 +12,42 @@ from duo_workflow_service.agent_platform.v1.components import (
     ComponentRegistry,
 )
 
-__all__ = ["FlowConfig", "PartialFlowConfig", "load_component_class", "list_configs"]
+__all__ = [
+    "BaseFlowConfig",
+    "DEFAULT_FLOW_VERSION",
+    "FlowConfig",
+    "FlowConfigInput",
+    "FlowConfigMetadata",
+    "PartialFlowConfig",
+    "list_configs",
+    "list_flow_configs",
+    "load_component_class",
+]
 
-
-_PREFIX_BLOCLIST = (
-    "..",
-    "/.../",
-    r"\…..\\",
-    "%00../../../../../",
-    "%2e%2e%2f",
-    "%252e%252e%252f",
-    "%c0%ae%c0%ae%c0%af",
-    "%uff0e%uff0e%u2215",
-    "%uff0e%uff0e%u2216",
-)
-
+logger = structlog.stdlib.get_logger(__name__)
 
 INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
+DEFAULT_FLOW_VERSION = "1.0.0"
+_DEFAULT_FLOW_VERSION = DEFAULT_FLOW_VERSION  # backward-compat alias
+
+
+def _safe_resolve(path: Path, base_path: Path) -> Path:
+    """Resolve *path*, rejecting symlinks and traversal outside *base_path*.
+
+    Symlink check must happen before .resolve() because resolve() follows
+    symlinks, after which is_symlink() always returns False.
+
+    Raises:
+        ValueError: If path is a symlink or resolves outside base_path.
+    """
+    if path.is_symlink():
+        raise ValueError(f"Symlinks are not allowed for security reasons: {path.name}")
+    resolved = path.resolve()
+    if not resolved.is_relative_to(base_path):
+        raise ValueError(
+            f"Path traversal detected: '{path.name}' resolves outside config directory"
+        )
+    return resolved
 
 
 class FlowConfigInputSchema(BaseModel):
@@ -46,14 +66,15 @@ class FlowConfigMetadata(BaseModel):
     inputs: Optional[list[FlowConfigInput]] = None
 
 
-class FlowConfig(BaseModel):
-    DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+class BaseFlowConfig(BaseModel):
+    DIRECTORY_PATH: ClassVar[Path]
+
     flow: FlowConfigMetadata
     components: list[dict]
     routers: list[dict]
-    environment: Literal["ambient", "chat", "chat-partial"]
-    version: Literal["v1"]
-    prompts: Optional[list[InMemoryPromptConfig]] = None
+    environment: str
+    version: str
+    prompts: Optional[list] = None
     name: Optional[str] = None
     description: Optional[str] = None
     product_group: Optional[str] = None
@@ -69,8 +90,6 @@ class FlowConfig(BaseModel):
                 for key, value in item.input_schema.items()
             }
 
-            # Create standard jsonschema structure,
-            # with all properties being required.
             jsonschema = {
                 "$schema": INPUT_JSONSCHEMA_VERSION,
                 "additionalProperties": False,
@@ -86,17 +105,10 @@ class FlowConfig(BaseModel):
     @classmethod
     def from_yaml_config(cls, path: str) -> Self:
         try:
-            # Validate path before resolving to prevent directory traversal
-            if any(prefix in path for prefix in _PREFIX_BLOCLIST) or path.startswith(
-                "/"
-            ):
-                raise ValueError(f"Path traversal detected: {path}")
-
             base_path = cls.DIRECTORY_PATH.resolve()
-            yaml_path = (base_path / f"{path}.yml").resolve()
-
-            if not yaml_path.is_relative_to(base_path):
-                raise ValueError(f"Path traversal detected: {path}")
+            yaml_path = _safe_resolve(
+                base_path / path / f"{_DEFAULT_FLOW_VERSION}.yml", base_path
+            )
 
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)
@@ -106,6 +118,74 @@ class FlowConfig(BaseModel):
             raise FileNotFoundError(f"{path} file not found in {cls.DIRECTORY_PATH}")
         except yaml.YAMLError as e:
             raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
+
+
+def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, str]]:
+    """List all available flow configurations for the given config class.
+
+    Errors during loading are logged for observability but do not stop processing.
+
+    Args:
+        flow_config_cls: FlowConfig class whose DIRECTORY_PATH to scan.
+
+    Returns:
+        List of dicts containing flow metadata and JSON-serialized configuration.
+    """
+    configs = []
+    for config_file in flow_config_cls.DIRECTORY_PATH.glob(
+        f"*/{_DEFAULT_FLOW_VERSION}.yml"
+    ):
+        flow_name = config_file.parent.name
+        try:
+            base_path = flow_config_cls.DIRECTORY_PATH.resolve()
+            yaml_path = _safe_resolve(config_file, base_path)
+
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f)
+
+            config = flow_config_cls(**config_data)
+            configs.append(
+                {
+                    "flow_identifier": flow_name,
+                    "version": config.version,
+                    "environment": config.environment,
+                    "config": json.dumps(config_data, indent=2),
+                }
+            )
+        except yaml.YAMLError as e:
+            logger.warning(
+                "Failed to parse YAML config file",
+                config_file=str(config_file),
+                error=str(e),
+            )
+        except (IOError, OSError) as e:
+            logger.warning(
+                "Failed to read config file",
+                config_file=str(config_file),
+                error=str(e),
+            )
+        except ValueError as e:
+            logger.warning(
+                "Security validation failed for config file",
+                config_file=str(config_file),
+                error=str(e),
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(
+                "Unexpected error loading config file",
+                config_file=str(config_file),
+                error=str(e),
+                exc_info=True,
+            )
+
+    return configs
+
+
+class FlowConfig(BaseFlowConfig):
+    DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+    environment: Literal["ambient", "chat", "chat-partial"]
+    version: Literal["v1"]
+    prompts: Optional[list[InMemoryPromptConfig]] = None
 
 
 class PartialFlowConfig(FlowConfig):
@@ -158,22 +238,4 @@ def load_component_class(
 
 
 def list_configs() -> List[dict[str, str]]:
-    configs = []
-    for config_file in FlowConfig.DIRECTORY_PATH.glob("*.yml"):
-        try:
-            config = FlowConfig.from_yaml_config(config_file.stem)
-            with open(config_file, "r", encoding="utf-8") as f:
-                config_data = yaml.safe_load(f)
-            config_json = json.dumps(config_data, indent=2)
-            configs.append(
-                {
-                    "flow_identifier": config_file.stem,
-                    "version": config.version,
-                    "environment": config.environment,
-                    "config": config_json,
-                }
-            )
-        except (yaml.YAMLError, IOError):
-            continue
-
-    return configs
+    return list_flow_configs(FlowConfig)
