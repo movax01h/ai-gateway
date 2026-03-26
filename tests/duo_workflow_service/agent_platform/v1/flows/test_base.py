@@ -78,7 +78,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         ui_notifier.send_event = AsyncMock()
 
         with (
-            patch("duo_workflow_service.workflows.abstract_workflow.get_http_client"),
             patch(
                 "duo_workflow_service.workflows.abstract_workflow.empty_workflow_config",
                 return_value={
@@ -158,14 +157,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "extended_logging": False,
         }
 
-    @pytest.fixture(name="mock_invocation_metadata")
-    def mock_invocation_metadata_fixture(self):
-        """Fixture providing mock invocation metadata."""
-        return {
-            "base_url": "https://gitlab.com",
-            "gitlab_token": "test-token",
-        }
-
     @pytest.fixture(name="sample_flow_config_metadata")
     def sample_flow_config_metadata_fixture(self):
         return FlowConfigMetadata(
@@ -228,7 +219,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     def flow_instance_fixture(
         self,
         mock_flow_metadata,
-        mock_invocation_metadata,
         user,
         sample_flow_config,
         mock_checkpointer,
@@ -247,7 +237,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
-                invocation_metadata=mock_invocation_metadata,
             )
             yield flow
 
@@ -331,7 +320,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     async def test_resume_command_with_approval_decision(
         self,
         mock_flow_metadata,
-        mock_invocation_metadata,
         user,
         sample_flow_config,
         mock_state_graph,
@@ -365,7 +353,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
-                invocation_metadata=mock_invocation_metadata,
                 approval=approval,
             )
 
@@ -394,7 +381,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         goal,
         mock_flow_metadata,
         user,
-        mock_invocation_metadata,
         sample_flow_config,
         mock_state_graph,
         flow_type: GLReportingEventContext,
@@ -417,7 +403,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
-                invocation_metadata=mock_invocation_metadata,
                 additional_context=[additional_context],
             )
 
@@ -439,7 +424,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         user,
-        mock_invocation_metadata,
         mock_state_graph,
         flow_type: GLReportingEventContext,
         mock_tools_registry,  # pylint: disable=unused-argument
@@ -472,7 +456,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=duplicate_config,
-                invocation_metadata=mock_invocation_metadata,
             )
 
             await flow_instance.run("test goal")
@@ -494,7 +477,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         user,
-        mock_invocation_metadata,
         mock_state_graph,
         mock_tools_registry,
         mock_checkpointer,
@@ -582,7 +564,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=complex_config,
-                invocation_metadata=mock_invocation_metadata,
             )
 
             # Run the workflow to trigger _compile
@@ -675,7 +656,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     async def test_resume_command_with_invalid_approval_decision(
         self,
         mock_flow_metadata,
-        mock_invocation_metadata,
         user,
         sample_flow_config,
         flow_type: GLReportingEventContext,
@@ -701,7 +681,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
-                invocation_metadata=mock_invocation_metadata,
                 approval=approval,
             )
 
@@ -746,7 +725,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         want_toolset,
         mock_flow_metadata,
         user,
-        mock_invocation_metadata,
         mock_tools_registry,
         flow_type: GLReportingEventContext,
         mock_checkpointer,  # pylint: disable=unused-argument
@@ -787,7 +765,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=config,
-                invocation_metadata=mock_invocation_metadata,
             )
 
             await flow.run("test goal")
@@ -938,7 +915,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self,
         mock_flow_metadata,
         user,
-        mock_invocation_metadata,
         mock_state_graph,  # pylint: disable=unused-argument
         flow_type: GLReportingEventContext,
     ):
@@ -975,7 +951,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=config,
-                invocation_metadata=mock_invocation_metadata,
             )
 
             flow._build_routers(components, Mock(spec=StateGraph))

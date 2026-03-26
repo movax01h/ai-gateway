@@ -179,9 +179,7 @@ async def test_init(user):
         metadata,
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
-        {},
         mcp_tools,
-        user,
     )
 
     assert workflow._workflow_id == workflow_id
@@ -278,7 +276,6 @@ async def test_compile_and_run_graph(
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
-        {},
         [mcp_tool],
     )
 
@@ -807,7 +804,6 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
-        {},
         [mcp_tool],
     )
 

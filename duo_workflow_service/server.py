@@ -327,8 +327,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 f"Flow configuration failed security validation: {str(e)}",
             )
 
-        invocation_metadata = dict(context.invocation_metadata())
-
         workflow: AbstractWorkflow = workflow_class(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
@@ -336,10 +334,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             user=user,
             mcp_tools=mcp_tools,
             additional_context=additional_context,
-            invocation_metadata={
-                "base_url": invocation_metadata.get("x-gitlab-base-url", ""),
-                "gitlab_token": invocation_metadata.get("x-gitlab-oauth-token", ""),
-            },
             approval=start_workflow_request.startRequest.approval,
             language_server_version=lsp_version,
             preapproved_tools=list(

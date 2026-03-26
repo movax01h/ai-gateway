@@ -35,7 +35,6 @@ from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
-    InvocationMetadata,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
@@ -146,10 +145,6 @@ class Workflow(AbstractWorkflow):
         workflow_id: str,
         workflow_metadata: Dict[str, Any],
         workflow_type: GLReportingEventContext,
-        invocation_metadata: InvocationMetadata = {
-            "base_url": "",
-            "gitlab_token": "",
-        },
         mcp_tools: list[contract_pb2.McpTool] = [],
         user: Optional[CloudConnectorUser] = None,
         additional_context: Optional[list[AdditionalContext]] = None,
@@ -173,7 +168,6 @@ class Workflow(AbstractWorkflow):
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=workflow_type,
-            invocation_metadata=invocation_metadata,
             mcp_tools=mcp_tools,
             user=user,
             additional_context=additional_context,

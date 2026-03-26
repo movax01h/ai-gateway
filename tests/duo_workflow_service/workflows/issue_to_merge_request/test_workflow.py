@@ -133,18 +133,15 @@ def workflow_fixture(
     gl_http_client: GitlabHttpClient,
     project: Project,
 ):
-    with patch(
-        "duo_workflow_service.workflows.abstract_workflow.get_http_client",
-        return_value=gl_http_client,
-    ):
-        workflow = Workflow(
-            workflow_id="test_id",
-            workflow_metadata={"git_branch": "test-branch"},
-            workflow_type=flow_type,
-            user=user,
-        )
-        workflow._project = project
-        return workflow
+    workflow = Workflow(
+        workflow_id="test_id",
+        workflow_metadata={"git_branch": "test-branch"},
+        workflow_type=flow_type,
+        user=user,
+    )
+    workflow._project = project
+    workflow._http_client = gl_http_client
+    return workflow
 
 
 @pytest.mark.asyncio
