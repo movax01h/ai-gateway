@@ -18,7 +18,6 @@ from ai_gateway.code_suggestions.processing.typing import (
     MetadataPromptBuilder,
     Prompt,
 )
-from ai_gateway.instrumentators import TextGenModelInstrumentator
 from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -80,7 +79,6 @@ class TestCodeGeneration:
         use_case = CodeGenerations(
             model, tokenization_strategy_mock, Mock(spec=SnowplowInstrumentator)
         )
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
         use_case.prompt_builder = prompt_builder_mock
 
         yield use_case
@@ -108,7 +106,6 @@ class TestCodeGeneration:
         use_case = CodeGenerations(
             model, tokenization_strategy_mock, Mock(spec=SnowplowInstrumentator)
         )
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
         use_case.prompt_builder = prompt_builder_mock
 
         yield use_case
@@ -442,7 +439,6 @@ class TestCodeGeneration:
             snowplow_instrumentator=Mock(spec=SnowplowInstrumentator),
             billing_event_client=mock_billing_client,
         )
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         prompt_builder_mock = Mock(spec=PromptBuilderBase)
         prompt = Prompt(
@@ -539,7 +535,6 @@ class TestCodeGeneration:
             snowplow_instrumentator=Mock(spec=SnowplowInstrumentator),
             # No billing client provided
         )
-        use_case.instrumentator = InstrumentorMock(spec=TextGenModelInstrumentator)
 
         prompt_builder_mock = Mock(spec=PromptBuilderBase)
         prompt = Prompt(
