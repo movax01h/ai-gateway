@@ -50,8 +50,6 @@ components:
         as: "project_id"
       - from: "context:issue_parser.tool_responses"
         as: "issue_details"
-      - from: "context:workflow_id"
-        as: "workflow_id"
       - from: "context:create_repository_branch.final_answer"
         as: "source_branch_details"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"

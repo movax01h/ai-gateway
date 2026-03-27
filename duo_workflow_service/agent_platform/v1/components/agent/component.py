@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal, Optional, Type, override
+from typing import Annotated, ClassVar, Literal, Optional, Self, Type, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -7,6 +7,7 @@ from pydantic import Field, PrivateAttr, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
@@ -20,6 +21,8 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
+    ExtraInputVariablesError,
+    MissingInputVariablesError,
     RouterProtocol,
 )
 from duo_workflow_service.agent_platform.v1.components.registry import (
@@ -121,6 +124,40 @@ class AgentComponent(BaseComponent):
             response_schema = None
 
         self._response_schema = response_schema
+        return self
+
+    # Variable injected by the node runner at execution time — never a component input.
+    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset({"history"})
+
+    @model_validator(mode="after")
+    def validate_prompt_variable_coverage(self) -> Self:
+        """Validate that inputs cover all Jinja2 variables in the prompt template.
+
+        Raises:
+            MissingInputVariablesError: If the component is missing variables required by the template.
+            ExtraInputVariablesError: If the component provides variables not present in the template.
+        """
+        try:
+            required = self.prompt_registry.get_required_variables(
+                self.prompt_id, self.prompt_version
+            )
+        except TemplateNotFoundError:
+            return self
+
+        required -= self._RUNTIME_INJECTED_VARS
+        provided = {inp.template_variable_name for inp in self.inputs}
+
+        if missing := required - provided:
+            raise MissingInputVariablesError(
+                f"Component '{self.name}' (prompt '{self.prompt_id}'): "
+                f"missing input variables: {sorted(missing)}"
+            )
+        if self.strict_validation:
+            if extra := provided - required:
+                raise ExtraInputVariablesError(
+                    f"Component '{self.name}' (prompt '{self.prompt_id}'): "
+                    f"extra input variables not present in template: {sorted(extra)}"
+                )
         return self
 
     def _agent_node_router(self, state: FlowState) -> str:

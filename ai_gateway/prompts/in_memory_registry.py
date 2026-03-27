@@ -4,7 +4,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import BaseTool
 
 from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.prompts.base import BasePromptRegistry, Prompt
+from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelConfig, PromptConfig
 from ai_gateway.prompts.registry import LocalPromptRegistry
 
@@ -108,6 +108,49 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             tools=tools,
             **kwargs,
         )
+
+    @override
+    def get_required_variables(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+    ) -> set[str]:
+        """Return Jinja2 variables required by an inline or file-based prompt.
+
+        Inline prompts (``prompt_version=None``) are resolved from in-memory
+        storage.  Registry-based prompts (``prompt_version`` set) are delegated
+        to the shared ``LocalPromptRegistry``.
+
+        Args:
+            prompt_id: Prompt identifier to inspect.
+            prompt_version: Version constraint, or ``None`` for inline prompts.
+
+        Returns:
+            Flat set of required variable names.
+
+        Raises:
+            TemplateNotFoundError: When the prompt cannot be resolved (not
+                registered inline and no version provided, or the file-based
+                registry cannot find it).
+        """
+        if prompt_version:
+            return self.shared_registry.get_required_variables(
+                prompt_id, prompt_version
+            )
+
+        raw_data = self._raw_prompt_data.get(prompt_id)
+        if not raw_data:
+            raise TemplateNotFoundError(
+                f"Cannot resolve required variables for '{prompt_id}': "
+                "prompt is not registered inline and no prompt_version was provided"
+            )
+
+        prompt_template = raw_data.get("prompt_template", {})
+        variables: set[str] = set()
+        for template_str in prompt_template.values():
+            if template_str:
+                variables.update(self._collect_jinja2_variables(template_str))
+        return variables
 
     @override
     def get(

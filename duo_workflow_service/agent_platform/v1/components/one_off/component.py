@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, ClassVar, Optional, override
+from typing import Any, ClassVar, Optional, Self, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
@@ -8,19 +8,26 @@ from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
-from duo_workflow_service.agent_platform.v1.components import (
-    BaseComponent,
-    RouterProtocol,
+from ai_gateway.prompts.base import TemplateNotFoundError
+from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
-    register_component,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import AgentNode
+from duo_workflow_service.agent_platform.v1.components.base import (
+    BaseComponent,
+    ExtraInputVariablesError,
+    MissingInputVariablesError,
+    RouterProtocol,
+)
 from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
     ToolNodeWithErrorCorrection,
 )
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
     UILogWriterOneOffTools,
+)
+from duo_workflow_service.agent_platform.v1.components.registry import (
+    register_component,
 )
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
@@ -86,6 +93,40 @@ class OneOffComponent(BaseComponent):
         if "inputs" not in data or not data["inputs"]:
             data["inputs"] = ["context:goal"]
         return data
+
+    # Variable injected by the node runner at execution time — never a component input.
+    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset({"history"})
+
+    @model_validator(mode="after")
+    def validate_prompt_variable_coverage(self) -> Self:
+        """Validate that inputs cover all Jinja2 variables in the prompt template.
+
+        Raises:
+            MissingInputVariablesError: If the component is missing variables required by the template.
+            ExtraInputVariablesError: If the component provides variables not present in the template.
+        """
+        try:
+            required = self.prompt_registry.get_required_variables(
+                self.prompt_id, self.prompt_version
+            )
+        except TemplateNotFoundError:
+            return self
+
+        required -= self._RUNTIME_INJECTED_VARS
+        provided = {inp.template_variable_name for inp in self.inputs}
+
+        if missing := required - provided:
+            raise MissingInputVariablesError(
+                f"Component '{self.name}' (prompt '{self.prompt_id}'): "
+                f"missing input variables: {sorted(missing)}"
+            )
+        if self.strict_validation:
+            if extra := provided - required:
+                raise ExtraInputVariablesError(
+                    f"Component '{self.name}' (prompt '{self.prompt_id}'): "
+                    f"extra input variables not present in template: {sorted(extra)}"
+                )
+        return self
 
     @override
     def __entry_hook__(self) -> str:

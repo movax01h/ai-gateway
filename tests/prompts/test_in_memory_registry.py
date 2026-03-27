@@ -10,7 +10,7 @@ from ai_gateway.model_selection.model_selection_config import (
     PromptParams,
 )
 from ai_gateway.model_selection.models import BaseModelParams, ChatLiteLLMParams
-from ai_gateway.prompts.base import Prompt
+from ai_gateway.prompts.base import Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
@@ -286,3 +286,47 @@ class TestInMemoryPromptRegistry:
         assert call_kwargs["model_class_provider"] == expected_model_class_provider
         prompt_config = call_kwargs["config"]
         assert prompt_config.model.params == expected_model_params
+
+
+class TestGetRequiredVariables:
+
+    @pytest.fixture
+    def mock_shared_registry(self, internal_event_client, model_limits):
+        registry = Mock(spec=LocalPromptRegistry)
+        registry.internal_event_client = internal_event_client
+        registry.model_limits = model_limits
+        return registry
+
+    @pytest.fixture
+    def in_memory_registry(self, mock_shared_registry):
+        return InMemoryPromptRegistry(mock_shared_registry)
+
+    def test_inline_prompt_returns_variables(self, in_memory_registry):
+        in_memory_registry.register_prompt(
+            "my_prompt",
+            {
+                "prompt_template": {
+                    "system": "Hello {{ name }}, your goal is {{ goal }}"
+                }
+            },
+        )
+        result = in_memory_registry.get_required_variables(
+            "my_prompt", prompt_version=None
+        )
+        assert result == {"name", "goal"}
+
+    def test_inline_prompt_not_found_raises(self, in_memory_registry):
+        with pytest.raises(TemplateNotFoundError):
+            in_memory_registry.get_required_variables("missing", prompt_version=None)
+
+    def test_versioned_prompt_delegates_to_shared_registry(
+        self, in_memory_registry, mock_shared_registry
+    ):
+        mock_shared_registry.get_required_variables.return_value = {"foo"}
+        result = in_memory_registry.get_required_variables(
+            "my_prompt", prompt_version="^1.0.0"
+        )
+        assert result == {"foo"}
+        mock_shared_registry.get_required_variables.assert_called_once_with(
+            "my_prompt", "^1.0.0"
+        )

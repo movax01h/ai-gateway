@@ -15,7 +15,22 @@ from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.context import ModelSizeBucket
 from lib.events import GLReportingEventContext
 
-__all__ = ["RouterProtocol", "BaseComponent", "EndComponent", "AbortComponent"]
+__all__ = [
+    "RouterProtocol",
+    "BaseComponent",
+    "EndComponent",
+    "AbortComponent",
+    "MissingInputVariablesError",
+    "ExtraInputVariablesError",
+]
+
+
+class MissingInputVariablesError(ValueError):
+    """Raised when a component's inputs do not cover all required prompt template variables."""
+
+
+class ExtraInputVariablesError(ValueError):
+    """Raised when a component provides input variables not present in the prompt template."""
 
 
 class RouterProtocol(Protocol):
@@ -42,6 +57,7 @@ class BaseComponent(BaseModel, ABC):
     flow_type: GLReportingEventContext
     user: CloudConnectorUser
     model_size_preference: ModelSizeBucket | None = None
+    strict_validation: bool = Field(default=False, exclude=True)
 
     @model_validator(mode="before")
     @classmethod

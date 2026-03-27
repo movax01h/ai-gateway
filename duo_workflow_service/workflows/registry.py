@@ -224,7 +224,7 @@ def _validate_flow_config_prompts(
                     ) from e
 
 
-def _flow_factory(
+def flow_factory(
     flow_cls: FlowFactory,
     config: Union[
         ExperimentalFlowConfig,
@@ -283,7 +283,7 @@ def _flow_factory(
     return partial(chat.Workflow, **args)
 
 
-def _get_flow_classes(
+def get_flow_classes(
     flow_config_schema_version: str, environment: Optional[str] = None
 ) -> Tuple[
     Type[
@@ -329,7 +329,7 @@ def resolve_workflow_class(
     if flow_config and flow_config_schema_version:
         try:
             config_dict: Dict[str, Any] = MessageToDict(flow_config)
-            flow_config_cls, flow_cls = _get_flow_classes(
+            flow_config_cls, flow_cls = get_flow_classes(
                 flow_config_schema_version, config_dict.get("environment", None)
             )
             config = _convert_struct_to_flow_config(
@@ -337,7 +337,7 @@ def resolve_workflow_class(
                 flow_config_schema_version=flow_config_schema_version,
                 flow_config_cls=flow_config_cls,
             )
-            return _flow_factory(flow_cls, config)
+            return flow_factory(flow_cls, config)
         except Exception as e:
             raise ValueError(
                 f"Failed to create flow from FlowConfig protobuf: {e}"
@@ -356,10 +356,10 @@ def resolve_workflow_class(
         raise ValueError(f"Unknown Flow version: {flow_version}")
 
     try:
-        flow_config_cls, flow_cls = _get_flow_classes(flow_version)
+        flow_config_cls, flow_cls = get_flow_classes(flow_version)
         config = flow_config_cls.from_yaml_config(flow_config_path)
 
-        return _flow_factory(flow_cls, config)
+        return flow_factory(flow_cls, config)
     except Exception:
         raise ValueError(f"Unknown Flow: {workflow_definition}")
 

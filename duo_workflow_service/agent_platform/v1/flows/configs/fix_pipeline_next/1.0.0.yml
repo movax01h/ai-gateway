@@ -20,6 +20,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset:
       - get_downstream_pipelines
       - get_pipeline_failing_jobs
@@ -45,6 +48,9 @@ components:
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
         optional: True
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"
@@ -67,6 +73,9 @@ components:
         as: "workflow_id"
       - from: "context:session_url"
         as: "session_url"
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset: ["create_merge_request_note"]
     ui_log_events:
       - "on_agent_final_answer"
@@ -112,6 +121,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -128,6 +140,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"
@@ -141,15 +156,14 @@ components:
         as: "fix_pipeline_context_results"
       - from: "context:fix_pipeline_create_plan.final_answer"
         as: "fix_pipeline_plan"
-      - from: "context:inputs.pipeline.source_branch"
-        as: "source_branch"
-      - from: "context:project_id"
-        as: "project_id"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
       - from: "context:inputs.os_information"
         as: "os_information"
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset:
       - create_file_with_contents
       - edit_file
@@ -171,6 +185,9 @@ components:
         as: "repository_url"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
         optional: True
     toolset:
       - "run_git_command"

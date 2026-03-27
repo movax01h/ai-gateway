@@ -70,10 +70,21 @@ __all__ = [
     "Prompt",
     "BasePromptRegistry",
     "BasePromptCallbackHandler",
+    "TemplateNotFoundError",
     "TOOL_OUTPUT_SECURITY_INCLUDE",
     "jinja2_formatter",
     "prompt_template_to_messages",
 ]
+
+
+class TemplateNotFoundError(Exception):
+    """Raised when a prompt template cannot be resolved.
+
+    Callers that want to skip validation when a template is unavailable
+    should catch this exception explicitly rather than relying on a ``None``
+    sentinel return value.
+    """
+
 
 _log = logging.getLogger(__name__)
 
@@ -607,6 +618,33 @@ class BasePromptRegistry(ABC):
     ) -> Prompt:
         pass
 
+    @abstractmethod
+    def get_required_variables(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+    ) -> set[str]:
+        """Return the set of Jinja2 variable names required by a prompt template.
+
+        The returned set already accounts for all ``{% include %}`` directives
+        resolved transitively — callers receive a flat set of variable names
+        with no further template parsing needed.
+
+        Args:
+            prompt_id: Identifier of the prompt to inspect.
+            prompt_version: Semantic version constraint (e.g. ``"^1.0.0"``) for
+                file-based prompts, or ``None`` for inline prompts.
+
+        Returns:
+            Flat set of required variable names.
+
+        Raises:
+            TemplateNotFoundError: When the prompt cannot be resolved (e.g.
+                ``prompt_version`` is absent and the prompt is not registered
+                inline). Callers that want to skip validation should catch this
+                exception explicitly.
+        """
+
     def get_on_behalf(
         self,
         # TODO: We should allow only `CloudConnectorUser` in the future.
@@ -643,6 +681,38 @@ class BasePromptRegistry(ABC):
         )
 
         return prompt
+
+    @staticmethod
+    def _collect_jinja2_variables(template: str) -> set[str]:
+        """Recursively extract all undeclared Jinja2 variables from *template*.
+
+        Follows ``{% include %}`` directives transitively, tracking visited
+        template names to avoid infinite loops. Use this instead of the
+        module-level ``_get_jinja2_variables_from_template`` when you need
+        full recursive resolution across nested partials.
+
+        Args:
+            template: A Jinja2 template string.
+
+        Returns:
+            Flat set of all variable names referenced in *template* and any
+            templates it includes transitively.
+        """
+        variables: set[str] = set()
+        visited: set[str] = set()
+
+        def _collect(source: str) -> None:
+            ast = jinja_env.parse(source)
+            variables.update(meta.find_undeclared_variables(ast))
+            for tpl_name in meta.find_referenced_templates(ast):
+                if not tpl_name or tpl_name in visited:
+                    continue
+                visited.add(tpl_name)
+                tpl_source, _, _ = jinja_loader.get_source(jinja_env, tpl_name)
+                _collect(tpl_source)
+
+        _collect(template)
+        return variables
 
     async def validate_model(self, model: str):
         log.info("Validating default model", model=model)
