@@ -10,11 +10,12 @@ import httpx
 import pytest
 from anthropic import (
     APIConnectionError,
-    APIStatusError,
     APITimeoutError,
     AsyncAnthropic,
     BadRequestError,
 )
+from anthropic import InternalServerError as AnthropicInternalServerError
+from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
 from jinja2.exceptions import SecurityError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -750,8 +751,33 @@ configurable_unit_primitives:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_ainvoke_retries_on_internal_server_error(self, prompt: Prompt):
-        """Test that ainvoke retries on litellm.InternalServerError (e.g. Vertex AI 500)."""
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                AnthropicInternalServerError(
+                    "Internal server error",
+                    response=httpx.Response(
+                        500, request=httpx.Request("POST", "https://api.anthropic.com")
+                    ),
+                    body=None,
+                ),
+                id="anthropic_internal_server_error",
+            ),
+            pytest.param(
+                LiteLLMInternalServerError(
+                    "Internal error encountered.",
+                    model="claude-haiku-4-5",
+                    llm_provider="vertex_ai",
+                ),
+                id="litellm_internal_server_error",
+            ),
+        ],
+    )
+    async def test_ainvoke_retries_on_internal_server_error(
+        self, prompt: Prompt, error: Exception
+    ):
+        """Test that ainvoke retries on InternalServerError from Anthropic and LiteLLM."""
         success_response = AIMessage(content="Hello!")
         call_count = 0
 
@@ -759,11 +785,7 @@ configurable_unit_primitives:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise LiteLLMInternalServerError(
-                    "Internal error encountered.",
-                    model="claude-haiku-4-5",
-                    llm_provider="vertex_ai",
-                )
+                raise error
             return success_response
 
         with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
@@ -775,7 +797,7 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     async def test_ainvoke_retries_on_anthropic_overloaded_error(self, prompt: Prompt):
-        """Test that ainvoke retries on anthropic.APIStatusError with 529 status code."""
+        """Test that ainvoke retries on anthropic.OverloadedError (HTTP 529)."""
         success_response = AIMessage(content="Hello!")
         call_count = 0
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -785,7 +807,9 @@ configurable_unit_primitives:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise APIStatusError("Overloaded", response=response, body=None)
+                raise AnthropicOverloadedError(
+                    "Overloaded", response=response, body=None
+                )
             return success_response
 
         with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
@@ -812,6 +836,27 @@ configurable_unit_primitives:
         ):
             with pytest.raises(BadRequestError):
                 await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_uses_exponential_backoff(self, prompt: Prompt):
+        """Test that retry waits follow exponential backoff: ~3s, ~9s, ~27s."""
+        sleep_calls = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with mock.patch.object(
+            FakeModel,
+            "ainvoke",
+            side_effect=httpx.ReadError("Connection reset by peer"),
+        ):
+            with mock.patch("asyncio.sleep", side_effect=fake_sleep):
+                with pytest.raises(httpx.ReadError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert len(sleep_calls) == 2
+        assert sleep_calls[0] == pytest.approx(3.0)
+        assert sleep_calls[1] == pytest.approx(9.0)
 
     @pytest.mark.parametrize(
         "tool_choice",
