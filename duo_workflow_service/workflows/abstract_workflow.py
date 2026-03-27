@@ -3,7 +3,7 @@ import asyncio
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 import structlog
@@ -34,6 +34,7 @@ from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiC
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.gitlab.events import get_event
+from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpClient
 from duo_workflow_service.gitlab.gitlab_api import (
     Namespace,
     Project,
@@ -42,7 +43,6 @@ from duo_workflow_service.gitlab.gitlab_api import (
     fetch_workflow_and_container_data,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.gitlab.http_client_factory import get_http_client
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.monitoring import duo_workflow_metrics
@@ -73,11 +73,6 @@ MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
-
-
-class InvocationMetadata(TypedDict):
-    base_url: str
-    gitlab_token: str
 
 
 class AbstractWorkflow(ABC):
@@ -111,10 +106,6 @@ class AbstractWorkflow(ABC):
         workflow_metadata: Dict[str, Any],
         workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
-        invocation_metadata: InvocationMetadata = {
-            "base_url": "",
-            "gitlab_token": "",
-        },
         mcp_tools: list[contract_pb2.McpTool] = [],
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
@@ -132,11 +123,7 @@ class AbstractWorkflow(ABC):
         self._workflow_metadata = workflow_metadata
         self._user = user
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
-        self._http_client = get_http_client(
-            self._outbox,
-            invocation_metadata.get("base_url", ""),
-            invocation_metadata.get("gitlab_token", ""),
-        )
+        self._http_client = ExecutorGitLabHttpClient(self._outbox)
         self._workflow_type = workflow_type
         self._additional_context = additional_context
         self._mcp_tools = convert_mcp_tools_to_configs(mcp_tools=mcp_tools)

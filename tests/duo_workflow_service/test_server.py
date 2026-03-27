@@ -1443,7 +1443,6 @@ async def test_execute_workflow_missing_workflow_metadata(
         ),  # backward compatibility when workflow_definition is empty
         user=user,
         additional_context=None,
-        invocation_metadata={"base_url": "", "gitlab_token": ""},
         mcp_tools=[],
         approval=contract_pb2.Approval(),
         language_server_version=None,
@@ -1499,10 +1498,6 @@ async def test_execute_workflow_valid_workflow_metadata(
     user = CloudConnectorUser(authenticated=True, is_debug=True)
     current_user.set(user)
     mock_context = MagicMock(spec=grpc.ServicerContext)
-    mock_context.invocation_metadata.return_value = [
-        ("x-gitlab-base-url", "http://test.url"),
-        ("x-gitlab-oauth-token", "123"),
-    ]
     servicer = DuoWorkflowService()
     result = servicer.ExecuteWorkflow(
         mock_request_iterator(),
@@ -1528,7 +1523,6 @@ async def test_execute_workflow_valid_workflow_metadata(
                 metadata={},
             ),
         ],
-        invocation_metadata={"base_url": "http://test.url", "gitlab_token": "123"},
         mcp_tools=mcp_tools,
         approval=approval,
         language_server_version=None,
