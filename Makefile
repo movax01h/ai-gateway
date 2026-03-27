@@ -194,7 +194,8 @@ lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespel
 .PHONY: lint-commit
 lint-commit:
 	@npm install
-	@npx commitlint --from=$$(git rev-parse main) --help-url
+	@git fetch origin main --depth=1 2>/dev/null || true
+	@npx commitlint --from=$$(git rev-parse --verify --quiet origin/main || git rev-parse --verify --quiet main) --help-url
 
 .PHONY: flake8
 flake8: install-lint-deps

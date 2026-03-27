@@ -32,8 +32,18 @@ setup_script:
   # Install Python dependencies
   - poetry install --with test,lint,eval --no-interaction --no-ansi
 
+  # Install mise and tools from .tool-versions needed for lefthook hooks.
+  # Only the minimum set is installed here; extend as needed (e.g. gcloud, ruby)
+  # if the agent requires more functionality like running the AI Gateway locally.
+  - curl -sSL https://mise.run | sh
+  - export PATH="$HOME/.local/bin:$PATH"
+  - mise install vale markdownlint-cli2 lefthook nodejs
+  - eval "$(mise env)"
+
+  # Install commitlint (required by lefthook pre-push lint-commit hook)
+  - npm ci
+
   # Having lefthook here avoids problems with broken commits
-  - npm install -g lefthook@1.12.3
   - lefthook install
 
   # Install Anthropic Sandbox Runtime
@@ -51,6 +61,7 @@ cache:
       - pyproject.toml
   paths:
     - .venv/
+    - node_modules/
     - /root/.cache/pypoetry
     - /usr/local/lib/node_modules
 
