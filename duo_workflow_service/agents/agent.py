@@ -5,7 +5,7 @@ from uuid import uuid4
 import structlog
 from anthropic import APIStatusError
 from gitlab_cloud_connector import CloudConnectorUser
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -15,6 +15,7 @@ from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
+from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
@@ -52,11 +53,16 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
                 map(lambda x: x.pretty_repr(), input["handover"])
             )
 
-        messages = self.preamble_messages
+        messages: list[BaseMessage] = list(
+            cast(list[BaseMessage], self.preamble_messages)
+        )
 
         if self.agent_name in input["conversation_history"]:
-            # NOTE: Not equivalent to `messages += input[...]`, which would modify `self.preamble_messages`
-            messages = messages + input["conversation_history"][self.agent_name]
+            history = restore_message_consistency(
+                input["conversation_history"][self.agent_name]
+            )
+            # NOTE: Not equivalent to `messages += history`, which would modify `self.preamble_messages`
+            messages = messages + history
 
         prompt_value = ChatPromptTemplate.from_messages(
             messages, template_format="jinja2"

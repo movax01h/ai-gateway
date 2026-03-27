@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.model_metadata import ModelMetadata
@@ -214,6 +214,57 @@ class TestChatAgentPromptTemplate:
         assert messages[2].content == "First message"
         assert messages[3].content == "AI response"
         assert messages[4].content == "Second message"
+
+    def test_dangling_tool_calls_get_synthetic_tool_messages(
+        self, model_provider, prompt_config
+    ):
+        """Test that AIMessages with unresolved tool_calls get synthetic ToolMessages injected.
+
+        This mirrors the crash-resume scenario: the execution node wrote an AIMessage
+        with tool_calls to the checkpoint, but the process died before the ToolMessages
+        were written.  On the next invocation the prompt template must repair the history
+        before sending it to the LLM, otherwise the Anthropic API rejects the request.
+        """
+        state = ChatWorkflowState(
+            plan={"steps": []},
+            status="execution",
+            conversation_history={
+                "test_agent": [
+                    HumanMessage(content="Do something"),
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "id": "tool-call-1",
+                                "name": "read_file",
+                                "args": {"file_path": "a.rb"},
+                            }
+                        ],
+                    ),
+                    # ToolMessage is missing — simulates a crash before tool execution
+                ]
+            },
+            ui_chat_log=[],
+            last_human_input=None,
+            project=None,
+            namespace=None,
+            approval=None,
+        )
+
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            result = template.invoke(state, agent_name="test_agent")
+
+        messages = result.messages
+        # system_static + system_dynamic + HumanMessage + AIMessage + synthetic ToolMessage
+        ai_msg = next(m for m in messages if isinstance(m, AIMessage))
+        ai_idx = messages.index(ai_msg)
+        assert isinstance(messages[ai_idx + 1], ToolMessage)
+        assert messages[ai_idx + 1].tool_call_id == "tool-call-1"
+        assert "interrupted" in messages[ai_idx + 1].content.lower()
 
     def test_slash_command_parsing(self, model_provider, prompt_config):
         state_with_slash_command = ChatWorkflowState(

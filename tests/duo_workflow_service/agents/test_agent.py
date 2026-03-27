@@ -1,8 +1,9 @@
+from typing import cast
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from anthropic import APIStatusError
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, Prompt
@@ -190,6 +191,45 @@ Human message"""
         assert result["conversation_history"][prompt_name] == [mock_response]
 
         assert "ui_chat_log" not in result
+
+    def test_dangling_tool_calls_get_synthetic_tool_messages(
+        self,
+        prompt_name: str,
+        prompt: Prompt,
+        workflow_state: DuoWorkflowStateType,
+    ):
+        """Test that AgentPromptTemplate injects synthetic ToolMessages for dangling tool calls.
+
+        This mirrors the crash-resume scenario: the execution node wrote an AIMessage
+        with tool_calls to the checkpoint, but the process died before the ToolMessages
+        were written.  The prompt template must repair the history before sending it to
+        the LLM, otherwise the Anthropic API rejects the request.
+        """
+        workflow_state["conversation_history"][prompt_name] = [
+            HumanMessage(content="Do something"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "tool-call-1",
+                        "name": "read_file",
+                        "args": {"file_path": "a.rb"},
+                    }
+                ],
+            ),
+            # ToolMessage is missing — simulates a crash before tool execution
+        ]
+
+        template = prompt.prompt_tpl
+        result = template.invoke(workflow_state)
+
+        messages = result.to_messages()
+        ai_msg = next(m for m in messages if isinstance(m, AIMessage))
+        ai_idx = messages.index(ai_msg)
+        assert isinstance(messages[ai_idx + 1], ToolMessage)
+        synthetic = cast(ToolMessage, messages[ai_idx + 1])
+        assert synthetic.tool_call_id == "tool-call-1"
+        assert "interrupted" in cast(str, synthetic.content).lower()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
