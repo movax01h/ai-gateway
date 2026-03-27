@@ -1,18 +1,121 @@
 # pylint: disable=too-many-lines
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     IOKey,
     IOKeyTemplate,
+    conversation_history_replace_reducer,
     create_nested_dict,
     get_vars_from_state,
     merge_nested_dict,
     merge_nested_dict_reducer,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+
+
+class TestConversationHistoryReplaceReducer:
+    """Test conversation_history_replace_reducer function."""
+
+    def test_replace_reducer_replaces_history(self):
+        """Test that reducer replaces history instead of appending."""
+        current = {"agent1": [HumanMessage(content="old message")]}
+        new = {"agent1": [HumanMessage(content="new message")]}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert len(result["agent1"]) == 1
+        assert result["agent1"][0].content == "new message"
+
+    def test_replace_reducer_preserves_other_agents(self):
+        """Test that reducer preserves history for agents not in new."""
+        current = {
+            "agent1": [HumanMessage(content="agent1 message")],
+            "agent2": [HumanMessage(content="agent2 message")],
+        }
+        new = {"agent1": [HumanMessage(content="new agent1 message")]}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert result["agent1"][0].content == "new agent1 message"
+        assert result["agent2"][0].content == "agent2 message"
+
+    def test_replace_reducer_clears_history_with_empty_list(self):
+        """Test that empty list clears history for an agent."""
+        current = {"agent1": [HumanMessage(content="message")]}
+        new = {"agent1": []}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert not result["agent1"]
+
+    def test_replace_reducer_skips_none_messages(self):
+        """Test that None messages are skipped."""
+        current = {"agent1": [HumanMessage(content="message")]}
+        new = {"agent1": None}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert result["agent1"][0].content == "message"
+
+    def test_replace_reducer_returns_current_when_new_is_none(self):
+        """Test that reducer returns current when new is None."""
+        current = {"agent1": [HumanMessage(content="message")]}
+
+        result = conversation_history_replace_reducer(current, None)
+
+        assert result["agent1"][0].content == "message"
+
+    def test_replace_reducer_adds_new_agent(self):
+        """Test that reducer adds new agent history."""
+        current = {"agent1": [HumanMessage(content="agent1 message")]}
+        new = {"agent2": [HumanMessage(content="agent2 message")]}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert "agent1" in result
+        assert "agent2" in result
+        assert result["agent2"][0].content == "agent2 message"
+
+    def test_replace_reducer_immutability(self):
+        """Test that original dict is not modified."""
+        current = {"agent1": [HumanMessage(content="original")]}
+        new = {"agent1": [HumanMessage(content="new")]}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert current["agent1"][0].content == "original"
+        assert result["agent1"][0].content == "new"
+
+    def test_replace_reducer_with_multiple_messages(self):
+        """Test replacing with multiple messages."""
+        current = {"agent1": [HumanMessage(content="old")]}
+        new = {
+            "agent1": [
+                HumanMessage(content="first"),
+                AIMessage(content="second"),
+                HumanMessage(content="third"),
+            ]
+        }
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert len(result["agent1"]) == 3
+        assert result["agent1"][0].content == "first"
+        assert result["agent1"][1].content == "second"
+        assert result["agent1"][2].content == "third"
+
+    def test_replace_reducer_applies_preprocessing(self):
+        """Test that preprocessing is applied to messages."""
+        current = {}
+        new = {"agent1": [HumanMessage(content="test message")]}
+
+        result = conversation_history_replace_reducer(current, new)
+
+        assert len(result["agent1"]) == 1
+        assert result["agent1"][0].content == "test message"
 
 
 class TestMergeNestedDict:

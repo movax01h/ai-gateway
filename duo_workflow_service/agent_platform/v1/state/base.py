@@ -16,11 +16,12 @@ from typing import (
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from duo_workflow_service.conversation.trimmer import preprocess_conversation_history
+
 # TODO: Remove dependency on legacy duo workflow packages
 from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
-    _conversation_history_reducer,
     _ui_chat_log_reducer,
 )
 
@@ -32,6 +33,7 @@ __all__ = [
     "merge_nested_dict",
     "create_nested_dict",
     "merge_nested_dict_reducer",
+    "conversation_history_replace_reducer",
     "IOKey",
     "IOKeyTemplate",
     "get_vars_from_state",
@@ -93,6 +95,36 @@ def merge_nested_dict_reducer(
     return merge_nested_dict(left or {}, right or {})
 
 
+def conversation_history_replace_reducer(
+    current: dict[str, list[BaseMessage]], new: Optional[dict[str, list[BaseMessage]]]
+) -> dict[str, list[BaseMessage]]:
+    """Replace-based conversation history reducer.
+
+    Unlike append-based reducers, this replaces the entire conversation history
+    for a given agent/component. Consumers must provide the full history
+    (existing + new messages) on each update.
+
+    Processing: Only applies cheap preprocessing (deduplication). Token-based
+    trimming is deferred to agent run stage via maybe_compact_history().
+    """
+    reduced = {**current}
+
+    if new is None:
+        return reduced
+
+    for agent_name, new_messages in new.items():
+        if new_messages is None:
+            continue
+
+        if new_messages == []:
+            reduced[agent_name] = []
+            continue
+
+        reduced[agent_name] = preprocess_conversation_history(messages=new_messages)
+
+    return reduced
+
+
 class FlowStateKeys:
     STATUS: Literal["status"] = "status"
     CONVERSATION_HISTORY: Literal["conversation_history"] = "conversation_history"
@@ -103,7 +135,7 @@ class FlowStateKeys:
 class FlowState(TypedDict):
     status: WorkflowStatusEnum
     conversation_history: Annotated[
-        dict[str, list[BaseMessage]], _conversation_history_reducer
+        dict[str, list[BaseMessage]], conversation_history_replace_reducer
     ]
     ui_chat_log: Annotated[list[UiChatLog], _ui_chat_log_reducer]
     context: Annotated[dict[str, Any], merge_nested_dict_reducer]

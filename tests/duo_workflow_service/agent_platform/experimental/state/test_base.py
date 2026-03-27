@@ -15,7 +15,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     merge_nested_dict_reducer,
 )
 from duo_workflow_service.agent_platform.experimental.state.base import (
-    _conversation_history_replace_reducer,
+    conversation_history_replace_reducer,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
@@ -1227,14 +1227,14 @@ class TestIOKeyLiteralField:
 
 
 class TestConversationHistoryReplaceReducer:
-    """Test _conversation_history_replace_reducer function."""
+    """Test conversation_history_replace_reducer function."""
 
     def test_basic_replacement(self):
         """Test that new messages replace existing messages for the same component."""
         current = {"component1": [SystemMessage(content="Old")]}
         new = {"component1": [SystemMessage(content="New")]}
 
-        result = _conversation_history_replace_reducer(current, new)
+        result = conversation_history_replace_reducer(current, new)
 
         assert result["component1"][0].content == "New"
         assert "Old" not in [msg.content for msg in result["component1"]]
@@ -1248,7 +1248,7 @@ class TestConversationHistoryReplaceReducer:
             ]
         }
 
-        result = _conversation_history_replace_reducer(current, None)
+        result = conversation_history_replace_reducer(current, None)
 
         # Should return current state unchanged
         assert result == current
@@ -1266,7 +1266,7 @@ class TestConversationHistoryReplaceReducer:
             "component1": [],  # Empty list should clear history
         }
 
-        result = _conversation_history_replace_reducer(current, new)
+        result = conversation_history_replace_reducer(current, new)
 
         # component1 should be cleared (empty list)
         assert "component1" in result
@@ -1286,7 +1286,7 @@ class TestConversationHistoryReplaceReducer:
             "component2": [HumanMessage(content="New component message")],
         }
 
-        result = _conversation_history_replace_reducer(current, new)
+        result = conversation_history_replace_reducer(current, new)
 
         # component1 should remain unchanged since value was None
         assert "component1" in result
@@ -1311,7 +1311,7 @@ class TestConversationHistoryReplaceReducer:
             ]
         }
 
-        result = _conversation_history_replace_reducer(current, new)
+        result = conversation_history_replace_reducer(current, new)
 
         # component2 should remain unchanged
         assert "component2" in result
@@ -1336,8 +1336,8 @@ class TestConversationHistoryReplaceReducer:
         }
 
         # Call reducer twice
-        result1 = _conversation_history_replace_reducer(current, new)
-        result2 = _conversation_history_replace_reducer(current, new)
+        result1 = conversation_history_replace_reducer(current, new)
+        result2 = conversation_history_replace_reducer(current, new)
 
         # Results should be equal
         assert len(result1["agent_a"]) == len(result2["agent_a"])
@@ -1352,7 +1352,7 @@ class TestConversationHistoryReplaceReducer:
             ],
         }
 
-        result = _conversation_history_replace_reducer(current, None)
+        result = conversation_history_replace_reducer(current, None)
 
         # returned results should be equal to current, but be a different object
         assert result == current

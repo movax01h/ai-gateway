@@ -78,6 +78,22 @@ def mock_get_vars_from_state_fixture(prompt_variables):
         yield mock_get_vars_from_state
 
 
+@pytest.fixture(name="_mock_maybe_compact_history")
+def _mock_maybe_compact_history_fixture():
+    """Fixture for mocking maybe_compact_history to return input unchanged."""
+    with patch(
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
+        new_callable=AsyncMock,
+    ) as mock_compact:
+
+        async def return_history(*, compactor, history, agent_name):
+            _ = compactor, agent_name
+            return history
+
+        mock_compact.side_effect = return_history
+        yield mock_compact
+
+
 class TestAgentNode:
     """Test suite for AgentNode class focusing on the run method."""
 
@@ -92,12 +108,13 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         mock_get_vars_from_state,
+        _mock_maybe_compact_history,
     ):
         """Test successful run with empty conversation history."""
 
         result = await agent_node.run(base_flow_state)
 
-        # Verify result structure
+        # Verify result structure (with replace mode: full history returned)
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
         assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
@@ -126,16 +143,22 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         mock_get_vars_from_state,
+        _mock_maybe_compact_history,
     ):
         """Test successful run with existing conversation history."""
+        existing_history = flow_state_with_history[FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
 
         result = await agent_node.run(flow_state_with_history)
 
-        # Verify result structure
+        # Verify result structure (with replace mode: full history returned)
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
+        # Replace mode: existing history + new completion
         assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
-            mock_ai_message
+            *existing_history,
+            mock_ai_message,
         ]
 
         mock_get_vars_from_state.assert_called_once_with(
@@ -145,9 +168,7 @@ class TestAgentNode:
         mock_prompt.ainvoke.assert_called_once_with(
             input={
                 **prompt_variables,
-                "history": flow_state_with_history[FlowStateKeys.CONVERSATION_HISTORY][
-                    component_name
-                ],
+                "history": existing_history,
             }
         )
 
@@ -162,13 +183,14 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         mock_get_vars_from_state,
+        _mock_maybe_compact_history,
     ):
         """Test run method with conversation_history missing the component key."""
         base_flow_state[FlowStateKeys.CONVERSATION_HISTORY] = {}
 
         result = await agent_node.run(base_flow_state)
 
-        # Verify result structure
+        # Verify result structure (with replace mode: full history returned)
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
         assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
@@ -255,6 +277,7 @@ class TestAgentNode:
         base_flow_state,
         component_name,
         prompt_variables,
+        _mock_maybe_compact_history,
     ):
         """Test run method when final_response_tool is combined with other tools."""
         # Create mock AI message with final_response_tool and another tool
@@ -295,11 +318,13 @@ class TestAgentNode:
             ]
         )
 
-        # Verify the method retried and returned successful result
+        # Verify the method retried and returned successful result (with replace mode: full history)
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
+        # Replace mode returns full history: retry_history + final completion
         assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
-            mock_ai_message
+            *retry_history,
+            mock_ai_message,
         ]
 
     @pytest.mark.asyncio
@@ -310,6 +335,7 @@ class TestAgentNode:
         agent_node_with_schema,
         base_flow_state,
         component_name,
+        _mock_maybe_compact_history,
     ):
         """Test run method with valid final_response_tool."""
         # Create mock AI message with valid final_response_tool
@@ -325,7 +351,7 @@ class TestAgentNode:
 
         result = await agent_node_with_schema.run(base_flow_state)
 
-        # Verify successful result
+        # Verify successful result (with replace mode: full history)
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
         assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
@@ -344,6 +370,7 @@ class TestAgentNode:
         agent_node_with_schema,
         base_flow_state,
         component_name,
+        _mock_maybe_compact_history,
     ):
         """Test run method when final_response_tool has validation error."""
         # Create mock AI message with invalid final_response_tool args
@@ -362,12 +389,13 @@ class TestAgentNode:
 
         result = await agent_node_with_schema.run(base_flow_state)
 
-        # Verify the method retried and returned successful result
+        # Verify the method retried and returned successful result (with replace mode)
         assert FlowStateKeys.CONVERSATION_HISTORY in result
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
-        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
-            mock_ai_message
-        ]
+        # Replace mode returns full history: retry messages + final completion
+        history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(history) == 3  # invalid AI message + tool message + final AI message
+        assert history[-1] == mock_ai_message
 
         # Verify prompt was called twice (first failed validation, second succeeded)
         assert mock_prompt.ainvoke.call_count == 2

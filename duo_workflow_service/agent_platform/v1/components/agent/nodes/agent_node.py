@@ -14,6 +14,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKey,
     get_vars_from_state,
 )
+from duo_workflow_service.conversation.compaction import maybe_compact_history
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
 from lib.context import LLMFinishReason
 from lib.events import GLReportingEventContext
@@ -94,6 +95,13 @@ class AgentNode:
         )
         variables = get_vars_from_state(self._inputs, state)
 
+        # Apply legacy token-based trimming before LLM call (compactor=None forces fallback)
+        history = await maybe_compact_history(
+            compactor=None,
+            history=history,
+            agent_name=self._component_name,
+        )
+
         while True:
             try:
                 completion: AIMessage = cast(
@@ -110,7 +118,7 @@ class AgentNode:
 
                 return {
                     FlowStateKeys.CONVERSATION_HISTORY: {
-                        self._component_name: [completion]
+                        self._component_name: history + [completion]
                     },
                 }
             except APIStatusError as e:

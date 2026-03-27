@@ -90,7 +90,7 @@ class ToolNode:
         return {
             **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
-                self._component_name: tools_responses,
+                self._component_name: conversation_history + tools_responses,
             },
         }
 
