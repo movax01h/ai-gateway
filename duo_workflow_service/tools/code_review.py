@@ -446,8 +446,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         boundary_id = secrets.token_hex(16)
 
         # Escape user-controlled fields to prevent HTML/XML injection
-        title = html.escape(context["mr_data"].get("title", ""))
-        description = html.escape(context["mr_data"].get("description", ""))
+        title = html.escape(context["mr_data"].get("title") or "")
+        description = html.escape(context["mr_data"].get("description") or "")
 
         custom_instructions_section = self._format_custom_instructions(
             context.get("custom_instructions", [])
