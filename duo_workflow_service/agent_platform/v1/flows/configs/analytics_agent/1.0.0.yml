@@ -7,8 +7,6 @@ components:
     inputs:
       - from: "context:goal"
         as: "goal"
-      - from: "context:project_id"
-        as: "project_id"
     toolset:
       - "get_current_user"
       - "run_glql_query"

@@ -25,8 +25,6 @@ components:
     inputs:
       - from: "context:load_jenkins_file.tool_responses"
         as: "jenkins_file_content"
-      - from: "context:project_id"
-        as: "project_id"
     toolset:
       - "create_file_with_contents"
       - "read_file"
@@ -74,6 +72,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
     toolset:
       - "run_git_command"
     ui_log_events:
@@ -99,6 +100,9 @@ components:
         as: "session_url"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
         optional: True
     toolset:
       - "run_git_command"

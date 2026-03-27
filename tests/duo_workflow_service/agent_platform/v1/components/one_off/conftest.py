@@ -102,6 +102,7 @@ def mock_prompt_registry_fixture():
     mock_prompt.model = Mock()
     mock_prompt.model.model_name = "claude-3-sonnet"
     mock_registry.get.return_value = mock_prompt
+    mock_registry.get_required_variables.return_value = set()
     return mock_registry
 
 

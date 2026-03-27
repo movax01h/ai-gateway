@@ -26,7 +26,7 @@ from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
-from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE
+from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
@@ -1413,3 +1413,126 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
 
         kwargs = prompt_class.call_args.kwargs
         assert kwargs.get("max_tokens_override") is None
+
+
+class TestGetRequiredVariables:
+
+    _PROMPT_BASE_DIR = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
+    )
+
+    def _create_prompt_file(
+        self, fs: FakeFilesystem, prompt_id: str, template: str
+    ) -> None:
+        """Create a minimal prompt YAML file with the given template string."""
+        path = self._PROMPT_BASE_DIR / prompt_id / "base" / "1.0.0.yml"
+        yaml_content = "\n".join(
+            [
+                "---",
+                "name: Test prompt",
+                "unit_primitive: duo_chat",
+                "prompt_template:",
+                f"  system: {repr(template)}",
+                "",
+            ]
+        )
+        fs.create_file(path, contents=yaml_content)
+
+    def test_no_version_raises(self, registry: LocalPromptRegistry):
+        """File-based prompts without a version constraint raise TemplateNotFoundError."""
+        with pytest.raises(TemplateNotFoundError, match="no prompt_version provided"):
+            registry.get_required_variables("any_prompt", prompt_version=None)
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_returns_variables_from_template(self, registry: LocalPromptRegistry):
+        """File-based prompt with matching version returns template variables."""
+        result = registry.get_required_variables("chat/react", prompt_version="^1.0.0")
+        assert isinstance(result, set)
+
+    def test_unknown_prompt_raises(self, registry: LocalPromptRegistry):
+        """Non-existent prompt ID raises TemplateNotFoundError."""
+        with pytest.raises(TemplateNotFoundError):
+            registry.get_required_variables("nonexistent", prompt_version="^1.0.0")
+
+    def test_simple_variables_extracted(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables referenced in a template are returned as a set."""
+        self._create_prompt_file(
+            fs, "test/simple_vars", "Hello {{ name }}, goal: {{ goal }}"
+        )
+        result = registry.get_required_variables(
+            "test/simple_vars", prompt_version="^1.0.0"
+        )
+        assert result == {"name", "goal"}
+
+    def test_no_variables_returns_empty_set(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """A template with no Jinja2 variables returns an empty set."""
+        self._create_prompt_file(fs, "test/no_vars", "Hello world")
+        result = registry.get_required_variables(
+            "test/no_vars", prompt_version="^1.0.0"
+        )
+        assert result == set()
+
+    def test_duplicate_variables_deduplicated(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Each variable name appears only once even if used multiple times."""
+        self._create_prompt_file(fs, "test/dup_vars", "{{ x }} and {{ x }}")
+        result = registry.get_required_variables(
+            "test/dup_vars", prompt_version="^1.0.0"
+        )
+        assert result == {"x"}
+
+    def test_variables_with_filters_extracted(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Filter expressions do not obscure the underlying variable name."""
+        self._create_prompt_file(fs, "test/filter_vars", "{{ name | upper }}")
+        result = registry.get_required_variables(
+            "test/filter_vars", prompt_version="^1.0.0"
+        )
+        assert result == {"name"}
+
+    def test_variables_in_conditionals_extracted(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables inside conditional blocks are included in the result."""
+        self._create_prompt_file(
+            fs,
+            "test/cond_vars",
+            "{% if flag %}{{ a }}{% else %}{{ b }}{% endif %}",
+        )
+        result = registry.get_required_variables(
+            "test/cond_vars", prompt_version="^1.0.0"
+        )
+        assert result == {"flag", "a", "b"}
+
+    def test_include_collects_variables_from_nested_template(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables from included templates are collected transitively."""
+        self._create_prompt_file(
+            fs, "test/include_vars", '{{ goal }}\n{%- include "fake.jinja" %}'
+        )
+        fake_loader = patch(
+            "ai_gateway.prompts.base.jinja_loader.get_source",
+            return_value=("Nested: {{ nested_var }}", "fake.jinja", lambda: True),
+        )
+        with fake_loader:
+            result = registry.get_required_variables(
+                "test/include_vars", prompt_version="^1.0.0"
+            )
+        assert result == {"goal", "nested_var"}
+
+    def test_include_unknown_template_raises(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """An unresolvable include propagates an exception from get_required_variables."""
+        self._create_prompt_file(
+            fs, "test/bad_include", '{% include "no_such_template.txt" %}'
+        )
+        with pytest.raises(Exception):
+            registry.get_required_variables("test/bad_include", prompt_version="^1.0.0")

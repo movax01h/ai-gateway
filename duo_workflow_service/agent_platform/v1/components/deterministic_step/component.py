@@ -6,7 +6,6 @@ from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
-from duo_workflow_service.agent_platform.v1.components import register_component
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -21,6 +20,9 @@ from duo_workflow_service.agent_platform.v1.components.deterministic_step.ui_log
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     extract_configured_params,
     select_validated_tool,
+)
+from duo_workflow_service.agent_platform.v1.components.registry import (
+    register_component,
 )
 from duo_workflow_service.agent_platform.v1.state import IOKey, IOKeyTemplate
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory

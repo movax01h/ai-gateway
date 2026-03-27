@@ -1,6 +1,6 @@
 """Shared fixtures for agent component tests."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -336,6 +336,7 @@ def mock_prompt_registry_fixture():
     mock_prompt.model = Mock()
     mock_prompt.model.model_name = "claude-3-sonnet"
     mock_registry.get.return_value = mock_prompt
+    mock_registry.get_required_variables.return_value = set()
     return mock_registry
 
 

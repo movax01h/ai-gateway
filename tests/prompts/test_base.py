@@ -56,7 +56,7 @@ from ai_gateway.prompts import (
     Prompt,
     jinja2_formatter,
 )
-from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE
+from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, TemplateNotFoundError
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
@@ -1197,6 +1197,9 @@ def registry_fixture(
 
         def get(self, *_args, **_kwargs):
             return prompt
+
+        def get_required_variables(self, *_args, **_kwargs) -> set[str]:
+            raise TemplateNotFoundError("not available in test registry")
 
     return Registry()
 

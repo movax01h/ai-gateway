@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
@@ -826,3 +826,111 @@ class TestAgentComponentOutputs:
         # Verify custom field outputs exist
         assert ("context", [component_name, "final_answer", "summary"]) in output_keys
         assert ("context", [component_name, "final_answer", "score"]) in output_keys
+
+
+class TestPromptVariableValidation:
+    """Tests for validate_prompt_variable_coverage on AgentComponent."""
+
+    def _build(
+        self,
+        inputs,
+        required_vars,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+        strict_validation=False,
+    ):
+        mock_prompt_registry.get_required_variables.return_value = required_vars
+        return AgentComponent(
+            name="comp",
+            flow_id="test",
+            flow_type=flow_type,
+            user=user,
+            inputs=inputs,
+            prompt_id="p",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            strict_validation=strict_validation,
+        )
+
+    def test_happy_path(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        comp = self._build(
+            ["context:goal"],
+            {"goal"},
+            mock_prompt_registry,
+            mock_internal_event_client,
+            flow_type,
+            user,
+            mock_toolset,
+        )
+        assert comp is not None
+
+    def test_missing_input_raises(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        with pytest.raises(ValidationError, match="missing input variables"):
+            self._build(
+                [],
+                {"goal"},
+                mock_prompt_registry,
+                mock_internal_event_client,
+                flow_type,
+                user,
+                mock_toolset,
+            )
+
+    def test_extra_input_without_strict_validation(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        """Extra inputs do NOT raise when strict_validation is False (default)."""
+        comp = self._build(
+            ["context:goal", "context:extra"],
+            {"goal"},
+            mock_prompt_registry,
+            mock_internal_event_client,
+            flow_type,
+            user,
+            mock_toolset,
+        )
+        assert comp is not None
+
+    def test_extra_input_with_strict_validation(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        """Extra inputs raise when strict_validation is True."""
+        with pytest.raises(ValidationError, match="extra input variables"):
+            self._build(
+                ["context:goal", "context:extra"],
+                {"goal"},
+                mock_prompt_registry,
+                mock_internal_event_client,
+                flow_type,
+                user,
+                mock_toolset,
+                strict_validation=True,
+            )

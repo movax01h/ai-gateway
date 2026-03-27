@@ -58,6 +58,10 @@ class PromptRegistrySelfHostedBillingSupport(BasePromptRegistry):
 
         return prompt
 
+    def get_required_variables(self, prompt_id: str, prompt_version: Any) -> Any:
+        """Delegate to the wrapped registry — covered by __getattr__ at runtime."""
+        return self.instance.get_required_variables(prompt_id, prompt_version)
+
 
 class FieldsWorkflowLegacy(NamedTuple):
     workflow_id: str = "_workflow_id"

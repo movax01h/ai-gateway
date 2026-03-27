@@ -14,7 +14,7 @@ from ai_gateway.model_metadata import (
     TypeModelMetadata,
     create_model_metadata,
 )
-from ai_gateway.prompts.base import BasePromptRegistry, Prompt
+from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFoundError
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.completion import completion_prompt_template_factory
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptConfig
@@ -411,6 +411,50 @@ class LocalPromptRegistry(BasePromptRegistry):
             max_tokens_override=max_tokens_override,
             **kwargs,
         )
+
+    @override
+    def get_required_variables(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+    ) -> set[str]:
+        """Return Jinja2 variables required by the file-based prompt template.
+
+        Args:
+            prompt_id: Prompt identifier to look up on disk.
+            prompt_version: Semantic version constraint selecting which version
+                file to inspect (e.g. ``"^1.0.0"``). When ``None`` the method
+                raises ``TemplateNotFoundError`` — file-based prompts have no
+                default version for variable inspection purposes.
+
+        Returns:
+            Flat set of required variable names (``{% include %}`` directives
+            followed recursively).
+
+        Raises:
+            TemplateNotFoundError: When the prompt cannot be resolved (missing
+                version, unknown prompt id, or unresolvable file path).
+        """
+        if not prompt_version:
+            raise TemplateNotFoundError(
+                f"Cannot resolve required variables for '{prompt_id}': no prompt_version provided"
+            )
+
+        try:
+            prompt_path = self._resolve_id(prompt_id, family=[])
+            registered = self._load_prompt_definition(prompt_id, prompt_path)
+            config = self._get_prompt_config(registered.versions, prompt_version)
+        except (FileNotFoundError, ValueError) as e:
+            raise TemplateNotFoundError(
+                f"Cannot resolve required variables for '{prompt_id}' "
+                f"(version '{prompt_version}'): {e}"
+            ) from e
+
+        variables: set[str] = set()
+        for template_str in config.prompt_template.values():
+            if template_str:
+                variables.update(self._collect_jinja2_variables(template_str))
+        return variables
 
     def _build_prompt(
         self,

@@ -226,21 +226,29 @@ class IOKey(BaseModel):
             optional=optional,
         )
 
+    @property
+    def template_variable_name(self) -> str:
+        """Return the Jinja2 template variable name this input will be exposed as.
+
+        This is the single source of truth for key selection: ``alias`` wins if
+        set (covers both literal and aliased inputs), then the last subkey, then
+        the bare target.  ``template_variable_from_state`` delegates to this
+        property so the rule is never duplicated.
+
+        Returns:
+            The variable name a Jinja2 template would see for this input.
+        """
+        if self.literal or self.alias:
+            return self.alias  # type: ignore[return-value]
+        if self.subkeys:
+            return self.subkeys[-1]
+        return self.target
+
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         # self.target presence in state is validated in parse_valid_target
         # thereby state[self.target] will always succeed
-        if self.literal:
-            return {self.alias: self.target}  # type: ignore[dict-item]
-
-        value = self.value_from_state(state)
-
-        if self.alias:
-            return {self.alias: value}
-
-        if not self.subkeys:
-            return {self.target: value}
-
-        return {self.subkeys[-1]: value}  # pylint: disable=unsubscriptable-object
+        value = self.target if self.literal else self.value_from_state(state)
+        return {self.template_variable_name: value}
 
     def value_from_state(self, state: FlowState) -> Any:
         # self.target presence in state is validated in parse_valid_target
