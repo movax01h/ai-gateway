@@ -17,6 +17,7 @@ from typing import (
 import httpx
 import structlog
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
+from anthropic import APIStatusError as AnthropicAPIStatusError
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from gitlab_cloud_connector import (
@@ -43,7 +44,7 @@ from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavaila
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -91,12 +92,38 @@ _RETRYABLE_NETWORK_ERRORS = (
     LiteLLMServiceUnavailableError,
 )
 
+# Retryable HTTP status codes for Anthropic errors surfaced via the non-streaming
+# path, where _make_status_error dispatches on response.status_code.
+_RETRYABLE_ANTHROPIC_STATUS_CODES = {500, 529}
+
+# In the streaming path the HTTP response always has status 200 (the stream
+# opened successfully) and the real error is embedded in the SSE body as e.g.
+# {'type': 'error', 'error': {'type': 'api_error', ...}}.  _make_status_error
+# therefore raises the base APIStatusError with status_code=200, so we cannot
+# match on status_code.  Instead we inspect the body's error type string.
+_RETRYABLE_ANTHROPIC_STREAM_ERROR_TYPES = {"api_error", "overloaded_error"}
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, _RETRYABLE_NETWORK_ERRORS):
+        return True
+    if isinstance(exc, AnthropicAPIStatusError):
+        if exc.status_code in _RETRYABLE_ANTHROPIC_STATUS_CODES:
+            return True
+        # Streaming-path errors arrive with HTTP 200; fall back to body inspection.
+        body = exc.body
+        if isinstance(body, dict):
+            error = body.get("error", {})
+            if isinstance(error, dict):
+                return error.get("type") in _RETRYABLE_ANTHROPIC_STREAM_ERROR_TYPES
+    return False
+
 
 @retry(
     reraise=True,
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=3, min=3, max=29, exp_base=3),
-    retry=retry_if_exception_type(_RETRYABLE_NETWORK_ERRORS),
+    retry=retry_if_exception(_is_retryable),
     before_sleep=before_sleep_log(_log, logging.WARNING),
 )
 async def _ainvoke_with_retry(

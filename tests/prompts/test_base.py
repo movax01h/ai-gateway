@@ -10,6 +10,7 @@ import httpx
 import pytest
 from anthropic import (
     APIConnectionError,
+    APIStatusError,
     APITimeoutError,
     AsyncAnthropic,
     BadRequestError,
@@ -765,6 +766,25 @@ configurable_unit_primitives:
                 id="anthropic_internal_server_error",
             ),
             pytest.param(
+                # Streaming path: HTTP 200 with error embedded in the body.
+                # _make_status_error raises the base APIStatusError (not InternalServerError)
+                # because status_code comes from the body, not the HTTP response.
+                APIStatusError(
+                    "Internal server error",
+                    response=httpx.Response(
+                        200, request=httpx.Request("POST", "https://api.anthropic.com")
+                    ),
+                    body={
+                        "type": "error",
+                        "error": {
+                            "type": "api_error",
+                            "message": "Internal server error",
+                        },
+                    },
+                ),
+                id="anthropic_internal_server_error_streaming_path",
+            ),
+            pytest.param(
                 LiteLLMInternalServerError(
                     "Internal error encountered.",
                     model="claude-haiku-4-5",
@@ -796,20 +816,53 @@ configurable_unit_primitives:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_ainvoke_retries_on_anthropic_overloaded_error(self, prompt: Prompt):
-        """Test that ainvoke retries on anthropic.OverloadedError (HTTP 529)."""
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                AnthropicOverloadedError(
+                    "Overloaded",
+                    response=httpx.Response(
+                        529,
+                        request=httpx.Request(
+                            "POST", "https://api.anthropic.com/v1/messages"
+                        ),
+                    ),
+                    body=None,
+                ),
+                id="anthropic_overloaded_error",
+            ),
+            pytest.param(
+                # Streaming path: HTTP 200 with overloaded_error in body.
+                APIStatusError(
+                    "Overloaded",
+                    response=httpx.Response(
+                        200,
+                        request=httpx.Request(
+                            "POST", "https://api.anthropic.com/v1/messages"
+                        ),
+                    ),
+                    body={
+                        "type": "error",
+                        "error": {"type": "overloaded_error", "message": "Overloaded"},
+                    },
+                ),
+                id="anthropic_overloaded_error_streaming_path",
+            ),
+        ],
+    )
+    async def test_ainvoke_retries_on_anthropic_overloaded_error(
+        self, prompt: Prompt, error: Exception
+    ):
+        """Test that ainvoke retries on OverloadedError from Anthropic, including streaming path."""
         success_response = AIMessage(content="Hello!")
         call_count = 0
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx.Response(529, request=request)
 
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise AnthropicOverloadedError(
-                    "Overloaded", response=response, body=None
-                )
+                raise error
             return success_response
 
         with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
@@ -820,21 +873,50 @@ configurable_unit_primitives:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_ainvoke_does_not_retry_on_anthropic_non_retryable_status(
-        self, prompt: Prompt
-    ):
-        """Test that ainvoke does not retry on non-retryable anthropic.APIStatusError (e.g. 400)."""
-        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-        response = httpx.Response(400, request=request)
-
-        with mock.patch.object(
-            FakeModel,
-            "ainvoke",
-            side_effect=BadRequestError(  # 400, not retryable
-                "Bad request", response=response, body=None
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                BadRequestError(
+                    "Bad request",
+                    response=httpx.Response(
+                        400,
+                        request=httpx.Request(
+                            "POST", "https://api.anthropic.com/v1/messages"
+                        ),
+                    ),
+                    body=None,
+                ),
+                id="bad_request_error",
             ),
-        ):
-            with pytest.raises(BadRequestError):
+            pytest.param(
+                # Streaming path: HTTP 200 with a non-retryable error type in body.
+                APIStatusError(
+                    "Invalid request",
+                    response=httpx.Response(
+                        200,
+                        request=httpx.Request(
+                            "POST", "https://api.anthropic.com/v1/messages"
+                        ),
+                    ),
+                    body={
+                        "type": "error",
+                        "error": {
+                            "type": "invalid_request_error",
+                            "message": "Invalid request",
+                        },
+                    },
+                ),
+                id="invalid_request_error_streaming_path",
+            ),
+        ],
+    )
+    async def test_ainvoke_does_not_retry_on_anthropic_non_retryable_status(
+        self, prompt: Prompt, error: Exception
+    ):
+        """Test that ainvoke does not retry on non-retryable Anthropic errors."""
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=error):
+            with pytest.raises(type(error)):
                 await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
     @pytest.mark.asyncio
