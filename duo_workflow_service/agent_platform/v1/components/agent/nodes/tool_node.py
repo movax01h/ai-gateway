@@ -112,6 +112,7 @@ class ToolNode:
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+                tool_response=tool_call_result,
             )
 
             return tool_call_result

@@ -73,6 +73,10 @@ class SlashCommandStatus(StrEnum):
     FAILURE = "failure"
 
 
+# Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
+TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
+
+
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
@@ -175,6 +179,25 @@ def _ui_chat_log_reducer(
         return current.copy()
 
     return current + new
+
+
+def build_tool_info(
+    name: str, args: dict[str, Any], tool_response: Any = None
+) -> ToolInfo:
+    """Build a ToolInfo dict, truncating tool_response strings to avoid large payloads.
+
+    Truncates string tool responses to TOOL_RESPONSE_MAX_DISPLAY_MSG characters to prevent bloating ui_chat_log payloads
+    and checkpoints with large tool outputs.
+    """
+    info = ToolInfo(name=name, args=args)
+    if tool_response is not None:
+        if (
+            isinstance(tool_response, str)
+            and len(tool_response) > TOOL_RESPONSE_MAX_DISPLAY_MSG
+        ):
+            tool_response = tool_response[:TOOL_RESPONSE_MAX_DISPLAY_MSG]
+        info["tool_response"] = tool_response
+    return info
 
 
 class WorkflowState(TypedDict):

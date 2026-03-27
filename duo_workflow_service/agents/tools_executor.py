@@ -17,6 +17,7 @@ from ai_gateway.container import ContainerApplication
 from duo_workflow_service.agents.project_utils import resolve_project_name_for_tool
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
+    TOOL_RESPONSE_MAX_DISPLAY_MSG,
     DuoWorkflowStateType,
     MessageTypeEnum,
     Plan,
@@ -55,9 +56,6 @@ _ACTION_HANDLERS = [
 _COMMAND_OUTPUT_TOOLS = {
     "run_command": RunCommand,
 }
-
-# Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
-TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
 
 class IncompleteToolCallDueToMaxTokens(ToolException):

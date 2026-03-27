@@ -52,6 +52,25 @@ class TestUILogWriterAgentTools:
             name=mock_tool.name, args=tool_call_args
         )
 
+    def test_log_success_with_tool_response(
+        self, ui_log_writer, mock_tool, mock_callback
+    ):
+        """Test the success method includes tool_response in ToolInfo."""
+        tool_call_args = {"param1": "value1"}
+        tool_response = "Tool execution result"
+
+        ui_log_writer.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+            tool_response=tool_response,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["tool_info"] == ToolInfo(
+            name=mock_tool.name, args=tool_call_args, tool_response=tool_response
+        )
+
     def test_log_success_with_message(self, ui_log_writer, mock_tool, mock_callback):
         """Test the success method with a custom message."""
         custom_message = "Custom success message"

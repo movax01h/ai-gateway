@@ -52,7 +52,26 @@ class TestUILogWriterDeterministicStep:
         assert args.record["message_type"] == MessageTypeEnum.TOOL
         assert args.record["status"] == ToolStatus.SUCCESS
         assert args.record["tool_info"] == ToolInfo(
-            name=mock_tool.name, args=tool_call_args
+            name=mock_tool.name, args=tool_call_args, tool_response=tool_response
+        )
+
+    def test_log_success_with_tool_response_in_tool_info(
+        self, ui_log_writer, mock_tool, mock_callback
+    ):
+        """Test the success method includes tool_response in ToolInfo."""
+        tool_call_args = {"param1": "value1"}
+        tool_response = "Tool execution result"
+
+        ui_log_writer.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            tool_response=tool_response,
+            event=UILogEventsDeterministicStep.ON_TOOL_EXECUTION_SUCCESS,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["tool_info"] == ToolInfo(
+            name=mock_tool.name, args=tool_call_args, tool_response=tool_response
         )
 
     def test_log_error(self, ui_log_writer, mock_tool, mock_callback):

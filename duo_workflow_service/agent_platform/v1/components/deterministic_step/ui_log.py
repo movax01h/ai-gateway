@@ -14,6 +14,7 @@ from duo_workflow_service.entities import (
     ToolInfo,
     ToolStatus,
     UiChatLog,
+    build_tool_info,
 )
 
 __all__ = ["UILogEventsDeterministicStep", "UILogWriterDeterministicStep"]
@@ -49,7 +50,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
             content=self._format_message(tool, tool_call_args, tool_response),
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
-            tool_info=ToolInfo(name=tool.name, args=tool_call_args),
+            tool_info=build_tool_info(tool.name, tool_call_args, tool_response),
             message_sub_type=tool.name,
             correlation_id=correlation_id,
             additional_context=additional_context,

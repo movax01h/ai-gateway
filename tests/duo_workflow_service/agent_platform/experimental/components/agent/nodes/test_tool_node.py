@@ -132,6 +132,7 @@ class TestToolNode:
             tool=mock_tool,
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+            tool_response="Tool execution result",
         )
 
         # Verify ui_history.pop_state_updates was called
