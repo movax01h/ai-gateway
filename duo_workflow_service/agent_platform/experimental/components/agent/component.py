@@ -14,6 +14,12 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
     FinalResponseNode,
     ToolNode,
 )
+from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
+    ConversationHistoryKeyFactory,
+)
+from duo_workflow_service.agent_platform.experimental.components.agent.nodes.final_response_node import (
+    OutputKeyFactory,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -27,7 +33,6 @@ from duo_workflow_service.agent_platform.experimental.components.registry import
 )
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
-    FlowStateKeys,
     IOKeyTemplate,
 )
 from duo_workflow_service.agent_platform.experimental.state.base import IOKey
@@ -50,7 +55,7 @@ class RoutingError(Exception):
 
 
 class AgentComponentBase(BaseComponent):
-    """Shared base for agent-style components (AgentComponent, SubagentComponent, SupervisorAgentComponent).
+    """Shared base for agent-style components (AgentComponent, SupervisorAgentComponent).
 
     Holds the common field declarations and class-level metadata shared by all
     agent variants.  Subclasses must override ``_agent_node_router`` and
@@ -159,20 +164,88 @@ class AgentComponent(AgentComponentBase):
     """Registered AgentComponent for use in flow configs.
 
     Provides the standard single-agent ReAct loop (agent ↔ tools, final_response) with dependency injection applied.
+
+    Can be used standalone or bound to a SupervisorAgentComponent via bind_to_supervisor.
+    When bound to a supervisor:
+    - The description field becomes required (used by supervisor's delegate_task tool)
+    - The component uses supervisor-provided key factories for conversation history and output
+    - Output keys are resolved at runtime based on the active subsession
+
+    When used standalone:
+    - The description field is optional
+    - Uses default key factories that resolve to component-scoped keys
+    - Output keys are static and component-scoped
     """
 
+    description: Optional[str] = None
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
-    def _agent_node_router(self, state: FlowState) -> str:
-        history: list[BaseMessage] = state[FlowStateKeys.CONVERSATION_HISTORY].get(
-            self.name,
-            [],
+    # Private attributes for key factories with default values.
+    # Overridden by bind_to_supervisor when used as a subagent.
+    _conversation_history_key_factory: ConversationHistoryKeyFactory = PrivateAttr()
+    _output_key_factory: OutputKeyFactory = PrivateAttr()
+    _is_bound_to_supervisor: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def initialize_key_factories(self) -> Self:
+        """Initialize key factories with default values for standalone use.
+
+        These defaults are overridden by bind_to_supervisor when the component is used as a subagent.
+        """
+        # Default conversation history factory uses component-scoped key
+        self._conversation_history_key_factory = self._conversation_history_key
+
+        # Default output factory returns static component-scoped final_answer key
+        output_key = self._final_answer_key.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         )
+        self._output_key_factory = lambda _: output_key
+
+        return self
+
+    def bind_to_supervisor(
+        self,
+        *,
+        conversation_history_key_factory: ConversationHistoryKeyFactory,
+        output_key_factory: OutputKeyFactory,
+    ) -> None:
+        """Bind this agent to a supervisor.
+
+        Must be called before ``attach`` when using this component as a subagent.
+        The supervisor passes subsession-scoped key factories so the agent never
+        needs to scan state to discover which supervisor owns it or what the active
+        subsession ID is.
+
+        When bound to a supervisor, the description field must be set.
+
+        Args:
+            conversation_history_key_factory: Callable ``(state) -> IOKey`` that
+                resolves the subsession-scoped conversation-history key at runtime.
+            output_key_factory: Callable ``(state) -> IOKey`` that resolves the
+                subsession-scoped final_answer key at runtime.
+
+        Raises:
+            ValueError: If description is not set when binding to supervisor.
+        """
+        if not self.description:
+            raise ValueError(
+                f"AgentComponent '{self.name}' must have a description when bound to a supervisor."
+            )
+        self._conversation_history_key_factory = conversation_history_key_factory
+        self._output_key_factory = output_key_factory
+        self._is_bound_to_supervisor = True
+
+    def _agent_node_router(self, state: FlowState) -> str:
+        history_iokey = self._conversation_history_key_factory(state)
+        history: list[BaseMessage] = history_iokey.value_from_state(state) or []
         if not history:
-            raise RoutingError(f"Conversation history not found for {self.name}")
+            raise RoutingError(
+                f"Conversation history not found for key "
+                f"{history_iokey.target}:{history_iokey.subkeys}"
+            )
 
         last_message = history[-1]
 
@@ -205,9 +278,13 @@ class AgentComponent(AgentComponentBase):
     def outputs(self) -> tuple[IOKey, ...]:
         """Return the outputs for this component.
 
-        For custom response schemas, this includes both the base final_answer output
-        and individual field paths for each schema field, enabling easier discovery
-        and access to nested data.
+        When bound to a supervisor, returns an empty tuple since the output keys
+        require runtime substitutions (supervisor name, subagent name, subsession ID)
+        that are only known at graph execution time.
+
+        For standalone components with custom response schemas, this includes both
+        the base final_answer output and individual field paths for each schema field,
+        enabling easier discovery and access to nested data.
 
         Returns:
             Tuple of IOKey objects describing all output paths from this component.
@@ -222,6 +299,9 @@ class AgentComponent(AgentComponentBase):
                 - context:<name>.final_answer.issues_found
                 - context:<name>.final_answer.recommendations
         """
+        # If bound to supervisor, return empty tuple (keys resolved at runtime)
+        if self._is_bound_to_supervisor:
+            return ()
 
         replacements = {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         base_outputs = tuple(output.to_iokey(replacements) for output in self._outputs)
@@ -264,13 +344,9 @@ class AgentComponent(AgentComponentBase):
             },
         )
 
-        output_key = self._final_answer_key.to_iokey(
-            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
-        )
-
         node_agent = AgentNode(
             name=self.__entry_hook__(),
-            conversation_history_key_factory=self._conversation_history_key,
+            conversation_history_key_factory=self._conversation_history_key_factory,
             prompt=prompt,
             inputs=self.inputs,
             flow_id=self.flow_id,
@@ -292,7 +368,7 @@ class AgentComponent(AgentComponentBase):
         )
         node_tools = ToolNode(
             name=f"{self.name}#tools",
-            conversation_history_key_factory=self._conversation_history_key,
+            conversation_history_key_factory=self._conversation_history_key_factory,
             toolset=self.toolset,
             flow_id=self.flow_id,
             flow_type=self.flow_type,
@@ -303,8 +379,8 @@ class AgentComponent(AgentComponentBase):
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
-            conversation_history_key_factory=self._conversation_history_key,
-            output_key_factory=lambda _: output_key,
+            conversation_history_key_factory=self._conversation_history_key_factory,
+            output_key_factory=self._output_key_factory,
             ui_history=UIHistory(
                 events=self.ui_log_events,
                 writer_class=default_ui_log_writer_class(

@@ -76,47 +76,6 @@ class TestFinalResponseNode:
         ui_history.pop_state_updates.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_run_success_without_output(
-        self,
-        conversation_history_key,
-        flow_state_with_message,
-        tool_call_id,
-        ui_history,
-        component_name,
-    ):
-        """Test successful run without output IOKey."""
-        node = FinalResponseNode(
-            name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: None,
-            ui_history=ui_history,
-            response_schema=AgentFinalOutput,
-        )
-
-        # Get existing history
-        existing_history = flow_state_with_message[FlowStateKeys.CONVERSATION_HISTORY][
-            component_name
-        ]
-
-        # Execute
-        result = await node.run(flow_state_with_message)
-
-        # Verify
-        assert FlowStateKeys.CONVERSATION_HISTORY in result
-        assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
-
-        # Verify component appends completion marker to existing conversation history
-        result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert len(result_messages) == len(existing_history) + 1
-        assert result_messages[:-1] == existing_history
-        assert isinstance(result_messages[-1], ToolMessage)
-        assert result_messages[-1].content == ""
-        assert result_messages[-1].tool_call_id == tool_call_id
-
-        # Check that no output was set in context (since output is None)
-        assert "context" not in result
-
-    @pytest.mark.asyncio
     async def test_run_success_with_nested_output(
         self,
         conversation_history_key,

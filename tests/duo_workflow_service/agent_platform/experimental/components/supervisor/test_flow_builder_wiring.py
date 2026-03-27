@@ -61,7 +61,8 @@ class TestFlowBuilderSupervisorWiring:
             components=[
                 {
                     "name": "developer",
-                    "type": "SubagentComponent",
+                    "type": "AgentComponent",
+                    "description": "Developer agent",
                     "prompt_id": "dev_prompt",
                     "toolset": ["read_file"],
                 },
@@ -99,7 +100,8 @@ class TestFlowBuilderSupervisorWiring:
             components=[
                 {
                     "name": "developer",
-                    "type": "SubagentComponent",
+                    "type": "AgentComponent",
+                    "description": "Developer agent",
                     "prompt_id": "dev_prompt",
                     "toolset": ["read_file"],
                 },
@@ -151,7 +153,8 @@ class TestFlowBuilderSupervisorWiring:
             components=[
                 {
                     "name": "developer",
-                    "type": "SubagentComponent",
+                    "type": "AgentComponent",
+                    "description": "Developer agent",
                     "prompt_id": "dev_prompt",
                     "toolset": ["read_file"],
                 },
