@@ -235,7 +235,7 @@ class TestSupervisorAgentComponentInit:
             (None, -1, None, "max_delegations must be at least 1"),
             (None, 5, "empty", "at least one subagent component"),
             (None, 5, "missing_tester", "Managed agent 'tester' not found"),
-            (None, 5, "wrong_type", "must be of type SubagentComponent"),
+            (None, 5, "wrong_type", "does not have a bind_to_supervisor method"),
         ],
         ids=[
             "empty_managed_agents",
@@ -266,6 +266,12 @@ class TestSupervisorAgentComponentInit:
         match,
     ):
         """Test that invalid construction parameters raise ValueError."""
+
+        # Create a non-bindable component (no bind_to_supervisor method)
+        class NonBindableComponent:
+            def __init__(self, name: str):
+                self.name = name
+
         subagent_components_by_key = {
             None: mock_sub_agents,
             "empty": {},
@@ -273,7 +279,7 @@ class TestSupervisorAgentComponentInit:
                 developer_name: MockSubagentComponent(name=developer_name)
             },
             "wrong_type": {
-                developer_name: Mock(),  # Mock auto-creates attributes; check uses `is True` so MagicMock != True
+                developer_name: NonBindableComponent(name=developer_name),
                 tester_name: MockSubagentComponent(name=tester_name),
             },
         }

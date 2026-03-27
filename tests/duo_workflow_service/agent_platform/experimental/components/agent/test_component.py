@@ -721,8 +721,9 @@ class TestAgentComponentAttachEdges:
         router_function = agent_router_call[0][1]
 
         # Test the routing behavior - should raise RoutingError
+        # The error message now includes the key path since we use the factory
         with pytest.raises(
-            RoutingError, match=f"Conversation history not found for {component_name}"
+            RoutingError, match="Conversation history not found for key"
         ):
             router_function(base_flow_state)
 
@@ -923,3 +924,122 @@ class TestAgentComponentOutputs:
         # Verify custom field outputs exist
         assert ("context", [component_name, "final_answer", "summary"]) in output_keys
         assert ("context", [component_name, "final_answer", "score"]) in output_keys
+
+
+class TestAgentComponentBindToSupervisor:
+    """Test suite for AgentComponent.bind_to_supervisor functionality."""
+
+    def test_bind_to_supervisor_sets_factories(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that bind_to_supervisor sets the key factories."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            description="Test agent for supervisor",
+        )
+
+        # Initially factories should have default values
+        assert component._conversation_history_key_factory is not None
+        assert component._output_key_factory is not None
+        assert not component._is_bound_to_supervisor
+
+        # Create mock factories
+        mock_history_factory = Mock()
+        mock_output_factory = Mock()
+
+        # Bind to supervisor
+        component.bind_to_supervisor(
+            conversation_history_key_factory=mock_history_factory,
+            output_key_factory=mock_output_factory,
+        )
+
+        # Factories should now be set to the provided values
+        assert component._conversation_history_key_factory is mock_history_factory
+        assert component._output_key_factory is mock_output_factory
+        assert component._is_bound_to_supervisor
+
+    def test_bind_to_supervisor_requires_description(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that bind_to_supervisor raises ValueError if description is not set."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            # No description
+        )
+
+        mock_history_factory = Mock()
+        mock_output_factory = Mock()
+
+        with pytest.raises(ValueError, match="must have a description"):
+            component.bind_to_supervisor(
+                conversation_history_key_factory=mock_history_factory,
+                output_key_factory=mock_output_factory,
+            )
+
+    def test_outputs_returns_empty_when_bound(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that outputs returns empty tuple when bound to supervisor."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            description="Test agent for supervisor",
+        )
+
+        # Before binding, outputs should be populated
+        assert len(component.outputs) > 0
+
+        # Bind to supervisor
+        mock_history_factory = Mock()
+        mock_output_factory = Mock()
+        component.bind_to_supervisor(
+            conversation_history_key_factory=mock_history_factory,
+            output_key_factory=mock_output_factory,
+        )
+
+        # After binding, outputs should be empty
+        assert component.outputs == ()

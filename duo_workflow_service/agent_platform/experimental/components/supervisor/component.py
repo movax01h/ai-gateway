@@ -17,6 +17,9 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     ConversationHistoryKeyFactory,
 )
+from duo_workflow_service.agent_platform.experimental.components.agent.nodes.final_response_node import (
+    OutputKeyFactory,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -35,10 +38,6 @@ from duo_workflow_service.agent_platform.experimental.components.supervisor.node
     SUBSESSION_KEY_SEPARATOR,
     DelegationNode,
     SubagentReturnNode,
-)
-from duo_workflow_service.agent_platform.experimental.components.supervisor.subagent_component import (
-    SUBAGENT_COMPONENT_MARKER,
-    SubagentComponent,
 )
 from duo_workflow_service.agent_platform.experimental.components.supervisor.ui_log import (
     UILogEventsSupervisor,
@@ -69,7 +68,7 @@ class _SubagentRouter:
     ``attach`` is intentionally a no-op: subagents are attached directly by
     ``SupervisorAgentComponent.attach``, which wires the subagent_return edge
     itself.  ``_SubagentRouter`` is passed only to satisfy the ``RouterProtocol``
-    interface required by ``SubagentComponent.attach``; ``route`` is the only
+    interface required by ``AgentComponent.attach``; ``route`` is the only
     method that LangGraph's conditional edge machinery will ever call on it.
     """
 
@@ -129,6 +128,15 @@ class SupervisorAgentComponent(AgentComponentBase):
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "max_subsession_id"],
         optional=True,
     )
+    _subsession_final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[
+            IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE,
+            IOKeyTemplate.COMPONENT_NAME_TEMPLATE,
+            IOKeyTemplate.SUBSESSION_ID_TEMPLATE,
+            "final_answer",
+        ],
+    )
 
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         # Supervisor's own conversation history and final answer
@@ -183,7 +191,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         This validator:
         1. Validates that every name in managed_agents has a matching entry
             in subagent_components
-        2. Validates that every subagent is of type SubagentComponent
+        2. Validates that every subagent has bind_to_supervisor method and description
         3. Removes managed_agents from the data (not stored on the model)
 
         managed_agents is consumed here and never stored — the runtime model
@@ -207,10 +215,14 @@ class SupervisorAgentComponent(AgentComponentBase):
 
             if sub_agents:
                 for name, component in sub_agents.items():
-                    if getattr(component, SUBAGENT_COMPONENT_MARKER, False) is not True:
+                    # Check if component has bind_to_supervisor method
+                    if not hasattr(component, "bind_to_supervisor") or not callable(
+                        getattr(component, "bind_to_supervisor")
+                    ):
                         raise ValueError(
-                            f"Subagent '{name}' is of type '{type(component).__name__}'. "
-                            f"Managed agents must be of type {SubagentComponent.__name__}."
+                            f"Managed agent '{name}' of type '{type(component).__name__}' "
+                            f"does not have a bind_to_supervisor method. "
+                            f"Managed agents must have a bind_to_supervisor method."
                         )
 
         return data
@@ -369,18 +381,18 @@ class SupervisorAgentComponent(AgentComponentBase):
 
     def _subagent_final_answer_key_factory_for(
         self, subagent_name: str
-    ) -> ConversationHistoryKeyFactory:
+    ) -> OutputKeyFactory:
         """Return a factory that resolves the final_answer IOKey for a specific subagent.
 
         The returned factory reads the active subsession ID from state at runtime
         and builds the IOKey for the given subagent_name.  Passed into
-        ``SubagentComponent.bind_to_supervisor`` so the subagent knows where to
+        ``AgentComponent.bind_to_supervisor`` so the subagent knows where to
         write its final answer.
 
         Args:
             subagent_name: The name of the subagent this factory is scoped to.
         """
-        return lambda state: SubagentComponent._final_answer_key.to_iokey(
+        return lambda state: self._subsession_final_answer_key.to_iokey(
             {
                 IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
                 IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,

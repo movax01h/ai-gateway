@@ -20,7 +20,7 @@ from duo_workflow_service.agent_platform.experimental.ui_log import (
 
 __all__ = ["FinalResponseNode"]
 
-OutputKeyFactory = Callable[[FlowState], Optional[IOKey]]
+OutputKeyFactory = Callable[[FlowState], IOKey]
 
 
 class FinalResponseNode:
@@ -40,9 +40,8 @@ class FinalResponseNode:
         ui_history: UI log history writer for final-answer events.
         conversation_history_key_factory: Callable ``(state) -> IOKey`` that
             resolves the conversation-history ``IOKey`` at runtime.
-        output_key_factory: Callable ``(state) -> Optional[IOKey]`` that resolves
-            the output ``IOKey`` at runtime.  Pass ``lambda _: None`` when no
-            persistent output is required.
+        output_key_factory: Callable ``(state) -> IOKey`` that resolves
+            the output ``IOKey`` at runtime.
     """
 
     def __init__(
@@ -142,9 +141,8 @@ class FinalResponseNode:
         }
 
         output = self._output_key_factory(state)
-        if output:
-            output_data = parsed_response.to_output()
-            updates.update(output.to_nested_dict(output_data))
+        output_data = parsed_response.to_output()
+        updates.update(output.to_nested_dict(output_data))
 
         return parsed_response.to_string_output(), updates
 
@@ -152,11 +150,6 @@ class FinalResponseNode:
         self, last_message: AIMessage, state: FlowState
     ) -> tuple[str, dict]:
         final_response_text = last_message.text
-
-        updates: dict = {}
-
         output = self._output_key_factory(state)
-        if output:
-            updates.update(output.to_nested_dict(final_response_text))
 
-        return final_response_text, updates
+        return final_response_text, output.to_nested_dict(final_response_text)
