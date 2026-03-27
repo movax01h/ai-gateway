@@ -50,6 +50,8 @@ class WorkflowConfig(TypedDict):
     first_checkpoint: Optional[Checkpoint]
     latest_checkpoint: Optional[Checkpoint]
     prompt_injection_protection_level: PromptInjectionProtectionLevel
+    archived: bool
+    stalled: bool
 
 
 GITLAB_18_2_QUERY = """
@@ -85,6 +87,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
 """
 
 # This query requires https://gitlab.com/gitlab-org/gitlab/-/merge_requests/196781 that is available in GitLab 18.3+.
+# This query requires https://gitlab.com/gitlab-org/gitlab/-/merge_requests/197587 that is available in GitLab 18.3+.
 GITLAB_18_3_OR_ABOVE_QUERY = """
 query($workflowId: AiDuoWorkflowsWorkflowID!) {
     duoWorkflowWorkflows(workflowId: $workflowId) {
@@ -122,6 +125,8 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
             firstCheckpoint {
                 checkpoint
             }
+            archived
+            stalled
         }
     }
 }
@@ -176,6 +181,8 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 metadata
                 checkpoint
             }
+            archived
+            stalled
         }
     }
 }
@@ -231,6 +238,8 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 metadata
                 checkpoint
             }
+            archived
+            stalled
         }
     }
 }
@@ -355,6 +364,8 @@ async def fetch_workflow_and_container_data(
         latest_checkpoint=workflow.get("latestCheckpoint", None),
         gitlab_host=gitlab_host,
         prompt_injection_protection_level=prompt_injection_protection_level,
+        archived=workflow.get("archived", None),
+        stalled=workflow.get("stalled", None),
     )
 
     return project, namespace, workflow_config
@@ -393,4 +404,6 @@ def empty_workflow_config() -> WorkflowConfig:
         "workflow_status": "",
         "gitlab_host": "",
         "prompt_injection_protection_level": PromptInjectionProtectionLevel.LOG_ONLY,
+        "archived": False,
+        "stalled": False,
     }
