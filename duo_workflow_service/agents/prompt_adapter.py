@@ -10,6 +10,7 @@ from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE
 from ai_gateway.prompts.config.base import PromptConfig
+from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -106,7 +107,8 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             )
             messages.append(SystemMessage(content=dynamic_content))
 
-        for m in input["conversation_history"][agent_name]:
+        history = restore_message_consistency(input["conversation_history"][agent_name])
+        for m in history:
             if isinstance(m, HumanMessage):
                 slash_command = None
 

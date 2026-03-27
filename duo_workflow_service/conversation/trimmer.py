@@ -1,5 +1,5 @@
 import time
-from typing import List
+from typing import List, cast
 
 import structlog
 from langchain_core.messages import (
@@ -157,61 +157,115 @@ def _deduplicate_additional_context(messages: List[BaseMessage]) -> List[BaseMes
     return result
 
 
-def _restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage]:
-    """Ensure tool messages have corresponding AI messages with tool calls.
+def _ai_message_tool_call_ids(msg: AIMessage) -> list[str]:
+    """Return a deduplicated, ordered list of tool-call IDs declared by an AIMessage."""
+    all_calls = msg.tool_calls + msg.invalid_tool_calls
+    return list(dict.fromkeys(tc_id for tc in all_calls if (tc_id := tc.get("id"))))
 
-    Converts orphaned ToolMessages to HumanMessages to maintain conversation consistency.
+
+def _fix_tool_call_group(
+    ai_msg: AIMessage,
+    tool_msgs: list[ToolMessage],
+) -> list[BaseMessage]:
+    """Fix a single (AIMessage, ToolMessages) group.
+
+    Ensures that every tool_call_id declared by *ai_msg* has exactly one
+    ToolMessage immediately following it.  Any ToolMessages whose
+    tool_call_id is *not* declared by this AIMessage are treated as
+    orphaned and converted to HumanMessages.
+
+    Args:
+        ai_msg: The AIMessage that declared tool calls. Must have at least one
+            tool_call_id (callers are responsible for this precondition).
+        tool_msgs: The ToolMessages that were found immediately after ai_msg.
+
+    Returns:
+        A corrected list starting with ai_msg followed by one ToolMessage per
+        declared tool_call_id (real where available, synthetic otherwise).
     """
-    if not messages:
-        return []
+    # list (not set) to preserve declaration order when emitting ToolMessages
+    expected_ids: list[str] = _ai_message_tool_call_ids(ai_msg)
 
-    # Identify all AIMessages with tool calls
-    tool_call_indices = _build_tool_call_indices(messages)
-
-    # Process the messages to ensure consistency
-    result: List[BaseMessage] = []
-    for i, msg in enumerate(messages):
-        if isinstance(msg, ToolMessage):
-            tool_call_id = getattr(msg, "tool_call_id", None)
-            # Check if this tool message has a corresponding AIMessage with tool_calls
-            # AND if the tool message appears after its parent
-            if (
-                tool_call_id
-                and tool_call_id in tool_call_indices
-                and i > tool_call_indices[tool_call_id]
-            ):
-                result.append(msg)
-            else:
-                # Convert invalid ToolMessage to HumanMessage
-                if msg.content:
-                    result.append(HumanMessage(content=msg.content))
+    # Index the real ToolMessages by their tool_call_id
+    real_by_id: dict[str, ToolMessage] = {}
+    orphaned: list[ToolMessage] = []
+    for tm in tool_msgs:
+        if tm.tool_call_id in expected_ids:
+            real_by_id[tm.tool_call_id] = tm
         else:
-            result.append(msg)
+            orphaned.append(tm)
+
+    missing_ids = [tc_id for tc_id in expected_ids if tc_id not in real_by_id]
+    if missing_ids:
+        logger.warning(
+            "Found AIMessage with unresolved tool_calls, injecting synthetic ToolMessages",
+            missing_tool_call_ids=missing_ids,
+        )
+
+    result: list[BaseMessage] = [ai_msg]
+    for tc_id in expected_ids:
+        if tc_id in real_by_id:
+            result.append(real_by_id[tc_id])
+        else:
+            result.append(
+                ToolMessage(
+                    content=(
+                        "Tool execution was interrupted and no result"
+                        " is available. Please decide how to proceed."
+                    ),
+                    tool_call_id=tc_id,
+                )
+            )
+
+    # Orphaned ToolMessages become HumanMessages
+    for tm in orphaned:
+        if tm.content:
+            result.append(HumanMessage(content=tm.content))
 
     return result
 
 
-def _build_tool_call_indices(messages: List[BaseMessage]) -> dict:
-    tool_call_indices = {}
+def restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Ensure tool messages and AI messages with tool calls are properly paired.
 
-    for i, msg in enumerate(messages):
-        if not isinstance(msg, AIMessage):
-            continue
+    Walks through messages in subset groups and fixes each group in place:
 
-        if hasattr(msg, "tool_calls") and msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                tool_call_id = tool_call.get("id")
-                if tool_call_id:
-                    tool_call_indices[tool_call_id] = i
+    - Single HumanMessage or SystemMessage: passed through unchanged.
+    - AIMessage without tool calls: passed through unchanged.
+    - AIMessage with tool calls followed by ToolMessages: the immediately
+        following ToolMessages are matched against the declared tool_call_ids.
+        Missing ToolMessages get a synthetic replacement; ToolMessages whose
+        tool_call_id is not declared by the AIMessage are treated as orphaned.
+    - Orphaned ToolMessages (not immediately after their AIMessage): converted
+        to HumanMessages, because the Anthropic API requires tool_result blocks
+        to appear *immediately* after the tool_use block.
+    """
+    if not messages:
+        return []
 
-        # Tool calls can end up in `invalid_tool_calls` instead of `tool_calls`
-        if hasattr(msg, "invalid_tool_calls") and msg.invalid_tool_calls:
-            for invalid_tool_call in msg.invalid_tool_calls:
-                tool_call_id = invalid_tool_call.get("id")
-                if tool_call_id:
-                    tool_call_indices[tool_call_id] = i
+    result: List[BaseMessage] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
 
-    return tool_call_indices
+        if isinstance(msg, AIMessage) and _ai_message_tool_call_ids(msg):
+            # Collect the ToolMessages that immediately follow this AIMessage
+            i += 1
+            tool_msgs: list[ToolMessage] = []
+            while i < len(messages) and isinstance(messages[i], ToolMessage):
+                tool_msgs.append(cast(ToolMessage, messages[i]))
+                i += 1
+            result.extend(_fix_tool_call_group(msg, tool_msgs))
+        elif isinstance(msg, ToolMessage):
+            # Orphaned ToolMessage — not immediately after an AIMessage with tool calls
+            if msg.content:
+                result.append(HumanMessage(content=msg.content))
+            i += 1
+        else:
+            result.append(msg)
+            i += 1
+
+    return result
 
 
 def _get_message_roles(messages: List[BaseMessage]) -> List[str]:
@@ -392,4 +446,4 @@ def apply_token_based_trim(
         duration_ms=duration_ms,
     )
 
-    return _restore_message_consistency(result)
+    return restore_message_consistency(result)

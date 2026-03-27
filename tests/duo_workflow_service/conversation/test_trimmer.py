@@ -11,11 +11,10 @@ from langchain_core.messages import (
 )
 
 from duo_workflow_service.conversation.trimmer import (
-    _build_tool_call_indices,
     _deduplicate_additional_context,
     _estimate_tokens_from_history,
     _pretrim_large_messages,
-    _restore_message_consistency,
+    restore_message_consistency,
     trim_conversation_history,
 )
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
@@ -269,7 +268,7 @@ def test_deduplicate_additional_context():
 def test_restore_message_consistency(
     messages, expected_types, expected_contents, expected_tool_call_ids
 ):
-    result = _restore_message_consistency(messages)
+    result = restore_message_consistency(messages)
 
     assert len(result) == len(expected_types)
 
@@ -303,14 +302,20 @@ def test_restore_message_consistency_tool_message_before_tool_call():
         ai_message,
     ]
 
-    result = _restore_message_consistency(messages)
+    result = restore_message_consistency(messages)
 
-    assert len(result) == 4
+    # The ToolMessage before its parent gets converted to HumanMessage (orphaned),
+    # and a synthetic ToolMessage is injected after the AIMessage since its tool_call
+    # has no valid ToolMessage following it.
+    assert len(result) == 5
     assert isinstance(result[0], SystemMessage)
     assert isinstance(result[1], HumanMessage)
     assert isinstance(result[2], HumanMessage)  # Converted from ToolMessage
     assert result[2].content == "tool response"
     assert isinstance(result[3], AIMessage)
+    assert isinstance(result[4], ToolMessage)  # Synthetic ToolMessage injected
+    assert result[4].tool_call_id == "tool-call-1"
+    assert "interrupted" in result[4].content.lower()
 
 
 @pytest.mark.parametrize(
@@ -530,97 +535,6 @@ def test_trim_conversation_history_error_handling(
     assert any(isinstance(msg, HumanMessage) for msg in result)
 
 
-def test_build_tool_call_indices_with_valid_tool_calls():
-    """Test that _build_tool_call_indices correctly tracks valid tool calls."""
-    messages = [
-        SystemMessage(content="system message"),
-        AIMessage(
-            content="ai message with tool call",
-            tool_calls=[
-                {"id": "tool-call-1", "name": "test_tool", "args": {"arg1": "value1"}},
-                {
-                    "id": "tool-call-2",
-                    "name": "another_tool",
-                    "args": {"arg2": "value2"},
-                },
-            ],
-        ),
-        AIMessage(
-            content="another ai message",
-            tool_calls=[
-                {"id": "tool-call-3", "name": "third_tool", "args": {"arg3": "value3"}},
-            ],
-        ),
-    ]
-
-    indices = _build_tool_call_indices(messages)
-
-    assert indices == {
-        "tool-call-1": 1,
-        "tool-call-2": 1,
-        "tool-call-3": 2,
-    }
-
-
-def test_build_tool_call_indices_with_invalid_tool_calls():
-    """Test that _build_tool_call_indices correctly tracks invalid tool calls."""
-    messages = [
-        SystemMessage(content="system message"),
-        AIMessage(
-            content="ai message with invalid tool calls",
-            invalid_tool_calls=[
-                {
-                    "id": "invalid-call-1",
-                },
-                {
-                    "id": "invalid-call-2",
-                },
-            ],
-        ),
-        AIMessage(
-            content="another ai message",
-            invalid_tool_calls=[
-                {
-                    "id": "invalid-call-3",
-                },
-            ],
-        ),
-    ]
-
-    indices = _build_tool_call_indices(messages)
-
-    assert indices == {
-        "invalid-call-1": 1,
-        "invalid-call-2": 1,
-        "invalid-call-3": 2,
-    }
-
-
-def test_build_tool_call_indices_with_mixed_tool_calls():
-    """Test that _build_tool_call_indices handles both valid and invalid tool calls."""
-    messages = [
-        SystemMessage(content="system message"),
-        AIMessage(
-            content="ai message with both valid and invalid tool calls",
-            tool_calls=[
-                {"id": "valid-call-1", "name": "test_tool", "args": {"arg1": "value1"}},
-            ],
-            invalid_tool_calls=[
-                {
-                    "id": "invalid-call-1",
-                },
-            ],
-        ),
-    ]
-
-    indices = _build_tool_call_indices(messages)
-
-    assert indices == {
-        "valid-call-1": 1,
-        "invalid-call-1": 1,
-    }
-
-
 def test_restore_message_consistency_with_invalid_tool_call_responses():
     """Test that ToolMessages from invalid tool calls are preserved when they have valid parents."""
     messages = [
@@ -636,7 +550,7 @@ def test_restore_message_consistency_with_invalid_tool_call_responses():
         ),
     ]
 
-    result = _restore_message_consistency(messages)
+    result = restore_message_consistency(messages)
 
     # All messages should be preserved since the ToolMessage has a valid parent
     assert len(result) == 4
@@ -662,7 +576,7 @@ def test_restore_message_consistency_with_orphaned_invalid_tool_response():
         ),
     ]
 
-    result = _restore_message_consistency(messages)
+    result = restore_message_consistency(messages)
 
     # The orphaned ToolMessage should be converted to HumanMessage
     assert len(result) == 3
@@ -672,6 +586,253 @@ def test_restore_message_consistency_with_orphaned_invalid_tool_response():
 
     # The converted message should have the same content
     assert result[2].content == INVALID_TOOL_ERROR_MESSAGE
+
+
+def test_restore_message_consistency_with_dangling_ai_tool_calls():
+    """Test that AIMessages with tool_calls but no ToolMessages get synthetic ToolMessages injected.
+
+    This happens when a workflow is retried after a crash: the execution node produces
+    an AIMessage with tool_calls, but the tools_executor never ran to produce ToolMessages.
+    """
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="I'll run that command now.",
+            tool_calls=[
+                {
+                    "id": "tool-call-1",
+                    "name": "run_command",
+                    "args": {"command": "bundle exec rake secret_tanuki"},
+                }
+            ],
+        ),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    assert len(result) == 4
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+    assert result[3].tool_call_id == "tool-call-1"
+    assert "interrupted" in result[3].content.lower()
+
+
+def test_restore_message_consistency_with_dangling_multiple_tool_calls():
+    """Test that multiple missing ToolMessages are injected for an AIMessage with multiple tool_calls."""
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="Let me read both files.",
+            tool_calls=[
+                {
+                    "id": "tool-call-1",
+                    "name": "read_file",
+                    "args": {"file_path": "a.rb"},
+                },
+                {
+                    "id": "tool-call-2",
+                    "name": "read_file",
+                    "args": {"file_path": "b.rb"},
+                },
+            ],
+        ),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    assert len(result) == 5
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+    assert result[3].tool_call_id == "tool-call-1"
+    assert isinstance(result[4], ToolMessage)
+    assert result[4].tool_call_id == "tool-call-2"
+
+
+def test_restore_message_consistency_with_partial_tool_responses():
+    """Test that only missing ToolMessages are injected when some are already present."""
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="Let me read both files.",
+            tool_calls=[
+                {
+                    "id": "tool-call-1",
+                    "name": "read_file",
+                    "args": {"file_path": "a.rb"},
+                },
+                {
+                    "id": "tool-call-2",
+                    "name": "read_file",
+                    "args": {"file_path": "b.rb"},
+                },
+            ],
+        ),
+        ToolMessage(content="contents of a.rb", tool_call_id="tool-call-1"),
+        # tool-call-2 has no ToolMessage
+    ]
+
+    result = restore_message_consistency(messages)
+
+    assert len(result) == 5
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    # ToolMessages are emitted in declared tool_call_id order.
+    # tool-call-1 has a real ToolMessage, tool-call-2 gets a synthetic one.
+    assert isinstance(result[3], ToolMessage)
+    assert result[3].tool_call_id == "tool-call-1"
+    assert result[3].content == "contents of a.rb"
+    assert isinstance(result[4], ToolMessage)
+    assert result[4].tool_call_id == "tool-call-2"
+    assert "interrupted" in result[4].content.lower()
+
+
+def test_restore_message_consistency_with_dangling_invalid_tool_calls():
+    """Test that AIMessages with invalid_tool_calls but no ToolMessages get synthetic ToolMessages."""
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="ai message with invalid tool call",
+            invalid_tool_calls=[{"id": "invalid-call-1"}],
+        ),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    assert len(result) == 4
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+    assert result[3].tool_call_id == "invalid-call-1"
+    assert "interrupted" in result[3].content.lower()
+
+
+def test_restore_message_consistency_preserves_complete_conversations():
+    """Test that a complete conversation with proper tool_call/ToolMessage pairing is not modified."""
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="I'll run that command.",
+            tool_calls=[
+                {
+                    "id": "tool-call-1",
+                    "name": "run_command",
+                    "args": {"command": "ls"},
+                }
+            ],
+        ),
+        ToolMessage(content="file1.txt\nfile2.txt", tool_call_id="tool-call-1"),
+        AIMessage(content="Here are the files."),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    assert len(result) == 5
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+    assert result[3].content == "file1.txt\nfile2.txt"
+    assert isinstance(result[4], AIMessage)
+    assert result[4].content == "Here are the files."
+
+
+def test_restore_message_consistency_dangling_mid_conversation():
+    """Test that a dangling AIMessage mid-conversation gets synthetic ToolMessages.
+
+    This can happen when trimming removes ToolMessages but keeps the AIMessage.
+    """
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="First tool call",
+            tool_calls=[
+                {
+                    "id": "tool-call-1",
+                    "name": "read_file",
+                    "args": {"file_path": "a.rb"},
+                }
+            ],
+        ),
+        # Missing ToolMessage for tool-call-1
+        HumanMessage(content="What happened?"),
+        AIMessage(content="Let me try again."),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    assert len(result) == 6
+    assert isinstance(result[0], SystemMessage)
+    assert isinstance(result[1], HumanMessage)
+    assert isinstance(result[2], AIMessage)
+    assert isinstance(result[3], ToolMessage)
+    assert result[3].tool_call_id == "tool-call-1"
+    assert "interrupted" in result[3].content.lower()
+    assert isinstance(result[4], HumanMessage)
+    assert isinstance(result[5], AIMessage)
+
+
+def test_restore_message_consistency_tool_message_not_immediately_after_ai():
+    """Regression test: ToolMessage matching tool_call_id exists but is not immediately after AIMessage.
+
+    The Anthropic API requires tool_result blocks to appear *immediately* after the
+    tool_use block.  A ToolMessage that matches the tool_call_id but is separated by
+    an intervening message must NOT be counted as resolved.  The AIMessage should
+    receive a synthetic ToolMessage and the displaced ToolMessage should be treated as
+    orphaned (converted to a HumanMessage).
+    """
+    messages = [
+        SystemMessage(content="system message"),
+        HumanMessage(content="human message"),
+        AIMessage(
+            content="ai message with tool call",
+            tool_calls=[
+                {
+                    "id": "tool-call-1",
+                    "name": "read_file",
+                    "args": {"file_path": "a.rb"},
+                }
+            ],
+        ),
+        # Intervening message breaks the adjacency requirement
+        HumanMessage(content="some other message"),
+        # ToolMessage for tool-call-1 appears too late — not immediately after AIMessage
+        ToolMessage(content="file contents", tool_call_id="tool-call-1"),
+        AIMessage(content="Here is the result."),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    # The AIMessage at index 2 must be followed immediately by a synthetic ToolMessage
+    # because the real ToolMessage was not adjacent.
+    assert result[2].type == "ai"
+    assert result[3].type == "tool"
+    assert cast(ToolMessage, result[3]).tool_call_id == "tool-call-1"
+    assert "interrupted" in result[3].content.lower()
+
+    # The intervening HumanMessage passes through unchanged
+    assert result[4].type == "human"
+    assert result[4].content == "some other message"
+
+    # The displaced ToolMessage is converted to a HumanMessage (orphaned)
+    assert result[5].type == "human"
+    assert result[5].content == "file contents"
+
+    # Final AIMessage is unchanged
+    assert result[6].type == "ai"
+    assert result[6].content == "Here is the result."
+    assert len(result) == 7
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
