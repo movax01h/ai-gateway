@@ -15,7 +15,7 @@ from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.security.prompt_security import SecurityException
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.internal_events.event_enum import EventEnum
 
 
 @pytest.fixture(name="mock_prompt_security")
@@ -206,16 +206,17 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        assert len(conversation_messages) == 2  # ToolMessage + success message
+        # Replace mode: full history (1 existing AIMessage + 1 ToolMessage + 1 success HumanMessage)
+        assert len(conversation_messages) == 3
 
-        # Check ToolMessage
-        tool_message = conversation_messages[0]
+        # Check ToolMessage (index 1, after existing AIMessage)
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
         assert tool_message.tool_call_id == mock_tool_call["id"]
         assert tool_message.content == "Sanitized response"
 
-        # Check success message
-        success_message = conversation_messages[1]
+        # Check success message (index 2)
+        success_message = conversation_messages[2]
         assert isinstance(success_message, HumanMessage)
         assert "completed successfully" in success_message.content
 
@@ -276,7 +277,8 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        tool_message = conversation_messages[0]
+        # Replace mode: full history (1 existing AIMessage + 1 ToolMessage)
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
 
         security_args = mock_prompt_security.call_args
@@ -368,7 +370,8 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        tool_message = conversation_messages[0]
+        # Replace mode: full history (1 existing AIMessage + 1 ToolMessage)
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
 
         # Verify internal event tracking
@@ -409,7 +412,8 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        tool_message = conversation_messages[0]
+        # Replace mode: full history (1 existing AIMessage + 1 ToolMessage)
+        tool_message = conversation_messages[1]
         assert isinstance(tool_message, ToolMessage)
         # Should contain our specific ToolException format
         assert "tool exception occurred" in tool_message.content.lower()
@@ -461,11 +465,12 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        assert len(conversation_messages) == 1
-        assert isinstance(conversation_messages[0], HumanMessage)
+        # Replace mode: full history (1 existing AIMessage + 1 HumanMessage feedback)
+        assert len(conversation_messages) == 2
+        assert isinstance(conversation_messages[1], HumanMessage)
         assert (
             "Your last response failed to generate the requested tool calls"
-            in conversation_messages[0].content
+            in conversation_messages[1].content
         )
 
     @pytest.mark.asyncio
@@ -514,11 +519,12 @@ class TestToolNodeWithErrorCorrectionRun:
         conversation_messages = result[FlowStateKeys.CONVERSATION_HISTORY][
             component_name
         ]
-        assert len(conversation_messages) == 1
-        assert isinstance(conversation_messages[0], HumanMessage)
+        # Replace mode: full history (1 existing AIMessage + 1 HumanMessage feedback)
+        assert len(conversation_messages) == 2
+        assert isinstance(conversation_messages[1], HumanMessage)
         assert (
             "Your last response failed to generate the requested tool calls"
-            in conversation_messages[0].content
+            in conversation_messages[1].content
         )
 
         # Verify execution result is set to "failed" when max attempts exceeded
@@ -841,9 +847,10 @@ class TestToolNodeWithErrorCorrectionSecurity:
 
             # Verify error message is in the response
             tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+            # Replace mode: full history (1 existing AIMessage + 1 ToolMessage)
             assert (
                 "Security scan detected potentially malicious content"
-                in tool_messages[0].content
+                in tool_messages[1].content
             )
 
     def test_sanitize_response_success(self, tool_node_with_error_correction):

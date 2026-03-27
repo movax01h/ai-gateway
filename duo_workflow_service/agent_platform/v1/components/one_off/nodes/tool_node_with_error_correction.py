@@ -68,12 +68,17 @@ class ToolNodeWithErrorCorrection:
             **self._ui_history.pop_state_updates(),
         }
 
+        # Get conversation history (needed for replace-mode reducer)
+        conversation_history = (
+            self._conversation_history_key.value_from_state(state) or []
+        )
+
         if len(self._toolset) == 0:
             human_message = HumanMessage(
                 content="The agent has no tools configured. Review agent privileges configuration. 0 attempts remaining"
             )
             conversation_history_dict = self._conversation_history_key.to_nested_dict(
-                [human_message]
+                conversation_history + [human_message]
             )
             result = merge_nested_dict(result, conversation_history_dict)
             if self.execution_result_key:
@@ -87,9 +92,6 @@ class ToolNodeWithErrorCorrection:
             target="context", subkeys=[self._component_name]
         ).to_nested_dict(context)
         attempts = context.get("correction_attempts", 0)
-
-        # Get conversation history
-        conversation_history = self._conversation_history_key.value_from_state(state)
 
         # Get tool calls from the last message
         last_message = conversation_history[-1] if conversation_history else None
@@ -112,7 +114,7 @@ class ToolNodeWithErrorCorrection:
             )
 
             conversation_history_dict = self._conversation_history_key.to_nested_dict(
-                [error_feedback]
+                conversation_history + [error_feedback]
             )
             result = merge_nested_dict(result, conversation_history_dict)
             result = merge_nested_dict(result, context_dict)
@@ -161,7 +163,7 @@ class ToolNodeWithErrorCorrection:
         result = {
             **self._ui_history.pop_state_updates(),
             FlowStateKeys.CONVERSATION_HISTORY: {
-                self._component_name: tool_responses,
+                self._component_name: conversation_history + tool_responses,
             },
         }
 
@@ -205,7 +207,9 @@ class ToolNodeWithErrorCorrection:
 
             # Update conversation_history while preserving context
             result[FlowStateKeys.CONVERSATION_HISTORY] = {
-                self._component_name: tool_responses + [error_feedback]
+                self._component_name: conversation_history
+                + tool_responses
+                + [error_feedback]
             }
 
             # Update context with correction attempts
@@ -227,7 +231,9 @@ class ToolNodeWithErrorCorrection:
 
             # Update conversation_history while preserving context
             result[FlowStateKeys.CONVERSATION_HISTORY] = {
-                self._component_name: tool_responses + [success_message]
+                self._component_name: conversation_history
+                + tool_responses
+                + [success_message]
             }
 
             # Add success to execution status key
