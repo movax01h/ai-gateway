@@ -361,6 +361,37 @@ async def test_build_review_context_basic_success(
 
 
 @pytest.mark.asyncio
+async def test_build_review_context_with_null_title_and_description(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    """Test that review context is built successfully when title and description are None."""
+    mr_data_null = {**mr_data, "title": None, "description": None}
+    original_file_content = {
+        "content": base64.b64encode(
+            b"class Calculator\n  def subtract(a, b)\n    # TODO: Implement\n  end\nend"
+        ).decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data_null)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<mr_title>" in response
+    assert "<mr_description>" in response
+    assert "<git_diffs>" in response
+    assert "None" not in response
+
+
+@pytest.mark.asyncio
 async def test_build_review_context_with_renames(
     gitlab_client_mock,
     metadata,
