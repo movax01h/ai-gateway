@@ -418,9 +418,27 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             else {}
         )
 
+        # Extract custom_llm_provider from identifier parsing (e.g., from identifiers like
+        # "mistral/codestral-latest"). This param needs to be set at model instantiation
+        # time for provider-specific behavior to work correctly (e.g., Mistral AI prefix).
+        # We only extract custom_llm_provider here; other params from to_params() are
+        # passed at invocation time via _build_model_kwargs.
+        dynamic_params = {}
+        if model_metadata:
+            all_params = model_metadata.to_params()
+            if "custom_llm_provider" in all_params:
+                dynamic_params["custom_llm_provider"] = all_params[
+                    "custom_llm_provider"
+                ]
+
+        # Precedence (highest wins): config.params > dynamic_params > llm_params
+        # - llm_params: static params from models.yml
+        # - dynamic_params: extracted from model identifier (e.g., custom_llm_provider)
+        # - config.params: prompt-specific configuration from YAML files
         model_factory_args = {
             "disable_streaming": disable_streaming,
             **llm_params,
+            **dynamic_params,
             **config.params.model_dump(
                 exclude={"model_class_provider"}, exclude_none=True, by_alias=True
             ),

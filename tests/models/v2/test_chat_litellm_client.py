@@ -477,3 +477,52 @@ def test_non_fireworks_max_retries_uses_default():
     """Verify that non-Fireworks providers use default max_retries."""
     chat = ChatLiteLLM(model="test-model", custom_llm_provider="anthropic")
     assert chat.max_retries == 1
+
+
+class TestMistralAIPrefixFormat:
+    """Tests for automatic Mistral AI prefix format support based on custom_llm_provider."""
+
+    @pytest.mark.parametrize(
+        ("custom_llm_provider", "last_message_type", "expected_role", "expect_prefix"),
+        [
+            # Mistral AI provider: only assistant messages get prefix
+            ("mistral", "assistant", "assistant", True),
+            ("mistral", "user", "user", False),
+            ("mistral", "system", "system", False),
+            # Other providers: no prefix regardless of message type
+            ("anthropic", "assistant", "assistant", False),
+            ("vertex_ai", "assistant", "assistant", False),
+            ("fireworks_ai", "assistant", "assistant", False),
+            ("bedrock", "assistant", "assistant", False),
+            (None, "assistant", "assistant", False),
+        ],
+    )
+    def test_create_message_dicts_prefix_behavior(
+        self, custom_llm_provider, last_message_type, expected_role, expect_prefix
+    ):
+        """Verify prefix is only added when using Mistral AI provider and last message is assistant."""
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        chat = ChatLiteLLM(model="test-model", custom_llm_provider=custom_llm_provider)
+
+        # Build messages based on last_message_type
+        if last_message_type == "assistant":
+            messages = [HumanMessage(content="Hello"), AIMessage(content="Thought:")]
+        elif last_message_type == "user":
+            messages = [HumanMessage(content="Hello")]
+        else:  # system
+            messages = [SystemMessage(content="You are a helpful assistant.")]
+
+        message_dicts, _ = chat._create_message_dicts(messages, stop=None)
+
+        assert message_dicts[-1]["role"] == expected_role
+        if expect_prefix:
+            assert message_dicts[-1]["prefix"] is True
+        else:
+            assert "prefix" not in message_dicts[-1]
+
+    def test_create_message_dicts_empty_messages(self):
+        """Verify no error when messages list is empty."""
+        chat = ChatLiteLLM(model="test-model", custom_llm_provider="mistral")
+        message_dicts, _ = chat._create_message_dicts([], stop=None)
+        assert message_dicts == []
