@@ -1,0 +1,11 @@
+---
+name: Duo Chat documentation search for Mistral AI
+model:
+  params:
+    temperature: 0.1
+unit_primitive: documentation_search
+prompt_template:
+  user: |
+    {% include 'chat/documentation_search/user/1.0.0.jinja' %}
+params:
+  timeout: 60

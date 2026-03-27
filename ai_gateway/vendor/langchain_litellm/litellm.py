@@ -598,6 +598,18 @@ class ChatLiteLLM(BaseChatModel):
                 raise ValueError("`stop` found in both the input and default params.")
             params["stop"] = stop
         message_dicts = [_convert_message_to_dict(m) for m in messages]
+
+        # Add Mistral AI prefix flag for last assistant message when using Mistral AI API directly.
+        # Mistral AI API requires "prefix: true" when the last message is from the assistant,
+        # which is used by the ReAct agent to prime the model's response.
+        # See: https://docs.mistral.ai/api/
+        if (
+            self.custom_llm_provider == "mistral"
+            and message_dicts
+            and message_dicts[-1].get("role") == "assistant"
+        ):
+            message_dicts[-1]["prefix"] = True
+
         return message_dicts, params
 
     @override
