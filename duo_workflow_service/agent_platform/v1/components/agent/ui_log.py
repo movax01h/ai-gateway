@@ -14,6 +14,7 @@ from duo_workflow_service.entities import (
     ToolInfo,
     ToolStatus,
     UiChatLog,
+    build_tool_info,
 )
 from duo_workflow_service.tools import DuoBaseTool
 
@@ -50,7 +51,9 @@ class UILogWriterAgentTools(BaseUILogWriter):
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=kwargs.get("correlation_id"),
-            tool_info=ToolInfo(name=tool.name, args=tool_call_args),
+            tool_info=build_tool_info(
+                tool.name, tool_call_args, kwargs.get("tool_response")
+            ),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
             message_id=None,

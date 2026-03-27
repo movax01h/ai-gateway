@@ -12,10 +12,13 @@ from langchain_core.messages import (
 )
 
 from duo_workflow_service.entities.state import (
+    TOOL_RESPONSE_MAX_DISPLAY_MSG,
     MessageTypeEnum,
+    ToolInfo,
     UiChatLog,
     _conversation_history_reducer,
     _ui_chat_log_reducer,
+    build_tool_info,
 )
 
 
@@ -187,3 +190,32 @@ def test_ui_chat_log_reducer_with_empty_lists():
 
     assert not result
     assert result is not current
+
+
+def test_build_tool_info_without_response():
+    result = build_tool_info("my_tool", {"arg1": "val1"})
+
+    assert result == ToolInfo(name="my_tool", args={"arg1": "val1"})
+    assert "tool_response" not in result
+
+
+def test_build_tool_info_with_short_response():
+    result = build_tool_info("my_tool", {"arg1": "val1"}, tool_response="short output")
+
+    assert result["tool_response"] == "short output"
+
+
+def test_build_tool_info_truncates_long_string_response():
+    long_response = "x" * (TOOL_RESPONSE_MAX_DISPLAY_MSG + 100)
+
+    result = build_tool_info("my_tool", {}, tool_response=long_response)
+
+    assert len(result["tool_response"]) == TOOL_RESPONSE_MAX_DISPLAY_MSG
+
+
+def test_build_tool_info_does_not_truncate_non_string_response():
+    non_string_response = {"key": "value", "data": [1, 2, 3]}
+
+    result = build_tool_info("my_tool", {}, tool_response=non_string_response)
+
+    assert result["tool_response"] == non_string_response
