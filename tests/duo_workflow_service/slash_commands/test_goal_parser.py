@@ -1,6 +1,6 @@
 import pytest
 
-from duo_workflow_service.slash_commands.goal_parser import parse
+from duo_workflow_service.slash_commands.goal_parser import is_slash_command, parse
 
 
 @pytest.mark.parametrize(
@@ -45,3 +45,32 @@ def test_parse_slash_commands(goal, expected_command, expected_text):
     command_type, remaining_text = parse(goal)
     assert command_type == expected_command
     assert remaining_text == expected_text
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "/nonexistent",
+        "/fix",
+        "/explain",
+        "/explain this code is confusing",
+        "/",
+        "  /invalid-command  ",
+    ],
+)
+def test_is_slash_command_returns_true(goal):
+    assert is_slash_command(goal) is True
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "Fix the error",
+        "Explain this code",
+        "/home/user/project",
+        "// Not a command",
+        "",
+    ],
+)
+def test_is_slash_command_returns_false(goal):
+    assert is_slash_command(goal) is False

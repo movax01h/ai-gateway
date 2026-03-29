@@ -861,3 +861,25 @@ async def test_workflow_cleanup(workflow, mock_action):
 
     assert workflow.is_done
     assert workflow._outbox._queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_workflow_reject_slash_commands(
+    mock_checkpoint_notifier,
+    mock_fetch_workflow_and_container_data,
+    mock_gitlab_workflow,
+    mock_tools_registry_cls,
+    workflow,
+):
+    mock_notifier = mock_checkpoint_notifier.return_value
+
+    await workflow.run("/nonexistent")
+    assert workflow.is_done
+
+    mock_notifier.send_event.assert_called_once()
+    call_args = mock_notifier.send_event.call_args
+    assert call_args.kwargs["type"] == "values"
+    state = call_args.kwargs["state"]
+    assert state["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert len(state["ui_chat_log"]) == 1
+    assert "/nonexistent" in state["ui_chat_log"][0]["content"]

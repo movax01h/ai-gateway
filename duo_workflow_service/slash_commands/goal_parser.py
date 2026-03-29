@@ -54,3 +54,23 @@ def _parse_space_after_slash(parts: list) -> Tuple[Optional[str], Optional[str]]
     remaining_text = remaining_parts[1] if len(remaining_parts) > 1 else None
 
     return command_type, remaining_text
+
+
+def is_slash_command(goal: str) -> bool:
+    """Determine if the input text is formatted like a slash command.
+
+    Args:
+        goal: The user input string
+
+    Returns:
+        bool: True if the text is formatted like a slash command, False otherwise
+    """
+    content = goal.strip()
+    if not content.startswith("/"):
+        return False
+
+    # Exclude file paths like '/home/dir'
+    if content.split(" ")[0].count("/") > 1:
+        return False
+
+    return True

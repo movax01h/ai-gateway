@@ -17,6 +17,9 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from duo_workflow_service.slash_commands.goal_parser import (
+    is_slash_command,
+)
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from lib.context import get_model_metadata
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
@@ -30,15 +33,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         self.prompt_template = config.prompt_template
 
     def is_slash_command_format(self, message):
-        content = message.content.strip()
-        if not content.startswith("/"):
-            return False
-
-        # Exclude file paths like '/home/dir'
-        if content.split(" ")[0].count("/") > 1:
-            return False
-
-        return True
+        return is_slash_command(message.content)
 
     @override
     def invoke(

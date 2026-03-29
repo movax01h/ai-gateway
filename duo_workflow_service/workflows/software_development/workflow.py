@@ -47,6 +47,10 @@ from duo_workflow_service.entities.agent_user_environment import (
     process_workspace_agent_skills,
 )
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
+from duo_workflow_service.slash_commands.error_handler import (
+    SlashCommandValidationError,
+)
+from duo_workflow_service.slash_commands.goal_parser import is_slash_command, parse
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
@@ -182,6 +186,28 @@ class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph, graph_config
     ):
+        if isinstance(error, SlashCommandValidationError) and self.checkpoint_notifier:
+            await self.checkpoint_notifier.send_event(
+                type="values",
+                state={
+                    "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                    "ui_chat_log": [
+                        UiChatLog(
+                            message_type=MessageTypeEnum.AGENT,
+                            message_sub_type=None,
+                            content=str(error),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            status=ToolStatus.FAILURE,
+                            correlation_id=None,
+                            tool_info=None,
+                            additional_context=None,
+                            message_id=f"error-{str(uuid4())}",
+                        )
+                    ],
+                },
+                stream=self._stream,
+            )
+            return
         log_exception(
             error, extra={"workflow_id": self._workflow_id, "source": __name__}
         )
@@ -277,6 +303,12 @@ class Workflow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ):
+        if goal and is_slash_command(goal):
+            command, _ = parse(goal)
+            raise SlashCommandValidationError(
+                f"The command '/{command}' does not exist"
+            )
+
         graph = StateGraph(WorkflowState)
 
         graph = self._setup_workflow_graph(
