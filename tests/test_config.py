@@ -9,7 +9,9 @@ from ai_gateway.config import (
     ConfigAuditEvent,
     ConfigAuth,
     ConfigBillingEvent,
+    ConfigCachingProxy,
     ConfigCustomModels,
+    ConfigDuoWorkflow,
     ConfigFastApi,
     ConfigFeatureFlags,
     ConfigGoogleCloudPlatform,
@@ -561,6 +563,91 @@ def test_config_audit_event(values: dict, expected: ConfigAuditEvent):
         config = Config(_env_file=None)
 
         assert config.audit_event == expected
+
+
+@pytest.mark.parametrize(
+    ("values", "expected_use_caching_proxy"),
+    [
+        ({}, False),
+        ({"DUO_WORKFLOW_USE_CACHING_PROXY": "true"}, True),
+        ({"DUO_WORKFLOW_USE_CACHING_PROXY": "false"}, False),
+    ],
+)
+def test_duo_workflow_config_use_caching_proxy(
+    values: dict, expected_use_caching_proxy: bool
+):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = ConfigDuoWorkflow()
+
+        assert config.use_caching_proxy == expected_use_caching_proxy
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({}, ConfigCachingProxy(url="http://localhost:8888")),
+        (
+            {
+                "DUO_WORKFLOW_CACHING_PROXY_URL": "http://proxy.test:9999",
+            },
+            ConfigCachingProxy(url="http://proxy.test:9999"),
+        ),
+        (
+            {
+                "DUO_WORKFLOW_CACHING_PROXY_URL": "http://localhost:8888",
+            },
+            ConfigCachingProxy(url="http://localhost:8888"),
+        ),
+    ],
+)
+def test_caching_proxy_config_url(values: dict, expected: ConfigCachingProxy):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = ConfigCachingProxy()
+
+        assert config.url == expected.url
+
+
+def test_duo_workflow_config_defaults():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        config = ConfigDuoWorkflow()
+
+        assert config.use_caching_proxy is False
+        assert config.caching_proxy.url == "http://localhost:8888"
+
+
+def test_aigw_config_has_duo_workflow_field():
+    with mock.patch.dict(
+        os.environ,
+        {
+            "DUO_WORKFLOW_USE_CACHING_PROXY": "true",
+            "DUO_WORKFLOW_CACHING_PROXY_URL": "http://test.proxy:9000",
+        },
+        clear=True,
+    ):
+        config = Config()
+
+        duo_workflow = config.duo_workflow
+
+        assert isinstance(duo_workflow, ConfigDuoWorkflow)
+        assert duo_workflow.use_caching_proxy is True
+        assert duo_workflow.caching_proxy.url == "http://test.proxy:9000"
+
+
+@pytest.mark.parametrize(
+    ("duo_workflow_config", "expected_url"),
+    [
+        (ConfigDuoWorkflow(use_caching_proxy=False), None),
+        (
+            ConfigDuoWorkflow(
+                use_caching_proxy=True,
+                caching_proxy=ConfigCachingProxy(url="http://proxy.test:8888"),
+            ),
+            "http://proxy.test:8888",
+        ),
+    ],
+)
+def test_caching_proxy_url(duo_workflow_config, expected_url):
+    assert duo_workflow_config.caching_proxy_url() == expected_url
 
 
 # pylint: enable=direct-environment-variable-reference

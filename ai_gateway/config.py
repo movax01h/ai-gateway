@@ -22,6 +22,8 @@ __all__ = [
     "ConfigModelKeys",
     "ConfigCustomersDot",
     "ConfigAuditEvent",
+    "ConfigCachingProxy",
+    "ConfigDuoWorkflow",
 ]
 
 ENV_PREFIX = "AIGW"
@@ -199,6 +201,37 @@ class ConfigModelLimits(RootModel):
         return self.root.get(engine, {}).get(name, None)
 
 
+class ConfigCachingProxy(BaseSettings):
+    """Configuration for the caching proxy used during load testing."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="DUO_WORKFLOW_CACHING_PROXY_",
+    )
+
+    url: str = Field(
+        default="http://localhost:8888",
+        description="URL of the caching proxy server",
+    )
+
+
+class ConfigDuoWorkflow(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="DUO_WORKFLOW_",
+        env_nested_delimiter="__",
+    )
+
+    use_caching_proxy: bool = Field(
+        default=False,
+        description="Enable routing requests through caching proxy for load testing",
+    )
+    caching_proxy: ConfigCachingProxy = Field(default_factory=ConfigCachingProxy)
+
+    def caching_proxy_url(self) -> str | None:
+        if self.use_caching_proxy:
+            return self.caching_proxy.url
+        return None
+
+
 class Config(BaseSettings):
     model_config = SettingsConfigDict(
         env_nested_delimiter="__",
@@ -287,6 +320,9 @@ class Config(BaseSettings):
     agentic_mock: Annotated[
         ConfigAgenticMock, Field(default_factory=ConfigAgenticMock)
     ] = ConfigAgenticMock()
+    duo_workflow: Annotated[
+        ConfigDuoWorkflow, Field(default_factory=ConfigDuoWorkflow)
+    ] = ConfigDuoWorkflow()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

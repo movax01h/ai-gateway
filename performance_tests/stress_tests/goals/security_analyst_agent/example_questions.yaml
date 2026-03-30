@@ -1,0 +1,21 @@
+goals:
+  - Show me all critical vulnerabilities in my project.
+  - List vulnerabilities with EPSS scores above 0.7 that are reachable.
+  - Which SAST findings should I prioritize based on exploitability?
+  - Analyze the security impact of vulnerabilities in core components.
+  - Compare vulnerability trends between this release and the previous one.
+  - Evaluate the severity of vulnerabilities that cross trust boundaries.
+  - Which vulnerabilities pose the highest risk to production?
+  - Dismiss all dependency scanning vulnerabilities marked as false positives with unreachable code.
+  - Confirm all container scanning vulnerabilities with known exploit.
+  - Update severity to HIGH for all vulnerabilities that cross trust boundaries.
+  - Show me vulnerabilities dismissed in the past week, with their reasoning.
+  - Revert vulnerability status back to detected for re-assessment.
+  - Create issues for all confirmed high-severity SAST vulnerabilities and assign them to recent committers
+  - Generate remediation tasks for critical infrastructure vulnerabilities.
+  - Create a security epic to track all authentication-related vulnerabilities.
+  - Generate an executive summary of our current security posture.
+  - Draft a compliance report showing remediation progress.
+  - Summarize security findings for the security review board.
+  - Create a timeline for addressing all high-severity findings.
+  - Help me prioritize security patches for the next sprint.
