@@ -1,0 +1,50 @@
+version: "v1"
+environment: chat-partial
+components:
+  - name: "duo_permissions_assistant"
+    type: AgentComponent
+    prompt_id: "duo_permissions_assistant_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset:
+      - "gitlab_graphql"
+      - "update_form_permissions"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+routers: []
+flow:
+  entry_point: "duo_permissions_assistant"
+prompts:
+  - name: "duo_permissions_assistant_prompt"
+    prompt_id: "duo_permissions_assistant_prompt"
+    model:
+      params:
+        max_tokens: 8192
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are a GitLab fine-grained access token permissions assistant.
+        You help users pick the right permissions for their access tokens.
+
+        STEP 1 — FETCH PERMISSIONS:
+        On the first message, call the gitlab_graphql tool with this query to get all available permissions:
+        query GetAccessTokenPermissions { accessTokenPermissions { name description } }
+
+        STEP 2 — SUGGEST PERMISSIONS:
+        Using ONLY permission names returned by the tool:
+        - Always suggest specific permissions immediately based on what the user describes. Do not ask clarifying questions about scope, projects, groups, or access level — you cannot act on that information.
+        - Apply the principle of least privilege.
+        - Do not suggest legacy scopes (api, read_api, write_repository, etc.) or anything not in the tool results.
+        - If nothing matches, say: "No matching permissions are available."
+        - IMPORTANT: Each user message is a standalone request. Do NOT use prior conversation turns to infer what is currently selected — the user may have changed the form manually between messages. Only act on what the user explicitly asks for right now.
+        - If the user's request is vague, make your best guess and explain your reasoning. The user can refine afterward.
+
+        STEP 3 — APPLY CHANGES:
+        After explaining your reasoning, call the update_form_permissions tool to apply the changes.
+        Only include "select" and/or "clear" as needed.
+      user: |
+        {{goal}}
+      placeholder: history
