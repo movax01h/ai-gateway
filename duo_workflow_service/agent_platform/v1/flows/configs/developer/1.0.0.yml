@@ -18,6 +18,7 @@ components:
     toolset:
       - "create_branch"
       - "run_git_command"
+    model_size_preference: "small"
     inputs:
       - from: "context:project_id"
         as: "project_id"
@@ -43,6 +44,7 @@ components:
     prompt_id: "create_merge_request"
     prompt_version: "^1.0.0"
     tool_name: "create_merge_request"
+    model_size_preference: "small"
     inputs:
       - from: "context:goal"
         as: "issue_url"
@@ -68,6 +70,7 @@ components:
     type: AgentComponent
     prompt_id: "list_available_tools"
     prompt_version: "^1.0.0"
+    model_size_preference: "large"
     toolset:
       - "list_issues"
       - "get_issue"
@@ -99,6 +102,7 @@ components:
     type: AgentComponent
     prompt_id: "developer_planner"
     prompt_version: "^1.0.0"
+    model_size_preference: "small"
     inputs:
       - from: "context:project_id"
         as: "project_id"
@@ -152,6 +156,7 @@ components:
     type: OneOffComponent
     prompt_id: "developer_add_plan_comment"
     prompt_version: "^1.0.0"
+    model_size_preference: "small"
     inputs:
       - from: "context:planning_agent.final_answer"
         as: "plan_text"
@@ -173,6 +178,7 @@ components:
     type: AgentComponent
     prompt_id: "programming_agent"
     prompt_version: "^1.0.0"
+    model_size_preference: "small"
     inputs:
       - from: "context:project_id"
         as: "project_id"
@@ -223,6 +229,7 @@ components:
     type: OneOffComponent
     prompt_id: "push_to_remote"
     prompt_version: "^1.0.0"
+    model_size_preference: "small"
     inputs:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
