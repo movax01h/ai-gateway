@@ -4,6 +4,7 @@ import litellm
 from dependency_injector import containers, providers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
+from ai_gateway.config import ConfigDuoWorkflow
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.models import mock
 from ai_gateway.models.base import init_anthropic_client, log_request
@@ -55,11 +56,16 @@ class ContainerModels(containers.DeclarativeContainer):
 
     http_async_client_anthropic = providers.Singleton(init_anthropic_client)
 
+    _duo_workflow = providers.Callable(
+        ConfigDuoWorkflow.model_validate, config.duo_workflow
+    )
+
     anthropic_claude_chat_fn = providers.Selector(
         _mock_selector,
         original=providers.Factory(
             ChatAnthropic,
             async_client=http_async_client_anthropic,
+            anthropic_api_url=_duo_workflow.provided.caching_proxy_url.call(),
             betas=[
                 "context-1m-2025-08-07",
             ],

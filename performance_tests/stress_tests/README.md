@@ -1,7 +1,7 @@
 ## Description
 
 The tests in this folder are designed to help identify performance bottlenecks by generating load for the
-Duo Workflow Service via a GitLab instance.
+Duo Workflow Service (DWS) via a GitLab instance.
 
 The tests should not be added to CI pipelines at this time.
 
@@ -12,20 +12,48 @@ The `api_v4_duo_workflow_chat_graphql_api.js` test can be run directly with k6 (
 ### Prerequisites
 
 1. [Install k6](https://grafana.com/docs/k6/latest/set-up/install-k6/)
-1. A GitLab environment with Duo Agent Platform enabled (e.g., [GDK](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md))
-    - For mocked responses, ensure the Duo Workflow Service is configured with:
-        ```
-        AIGW_MOCK_MODEL_RESPONSES=true
-        AIGW_USE_AGENTIC_MOCK=true
-        ```
+1. A GitLab environment with Duo Agent Platform enabled
+   - **Preferred**: Use the [LLM caching proxy](../../docs/performance_testing/profiling_with_llm_caching_proxy.md)
+     with `SCENARIO_TYPE=llm_proxy` (the default). The proxy caches actual LLM responses, reducing API costs while
+     producing realistic results. Configure DWS with:
+     ```shell
+     DUO_WORKFLOW_USE_CACHING_PROXY=true
+     ```
+     See [Profiling DWS with Pyroscope and LLM caching proxy](../../docs/performance_testing/profiling_with_llm_caching_proxy.md)
+     for setup instructions.
+   - **Alternative**: For fully mocked responses (no LLM calls), configure DWS with:
+     ```shell
+     AIGW_MOCK_MODEL_RESPONSES=true
+     AIGW_USE_AGENTIC_MOCK=true
+     ```
+     Note that agentic mocking bypasses LLM calls entirely, so results may not reflect production behaviour.
+1. **For foundational agents**: Fetch agent configurations into the DWS before running tests (see below)
 
+    When load testing foundational agents like `duo_planner` or `security_analyst_agent`, you must fetch their configurations first:
+
+    ```shell
+    poetry run fetch-foundational-agents \
+      "https://gitlab.test" \
+      "$GITLAB_API_TOKEN" \
+      "duo_planner:348,security_analyst_agent:356" \
+      --flow-registry-version v1
+    ```
+
+    **Parameters:**
+
+    - GitLab instance URL
+    - GitLab API token with read access to the agent repository
+    - Comma-separated list of `agent_name:version_id` pairs
+    - Flow registry version (`v1` or `experimental`)
+
+    The fetched configurations will be used by DWS during the test. Without this step, tests using foundational agents may fail or use incorrect versions.
 1. A project with appropriate feature flags enabled (such as one created by `rake gitlab:duo:setup` in GDK)
 1. A Personal Access Token with API scope
 
 ### Running the test
 
 ```shell
-ENVIRONMENT_URL=http://gdk.test:3000 \
+ENVIRONMENT_URL=https://gitlab.test \
 ACCESS_TOKEN=<gitlab personal access token with api scope> \
 AI_DUO_WORKFLOW_PROJECT_ID=1000000 \
 AI_DUO_WORKFLOW_ROOT_NAMESPACE_ID=1000000 \
@@ -37,14 +65,10 @@ k6 run performance_tests/stress_tests/api_v4_duo_workflow_chat_graphql_api.js
 - `ACCESS_TOKEN`: Your GitLab Personal Access Token (required)
 - `AI_DUO_WORKFLOW_ROOT_NAMESPACE_ID`: The namespace ID with Duo Agent Platform enabled (required)
 - `AI_DUO_WORKFLOW_PROJECT_ID`: The project ID in the above namespace (required)
-- `SCENARIO_TYPE`: Either `mocked_llm` (default) or `real_llm`
-- `MOCKED_GOAL_FILE`: A file containing the goal to pass to Agentic Chat (default: [`goals/summarize_issue_check_implementation.txt`](goals/summarize_issue_check_implementation.txt))
-
-For mocked responses, ensure the Duo Workflow Service is configured with:
-```
-AIGW_MOCK_MODEL_RESPONSES=true
-AIGW_USE_AGENTIC_MOCK=true
-```
+- `SCENARIO_TYPE`: `llm_proxy` (default, recommended), `real_llm`, or `mocked_llm`
+- `MOCKED_GOAL_FILE`: A file containing the goal(s) to pass to Agentic Chat (default: [`goals/summarize_issue_check_implementation.txt`](goals/summarize_issue_check_implementation.txt)).
+  Can be a plain text file with a single goal, or a YAML file with multiple goals (distributed round-robin across test iterations).
+  For example: [`goals/security_analyst_agent/example_questions.yaml`](goals/security_analyst_agent/example_questions.yaml)
 
 You can adjust the load scenarios by editing the `options` object in the test file.
 
@@ -97,4 +121,4 @@ Note the following:
   You can replace the URL in the configuration with your GDK URL if you'd like to run the tests locally.
 - `GPT_SKIP_RETRY=true` is helpful when running tests locally for development or troubleshooting purposes.
 - The `tests` path is constructed so that reference to `../../lib/gpt_k6_modules.js` in the tests resolves correctly to a file in the gitlab-performance-tool codebase.
-- `SCENARIO_TYPE=mocked_llm` is actually the default. Use `SCENARIO_TYPE=real_llm` for actual LLM responses.
+- `SCENARIO_TYPE=llm_proxy` is the default and recommended option. Use `SCENARIO_TYPE=mocked_llm` to bypass LLM calls entirely with agentic mocking, or `SCENARIO_TYPE=real_llm` for direct LLM calls when the LLM caching proxy is not used.

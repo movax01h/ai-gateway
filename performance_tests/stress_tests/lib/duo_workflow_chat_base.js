@@ -1,11 +1,15 @@
-import http from "k6/http";
-import { check, group } from "k6";
-import { Rate } from "k6/metrics";
-import { WebSocket } from "k6/experimental/websockets";
+import { check } from "k6";
+import { WebSocket } from "k6/websockets";
 import { SharedArray } from 'k6/data';
 
-export const WORKFLOW_COMPLETE_TIMEOUT = 80000;
-export const GRACEFUL_STOP_DURATION = '2m';
+import YAML from 'https://cdn.jsdelivr.net/npm/js-yaml@4.1.1/+esm';
+
+// Workflows can run for up to 5 minutes before being considered to have timed out and marked as failed.
+export const WORKFLOW_COMPLETE_TIMEOUT = 300000;
+
+// Allow the test to run for up to 5 minutes after the duration configured for a scenario. If any long-running
+// flows started near the end of the scenario, this gives them time to finish without being marked as failed.
+export const GRACEFUL_STOP_DURATION = '5m';
 
 export function logDebug(...args) {
   if (__ENV.DEBUG === 'true') {
@@ -19,33 +23,46 @@ export function logError(...args) {
 
 /**
  * Loads and renders goal file content for mocked LLM scenarios
- * @param {string} scenarioType - Type of scenario ('real_llm' or 'mocked_llm')
- * @param {string} goalFile - Path to the goal file
+ * Supports both .txt files (single goal) and .yml/.yaml files (array of goals)
+ * @param {string} scenarioType - Type of scenario ('real_llm', 'mocked_llm', or 'llm_proxy')
+ * @param {string} goalFile - Path to the goal file (.txt or .yml/.yaml)
  * @param {string} projectId - Project ID for template replacement
  * @param {string} gitlabURL - GitLab URL for template replacement
- * @returns {string|null} - Rendered goal content or null for real_llm scenarios
+ * @returns {string|Array<string>|null} - Rendered goal(s) or null for real_llm scenarios
  */
 export function loadGoalFile(scenarioType, goalFile, projectId, gitlabURL) {
-  if (scenarioType !== 'mocked_llm') {
+  if (scenarioType !== 'mocked_llm' && scenarioType !== 'llm_proxy') {
     return null;
   }
 
   const data = new SharedArray('goals', function () {
-    const goalFilePath = import.meta.resolve(`../${goalFile}`);
+    const goalFilePath = import.meta.resolve(`../goals/${goalFile}`);
     const rawContent = open(goalFilePath);
-    const renderedContent = rawContent
-        .replace(/\$\{projectId\}/g, projectId)
-        .replace(/\$\{gitlabURL\}/g, gitlabURL);
-    return [renderedContent];
+    const isYamlFile = goalFile.endsWith('.yml') || goalFile.endsWith('.yaml');
+
+    let goals = null;
+    if (isYamlFile) {
+      const yamlData = YAML.load(rawContent);
+      if (!yamlData || !Array.isArray(yamlData.goals)) {
+        throw new Error(`YAML file must contain a 'goals' key with an array of goals`);
+      }
+
+      goals = yamlData.goals;
+    } else {
+      goals = [rawContent];
+    }
+    return goals.map(goal => goal
+      .replace(/\$\{projectId\}/g, projectId)
+      .replace(/\$\{gitlabURL\}/g, gitlabURL)
+    );
   });
 
-  return data[0];
+  return data;
 }
-
 /**
  * Gets test configuration based on scenario type
- * @param {string} scenarioType - Type of scenario ('real_llm' or 'mocked_llm')
- * @param {string|null} mockedGoalContent - Content for mocked scenario
+ * @param {string} scenarioType - Type of scenario ('real_llm', 'mocked_llm', or 'llm_proxy')
+ * @param {string|Array<string>|null} mockedGoalContent - Content for mocked scenario (single goal or array)
  * @returns {Object} - Test configuration object
  */
 export function getTestConfig(scenarioType, mockedGoalContent) {
@@ -59,12 +76,17 @@ export function getTestConfig(scenarioType, mockedGoalContent) {
       goal: mockedGoalContent,
       testName: "API - Duo Agent - Chat (Mocked Responses)",
       scenarioType: 'mocked_llm'
+    },
+    llm_proxy: {
+      goal: mockedGoalContent,
+      testName: "API - Duo Agent - Chat (LLM Proxy)",
+      scenarioType: 'llm_proxy'
     }
   };
 
   const config = testConfigs[scenarioType];
   if (!config) {
-    throw new Error(`Unknown scenario type: ${scenarioType}. Valid options: real_llm, mocked_llm`);
+    throw new Error(`Unknown scenario type: ${scenarioType}. Valid options: real_llm, mocked_llm, llm_proxy`);
   }
 
   return config;
@@ -82,6 +104,15 @@ export function getScenarios(loadScenario) {
       sustain_40: {
         executor: 'constant-vus',
         vus: 40,
+        duration: '10m',
+        gracefulStop: GRACEFUL_STOP_DURATION,
+      },
+    },
+
+    constant_40vus_5m: {
+      constant_40vus_5m: {
+        executor: 'constant-vus',
+        vus: 40,
         duration: '5m',
         gracefulStop: GRACEFUL_STOP_DURATION,
       },
@@ -92,7 +123,25 @@ export function getScenarios(loadScenario) {
       single: {
         executor: 'constant-vus',
         vus: 1,
-        duration: '20s',
+        duration: '5s',
+        gracefulStop: GRACEFUL_STOP_DURATION,
+      },
+    },
+
+    quick5: {
+      quick5: {
+        executor: 'constant-vus',
+        vus: 5,
+        duration: '5s',
+        gracefulStop: GRACEFUL_STOP_DURATION,
+      },
+    },
+
+    test_goals: {
+      test_goals: {
+        executor: 'constant-vus',
+        vus: 5,
+        duration: '5m',
         gracefulStop: GRACEFUL_STOP_DURATION,
       },
     },
@@ -136,6 +185,9 @@ export function getAccessToken() {
  * @param {string} options.workflowDefinition - Workflow definition type (default: "chat")
  * @param {number} options.timeout - Timeout in milliseconds (default: WORKFLOW_COMPLETE_TIMEOUT)
  * @param {Function} options.onComplete - Callback function called on close with success boolean
+ * @param {string} [options.userSelectedModelIdentifier] - Optional model identifier (e.g. "claude_haiku_4_5_20251001").
+ *   Maps to the `MODEL_IDENTIFIER` WebSocket query param, and to the `selectable_models` values in `ai_gateway/model_selection/unit_primitives.yml`.
+ *   Can be set via the `MODEL_IDENTIFIER` env var.
  */
 export function connectWorkflowWebSocket(options) {
   const {
@@ -144,10 +196,14 @@ export function connectWorkflowWebSocket(options) {
     accessToken,
     workflowDefinition = "chat",
     timeout = WORKFLOW_COMPLETE_TIMEOUT,
-    onComplete
+    onComplete,
+    userSelectedModelIdentifier = __ENV.MODEL_IDENTIFIER
   } = options;
 
-  const wsUrl = `${__ENV.ENVIRONMENT_URL.replace(/^http/, 'ws')}/api/v4/ai/duo_workflows/ws?project_id=${__ENV.AI_DUO_WORKFLOW_PROJECT_ID}&root_namespace_id=${__ENV.AI_DUO_WORKFLOW_ROOT_NAMESPACE_ID}`;
+  const modelParam = userSelectedModelIdentifier
+    ? `&user_selected_model_identifier=${encodeURIComponent(userSelectedModelIdentifier)}`
+    : '';
+  const wsUrl = `${__ENV.ENVIRONMENT_URL.replace(/^http/, 'ws')}/api/v4/ai/duo_workflows/ws?project_id=${__ENV.AI_DUO_WORKFLOW_PROJECT_ID}&root_namespace_id=${__ENV.AI_DUO_WORKFLOW_ROOT_NAMESPACE_ID}${modelParam}`;
 
   const ws = new WebSocket(wsUrl, null, {
     headers: {
@@ -243,102 +299,4 @@ export function connectWorkflowWebSocket(options) {
       }
     });
   });
-}
-
-export default function createDuoWorkflowChatTest(config) {
-  const { goal, testName = "API - Duo Agent - Chat", scenarioType } = config;
-  const successRate = new Rate("successful_requests");
-  const access_token = getAccessToken();
-
-  return function() {
-    // Add scenario type to group name if provided
-    const groupName = scenarioType ? `${testName} [${scenarioType}]` : testName;
-
-    group(groupName, function () {
-      // Create workflow via GraphQL mutation
-      logDebug(`goal: ${goal}`);
-
-      const graphqlQuery = {
-        query: `mutation createAiDuoWorkflow(
-          $projectId: ProjectID
-          $goal: String!
-          $workflowDefinition: String!
-          $agentPrivileges: [Int!]
-          $preApprovedAgentPrivileges: [Int!]
-        ) {
-          aiDuoWorkflowCreate(
-            input: {
-              projectId: $projectId
-              environment: WEB
-              goal: $goal
-              workflowDefinition: $workflowDefinition
-              agentPrivileges: $agentPrivileges
-              preApprovedAgentPrivileges: $preApprovedAgentPrivileges
-            }
-          ) {
-            workflow {
-              id
-            }
-            errors
-          }
-        }`,
-        variables: {
-          projectId: `gid://gitlab/Project/${__ENV.AI_DUO_WORKFLOW_PROJECT_ID}`,
-          goal: goal,
-          workflowDefinition: "chat",
-          agentPrivileges: [2, 3],
-          preApprovedAgentPrivileges: [2]
-        }
-      };
-
-      let params = {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${access_token}`,
-          "X-GitLab-Interface": "duo_chat",
-          "X-GitLab-Client-Type": "web_browser"
-        },
-      };
-
-      let response = http.post(
-        `${__ENV.ENVIRONMENT_URL}/api/graphql`,
-        JSON.stringify(graphqlQuery),
-        params
-      );
-
-      if (!check(response, {'is status 200': (r) => r.status === 200})){
-        successRate.add(false);
-        logError(response);
-        return;
-      }
-
-      const responseData = response.json();
-      const checkOutput = check(responseData, {
-        'verify workflow was created': (r) => r.data?.aiDuoWorkflowCreate?.workflow?.id !== undefined,
-        'no graphql errors': (r) => !r.data?.aiDuoWorkflowCreate?.errors || r.data.aiDuoWorkflowCreate.errors.length === 0
-      });
-
-      if (!checkOutput) {
-        successRate.add(false);
-        logError(response);
-        return;
-      }
-
-      // Extract workflow ID from GraphQL response
-      const workflowGid = responseData.data.aiDuoWorkflowCreate.workflow.id;
-      const workflowId = workflowGid.split('/').pop();
-
-      // Connect to websocket to receive workflow responses
-      connectWorkflowWebSocket({
-        workflowId: workflowId,
-        goal: goal,
-        accessToken: access_token,
-        workflowDefinition: "chat",
-        timeout: WORKFLOW_COMPLETE_TIMEOUT,
-        onComplete: (success) => {
-          successRate.add(success);
-        }
-      });
-    });
-  };
 }

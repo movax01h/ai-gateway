@@ -926,10 +926,10 @@ def run(config: Config):
     setup_container(config)
     setup_litellm(config)
     setup_cloud_connector()
-    setup_profiling()
     setup_error_tracking()
     setup_monitoring()
     setup_logging()
+    setup_profiling()
     if not self_hosted_mode:
         validate_llm_access()
     port = int(os.environ.get("PORT", "50052"))
