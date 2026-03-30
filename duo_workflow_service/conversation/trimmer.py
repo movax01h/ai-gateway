@@ -294,7 +294,14 @@ def trim_conversation_history(
 
     Combines preprocessing and token-based trimming:
     1. Preprocessing (always runs): Deduplicates additional context tags
-    2. Token-based trim (conditional): Trims to fit budget, restores message consistency
+    2. Token-based trim (conditional): Trims to fit token budget
+
+    Note: Message consistency repair (orphaned ToolMessages, dangling AIMessages
+    with unresolved tool_calls) is intentionally NOT performed here.  This
+    function runs inside the LangGraph state reducer and its output is
+    checkpointed — repairing here would persist synthetic ToolMessages into the
+    checkpoint state, causing a resume/retry loop.  Consistency is repaired at
+    read time in AgentPromptTemplate.invoke and ChatAgentPromptTemplate.invoke.
 
     Args:
         messages: List of messages to trim
@@ -342,7 +349,6 @@ def apply_token_based_trim(
     1. Replaces oversized single messages with placeholders
     2. Trims conversation to fit budget using LangChain's trim_messages (strategy="last")
     3. Falls back to system + recent messages if trimming fails
-    4. Restores message consistency (converts orphaned tool messages)
 
     Args:
         messages: List of messages to trim (should be preprocessed first)
@@ -446,4 +452,4 @@ def apply_token_based_trim(
         duration_ms=duration_ms,
     )
 
-    return restore_message_consistency(result)
+    return result

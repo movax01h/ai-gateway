@@ -318,92 +318,30 @@ def test_restore_message_consistency_tool_message_before_tool_call():
     assert "interrupted" in result[4].content.lower()
 
 
-@pytest.mark.parametrize(
-    "trim_result, expected_result",
-    [
-        (  # Test case: Valid tool message preserved
-            [
-                SystemMessage(content="system message"),
-                AIMessage(
-                    content="ai message with tool call",
-                    tool_calls=[
-                        {
-                            "id": "tool-call-1",
-                            "name": "test_tool",
-                            "args": {"arg1": "value1"},
-                        }
-                    ],
-                ),
-                ToolMessage(content="tool response", tool_call_id="tool-call-1"),
-            ],
-            [
-                SystemMessage(content="system message"),
-                AIMessage(
-                    content="ai message with tool call",
-                    tool_calls=[
-                        {
-                            "id": "tool-call-1",
-                            "name": "test_tool",
-                            "args": {"arg1": "value1"},
-                        }
-                    ],
-                ),
-                ToolMessage(content="tool response", tool_call_id="tool-call-1"),
-            ],
-        ),
-        (  # Test case: Orphaned tool message converted
-            [
-                SystemMessage(content="system message"),
-                HumanMessage(content="human message"),
-                ToolMessage(
-                    content="orphaned tool response", tool_call_id="tool-call-1"
-                ),
-            ],
-            [
-                SystemMessage(content="system message"),
-                HumanMessage(content="human message"),
-                HumanMessage(content="orphaned tool response"),  # Converted
-            ],
-        ),
-        # Test case: Orphaned tool message with empty content is dropped
-        (
-            [
-                SystemMessage(content="system message"),
-                HumanMessage(content="human message"),
-                ToolMessage(content="", tool_call_id="tool-call-1"),
-            ],
-            [
-                SystemMessage(content="system message"),
-                HumanMessage(content="human message"),
-                # No message for empty content
-            ],
-        ),
-    ],
-)
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
 @patch("duo_workflow_service.conversation.trimmer._estimate_tokens_from_history")
-def test_trim_conversation_history_with_tool_messages(
+def test_trim_conversation_history_preserves_tool_messages(
     mock_estimate_tokens,
     mock_token_counter_cls,
     mock_trim_messages,
-    trim_result,
-    expected_result,
 ):
-    """Test that trim_conversation_history properly handles tool messages.
+    """Test that trim_conversation_history passes tool messages through unchanged.
 
-    This test verifies the integration between trim_messages and _restore_message_consistency to ensure tool messages
-    are handled correctly.
+    Message consistency repair (orphaned ToolMessages, dangling AIMessages) is intentionally NOT done in
+    trim_conversation_history — it runs on the write path (state reducer) and its output is checkpointed.  Repairing
+    there would persist synthetic ToolMessages into the checkpoint, causing the LLM to re-enter an infinite tool-call
+    loop on every resume/retry.
+
+    Consistency is repaired at read time in AgentPromptTemplate.invoke and ChatAgentPromptTemplate.invoke, just before
+    the prompt is sent to the LLM.
     """
-    # Return a high token count so the fast paths don't skip trimming
     mock_estimate_tokens.return_value = 999_999
     mock_counter = MagicMock()
     mock_counter.count_tokens.return_value = 999_999
     mock_token_counter_cls.return_value = mock_counter
 
-    mock_trim_messages.return_value = trim_result
-
-    messages = [
+    original_messages = [
         SystemMessage(content="system message"),
         AIMessage(
             content="ai message with tool call",
@@ -417,12 +355,24 @@ def test_trim_conversation_history_with_tool_messages(
         ),
         ToolMessage(content="tool response", tool_call_id="tool-call-1"),
     ]
+    # Capture identity and serialized form of each original object before the call
+    original_ids = [id(m) for m in original_messages]
+    original_serialized = [m.model_dump() for m in original_messages]
+
+    mock_trim_messages.return_value = original_messages.copy()
 
     result = trim_conversation_history(
-        messages=messages, component_name="agent_a", max_context_tokens=400_000
+        messages=original_messages, component_name="agent_a", max_context_tokens=400_000
     )
 
-    assert result == expected_result
+    # trim_conversation_history must return messages unchanged —
+    # no consistency repair, no message type conversion.
+    assert [type(m) for m in result] == [type(m) for m in original_messages]
+    assert [m.model_dump() for m in result] == original_serialized
+
+    # Original message objects must not have been mutated in place.
+    assert [id(m) for m in original_messages] == original_ids
+    assert [m.model_dump() for m in original_messages] == original_serialized
 
 
 def test_trim_conversation_history_exceeding_context_limit():
