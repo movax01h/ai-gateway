@@ -400,6 +400,67 @@ class TestDelegationNodeErrorHandling:
         assert "final_response_tool" in history[-1].content
 
     @pytest.mark.asyncio
+    async def test_none_max_delegations_does_not_enforce_limit(
+        self,
+        supervisor_name,
+        developer_name,
+        delegate_task_cls,
+        ai_message_with_delegate,
+        base_flow_state,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_type_key,
+        max_subsession_id_key,
+        supervisor_history_key_factory,
+        subsession_history_key_factory,
+    ):
+        """Test that None max_delegations imposes no delegation limit."""
+        node = DelegationNode(
+            name=f"{supervisor_name}#delegation",
+            max_delegations=None,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_type_key=active_subagent_type_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_key_factory=supervisor_history_key_factory,
+            subsession_history_key_factory=subsession_history_key_factory,
+        )
+
+        # Set delegation_count to a very high value — should not trigger any limit
+        state = {**base_flow_state}
+        state["context"] = {
+            supervisor_name: {
+                "max_subsession_id": 0,
+                "active_subsession": None,
+                "active_subagent_type": None,
+                "delegation_count": 9999,
+            }
+        }
+        state["conversation_history"] = {
+            supervisor_name: [ai_message_with_delegate],
+        }
+
+        result = await node.run(state)
+
+        # Verify delegation actually happened by asserting on the success-path outputs.
+        # The context must reflect the incremented delegation_count, the newly assigned
+        # active_subagent_type, and the new subsession ID — none of which are set when
+        # the node returns an error ToolMessage instead of delegating.
+        ctx = result[FlowStateKeys.CONTEXT][supervisor_name]
+        assert ctx["delegation_count"] == 10000  # 9999 + 1
+        assert ctx["active_subagent_type"] == developer_name
+        assert ctx["active_subsession"] == 1
+        assert ctx["max_subsession_id"] == 1
+
+        # The new subsession history must be seeded with the delegation prompt.
+        session_key = f"{supervisor_name}__{developer_name}__1"
+        session_history = result[FlowStateKeys.CONVERSATION_HISTORY][session_key]
+        assert len(session_history) == 1
+        assert isinstance(session_history[0], HumanMessage)
+        assert session_history[0].content == "Implement the feature"
+
+    @pytest.mark.asyncio
     async def test_no_conversation_history_raises(
         self, delegation_node, base_flow_state
     ):

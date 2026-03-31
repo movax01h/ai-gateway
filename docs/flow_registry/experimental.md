@@ -730,14 +730,15 @@ as `AgentComponent` with a `description` field and listed under `managed_agents`
   on when and how to use `delegate_task` and `final_response_tool`.
 - **managed_agents**: List of `AgentComponent` names that this supervisor manages.
   Every name must correspond to an `AgentComponent` with a `description` field defined in the `components` list.
-- **max_delegations**: Maximum number of `delegate_task` calls allowed before the
-  supervisor is forced to call `final_response_tool`. Must be ≥ 1.
 
 #### Optional Parameters
 
 - **prompt_version**: Semantic version constraint (e.g. `"^1.0.0"`). Omit to use a locally defined prompt.
 - **inputs**: List of input data sources (default: `["context:goal"]`)
 - **toolset**: Additional tools available to the supervisor alongside `delegate_task` and `final_response_tool`
+- **max_delegations**: Maximum number of `delegate_task` calls allowed before the
+  supervisor is forced to call `final_response_tool`. Must be ≥ 1 when set.
+  When omitted (default), no delegation limit is enforced.
 - **ui_log_events**: UI logging configuration — supports `on_agent_final_answer`,
   `on_tool_execution_success`, `on_tool_execution_failed`
 - **ui_role_as**: Display role in UI (`"agent"` or `"tool"`, default `"agent"`)

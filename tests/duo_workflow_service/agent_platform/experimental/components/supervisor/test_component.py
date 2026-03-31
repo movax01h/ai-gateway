@@ -298,6 +298,35 @@ class TestSupervisorAgentComponentInit:
                 mock_schema_registry,
             )
 
+    def test_none_max_delegations_is_valid(
+        self,
+        supervisor_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        managed_agent_names,
+        mock_sub_agents,
+        mock_schema_registry,
+    ):
+        """Test that omitting max_delegations (None) is valid and imposes no delegation limit."""
+        supervisor = _make_supervisor(
+            supervisor_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            managed_agent_names,
+            max_delegations=None,
+            subagent_components=mock_sub_agents,
+            mock_schema_registry=mock_schema_registry,
+        )
+        assert supervisor.max_delegations is None
+
 
 class TestSupervisorExecutionFlow:
     """Tests for SupervisorAgentComponent execution via a real compiled graph."""

@@ -1,4 +1,4 @@
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, NamedTuple, Optional
 
 import structlog
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -97,7 +97,7 @@ class DelegationNode:
         self,
         *,
         name: str,
-        max_delegations: int,
+        max_delegations: Optional[int],
         delegate_task_cls: type[DelegateTask],
         delegation_count_key: IOKey,
         active_subsession_key: IOKey,
@@ -129,7 +129,10 @@ class DelegationNode:
             delegation_count = self._delegation_count_key.value_from_state(state) or 0
             max_subsession_id = self._max_subsession_id_key.value_from_state(state) or 0
 
-            if delegation_count >= self._max_delegations:
+            if (
+                self._max_delegations is not None
+                and delegation_count >= self._max_delegations
+            ):
                 raise DelegationError(
                     f"Maximum delegation limit ({self._max_delegations}) reached. "
                     f"You must call final_response_tool to complete the workflow.",
