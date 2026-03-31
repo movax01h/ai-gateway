@@ -15,6 +15,12 @@ from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
+from duo_workflow_service.conversation.compaction import (
+    CompactionConfig,
+    ConversationCompactor,
+    create_conversation_compactor,
+    maybe_compact_history,
+)
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
@@ -75,6 +81,7 @@ class Agent(BaseAgent):
     check_events: bool = True
     http_client: GitlabHttpClient
     prompt_template_inputs: dict = {}
+    compactor: ConversationCompactor | None = None
 
     async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
         with duo_workflow_metrics.time_compute(
@@ -89,6 +96,14 @@ class Agent(BaseAgent):
                     return {"status": WorkflowStatusEnum.CANCELLED}
 
             try:
+                history = state["conversation_history"].get(self.name, [])
+                compacted_history = await maybe_compact_history(
+                    compactor=self.compactor,
+                    history=history,
+                    agent_name=self.name,
+                )
+                state["conversation_history"][self.name] = compacted_history
+
                 input = self._prepare_input(state)
 
                 model_completion = await super().ainvoke(input)
@@ -175,6 +190,7 @@ def build_agent(
     tools: list[BaseTool],
     workflow_id: str,
     workflow_type: GLReportingEventContext,
+    compaction: CompactionConfig | None = None,
     **kwargs: Any,
 ):
     prompt = prompt_registry.get_on_behalf(
@@ -189,9 +205,16 @@ def build_agent(
         },
     )
 
+    compactor = (
+        create_conversation_compactor(config=compaction, llm_model=prompt.model)
+        if compaction
+        else None
+    )
+
     return Agent(
         name=name,
         workflow_id=workflow_id,
         prompt=prompt,
+        compactor=compactor,
         **kwargs,
     )

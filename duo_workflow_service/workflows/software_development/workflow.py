@@ -33,6 +33,7 @@ from duo_workflow_service.components import (
 )
 from duo_workflow_service.components.executor.component import ExecutorComponent
 from duo_workflow_service.components.planner.component import PlannerComponent
+from duo_workflow_service.conversation.compaction import CompactionConfig
 from duo_workflow_service.entities import (
     MessageTypeEnum,
     Plan,
@@ -211,6 +212,7 @@ class Workflow(AbstractWorkflow):
             project=self._project,  # type: ignore[arg-type]
             http_client=self._http_client,
             additional_context=self._additional_context,
+            compaction=CompactionConfig(trim_threshold=0.7),
         )
 
         plan_approval_component = None
@@ -257,6 +259,7 @@ class Workflow(AbstractWorkflow):
             http_client=self._http_client,
             additional_context=self._additional_context,
             user=self._user,
+            compaction=CompactionConfig(trim_threshold=0.7),
         )
 
         executor_entry_node = executor_component.attach(
@@ -325,6 +328,7 @@ class Workflow(AbstractWorkflow):
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
             http_client=self._http_client,
+            compaction=CompactionConfig(trim_threshold=0.7),
         )
 
         context_builder.prompt_template_inputs.setdefault(
