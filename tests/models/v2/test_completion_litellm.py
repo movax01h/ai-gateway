@@ -2,10 +2,35 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import litellm
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.v2.completion_litellm import MODEL_STOP_TOKENS, CompletionLiteLLM
+
+
+@pytest.fixture(name="message_content")
+def message_content_fixture() -> dict:
+    return {"prefix": "test", "suffix": ""}
+
+
+@pytest.fixture(name="messages")
+def messages_fixture(message_content: dict) -> list[BaseMessage]:
+    return [HumanMessage(content=[message_content])]
+
+
+@pytest.fixture(name="mock_response_text")
+def mock_response_text_fixture() -> str:
+    return "test"
+
+
+@pytest.fixture(name="mock_response")
+def mock_response_fixture(mock_response_text: str) -> MagicMock:
+    mock = MagicMock()
+    mock.choices = [MagicMock(text=mock_response_text)]
+    mock.usage = None
+    mock.model = "test-model"
+    return mock
 
 
 class TestCompletionLiteLLMInit:
@@ -287,19 +312,19 @@ class TestBuildCompletionArgs:
         assert args["vertex_ai_location"] == "us-central1"
 
 
-class TestInvoke:
-    def test_sync_invoke_not_implemented(self):
+class TestGenerate:
+    def test_sync_generate_not_implemented(self, messages: list[BaseMessage]):
         model = CompletionLiteLLM(
             model="codestral-2501",
             completion_type=CompletionType.TEXT,
         )
         with pytest.raises(
-            NotImplementedError, match="Sync invocation not implemented"
+            NotImplementedError, match="Sync generation not implemented"
         ):
-            model.invoke({"prefix": "test", "suffix": ""})
+            model._generate(messages)
 
 
-class TestAInvoke:
+class TestAGenerate:
     @pytest.fixture
     def fim_model(self):
         return CompletionLiteLLM(
@@ -319,7 +344,7 @@ class TestAInvoke:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("fixture_name", "payload", "expected_prompt", "expected_suffix"),
+        ("fixture_name", "message_content", "expected_prompt", "expected_suffix"),
         [
             (
                 "fim_model",
@@ -335,25 +360,33 @@ class TestAInvoke:
             ),
         ],
     )
-    async def test_ainvoke(
+    async def test_agenerate(
         self,
         request,
         fixture_name,
-        payload,
+        messages,
+        mock_response,
+        mock_response_text,
         expected_prompt,
         expected_suffix,
     ):
         model = request.getfixturevalue(fixture_name)
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(text="print('hello')")]
 
         with patch(
             "litellm.atext_completion", new=AsyncMock(return_value=mock_response)
         ) as mock_acompletion:
-            result = await model.ainvoke(payload)
+            result = await model._agenerate(messages)
 
-            assert isinstance(result, AIMessage)
-            assert result.content == "print('hello')"
+            assert result == ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(
+                            content=mock_response_text,
+                            response_metadata={"model_name": "test-model"},
+                        )
+                    )
+                ]
+            )
 
             call_kwargs = mock_acompletion.call_args[1]
             assert call_kwargs["prompt"] == expected_prompt
@@ -363,17 +396,17 @@ class TestAInvoke:
                 assert call_kwargs["suffix"] == expected_suffix
 
 
-class TestStream:
-    def test_sync_stream_not_implemented(self):
+class TestStreamSync:
+    def test_sync_stream_not_implemented(self, messages: list[BaseMessage]):
         model = CompletionLiteLLM(
             model="codestral-2501",
             completion_type=CompletionType.TEXT,
         )
         with pytest.raises(NotImplementedError, match="Sync streaming not implemented"):
-            list(model.stream({"prefix": "test", "suffix": ""}))
+            list(model._stream(messages))
 
 
-class TestAStream:
+class TestAStreamAsync:
     @pytest.fixture
     def fim_model(self):
         return CompletionLiteLLM(
@@ -392,11 +425,17 @@ class TestAStream:
         )
 
     @pytest.mark.asyncio
-    async def test_astream_fim(self, fim_model):
+    async def test_astream_fim(self, fim_model, messages: list[BaseMessage]):
         async def mock_response():
             chunks = [
-                MagicMock(choices=[MagicMock(text="print")]),
-                MagicMock(choices=[MagicMock(text="('hello')")]),
+                MagicMock(
+                    choices=[MagicMock(text="print")], usage=None, model="test-model"
+                ),
+                MagicMock(
+                    choices=[MagicMock(text="('hello')")],
+                    usage=None,
+                    model="test-model",
+                ),
             ]
             for chunk in chunks:
                 yield chunk
@@ -405,22 +444,36 @@ class TestAStream:
             "litellm.atext_completion", new=AsyncMock(return_value=mock_response())
         ):
             chunks = []
-            async for chunk in fim_model.astream(
-                {"prefix": "def hello():", "suffix": ""}
-            ):
+            async for chunk in fim_model._astream(messages):
                 chunks.append(chunk)
 
-            assert len(chunks) == 2
-            assert all(isinstance(c, AIMessageChunk) for c in chunks)
-            assert chunks[0].content == "print"
-            assert chunks[1].content == "('hello')"
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="print",
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="('hello')",
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+            ]
 
     @pytest.mark.asyncio
-    async def test_astream_text(self, text_model):
+    async def test_astream_text(self, text_model, messages: list[BaseMessage]):
         async def mock_response():
             chunks = [
-                MagicMock(choices=[MagicMock(text="print")]),
-                MagicMock(choices=[MagicMock(text="('hello')")]),
+                MagicMock(
+                    choices=[MagicMock(text="print")], usage=None, model="test-model"
+                ),
+                MagicMock(
+                    choices=[MagicMock(text="('hello')")],
+                    usage=None,
+                    model="test-model",
+                ),
             ]
             for chunk in chunks:
                 yield chunk
@@ -429,40 +482,59 @@ class TestAStream:
             "litellm.atext_completion", new=AsyncMock(return_value=mock_response())
         ):
             chunks = []
-            async for chunk in text_model.astream(
-                {"prefix": "def hello():", "suffix": "\nreturn 1"}
-            ):
+            async for chunk in text_model._astream(messages):
                 chunks.append(chunk)
 
-            assert len(chunks) == 2
-            assert all(isinstance(c, AIMessageChunk) for c in chunks)
-            assert chunks[0].content == "print"
-            assert chunks[1].content == "('hello')"
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="print",
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="('hello')",
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+            ]
 
     @pytest.mark.asyncio
-    async def test_astream_disabled(self, fim_model):
+    async def test_astream_disabled(
+        self,
+        fim_model,
+        messages: list[BaseMessage],
+        mock_response: MagicMock,
+        mock_response_text: str,
+    ):
         fim_model.disable_streaming = True
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock(text="full response")]
 
         with patch(
             "litellm.atext_completion", new=AsyncMock(return_value=mock_response)
         ):
             chunks = []
-            async for chunk in fim_model.astream({"prefix": "test", "suffix": ""}):
+            async for chunk in fim_model._astream(messages):
                 chunks.append(chunk)
 
-            assert len(chunks) == 1
-            assert chunks[0].content == "full response"
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content=mock_response_text,
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+            ]
 
     @pytest.mark.asyncio
-    async def test_astream_empty_chunks(self, fim_model):
+    async def test_astream_empty_chunks(self, fim_model, messages: list[BaseMessage]):
         async def mock_response():
             chunks = [
-                MagicMock(choices=[]),
-                MagicMock(choices=[MagicMock(text="")]),
-                MagicMock(choices=[MagicMock(text="valid")]),
+                MagicMock(choices=[], usage=None, model="test-model"),
+                MagicMock(choices=[MagicMock(text="")], usage=None, model="test-model"),
+                MagicMock(
+                    choices=[MagicMock(text="valid")], usage=None, model="test-model"
+                ),
             ]
             for chunk in chunks:
                 yield chunk
@@ -471,11 +543,17 @@ class TestAStream:
             "litellm.atext_completion", new=AsyncMock(return_value=mock_response())
         ):
             chunks = []
-            async for chunk in fim_model.astream({"prefix": "test", "suffix": ""}):
+            async for chunk in fim_model._astream(messages):
                 chunks.append(chunk)
 
-            assert len(chunks) == 1
-            assert chunks[0].content == "valid"
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="valid",
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+            ]
 
 
 class TestExtractText:
@@ -543,6 +621,149 @@ class TestExtractChunkText:
         assert model._extract_chunk_text(chunk) == ""
 
 
+class TestUsageMetadata:
+    @pytest.fixture
+    def fim_model(self):
+        return CompletionLiteLLM(
+            model="codestral-2501",
+            completion_type=CompletionType.FIM,
+            fim_format="</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]",
+            custom_llm_provider="fireworks_ai",
+        )
+
+    @pytest.fixture
+    def text_model(self):
+        return CompletionLiteLLM(
+            model="codestral-2501",
+            completion_type=CompletionType.TEXT,
+            custom_llm_provider="vertex_ai",
+        )
+
+    @pytest.mark.asyncio
+    async def test_agenerate_with_usage_metadata(
+        self,
+        fim_model,
+        messages: list[BaseMessage],
+        mock_response: MagicMock,
+        mock_response_text: str,
+    ):
+        """Verify usage metadata is extracted and included in agenerate response."""
+        mock_response.usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
+
+        with patch(
+            "litellm.atext_completion", new=AsyncMock(return_value=mock_response)
+        ):
+            result = await fim_model._agenerate(messages)
+
+            assert result == ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(
+                            content=mock_response_text,
+                            response_metadata={"model_name": "test-model"},
+                            usage_metadata={
+                                "input_tokens": 10,
+                                "output_tokens": 5,
+                                "total_tokens": 15,
+                            },
+                        )
+                    )
+                ]
+            )
+
+    @pytest.mark.asyncio
+    async def test_astream_with_usage_metadata(
+        self, text_model, messages: list[BaseMessage]
+    ):
+        """Verify usage metadata is extracted in streaming responses."""
+
+        async def mock_response():
+            chunk1 = MagicMock()
+            chunk1.choices = [MagicMock(text="hello")]
+            chunk1.usage = {
+                "prompt_tokens": 10,
+                "completion_tokens": 1,
+                "total_tokens": 11,
+            }
+            chunk1.model = "test-model"
+            yield chunk1
+
+            chunk2 = MagicMock()
+            chunk2.choices = [MagicMock(text=" world")]
+            chunk2.usage = None
+            chunk2.model = "test-model"
+            yield chunk2
+
+        with patch(
+            "litellm.atext_completion", new=AsyncMock(return_value=mock_response())
+        ):
+            chunks = []
+            async for chunk in text_model._astream(messages):
+                chunks.append(chunk)
+
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="hello",
+                        response_metadata={"model_name": "test-model"},
+                        usage_metadata={
+                            "input_tokens": 10,
+                            "output_tokens": 1,
+                            "total_tokens": 11,
+                        },
+                    )
+                ),
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content=" world",
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+            ]
+
+    @pytest.mark.asyncio
+    async def test_astream_disabled_with_usage_metadata(
+        self,
+        fim_model,
+        messages: list[BaseMessage],
+        mock_response: MagicMock,
+        mock_response_text: str,
+    ):
+        """Verify usage metadata is preserved when streaming is disabled."""
+        fim_model.disable_streaming = True
+
+        mock_response.usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
+
+        with patch(
+            "litellm.atext_completion", new=AsyncMock(return_value=mock_response)
+        ):
+            chunks = []
+            async for chunk in fim_model._astream(messages):
+                chunks.append(chunk)
+
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content=mock_response_text,
+                        response_metadata={"model_name": "test-model"},
+                        usage_metadata={
+                            "input_tokens": 10,
+                            "output_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    )
+                ),
+            ]
+
+
 class TestFireworksRetry:
     @pytest.fixture
     def fireworks_model(self):
@@ -562,7 +783,13 @@ class TestFireworksRetry:
         )
 
     @pytest.mark.asyncio
-    async def test_fireworks_503_retries(self, fireworks_model):
+    async def test_fireworks_503_retries(
+        self,
+        fireworks_model,
+        messages: list[BaseMessage],
+        mock_response: MagicMock,
+        mock_response_text: str,
+    ):
         """Verify 503 errors trigger retries for Fireworks."""
         call_count = 0
 
@@ -575,20 +802,29 @@ class TestFireworksRetry:
                     llm_provider="fireworks_ai",
                     model="codestral-2501",
                 )
-            response = MagicMock()
-            response.choices = [MagicMock(text="success")]
-            return response
+            return mock_response
 
         with patch(
             "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
         ):
-            result = await fireworks_model.ainvoke({"prefix": "test", "suffix": ""})
+            result = await fireworks_model._agenerate(messages)
 
             assert call_count == 3
-            assert result.content == "success"
+            assert result == ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(
+                            content=mock_response_text,
+                            response_metadata={"model_name": "test-model"},
+                        )
+                    )
+                ]
+            )
 
     @pytest.mark.asyncio
-    async def test_non_fireworks_503_fails_immediately(self, vertex_model):
+    async def test_non_fireworks_503_fails_immediately(
+        self, vertex_model, messages: list[BaseMessage]
+    ):
         """Verify 503 errors do NOT trigger retries for non-Fireworks providers."""
         call_count = 0
 
@@ -605,12 +841,18 @@ class TestFireworksRetry:
             "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
         ):
             with pytest.raises(litellm.ServiceUnavailableError):
-                await vertex_model.ainvoke({"prefix": "test", "suffix": ""})
+                await vertex_model._agenerate(messages)
 
             assert call_count == 1
 
     @pytest.mark.asyncio
-    async def test_fireworks_stream_503_retries(self, fireworks_model):
+    async def test_fireworks_stream_503_retries(
+        self,
+        fireworks_model,
+        messages: list[BaseMessage],
+        mock_response: MagicMock,
+        mock_response_text: str,
+    ):
         """Verify 503 errors trigger retries for Fireworks streaming."""
         call_count = 0
 
@@ -625,7 +867,7 @@ class TestFireworksRetry:
                 )
 
             async def mock_stream():
-                yield MagicMock(choices=[MagicMock(text="success")])
+                yield mock_response
 
             return mock_stream()
 
@@ -633,17 +875,26 @@ class TestFireworksRetry:
             "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
         ):
             chunks = []
-            async for chunk in fireworks_model.astream(
-                {"prefix": "test", "suffix": ""}
-            ):
+            async for chunk in fireworks_model._astream(messages):
                 chunks.append(chunk)
 
-            assert call_count == 2
-            assert len(chunks) == 1
-            assert chunks[0].content == "success"
+            assert chunks == [
+                ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content=mock_response_text,
+                        response_metadata={"model_name": "test-model"},
+                    )
+                ),
+            ]
 
     @pytest.mark.asyncio
-    async def test_fireworks_rate_limit_retries(self, fireworks_model):
+    async def test_fireworks_rate_limit_retries(
+        self,
+        fireworks_model,
+        messages: list[BaseMessage],
+        mock_response: MagicMock,
+        mock_response_text: str,
+    ):
         """Verify rate limit errors trigger retries for Fireworks."""
         call_count = 0
 
@@ -656,14 +907,21 @@ class TestFireworksRetry:
                     llm_provider="fireworks_ai",
                     model="codestral-2501",
                 )
-            response = MagicMock()
-            response.choices = [MagicMock(text="success")]
-            return response
+            return mock_response
 
         with patch(
             "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
         ):
-            result = await fireworks_model.ainvoke({"prefix": "test", "suffix": ""})
+            result = await fireworks_model._agenerate(messages)
 
             assert call_count == 2
-            assert result.content == "success"
+            assert result == ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(
+                            content=mock_response_text,
+                            response_metadata={"model_name": "test-model"},
+                        )
+                    )
+                ]
+            )

@@ -1,10 +1,9 @@
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, List
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, call, patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
-from snowplow_tracker import Snowplow
 
 from ai_gateway.code_suggestions import CodeGenerations, ModelProvider
 from ai_gateway.code_suggestions.processing import TokenStrategyBase
@@ -25,9 +24,23 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from ai_gateway.safety_attributes import SafetyAttributes
-from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
-from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 from lib.billing_events import BillingEvent, BillingEventsClient
+
+
+@pytest.fixture(name="mock_get_llm_operations")
+def mock_get_llm_operations_fixture():
+    with patch("ai_gateway.code_suggestions.generations.get_llm_operations") as mock:
+        mock.return_value = [
+            {
+                "model_id": "context-model",
+                "model_engine": "openai",
+                "model_provider": "openai",
+                "token_count": 999,
+                "prompt_tokens": 500,
+                "completion_tokens": 499,
+            }
+        ]
+        yield mock
 
 
 class InstrumentorMock(Mock):
@@ -43,11 +56,6 @@ class InstrumentorMock(Mock):
 
 @pytest.mark.asyncio
 class TestCodeGeneration:
-    def cleanup(self):
-        """Ensure Snowplow cache is reset between tests."""
-        yield
-        Snowplow.reset()
-
     @pytest.fixture(name="mock_user")
     def mock_user_fixture(self):
         return Mock(spec=CloudConnectorUser)
@@ -76,9 +84,7 @@ class TestCodeGeneration:
         )
         prompt_builder_mock.build = Mock(return_value=prompt)
 
-        use_case = CodeGenerations(
-            model, tokenization_strategy_mock, Mock(spec=SnowplowInstrumentator)
-        )
+        use_case = CodeGenerations(model, tokenization_strategy_mock)
         use_case.prompt_builder = prompt_builder_mock
 
         yield use_case
@@ -103,9 +109,7 @@ class TestCodeGeneration:
         )
         prompt_builder_mock.build = Mock(return_value=prompt)
 
-        use_case = CodeGenerations(
-            model, tokenization_strategy_mock, Mock(spec=SnowplowInstrumentator)
-        )
+        use_case = CodeGenerations(model, tokenization_strategy_mock)
         use_case.prompt_builder = prompt_builder_mock
 
         yield use_case
@@ -127,9 +131,12 @@ class TestCodeGeneration:
                 text="output", score=0, safety_attributes=SafetyAttributes()
             )
 
-            with patch.object(
-                expected_post_processor, "process"
-            ) as mock_post_processor:
+            with (
+                patch.object(expected_post_processor, "process") as mock_post_processor,
+                patch(
+                    "ai_gateway.code_suggestions.generations.init_llm_operations"
+                ) as mock_init_llm_ops,
+            ):
                 _ = await use_case.execute(
                     "prefix",
                     "test.py",
@@ -137,6 +144,7 @@ class TestCodeGeneration:
                     raw_prompt="test prompt",
                     model_provider=model_provider,
                 )
+                mock_init_llm_ops.assert_called()
                 mock_generate.assert_called()
                 mock_post_processor.assert_called()
 
@@ -196,92 +204,6 @@ class TestCodeGeneration:
                 use_case.prompt_builder.build().prefix,
                 "",
                 stream=True,
-            )
-
-    @pytest.mark.parametrize(
-        ("stream", "response_token_length"),
-        [
-            (True, 9),
-            (False, 4),
-        ],
-    )
-    async def test_snowplow_instrumentation(
-        self,
-        use_case: CodeGenerations,
-        stream: bool,
-        response_token_length: int,
-    ):
-        async def _stream_generator(
-            prefix: str, suffix: str, stream: bool
-        ) -> AsyncIterator[TextGenModelChunk]:
-            model_chunks = [
-                TextGenModelChunk(text="hello "),
-                TextGenModelChunk(text="world!"),
-            ]
-
-            for chunk in model_chunks:
-                yield chunk
-
-        snowplow_event_context = MagicMock(spec=SnowplowEventContext)
-        expected_event_1 = SnowplowEvent(
-            context=snowplow_event_context,
-            action="tokens_per_user_request_prompt",
-            label="code_generation",
-            value=1,
-        )
-        expected_event_2 = SnowplowEvent(
-            context=snowplow_event_context,
-            action="tokens_per_user_request_response",
-            label="code_generation",
-            value=response_token_length,
-        )
-
-        with (
-            patch.object(use_case, "tokenization_strategy") as mock,
-            patch.object(use_case, "snowplow_instrumentator") as snowplow_mock,
-        ):
-            mock.estimate_length = Mock(return_value=[4, 5])
-
-            if stream:
-                with patch.object(
-                    use_case.model, "generate", new_callable=AsyncMock
-                ) as mock_generate:
-                    mock_generate.side_effect = _stream_generator
-
-                    actual = await use_case.execute(
-                        prefix="any",
-                        file_name="bar.py",
-                        editor_lang="Python",
-                        model_provider=ModelProvider.ANTHROPIC,
-                        stream=stream,
-                        snowplow_event_context=snowplow_event_context,
-                    )
-
-                    if isinstance(actual, AsyncIterator):
-                        async for _ in actual:
-                            pass
-
-            else:
-                with patch.object(
-                    use_case.model, "generate", new_callable=AsyncMock
-                ) as mock_generate:
-                    mock_generate.return_value = TextGenModelOutput(
-                        text="output", score=0, safety_attributes=SafetyAttributes()
-                    )
-
-                    actual = await use_case.execute(
-                        prefix="any",
-                        file_name="bar.py",
-                        editor_lang="Python",
-                        model_provider=ModelProvider.ANTHROPIC,
-                        stream=stream,
-                        snowplow_event_context=snowplow_event_context,
-                    )
-
-            mock.estimate_length.assert_called()
-
-            snowplow_mock.watch.assert_has_calls(
-                [call(expected_event_1), call(expected_event_2)]
             )
 
     @pytest.mark.asyncio
@@ -436,7 +358,6 @@ class TestCodeGeneration:
         use_case = CodeGenerations(
             model=model,
             tokenization_strategy=tokenization_strategy_mock,
-            snowplow_instrumentator=Mock(spec=SnowplowInstrumentator),
             billing_event_client=mock_billing_client,
         )
 
@@ -458,7 +379,11 @@ class TestCodeGeneration:
         return use_case
 
     async def test_billing_event_tracked_on_successful_generation(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing event is tracked when code generation is successful."""
         expected_output = "generated code"
@@ -488,9 +413,7 @@ class TestCodeGeneration:
             quantity=1,
             metadata={
                 "execution_environment": "code_generations",
-                "llm_operations": [
-                    {"model_id": "test-model-id", "completion_tokens": 25}
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },
@@ -532,7 +455,6 @@ class TestCodeGeneration:
         use_case = CodeGenerations(
             model=model,
             tokenization_strategy=tokenization_strategy_mock,
-            snowplow_instrumentator=Mock(spec=SnowplowInstrumentator),
             # No billing client provided
         )
 
@@ -637,7 +559,11 @@ class TestCodeGeneration:
         mock_billing_client.track_billing_event.assert_called_once()
 
     async def test_billing_event_with_zero_tokens(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing event is tracked even when output tokens is zero."""
         # Mock tokenization strategy to return 0 tokens
@@ -670,16 +596,18 @@ class TestCodeGeneration:
             quantity=1,
             metadata={
                 "execution_environment": "code_generations",
-                "llm_operations": [
-                    {"model_id": "test-model-id", "completion_tokens": 0}
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },
         )
 
     async def test_billing_event_with_anthropic_provider(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing event is tracked correctly with Anthropic provider."""
         expected_output = "generated code"
@@ -712,16 +640,18 @@ class TestCodeGeneration:
             quantity=1,
             metadata={
                 "execution_environment": "code_generations",
-                "llm_operations": [
-                    {"model_id": "test-model-id", "completion_tokens": 25}
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },
         )
 
     async def test_billing_event_tracked_for_streaming(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing events are tracked for streaming responses."""
 
@@ -758,9 +688,7 @@ class TestCodeGeneration:
             quantity=1,
             metadata={
                 "execution_environment": "code_generations",
-                "llm_operations": [
-                    {"model_id": "test-model-id", "completion_tokens": 55}
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },

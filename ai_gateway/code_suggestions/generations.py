@@ -28,12 +28,11 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
-from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
-from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 from lib.billing_events import BillingEvent, BillingEventsClient
 
 __all__ = ["CodeGenerations"]
 
+from lib.context.llm_operations import get_llm_operations, init_llm_operations
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 
 log = structlog.stdlib.get_logger("codesuggestions")
@@ -53,7 +52,6 @@ class CodeGenerations:
         self,
         model: TextGenModelBase,
         tokenization_strategy: TokenStrategyBase,
-        snowplow_instrumentator: SnowplowInstrumentator,
         billing_event_client: Optional[BillingEventsClient] = None,
     ):
         self.model = model
@@ -63,7 +61,6 @@ class CodeGenerations:
             model.input_token_limit, tokenization_strategy
         )
         self.tokenization_strategy = tokenization_strategy
-        self.snowplow_instrumentator = snowplow_instrumentator
         self.billing_event_client = billing_event_client
 
     def _get_prompt(
@@ -90,9 +87,7 @@ class CodeGenerations:
     def with_prompt_prepared(self, prompt: str | list[Message]):
         self.prompt = self.prompt_builder.wrap(prompt)
 
-    def _track_billing_event(
-        self, user: Optional[CloudConnectorUser], output_tokens: int
-    ) -> None:
+    def _track_billing_event(self, user: Optional[CloudConnectorUser]) -> None:
         """Track billing event for code generations."""
         if self.billing_event_client and user:
             try:
@@ -103,12 +98,7 @@ class CodeGenerations:
 
                 billing_metadata = {
                     "execution_environment": "code_generations",
-                    "llm_operations": [
-                        {
-                            "model_id": self.model.metadata.identifier,
-                            "completion_tokens": output_tokens,
-                        }
-                    ],
+                    "llm_operations": get_llm_operations(),
                     "feature_qualified_name": gl_event_context.feature_qualified_name,
                     "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
                 }
@@ -125,7 +115,6 @@ class CodeGenerations:
                 log.error(
                     "Failed to track billing event for code generations",
                     error=str(e),
-                    output_tokens=output_tokens,
                 )
 
     async def execute(
@@ -135,7 +124,6 @@ class CodeGenerations:
         editor_lang: Optional[str] = None,
         model_provider: Optional[str] = None,
         stream: bool = False,
-        snowplow_event_context: Optional[SnowplowEventContext] = None,
         prompt_enhancer: Optional[dict] = None,
         suffix: Optional[str] = None,
         user: Optional[CloudConnectorUser] = None,
@@ -145,17 +133,7 @@ class CodeGenerations:
         increment_lang_counter(file_name, lang_id, editor_lang)
 
         prompt = self._get_prompt(prefix, file_name, lang_id)
-
-        self.snowplow_instrumentator.watch(
-            SnowplowEvent(
-                context=snowplow_event_context,
-                action="tokens_per_user_request_prompt",
-                label="code_generation",
-                value=sum(
-                    md.length_tokens for md in prompt.metadata.components.values()
-                ),
-            )
-        )
+        init_llm_operations()
 
         if isinstance(self.model, AgentModel):
             # The prefix variable here is content-above-cursor, it'll appear as `prefix` field in the template
@@ -200,7 +178,7 @@ class CodeGenerations:
 
         if res:
             if isinstance(res, AsyncIterator):
-                stream_result = self._handle_stream(res, snowplow_event_context, user)
+                stream_result = self._handle_stream(res, user)
                 return stream_result
 
             return await self._handle_sync(
@@ -209,7 +187,6 @@ class CodeGenerations:
                 model_provider=model_provider,
                 prefix=prefix,
                 user=user,
-                snowplow_event_context=snowplow_event_context,
             )
 
         return CodeSuggestionsOutput(
@@ -219,7 +196,6 @@ class CodeGenerations:
     async def _handle_stream(
         self,
         response: AsyncIterator[TextGenModelChunk],
-        snowplow_event_context: Optional[SnowplowEventContext] = None,
         user: Optional[CloudConnectorUser] = None,
     ) -> AsyncIterator[CodeSuggestionsChunk]:
         chunks = []
@@ -230,17 +206,7 @@ class CodeGenerations:
                 yield chunk_content
         finally:
             # Track billing event for streaming response
-            output_tokens = sum(self.tokenization_strategy.estimate_length(chunks))
-            self._track_billing_event(user, output_tokens)
-
-            self.snowplow_instrumentator.watch(
-                SnowplowEvent(
-                    context=snowplow_event_context,
-                    action="tokens_per_user_request_response",
-                    label="code_generation",
-                    value=output_tokens,
-                )
-            )
+            self._track_billing_event(user)
 
     async def _handle_sync(
         self,
@@ -248,7 +214,6 @@ class CodeGenerations:
         lang_id: Optional[LanguageId],
         prefix: str,
         model_provider: Optional[str] = None,
-        snowplow_event_context: Optional[SnowplowEventContext] = None,
         user: Optional[CloudConnectorUser] = None,
     ) -> CodeSuggestionsOutput:
         processor = (
@@ -258,17 +223,7 @@ class CodeGenerations:
         )
         generation = await processor(prefix).process(response.text)
 
-        output_tokens = self.tokenization_strategy.estimate_length(response.text)[0]
-        self._track_billing_event(user, output_tokens)
-
-        self.snowplow_instrumentator.watch(
-            SnowplowEvent(
-                context=snowplow_event_context,
-                action="tokens_per_user_request_response",
-                label="code_generation",
-                value=output_tokens,
-            )
-        )
+        self._track_billing_event(user)
 
         return CodeSuggestionsOutput(
             text=generation,

@@ -7,17 +7,33 @@ cases.
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional, override
+from typing import (
+    Any,
+    AsyncIterator,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    cast,
+    override,
+)
 
 import litellm
-from langchain_core.messages import AIMessage, AIMessageChunk
-from langchain_core.runnables import RunnableConfig, RunnableSerializable
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.fireworks_retry import (
     DEFAULT_FIREWORKS_ERRORS,
     create_fireworks_retry_decorator,
 )
+from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 
 __all__ = ["CompletionLiteLLM"]
 
@@ -53,8 +69,8 @@ MODEL_STOP_TOKENS: Dict[str, List[str]] = {
 }
 
 
-class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
-    """Runnable wrapper for FiM and text completion endpoints via LiteLLM.
+class CompletionLiteLLM(BaseChatModel):
+    """Chat model wrapper for FiM and text completion endpoints via LiteLLM.
 
     Supports two completion types:
     - FIM: Format prefix/suffix into prompt string using fim_format template
@@ -188,22 +204,32 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         return completion_args
 
     @override
-    def invoke(
+    def _generate(
         self,
-        input: Dict[str, Any],
-        config: Optional[RunnableConfig] = None,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
-    ) -> AIMessage:
-        raise NotImplementedError("Sync invocation not implemented. Use ainvoke.")
+    ) -> ChatResult:
+        """Generate a chat result from messages.
+
+        This method is not implemented for completion models. Use _agenerate instead.
+        """
+        raise NotImplementedError("Sync generation not implemented. Use _agenerate.")
 
     @override
-    def stream(
+    def _stream(
         self,
-        input: Dict[str, Any],
-        config: Optional[RunnableConfig] = None,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
-    ) -> Iterator[AIMessageChunk]:
-        raise NotImplementedError("Sync streaming not implemented. Use astream.")
+    ) -> Iterator[ChatGenerationChunk]:
+        """Stream chat generation from messages.
+
+        This method is not implemented for completion models. Use _astream instead.
+        """
+        raise NotImplementedError("Sync streaming not implemented. Use _astream.")
 
     async def _acompletion_with_retry(self, **completion_args: Any) -> Any:
         """Execute text completion with retry logic for Fireworks provider."""
@@ -217,26 +243,50 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
 
         return await litellm.atext_completion(**completion_args)
 
+    def _extract_prefix_suffix_from_messages(
+        self, messages: List[BaseMessage]
+    ) -> tuple[str, str]:
+        """Extract prefix and suffix from messages.
+
+        For completion models, we expect the last message to contain prefix/suffix info. This is a compatibility layer
+        for the BaseChatModel interface.
+        """
+        if not messages:
+            return "", ""
+
+        last_message = messages[-1]
+        content = last_message.content
+
+        # If content is a non-empty list, and the first item is a dict, use that
+        if isinstance(content, list) and content:
+            data = content[0]
+            if isinstance(data, dict):
+                return data.get("prefix", ""), data.get("suffix", "")
+
+        # Otherwise, treat the entire content as prefix
+        return str(content), ""
+
     @override
-    async def ainvoke(
+    async def _agenerate(
         self,
-        input: Dict[str, Any],
-        config: Optional[RunnableConfig] = None,  # pylint: disable=unused-argument
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
-    ) -> AIMessage:
-        """Invoke the completion model.
+    ) -> ChatResult:
+        """Generate a chat result from messages.
 
         Args:
-            input: Dict with 'prefix'/'suffix' keys
-            config: Optional runnable config
+            messages: List of messages
+            stop: Optional stop sequences
+            run_manager: Optional async callback manager
             **kwargs: Additional arguments passed to completion
 
         Returns:
-            AIMessage containing the completion text
+            ChatResult containing the completion
         """
-        prefix = input.get("prefix", "")
-        suffix = input.get("suffix", "")
-        stop = kwargs.pop("stop", None)
+        prefix, suffix = self._extract_prefix_suffix_from_messages(messages)
+        stop_sequences = kwargs.pop("stop", stop)
 
         if self.completion_type == CompletionType.FIM:
             formatted_prompt = self._format_fim_prompt(prefix, suffix)
@@ -248,40 +298,58 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         completion_args = self._build_completion_args(
             formatted_prompt,
             completion_suffix,
-            stop,
+            stop_sequences,
             False,
             **kwargs,
         )
 
         response = await self._acompletion_with_retry(**completion_args)
         text = self._extract_text(response)
-        return AIMessage(content=text)
+        message = AIMessage(
+            content=text,
+            response_metadata=(
+                {"model_name": response.model} if response.model else {}
+            ),
+            usage_metadata=(
+                _create_usage_metadata(response.usage) if response.usage else None
+            ),
+        )
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
     @override
-    async def astream(
+    async def _astream(
         self,
-        input: Dict[str, Any],
-        config: Optional[RunnableConfig] = None,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
         **kwargs: Any,
-    ) -> AsyncIterator[AIMessageChunk]:
+    ) -> AsyncIterator[ChatGenerationChunk]:
         """Stream the completion model.
 
         Args:
-            input: Dict with 'prefix'/'suffix' keys
-            config: Optional runnable config
+            messages: List of messages
+            stop: Optional stop sequences
+            run_manager: Optional async callback manager
             **kwargs: Additional arguments passed to completion
 
         Yields:
             AIMessageChunk containing completion text chunks
         """
         if self.disable_streaming:
-            result = await self.ainvoke(input, config, **kwargs)
-            yield AIMessageChunk(content=result.content)
+            result = await self._agenerate(messages, stop, run_manager, **kwargs)
+            if result.generations:
+                message = cast(AIMessage, result.generations[0].message)
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content=message.content,
+                        response_metadata=message.response_metadata,
+                        usage_metadata=message.usage_metadata,
+                    )
+                )
             return
 
-        prefix = input.get("prefix", "")
-        suffix = input.get("suffix", "")
-        stop = kwargs.pop("stop", None)
+        prefix, suffix = self._extract_prefix_suffix_from_messages(messages)
+        stop_sequences = kwargs.pop("stop", stop)
 
         if self.completion_type == CompletionType.FIM:
             formatted_prompt = self._format_fim_prompt(prefix, suffix)
@@ -293,7 +361,7 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         completion_args = self._build_completion_args(
             formatted_prompt,
             completion_suffix,
-            stop,
+            stop_sequences,
             True,
             **kwargs,
         )
@@ -303,7 +371,17 @@ class CompletionLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         async for chunk in response:
             text = self._extract_chunk_text(chunk)
             if text:
-                yield AIMessageChunk(content=text)
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content=text,
+                        response_metadata=(
+                            {"model_name": chunk.model} if chunk.model else {}
+                        ),
+                        usage_metadata=(
+                            _create_usage_metadata(chunk.usage) if chunk.usage else None
+                        ),
+                    )
+                )
 
     def _extract_text(self, response: Any) -> str:
         return response.choices[0].text

@@ -445,7 +445,7 @@ def mock_litellm_atext_completion_fixture():
                     logprobs=AsyncMock(token_logprobs=[999]),
                 ),
             ],
-            usage=AsyncMock(completion_tokens=999),
+            usage={"prompt_tokens": 1, "completion_tokens": 999, "total_tokens": 1000},
         )
 
         yield mock_acompletion
