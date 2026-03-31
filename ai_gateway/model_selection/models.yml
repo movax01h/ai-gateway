@@ -251,8 +251,6 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
-      extra_headers:
-        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
@@ -348,8 +346,6 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
-      extra_headers:
-        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
