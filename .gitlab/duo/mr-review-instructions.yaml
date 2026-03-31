@@ -1,0 +1,272 @@
+---
+# Custom instructions for GitLab Duo Code Review
+# Adapted for the AI Gateway / Duo Workflow Service Python codebase
+#
+# References:
+# - AGENTS.md: Repository conventions and architecture overview
+# - Clean Architecture: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+# - Dependency Injector: https://python-dependency-injector.ets-labs.org/
+# - FastAPI: https://fastapi.tiangolo.com/
+# - Pydantic: https://docs.pydantic.dev/
+
+# This file defines custom review criteria applied to specific files
+# during merge request reviews. Instructions are grouped by name and can target
+# multiple file patterns using glob syntax.
+instructions:
+  - name: General Python Standards
+    fileFilters:
+      - "**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      1. Ensure inclusive language is used where applicable, e.g. prefer `allowlist` over `whitelist`.
+      1. Verify type hints are present on all functions and methods (mypy is enforced incrementally).
+      1. Ensure Google-style docstrings are used for public classes and functions, wrapped at 120 characters.
+      1. Flag comments that only describe what code does (e.g., `# Loop through items`) rather than why.
+        Suggest removing these and using better naming or method extraction instead.
+      1. Ensure no sensitive data (API keys, tokens, credentials, PII) is logged or included in error responses.
+      1. Verify structured logging uses `structlog` with bound context rather than plain `print` or `logging`:
+        - Use `structlog.stdlib.get_logger("component").bind(key=value)` pattern.
+        - Ensure log messages include relevant context fields (e.g., `request_id`, `user_id`).
+      1. Ensure `async`/`await` is used consistently for I/O-bound operations.
+      1. Flag any use of `time.sleep()` in async code — use `asyncio.sleep()` instead.
+      1. Verify exception handling is specific (avoid bare `except:` or `except Exception:` without re-raising or logging).
+      1. Ensure no mutable default arguments in function signatures (e.g., `def f(x=[])` is a bug).
+
+  - name: Clean Architecture Layer Separation
+    fileFilters:
+      - "duo_workflow_service/workflows/**/*.py"
+      - "duo_workflow_service/components/**/*.py"
+      - "duo_workflow_service/agents/**/*.py"
+      - "!duo_workflow_service/agent_platform/**/*"
+      - "!tests/**/*"
+    instructions: |
+      This service enforces strict layer separation. Verify the following:
+      1. LangGraph APIs Layer (`duo_workflow_service/` root modules): Only uses raw LangGraph package APIs.
+      1. Components Layer (`duo_workflow_service/components/`, `duo_workflow_service/agent_platform/`):
+        - Only imports from the LangGraph APIs layer below it.
+        - Must not import from the Workflows layer above it.
+      1. Workflows Layer (`duo_workflow_service/workflows/`):
+        - Only imports from the Components layer below it.
+        - Must not import directly from LangGraph APIs layer.
+      1. Flag any cross-layer imports that violate this hierarchy — CI enforces this via static scanning.
+      1. Tools (`duo_workflow_service/tools/`) should be self-contained and not depend on workflow-specific state.
+      1. Agents (`duo_workflow_service/agents/`) should orchestrate via the components layer, not call LangGraph directly.
+
+  - name: Flow Registry contribution guidelines
+    fileFilters:
+      - "duo_workflow_service/agent_platform/**/*"
+      - "tests/duo_workflow_service/agent_platform/**/*"
+    instructions: |
+      This module implments an internal framework called Flow Registry, before making any suggestions familiarize
+      yourself with the latest version of following documents:
+      1. Flow Registry documentation at
+      https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/raw/main/docs/flow_registry/index.md
+      to understand architecture, conventions, and application of Flow Registry
+      2. Flow Registry contribution guidelines at docs/flow_registry/contribution_guidelines.md
+
+      CRITICAL: All changes that affect Flow Registry codebase MUST adheres to the contribution guidelines rules.
+
+  - name: No breaking changes withing Flow Registry v1 release
+    fileFilters:
+      - "duo_workflow_service/agent_platform/v1/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      This module implments a stable release of Flow Registry framework, before making any suggestions
+      familiarize yourself with documentation for the stable release at docs/flow_registry/v1.md
+
+      CRITICAL: Any breaking change to components API MUST NOT be introduced under any circumstances.
+
+  - name: Flow Registry experimental release contribution guidelines
+    fileFilters:
+      - "duo_workflow_service/agent_platform/experimental/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      This module implements an experimental release of Flow Registry framework, before making any suggestions
+      familiarize yourself with documentation for the stable release at docs/flow_registry/experimental.md
+
+      1. Code in this module is intedent to be a short lived, changes after being evaluated and vaildated should be
+      either matured to a current stable relase, or removed.
+      1. This module should import common code from a current stable release module.
+
+  - name: Dependency Injection
+    fileFilters:
+      - "**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      This project uses the Dependency Injector framework. Verify:
+      1. If a resource is provided in a container, avoid instantiating it directly — use the container instead.
+      1. Container definitions should use `providers.Singleton` for stateless services and `providers.Factory`
+        for objects that need fresh instances per request.
+      1. Verify that new containers are properly nested under the main `ai_gateway/container.py`.
+
+  - name: FastAPI Endpoints
+    fileFilters:
+      - "ai_gateway/api/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For FastAPI endpoint changes, verify:
+      1. Request and response models use Pydantic v2 models with explicit field types and validators.
+      1. Endpoints use dependency injection via `Depends()` for shared resources (auth, DB, etc.).
+      1. Authentication middleware is applied — new endpoints must not bypass auth without explicit justification.
+      1. HTTP status codes are appropriate and consistent with REST conventions.
+      1. Error responses use the project's `error_utils.py` patterns and do not leak internal details.
+      1. New endpoints are versioned under the correct `v{1,2,3,4}/` directory.
+      1. Ensure `feature_category` is set correctly for new endpoints (see `ai_gateway/api/feature_category.py`).
+      1. Streaming endpoints use `StreamingResponse` with proper content-type headers.
+      1. Verify that new routes are registered in the appropriate router and included in `server.py`.
+
+  - name: Pydantic Models and Configuration
+    fileFilters:
+      - "ai_gateway/config.py"
+      - "**/models/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For Pydantic model and configuration changes, verify:
+      1. Use Pydantic v2 syntax (`model_validator`, `field_validator`) — not deprecated v1 validators.
+      1. Configuration classes inherit from `BaseSettings` with `AIGW_` prefix for environment variables.
+      1. Nested config uses double underscore separator: `AIGW_SECTION__SUBSECTION__KEY`.
+      1. Sensitive fields (API keys, tokens) use `SecretStr` type to prevent accidental logging.
+      1. New config fields have sensible defaults and are documented with `Field(description=...)`.
+      1. Avoid breaking changes to existing config field names — prefer adding new fields with defaults.
+
+  - name: LLM Model Integration
+    fileFilters:
+      - "ai_gateway/models/**/*.py"
+      - "ai_gateway/model_selection/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For LLM model integration changes, verify:
+      1. New models are registered in `ai_gateway/model_selection/models.yml` with correct metadata.
+      1. LiteLLM is used as the unified interface for multi-provider support where applicable.
+      1. Token limits and context window sizes are correctly configured for new models.
+      1. Streaming and non-streaming response paths are both handled.
+      1. Error handling covers rate limits, timeouts, and provider-specific errors.
+
+  - name: No breaking changes to prompt templates syntax
+    fileFilters:
+      - "ai_gateway/prompts/config/base.py"
+      - "!tests/**/*"
+    instructions: |
+      The public API of this project includes prompt templates (via Flow Registry and AI Catalog),
+      therefore according to GitLab backward support policy no breaking changes are allowed.
+
+      Breaking changes include removal of any public model attributes, or any change that makes
+      a public optional model attribute required
+
+      CRITICAL: Any breaking change to prompt template syntax nor structure MUST NOT be introduced under any circumstances.
+
+  - name: Prompt Templates
+    fileFilters:
+      - "ai_gateway/prompts/**/*.jinja"
+      - "ai_gateway/prompts/**/*.yml"
+    instructions: |
+      For prompt template changes, verify:
+      1. Sensitive data is not hardcoded in prompt templates.
+
+  - name: Authentication and Security
+    fileFilters:
+      - "ai_gateway/auth/**/*.py"
+      - "ai_gateway/api/middleware/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For authentication and security changes, verify:
+      1. JWT validation logic is not weakened — flag any changes to signature verification.
+      1. `bypass_external` and `bypass_jwt_signature` config flags must only be used in local dev/test.
+      1. New middleware must be applied in the correct order in `server.py`.
+      1. Authorization checks must happen before any business logic or data access.
+      1. Ensure no credentials, tokens, or secrets are logged at any log level.
+      1. Cloud Connector JWT claims are validated against expected values.
+      1. Self-hosted instance authentication paths are tested separately from SaaS paths.
+
+  - name: gRPC and Protocol Buffers
+    fileFilters:
+      - "contract/**/*.proto"
+      - "duo_workflow_service/**/*_pb2*.py"
+      - "!tests/**/*"
+    instructions: |
+      For gRPC and protobuf changes, verify:
+      1. Proto changes are backward-compatible (no field removal, no field number reuse).
+      1. Generated files (`*_pb2.py`, `contract_pb.rb`, etc) are regenerated via `make gen-proto`.
+      1. New RPC methods have corresponding server-side implementations.
+      1. Streaming RPCs handle client disconnection and cancellation gracefully.
+      1. Proto field names use `snake_case` as per protobuf conventions.
+
+  - name: Internal Events Tracking
+    fileFilters:
+      - "config/events/**/*.yml"
+      - "lib/internal_events/**/*.py"
+      - "ai_gateway/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      For internal event tracking changes, verify:
+      1. Event definitions exist in `config/events/*.yml` for any new `track_internal_event` calls.
+      1. Event `action` names follow the convention: `<operation>_<target>_<where/when>`.
+      1. Required fields are present in event definitions: `description`, `action`, `product_group`, `tiers`.
+      1. No PII, secrets, or sensitive data is included in event properties.
+      1. The `InternalEventEnum` in `lib/internal_events/event_enum.py` is updated for new events.
+      1. Events are only tracked after successful operations, not on failures (unless explicitly tracking errors).
+
+  - name: Test Coverage
+    fileFilters:
+      - "tests/**/*.py"
+    instructions: |
+      1. Test files mirror source structure: `tests/path/to/test_module.py` for `path/to/module.py`.
+      1. Use pytest fixtures and @pytest.mark.parametrize for reducing duplication.
+      1. Ensure error handling paths are tested, not just the happy path.
+      1. For conditional logic (`if`/`else`, `try`/`except`), verify each branch has test coverage.
+      1. Flag missing edge case coverage:
+        - `None`/empty values
+        - Boundary conditions
+        - Error states and exception propagation
+      1. Async tests must use `pytest-asyncio` with `@pytest.mark.asyncio` decorator.
+      1. Mock external dependencies (LLM providers, GCP, GitLab API) — do not make real network calls in unit tests.
+      1. Integration tests in `integration_tests/` may make real calls but must be clearly marked.
+      1. Follow the testing pyramid: most tests at unit level, fewer at integration/system level.
+      1. Verify that new fixtures in `conftest.py` are scoped appropriately (`function`, `module`, `session`).
+
+  - name: Documentation
+    fileFilters:
+      - "docs/**/*.md"
+      - "README.md"
+      - "AGENTS.md"
+    instructions: |
+      1. Ensure new or updated content aligns with existing content in technical meaning and style.
+      1. Use American English spelling and active voice.
+      1. Avoid excessive or repetitive links.
+      1. Avoid ambiguous phrases and be consistent with feature names.
+      1. Avoid sales or marketing language, including words like "easily" or "simply."
+      1. Get straight to the point — avoid phrases like "This page shows."
+      1. Use sentence case for topic titles.
+      1. Do not promise work in future milestones. Instead, say work is being proposed.
+      1. Code examples in docs must be tested and accurate.
+      1. Shell commands should be copy-pasteable and include all required context.
+      1. AGENTS.md changes must accurately reflect the current state of the repository conventions.
+
+  - name: CI/CD Configuration
+    fileFilters:
+      - ".gitlab-ci.yml"
+      - ".gitlab/ci/**/*.yml"
+    instructions: |
+      For CI/CD configuration changes, verify:
+      1. New jobs are placed in the appropriate stage and file under `.gitlab/ci/`.
+      1. Jobs that run on MRs use `rules: - if: $CI_PIPELINE_SOURCE == "merge_request_event"` or equivalent.
+      1. Secrets and credentials must never be hardcoded. Reference them through the Runway Vault as the prefered path
+      or CI/CD variables depending on the deployment context.
+      1. New Docker images used in jobs are pinned to a specific digest or version tag.
+      1. Jobs that modify deployment configuration are reviewed by a maintainer.
+      1. Ensure `needs:` dependencies are correct to avoid unnecessary pipeline delays.
+
+  - name: Dependency Management
+    fileFilters:
+      - "pyproject.toml"
+      - "poetry.lock"
+    instructions: |
+      For dependency changes, verify:
+      1. New dependencies are added to the correct group (`main`, `test`, `lint`, `eval`).
+      1. Version constraints use `^` (compatible release) unless a specific version is required.
+      1. Security-sensitive dependencies (auth, crypto) are pinned more tightly.
+      1. The `poetry.lock` file is updated and committed alongside `pyproject.toml` changes.
+      1. New dependencies do not introduce conflicting transitive dependencies.
+      1. Prefer well-maintained packages with active communities over abandoned ones.
+      1. Check for known vulnerabilities in new dependencies.
+      1. Dependencies should not bloat the application code or prolong CI times unnecessarily.
