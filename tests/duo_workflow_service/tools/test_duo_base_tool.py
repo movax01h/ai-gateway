@@ -574,3 +574,77 @@ async def test_get_discussion_id_from_note_rest_api_exception(
             resource_iid=42,
             note_id=1,
         )
+
+
+class ToolOptionsTestTool(DuoBaseTool):
+    name: str = "test_tool"
+    description: str = "A test tool for tool_options"
+
+    class ArgsSchema(BaseModel):
+        value: str = Field(description="A value parameter")
+        flag: bool = Field(default=False, description="A boolean flag")
+
+    args_schema: Type[BaseModel] = ArgsSchema
+
+    async def _execute(self, value: str, **kwargs: Any) -> str:
+        kwargs = self._apply_tool_options(kwargs)
+        flag = kwargs.pop("flag", False)
+        return json.dumps({"value": value, "flag": flag})
+
+
+def test_apply_tool_options_overrides_llm_value():
+    tool = ToolOptionsTestTool(metadata={})
+    # pylint: disable=attribute-defined-outside-init
+    tool._tool_options = {"test_tool": {"flag": True}}
+    # pylint: enable=attribute-defined-outside-init
+
+    # LLM passes flag=False, but tool_options should override to True
+    kwargs = {"flag": False, "other": "value"}
+    result = tool._apply_tool_options(kwargs)
+
+    assert result["flag"] is True
+    assert result["other"] == "value"
+
+
+def test_apply_tool_options_with_matching_llm_value():
+    tool = ToolOptionsTestTool(metadata={})
+    # pylint: disable=attribute-defined-outside-init
+    tool._tool_options = {"test_tool": {"flag": True}}
+    # pylint: enable=attribute-defined-outside-init
+
+    # LLM also passes flag=True
+    kwargs = {"flag": True}
+    result = tool._apply_tool_options(kwargs)
+
+    assert result["flag"] is True
+
+
+def test_apply_tool_options_empty_respects_llm_choice():
+    tool = ToolOptionsTestTool(metadata={})
+    tool._tool_options = {}  # pylint: disable=attribute-defined-outside-init
+
+    kwargs = {"flag": False}
+    result = tool._apply_tool_options(kwargs)
+
+    assert result["flag"] is False
+
+
+def test_apply_tool_options_no_attribute():
+    tool = ToolOptionsTestTool(metadata={})
+
+    kwargs = {"flag": False}
+    result = tool._apply_tool_options(kwargs)
+
+    assert result["flag"] is False
+
+
+def test_apply_tool_options_different_tool_name():
+    tool = ToolOptionsTestTool(metadata={})
+    # pylint: disable=attribute-defined-outside-init
+    tool._tool_options = {"other_tool": {"flag": True}}
+    # pylint: enable=attribute-defined-outside-init
+
+    kwargs = {"flag": False}
+    result = tool._apply_tool_options(kwargs)
+
+    assert result["flag"] is False
