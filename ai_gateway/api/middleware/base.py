@@ -24,6 +24,7 @@ from .headers import (
     X_GITLAB_LANGUAGE_SERVER_VERSION,
     X_GITLAB_MODEL_GATEWAY_REQUEST_SENT_AT,
     X_GITLAB_REALM_HEADER,
+    X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
@@ -156,6 +157,9 @@ class AccessLogMiddleware:
                 "gitlab_version": request.headers.get(X_GITLAB_VERSION_HEADER),
                 "gitlab_saas_duo_pro_namespace_ids": request.headers.get(
                     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER
+                ),
+                "gitlab_root_namespace_id": request.headers.get(
+                    X_GITLAB_ROOT_NAMESPACE_ID
                 ),
                 "gitlab_feature_enabled_by_namespace_ids": request.headers.get(
                     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER
