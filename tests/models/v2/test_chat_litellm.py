@@ -3,7 +3,12 @@ from unittest.mock import AsyncMock, patch
 
 import litellm
 import pytest
-from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.runnables import Runnable
@@ -52,7 +57,7 @@ async def test_astream_with_stream_options_and_stop_reason():
         },
     ]
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         for chunk in mock_chunks:
             yield chunk
 
@@ -124,7 +129,7 @@ async def test_fireworks_logprobs_in_streaming():
         },
     ]
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **kwargs):
         # Verify that logprobs=1 was passed for Fireworks
         assert kwargs.get("logprobs") == 1
         for chunk in mock_chunks:
@@ -320,7 +325,7 @@ async def test_fireworks_503_retries_with_exponential_backoff():
     # Mock to fail twice with 503, then succeed
     call_count = 0
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         nonlocal call_count
         call_count += 1
         if call_count <= 2:
@@ -360,7 +365,7 @@ async def test_non_fireworks_503_fails_immediately():
 
     call_count = 0
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         nonlocal call_count
         call_count += 1
         raise litellm.ServiceUnavailableError(
@@ -427,7 +432,7 @@ async def test_fireworks_exponential_backoff_timing():
 
     call_times = []
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         call_times.append(time.time())
         raise litellm.ServiceUnavailableError(
             message="Service temporarily unavailable",
@@ -501,8 +506,6 @@ class TestMistralAIPrefixFormat:
         self, custom_llm_provider, last_message_type, expected_role, expect_prefix
     ):
         """Verify prefix is only added when using Mistral AI provider and last message is assistant."""
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
         chat = ChatLiteLLM(model="test-model", custom_llm_provider=custom_llm_provider)
 
         # Build messages based on last_message_type

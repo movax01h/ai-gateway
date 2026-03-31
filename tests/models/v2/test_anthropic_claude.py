@@ -1,8 +1,6 @@
-import httpx
 import pytest
-from anthropic import Anthropic, AsyncAnthropic
+from anthropic import AsyncAnthropic
 from langchain_core.runnables import Runnable
-from langchain_core.tools import BaseTool
 
 from ai_gateway.models.v2 import ChatAnthropic
 
