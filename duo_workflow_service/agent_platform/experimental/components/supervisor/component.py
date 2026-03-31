@@ -1,4 +1,4 @@
-from typing import Annotated, Any, ClassVar, Self
+from typing import Annotated, Any, ClassVar, Optional, Self
 
 from dependency_injector.wiring import inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -155,7 +155,7 @@ class SupervisorAgentComponent(AgentComponentBase):
 
     supported_environments: ClassVar[tuple[str, ...]] = ("ambient",)
 
-    max_delegations: int
+    max_delegations: Optional[int] = None
 
     ui_log_events: list[UILogEventsSupervisor] = Field(default_factory=list)
     ui_role_as: str = "agent"
@@ -174,8 +174,8 @@ class SupervisorAgentComponent(AgentComponentBase):
 
     @field_validator("max_delegations")
     @classmethod
-    def validate_max_delegations(cls, v: int) -> int:
-        if v < 1:
+    def validate_max_delegations(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
             raise ValueError("max_delegations must be at least 1.")
         return v
 
