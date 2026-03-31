@@ -14,6 +14,11 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowStateKeys,
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
+from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
+    ATTEMPTS_REMAINING_SENTINEL,
+    MAX_ATTEMPTS_SENTINEL,
+    SUCCESS_SENTINEL,
+)
 
 
 @pytest.fixture(name="prompt_id")
@@ -205,7 +210,7 @@ class TestOneOffComponentAttachNodes:
             prompt_id,
             prompt_version,
             tools=mock_toolset.bindable,
-            tool_choice="any",
+            tool_choice="auto",
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,
@@ -333,7 +338,7 @@ class TestOneOffComponentToolsRouter:
                         tool_call_id="123",
                     ),
                     HumanMessage(
-                        content="Tool execution completed successfully after 0 correction attempts."
+                        content=f"Tool execution {SUCCESS_SENTINEL} after 0 correction attempts."
                     ),
                 ]
             },
@@ -373,9 +378,7 @@ class TestOneOffComponentToolsRouter:
 
         # Verify final state contains success message
         final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert any(
-            "completed successfully" in msg.content for msg in final_conversation
-        )
+        assert any(SUCCESS_SENTINEL in msg.content for msg in final_conversation)
 
     def test_tool_execution_retry_flow(
         self,
@@ -432,7 +435,7 @@ class TestOneOffComponentToolsRouter:
                             tool_call_id="123",
                         ),
                         HumanMessage(
-                            content="The previous tool calls failed. You have 2 attempts remaining."
+                            content=f"The previous tool calls failed. You have 2 {ATTEMPTS_REMAINING_SENTINEL}."
                         ),
                     ]
                 },
@@ -447,7 +450,7 @@ class TestOneOffComponentToolsRouter:
                             tool_call_id="123",
                         ),
                         HumanMessage(
-                            content="Tool execution completed successfully after 1 correction attempts."
+                            content=f"Tool execution {SUCCESS_SENTINEL} after 1 correction attempts."
                         ),
                     ]
                 },
@@ -485,9 +488,7 @@ class TestOneOffComponentToolsRouter:
 
         # Verify final state contains success message
         final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert any(
-            "completed successfully" in msg.content for msg in final_conversation
-        )
+        assert any(SUCCESS_SENTINEL in msg.content for msg in final_conversation)
 
     def test_max_attempts_reached_flow(
         self,
@@ -530,7 +531,7 @@ class TestOneOffComponentToolsRouter:
                         tool_call_id="123",
                     ),
                     HumanMessage(
-                        content="The previous tool calls failed. You have 0 attempts remaining."
+                        content=f"The previous tool calls failed. You have {MAX_ATTEMPTS_SENTINEL}."
                     ),
                 ]
             },
@@ -567,7 +568,7 @@ class TestOneOffComponentToolsRouter:
 
         # Verify final state contains max attempts message
         final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert any("0 attempts remaining" in msg.content for msg in final_conversation)
+        assert any(MAX_ATTEMPTS_SENTINEL in msg.content for msg in final_conversation)
 
     def test_component_state_management_through_execution(
         self,
@@ -611,7 +612,7 @@ class TestOneOffComponentToolsRouter:
                         tool_call_id="123",
                     ),
                     HumanMessage(
-                        content="Tool execution completed successfully after 0 correction attempts."
+                        content=f"Tool execution {SUCCESS_SENTINEL} after 0 correction attempts."
                     ),
                 ]
             },

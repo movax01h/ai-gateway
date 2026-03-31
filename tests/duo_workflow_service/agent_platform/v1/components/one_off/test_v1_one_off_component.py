@@ -10,6 +10,11 @@ from pydantic import ValidationError
 from duo_workflow_service.agent_platform.v1.components.one_off.component import (
     OneOffComponent,
 )
+from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
+    ATTEMPTS_REMAINING_SENTINEL,
+    MAX_ATTEMPTS_SENTINEL,
+    SUCCESS_SENTINEL,
+)
 from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 
@@ -204,7 +209,7 @@ class TestOneOffComponentAttachNodes:
             prompt_version,
             model_metadata=None,
             tools=mock_toolset.bindable,
-            tool_choice="any",
+            tool_choice="auto",
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,
@@ -431,7 +436,7 @@ class TestOneOffComponentToolsRouter:
                             tool_call_id="123",
                         ),
                         HumanMessage(
-                            content="The previous tool calls failed. You have 2 attempts remaining."
+                            content=f"The previous tool calls failed. You have 2 {ATTEMPTS_REMAINING_SENTINEL}."
                         ),
                     ]
                 },
@@ -446,7 +451,7 @@ class TestOneOffComponentToolsRouter:
                             tool_call_id="123",
                         ),
                         HumanMessage(
-                            content="Tool execution completed successfully after 1 correction attempts."
+                            content=f"Tool execution {SUCCESS_SENTINEL} after 1 correction attempts."
                         ),
                     ]
                 },
@@ -529,7 +534,7 @@ class TestOneOffComponentToolsRouter:
                         tool_call_id="123",
                     ),
                     HumanMessage(
-                        content="The previous tool calls failed. You have 0 attempts remaining."
+                        content=f"The previous tool calls failed. You have {MAX_ATTEMPTS_SENTINEL}."
                     ),
                 ]
             },
@@ -566,7 +571,7 @@ class TestOneOffComponentToolsRouter:
 
         # Verify final state contains max attempts message
         final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert any("0 attempts remaining" in msg.content for msg in final_conversation)
+        assert any(MAX_ATTEMPTS_SENTINEL in msg.content for msg in final_conversation)
 
     def test_component_state_management_through_execution(
         self,
