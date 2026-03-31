@@ -47,8 +47,8 @@ Compaction is being integrated incrementally across workflow implementations:
 | Legacy Software Development Workflow | Yes | Enabled via `CompactionConfig` in workflow setup |
 | Flow Registry Experimental (AgentComponent) | Yes | YAML configuration |
 | Flow Registry Experimental (OneOffComponent) | Yes | YAML configuration |
-| Flow Registry v1 (AgentComponent) | No | Not yet integrated |
-| Flow Registry v1 (OneOffComponent) | No | Not yet integrated |
+| Flow Registry v1 (AgentComponent) | Yes | YAML configuration |
+| Flow Registry v1 (OneOffComponent) | Yes | YAML configuration |
 | Flow Registry (DeterministicStepComponent) | No | No conversation history |
 
 ## Configuration
@@ -122,9 +122,9 @@ planner_component = PlannerComponent(
 )
 ```
 
-### Flow Registry Experimental
+### Flow Registry (Experimental & v1)
 
-For flows built with Flow Registry Experimental, configure compaction in the YAML flow configuration.
+For flows built with Flow Registry (both Experimental and v1 versions), configure compaction in the YAML flow configuration. The configuration is identical for both versions.
 
 The `compaction` field accepts either a boolean (`true`/`false`) or a `CompactionConfig` object.
 
@@ -221,7 +221,7 @@ Compaction integrates with state management differently depending on the workflo
 
 **Legacy Software Development Workflow**: The compacted history is written directly back to the state's `conversation_history` before the LLM call in the `Agent.run()` method, similar to the Chat workflow.
 
-**Flow Registry Experimental**: Compaction happens before the LLM invocation in `AgentNode.run()`. The compacted history is used for the prompt, and the complete history (compacted + new completion) is returned via the component's output. The reducer handles updating the conversation history in the flow state.
+**Flow Registry (Experimental & v1)**: Compaction happens before the LLM invocation in `AgentNode.run()`. The compacted history is used for the prompt, and the complete history (compacted + new completion) is returned via the component's output. The reducer handles updating the conversation history in the flow state.
 
 ## Best Practices
 

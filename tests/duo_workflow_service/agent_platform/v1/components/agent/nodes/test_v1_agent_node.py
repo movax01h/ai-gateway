@@ -12,6 +12,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentNode,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
+from duo_workflow_service.conversation.compaction import ConversationCompactor
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -412,3 +413,96 @@ class TestAgentNode:
             f"{AgentFinalOutput.tool_title} raised validation error:"
             in retry_messages_history[1].content
         )
+
+
+class TestAgentNodeCompaction:
+    """Test suite for AgentNode compaction support."""
+
+    @pytest.fixture(name="mock_compactor")
+    def mock_compactor_fixture(self):
+        """Fixture for mock ConversationCompactor."""
+        return Mock(spec=ConversationCompactor)
+
+    @pytest.fixture(name="agent_node_with_compactor")
+    def agent_node_with_compactor_fixture(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        component_name,
+        mock_internal_event_client,
+        mock_compactor,
+    ):
+        """Fixture for AgentNode instance with compactor."""
+        return AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            component_name=component_name,
+            internal_event_client=mock_internal_event_client,
+            compactor=mock_compactor,
+        )
+
+    def test_agent_node_stores_compactor(
+        self,
+        agent_node_with_compactor,
+        mock_compactor,
+    ):
+        """Test that AgentNode stores the compactor when provided."""
+        assert agent_node_with_compactor._compactor == mock_compactor
+
+    def test_agent_node_without_compactor_has_none(
+        self,
+        agent_node,
+    ):
+        """Test that AgentNode has None compactor when not provided."""
+        assert agent_node._compactor is None
+
+    @pytest.mark.asyncio
+    async def test_run_calls_maybe_compact_history_with_compactor(
+        self,
+        agent_node_with_compactor,
+        base_flow_state,
+        mock_compactor,
+        component_name,
+        mock_get_vars_from_state,
+    ):
+        """Test that run() passes the compactor to maybe_compact_history."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
+            new_callable=AsyncMock,
+        ) as mock_compact:
+            mock_compact.return_value = []
+
+            await agent_node_with_compactor.run(base_flow_state)
+
+            mock_compact.assert_called_once_with(
+                compactor=mock_compactor,
+                history=[],
+                agent_name=component_name,
+            )
+
+    @pytest.mark.asyncio
+    async def test_run_calls_maybe_compact_history_without_compactor(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_get_vars_from_state,
+    ):
+        """Test that run() passes None to maybe_compact_history when no compactor."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
+            new_callable=AsyncMock,
+        ) as mock_compact:
+            mock_compact.return_value = []
+
+            await agent_node.run(base_flow_state)
+
+            mock_compact.assert_called_once_with(
+                compactor=None,
+                history=[],
+                agent_name=component_name,
+            )
