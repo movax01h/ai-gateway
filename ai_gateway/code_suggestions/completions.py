@@ -28,6 +28,7 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.context.llm_operations import get_llm_operations, init_llm_operations
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 
 __all__ = ["CodeCompletions"]
@@ -57,9 +58,7 @@ class CodeCompletions:
             model.input_token_limit, tokenization_strategy
         )
 
-    def _track_billing_event(
-        self, user: Optional[CloudConnectorUser], output_tokens: int
-    ) -> None:
+    def _track_billing_event(self, user: Optional[CloudConnectorUser]) -> None:
         """Track billing event for code completions."""
         if self.billing_event_client and user:
             try:
@@ -70,12 +69,7 @@ class CodeCompletions:
 
                 billing_metadata = {
                     "execution_environment": "code_completions",
-                    "llm_operations": [
-                        {
-                            "model_id": self.model.metadata.identifier,
-                            "completion_tokens": output_tokens,
-                        }
-                    ],
+                    "llm_operations": get_llm_operations(),
                     "feature_qualified_name": gl_event_context.feature_qualified_name,
                     "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
                 }
@@ -92,7 +86,6 @@ class CodeCompletions:
                 log.error(
                     "Failed to track billing event for code suggestions",
                     error=str(e),
-                    output_tokens=output_tokens,
                 )
 
     def _get_prompt(
@@ -143,6 +136,7 @@ class CodeCompletions:
             code_context=code_context,
             context_max_percent=context_max_percent,
         )
+        init_llm_operations()
 
         if isinstance(self.model, AgentModel):
             if lang := (editor_lang or resolve_lang_name(file_name)):
@@ -207,10 +201,7 @@ class CodeCompletions:
         finally:
             # Track billing event for streaming response
             if chunks:
-                estimated_tokens = sum(
-                    self.tokenization_strategy.estimate_length(chunks)
-                )
-                self._track_billing_event(user, estimated_tokens)
+                self._track_billing_event(user)
 
     async def _handle_sync(
         self,
@@ -231,7 +222,7 @@ class CodeCompletions:
             max_output_tokens_used=tokens_consumption_metadata.max_output_tokens_used,
         )
 
-        self._track_billing_event(user, tokens_consumption_metadata.output_tokens)
+        self._track_billing_event(user)
 
         return CodeSuggestionsOutput(
             text=response_text,

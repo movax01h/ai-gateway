@@ -302,7 +302,6 @@ async def generations(
         editor_lang=payload.current_file.language_identifier,
         model_provider=payload.model_provider,
         stream=payload.stream,
-        snowplow_event_context=snowplow_event_context,
     )
 
     if isinstance(suggestion, AsyncIterator):

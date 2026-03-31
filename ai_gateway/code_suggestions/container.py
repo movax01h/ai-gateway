@@ -32,7 +32,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
     litellm_chat = providers.Dependency(instance_of=ChatModelBase)  # type: ignore[type-abstract]
     agent_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
 
-    snowplow_instrumentator = providers.Dependency(instance_of=SnowplowInstrumentator)
     billing_event_client = providers.Dependency(instance_of=BillingEventsClient)
 
     vertex = providers.Factory(
@@ -43,7 +42,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        snowplow_instrumentator=snowplow_instrumentator,
         billing_event_client=billing_event_client,
     )
 
@@ -53,7 +51,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        snowplow_instrumentator=snowplow_instrumentator,
         billing_event_client=billing_event_client,
     )
 
@@ -63,7 +60,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        snowplow_instrumentator=snowplow_instrumentator,
         billing_event_client=billing_event_client,
     )
 
@@ -73,7 +69,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        snowplow_instrumentator=snowplow_instrumentator,
         billing_event_client=billing_event_client,
     )
 
@@ -83,7 +78,6 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        snowplow_instrumentator=snowplow_instrumentator,
         billing_event_client=billing_event_client,
     )
 
@@ -195,7 +189,6 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
         litellm_chat=models.litellm_chat,
         agent_model=models.agent_model,
         amazon_q_model=models.amazon_q_model,
-        snowplow_instrumentator=snowplow.instrumentator,
         billing_event_client=billing_event.client,
     )
 

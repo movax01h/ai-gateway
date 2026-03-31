@@ -36,6 +36,22 @@ from ai_gateway.safety_attributes import SafetyAttributes
 from lib.billing_events import BillingEvent, BillingEventsClient
 
 
+@pytest.fixture(name="mock_get_llm_operations")
+def mock_get_llm_operations_fixture():
+    with patch("ai_gateway.code_suggestions.completions.get_llm_operations") as mock:
+        mock.return_value = [
+            {
+                "model_id": "context-model",
+                "model_engine": "openai",
+                "model_provider": "openai",
+                "token_count": 999,
+                "prompt_tokens": 500,
+                "completion_tokens": 499,
+            }
+        ]
+        yield mock
+
+
 class InstrumentorMock(Mock):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
@@ -252,6 +268,9 @@ class TestCodeCompletions:
             patch.object(use_case.model, "generate", mock_generate),
             patch.object(use_case.prompt_builder, "build", mock_build),
             patch.object(use_case.prompt_builder, "add_content", mock_add_content),
+            patch(
+                "ai_gateway.code_suggestions.completions.init_llm_operations"
+            ) as mock_init_llm_ops,
         ):
             actual = await use_case.execute(
                 prefix=prefix,
@@ -270,6 +289,8 @@ class TestCodeCompletions:
             context_max_percent=context_max_percent,
             code_context=code_context,
         )
+
+        mock_init_llm_ops.assert_called_once()
 
         actual = cast(CodeSuggestionsOutput, actual)
 
@@ -715,7 +736,11 @@ class TestCodeCompletions:
         )
 
     async def test_billing_event_tracked_on_successful_completion(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing event is tracked when code completion is successful."""
         expected_output_tokens = 25
@@ -747,12 +772,7 @@ class TestCodeCompletions:
             quantity=1,
             metadata={
                 "execution_environment": "code_completions",
-                "llm_operations": [
-                    {
-                        "model_id": "test-model-id",
-                        "completion_tokens": expected_output_tokens,
-                    }
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },
@@ -813,7 +833,11 @@ class TestCodeCompletions:
         mock_billing_client.track_billing_event.assert_called_once()
 
     async def test_billing_event_with_zero_tokens(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing event is tracked when output tokens is zero."""
         use_case_with_billing.model.generate = AsyncMock(
@@ -842,16 +866,18 @@ class TestCodeCompletions:
             quantity=1,
             metadata={
                 "execution_environment": "code_completions",
-                "llm_operations": [
-                    {"model_id": "test-model-id", "completion_tokens": 0}
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },
         )
 
     async def test_billing_event_tracked_for_streaming(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
     ):
         """Test that billing events are tracked for streaming responses."""
 
@@ -891,16 +917,17 @@ class TestCodeCompletions:
             quantity=1,
             metadata={
                 "execution_environment": "code_completions",
-                "llm_operations": [
-                    {"model_id": "test-model-id", "completion_tokens": 12}
-                ],
+                "llm_operations": mock_get_llm_operations.return_value,
                 "feature_qualified_name": "code_suggestions",
                 "feature_ai_catalog_item": False,
             },
         )
 
     async def test_billing_event_exception_handling_streaming(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
     ):
         """Test that billing event exceptions are handled gracefully for streaming."""
 
