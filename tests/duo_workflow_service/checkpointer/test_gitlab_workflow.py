@@ -31,7 +31,7 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
-from lib.billing_events import BillingEvent
+from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.context import llm_operations
 from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
@@ -1300,13 +1300,13 @@ async def test_track_workflow_completion_with_billing_event(
     gitlab_workflow,
     workflow_id,
     workflow_type,
-    billing_event_client,
+    billing_event_service,
     mock_user,
     status,
 ):
     """Test that workflow completion triggers billing event for trackable statuses."""
     current_user.set(mock_user)
-    gitlab_workflow._billing_event_client = billing_event_client
+    gitlab_workflow._billing_event_service = billing_event_service
 
     operations = [
         {
@@ -1330,33 +1330,29 @@ async def test_track_workflow_completion_with_billing_event(
 
     await gitlab_workflow._track_workflow_completion(status)
 
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_service.track_billing.assert_called_once_with(
+        workflow_id=workflow_id,
         user=mock_user,
+        gl_context=workflow_type,
         event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+        execution_env=ExecutionEnvironment.DAP,
         category="GitLabWorkflow",
         unit_of_measure="request",
         quantity=1,
-        metadata={
-            "workflow_id": workflow_id,
-            "feature_qualified_name": workflow_type.feature_qualified_name,
-            "feature_ai_catalog_item": workflow_type.feature_ai_catalog_item,
-            "execution_environment": "duo_agent_platform",
-            "llm_operations": operations,
-        },
     )
 
 
 @pytest.mark.asyncio
 async def test_track_workflow_completion_with_non_billable_status(
     gitlab_workflow,
-    billing_event_client,
+    billing_event_service,
 ):
     """Test that workflow completion doesn't trigger billing event for non-trackable statuses."""
-    gitlab_workflow._billing_event_client = billing_event_client
+    gitlab_workflow._billing_event_service = billing_event_service
 
     await gitlab_workflow._track_workflow_completion("some_other_status")
 
-    billing_event_client.track_billing_event.assert_not_called()
+    billing_event_service.track_billing.assert_not_called()
 
 
 @pytest.fixture(autouse=True)
@@ -1542,7 +1538,7 @@ async def test_track_workflow_completion_includes_duration_seconds(
 ):
     """Test that completion events include duration_seconds when _flow_start_time is set."""
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._billing_event_client = Mock()
+    gitlab_workflow._billing_event_service = Mock()
     gitlab_workflow._flow_start_time = 1000.0
 
     with patch("duo_workflow_service.checkpointer.gitlab_workflow.time") as mock_time:
@@ -1565,7 +1561,7 @@ async def test_track_workflow_completion_without_start_time(
 ):
     """Test that completion events omit duration_seconds when _flow_start_time is not set."""
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._billing_event_client = Mock()
+    gitlab_workflow._billing_event_service = Mock()
 
     await gitlab_workflow._track_workflow_completion("finished")
 

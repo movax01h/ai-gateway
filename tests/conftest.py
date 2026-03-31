@@ -61,6 +61,7 @@ from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.billing_events.client import BillingEventsClient
+from lib.billing_events.service import BillingEventService
 from lib.context import (
     StarletteUser,
     current_model_metadata_context,
@@ -909,3 +910,8 @@ def mock_request_fixture(user: StarletteUser | None):
 @pytest.fixture(name="billing_event_client")
 def billing_event_client_fixture():
     return Mock(spec=BillingEventsClient)
+
+
+@pytest.fixture(name="billing_event_service")
+def billing_event_service_fixture():
+    return Mock(spec=BillingEventService)

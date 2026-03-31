@@ -67,8 +67,8 @@ from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
-from lib.billing_events import BillingEvent, BillingEventsClient
-from lib.context import get_llm_operations, init_llm_operations
+from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
+from lib.context import init_llm_operations
 from lib.events import GLReportingEventContext
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -162,8 +162,8 @@ class GitLabWorkflow(
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
-        billing_event_client: BillingEventsClient = Provide[
-            ContainerApplication.billing_event.client
+        billing_event_service: BillingEventService = Provide[
+            ContainerApplication.billing_event.service
         ],
     ):
         self._offline_mode = os.getenv("USE_MEMSAVER")
@@ -176,7 +176,7 @@ class GitLabWorkflow(
         self._workflow_type = workflow_type
         self._workflow_config = workflow_config
         self._internal_event_client = internal_event_client
-        self._billing_event_client = billing_event_client
+        self._billing_event_service = billing_event_service
         self.serde = CheckpointSerializer()
 
     @override
@@ -512,20 +512,15 @@ class GitLabWorkflow(
         if status in BILLABLE_STATUSES:
             try:
                 user: CloudConnectorUser = current_user.get()
-                billing_metadata = {
-                    "workflow_id": self._workflow_id,
-                    "feature_qualified_name": self._workflow_type.feature_qualified_name,
-                    "feature_ai_catalog_item": self._workflow_type.feature_ai_catalog_item,
-                    "execution_environment": "duo_agent_platform",
-                    "llm_operations": get_llm_operations(),
-                }
-                self._billing_event_client.track_billing_event(
+                self._billing_event_service.track_billing(
+                    workflow_id=self._workflow_id,
                     user=user,
+                    gl_context=self._workflow_type,
                     event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+                    execution_env=ExecutionEnvironment.DAP,
                     category=self.__class__.__name__,
                     unit_of_measure="request",
                     quantity=1,
-                    metadata=billing_metadata,
                 )
                 self._logger.info(
                     "Successfully sent billing event for workflow %s", self._workflow_id
