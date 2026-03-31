@@ -12,13 +12,16 @@ Name your branch based on this context:
 </naming_context>
 
 <branch_handling_strategy>
-1. Generate a branch name following the system prompt rules
-2. Include the workflow_id as suffix: duo/<type>/<identifier>-<description>-<workflow_id>
-3. Call `create_branch` with ref={{ ref }}
-4. On success: fetch and checkout the new branch
-5. On failure (other): retry with a modified description (max 2 total attempts)
-6. Respond with the result
+1. Fetch origin using the run_git_command tool
+2. Checkout a new branch using the run_git_command tool to track `origin/{{ ref }}`
+3. Push the new branch
+4. On failure: change the branch name and try to push again.
+5. Respond with the result
 </branch_handling_strategy>
+
+<retry_limit>
+You may attempt a maximum of 5 different branch names. If all attempts fail, report the failure.
+</retry_limit>
 
 <final_response_format>
 Respond with EXACTLY one of:

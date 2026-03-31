@@ -16,7 +16,6 @@ components:
     prompt_id: "create_repository_branch"
     prompt_version: "^1.0.0"
     toolset:
-      - "create_branch"
       - "run_git_command"
     model_size_preference: "small"
     inputs:

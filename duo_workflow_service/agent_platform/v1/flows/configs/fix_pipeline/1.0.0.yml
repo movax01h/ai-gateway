@@ -80,7 +80,6 @@ components:
     prompt_id: "create_repository_branch"
     prompt_version: "^1.0.0"
     toolset:
-      - "create_branch"
       - "run_git_command"
     inputs:
       - from: "context:project_id"
