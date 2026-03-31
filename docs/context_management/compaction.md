@@ -44,7 +44,7 @@ Compaction is being integrated incrementally across workflow implementations:
 | Workflow Type | Support | Configuration Method |
 |---------------|---------|---------------------|
 | Legacy Chat Workflow | Yes | Enabled by default via `create_agent()` factory |
-| Legacy Software Development Workflow | No | Not yet integrated |
+| Legacy Software Development Workflow | Yes | Enabled via `CompactionConfig` in workflow setup |
 | Flow Registry Experimental (AgentComponent) | Yes | YAML configuration |
 | Flow Registry Experimental (OneOffComponent) | Yes | YAML configuration |
 | Flow Registry v1 (AgentComponent) | No | Not yet integrated |
@@ -81,6 +81,44 @@ To disable compaction, pass `False`:
 agent = create_agent(
     # ... other params ...
     compaction=False,  # Disabled
+)
+```
+
+### Legacy Software Development Workflow
+
+Compaction is **enabled by default** for all agents in the software development workflow (context_builder, planner, executor). The `build_agent()` factory function in `agent.py` creates a `ConversationCompactor` when a `CompactionConfig` is provided.
+
+To customize compaction behavior, pass a `CompactionConfig` when setting up workflow components:
+
+```python
+# In workflow setup
+from duo_workflow_service.conversation.compaction import CompactionConfig
+
+# For PlannerComponent
+planner_component = PlannerComponent(
+    # ... other params ...
+    compaction=CompactionConfig(
+        max_recent_messages=20,
+        trim_threshold=0.8,
+    ),
+)
+
+# For ExecutorComponent
+executor_component = ExecutorComponent(
+    # ... other params ...
+    compaction=CompactionConfig(
+        max_recent_messages=20,
+        trim_threshold=0.8,
+    ),
+)
+```
+
+To disable compaction, omit the `compaction` parameter or pass `None`:
+
+```python
+planner_component = PlannerComponent(
+    # ... other params ...
+    # compaction not specified = disabled
 )
 ```
 
@@ -180,6 +218,8 @@ Note: Compaction is not currently surfaced in the user-facing chat UI. The proce
 Compaction integrates with state management differently depending on the workflow type:
 
 **Legacy Chat Workflow**: The compacted history is written directly back to the state's `conversation_history` before the LLM call. The state is mutated in place within the `ChatAgent.run()` method.
+
+**Legacy Software Development Workflow**: The compacted history is written directly back to the state's `conversation_history` before the LLM call in the `Agent.run()` method, similar to the Chat workflow.
 
 **Flow Registry Experimental**: Compaction happens before the LLM invocation in `AgentNode.run()`. The compacted history is used for the prompt, and the complete history (compacted + new completion) is returned via the component's output. The reducer handles updating the conversation history in the flow state.
 

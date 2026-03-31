@@ -13,6 +13,7 @@ from duo_workflow_service.agents import (
 from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.base import BaseComponent
+from duo_workflow_service.conversation.compaction import CompactionConfig
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,
@@ -53,9 +54,16 @@ def _router(
 
 
 class ExecutorComponent(BaseComponent):
-    def __init__(self, executor_toolset: Any, project: Project, **kwargs: Any):
+    def __init__(
+        self,
+        executor_toolset: Any,
+        project: Project,
+        compaction: CompactionConfig | None = None,
+        **kwargs: Any,
+    ):
         self.executor_toolset = executor_toolset
         self.project = project
+        self.compaction = compaction
         super().__init__(**kwargs)
 
     def attach(
@@ -75,6 +83,7 @@ class ExecutorComponent(BaseComponent):
             workflow_id=self.workflow_id,
             workflow_type=self.workflow_type,
             http_client=self.http_client,
+            compaction=self.compaction,
             prompt_template_inputs={
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",

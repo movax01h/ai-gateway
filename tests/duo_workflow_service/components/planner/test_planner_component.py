@@ -1,4 +1,3 @@
-import re
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -211,6 +210,7 @@ class TestPlannerComponent:
             workflow_id="test-workflow-123",
             workflow_type=workflow_type,
             http_client=planner_component.http_client,
+            compaction=planner_component.compaction,
             prompt_template_inputs={
                 "executor_agent_tools": f"{mock_tool.name}: {mock_tool.description}",
                 "create_plan_tool_name": "test_tool",

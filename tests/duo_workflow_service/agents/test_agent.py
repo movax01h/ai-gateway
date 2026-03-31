@@ -8,6 +8,10 @@ from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, Prompt
 from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
+from duo_workflow_service.conversation.compaction import (
+    CompactionConfig,
+    ConversationCompactor,
+)
 from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.state import (
@@ -413,3 +417,168 @@ def test_create_agent_with_prompt_registry(
     assert agent.name == "test_agent"
     assert agent.workflow_id == "workflow_123"
     assert agent.prompt == prompt
+
+
+@patch("duo_workflow_service.agents.agent.create_conversation_compactor")
+def test_create_agent_with_compaction_config(
+    mock_create_compactor,
+    user,
+    mock_local_prompt_registry,
+    tools,
+    prompt,
+    gl_http_client,
+):
+    mock_compactor = Mock(spec=ConversationCompactor)
+    mock_create_compactor.return_value = mock_compactor
+
+    compaction_config = CompactionConfig(trim_threshold=0.7)
+    agent = build_agent(
+        name="test_agent",
+        prompt_registry=mock_local_prompt_registry,
+        user=user,
+        prompt_id="test/agent",
+        prompt_version="^1.0.0",
+        tools=tools,
+        workflow_id="workflow_123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        http_client=gl_http_client,
+        compaction=compaction_config,
+    )
+
+    mock_create_compactor.assert_called_once_with(
+        config=compaction_config, llm_model=prompt.model
+    )
+    assert agent.compactor == mock_compactor
+
+
+def test_create_agent_without_compaction_config(
+    user, mock_local_prompt_registry, tools, gl_http_client
+):
+    agent = build_agent(
+        name="test_agent",
+        prompt_registry=mock_local_prompt_registry,
+        user=user,
+        prompt_id="test/agent",
+        prompt_version="^1.0.0",
+        tools=tools,
+        workflow_id="workflow_123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        http_client=gl_http_client,
+    )
+
+    assert agent.compactor is None
+
+
+class TestAgentCompaction:
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.agent.maybe_compact_history")
+    @patch("duo_workflow_service.agents.agent.get_event")
+    async def test_agent_run_calls_maybe_compact_history(
+        self,
+        mock_get_event,
+        mock_maybe_compact,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: CategoryEnum,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+        mock_ainvoke: Mock,  # pylint: disable=unused-argument
+    ):
+        mock_get_event.return_value = None
+        mock_compactor = Mock(spec=ConversationCompactor)
+        original_messages = [HumanMessage(content="test message")]
+        compacted_messages = [HumanMessage(content="compacted")]
+        mock_maybe_compact.return_value = compacted_messages
+
+        workflow_state["conversation_history"][prompt_name] = original_messages  # type: ignore[assignment]
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+            compactor=mock_compactor,
+        )  # type: ignore[call-arg]
+
+        await agent.run(workflow_state)
+
+        mock_maybe_compact.assert_called_once_with(
+            compactor=mock_compactor,
+            history=original_messages,
+            agent_name=prompt_name,
+        )
+        assert workflow_state["conversation_history"][prompt_name] == compacted_messages
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.agent.maybe_compact_history")
+    @patch("duo_workflow_service.agents.agent.get_event")
+    async def test_agent_run_without_compactor_still_calls_maybe_compact(
+        self,
+        mock_get_event,
+        mock_maybe_compact,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: CategoryEnum,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+        mock_ainvoke: Mock,  # pylint: disable=unused-argument
+    ):
+        mock_get_event.return_value = None
+        original_messages = [HumanMessage(content="test message")]
+        mock_maybe_compact.return_value = original_messages
+
+        workflow_state["conversation_history"][prompt_name] = original_messages  # type: ignore[assignment]
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+        )  # type: ignore[call-arg]
+
+        await agent.run(workflow_state)
+
+        mock_maybe_compact.assert_called_once_with(
+            compactor=None,
+            history=original_messages,
+            agent_name=prompt_name,
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.agent.maybe_compact_history")
+    @patch("duo_workflow_service.agents.agent.get_event")
+    async def test_agent_run_calls_compaction_with_empty_history(
+        self,
+        mock_get_event,
+        mock_maybe_compact,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: CategoryEnum,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+        mock_ainvoke: Mock,  # pylint: disable=unused-argument
+    ):
+        mock_get_event.return_value = None
+        mock_maybe_compact.return_value = []
+        workflow_state["conversation_history"] = {}
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+        )  # type: ignore[call-arg]
+
+        await agent.run(workflow_state)
+
+        mock_maybe_compact.assert_called_once_with(
+            compactor=None,
+            history=[],
+            agent_name=prompt_name,
+        )

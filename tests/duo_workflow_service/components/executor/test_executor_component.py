@@ -214,6 +214,7 @@ class TestExecutorComponent:
             workflow_id="test-workflow-123",
             workflow_type=workflow_type,
             http_client=executor_component.http_client,
+            compaction=executor_component.compaction,
             prompt_template_inputs={
                 "set_task_status_tool_name": "set_task_status",
                 "get_plan_tool_name": "get_plan",
