@@ -46,6 +46,7 @@ def test_x_gitlab_headers_logged_when_set(mock_log_exception):
                 "X-Gitlab-Feature-Enabled-By-Namespace-Ids": "1,2",
                 "X-Gitlab-Feature-Enablement-Type": "duo_pro",
                 "X-Gitlab-Realm": "saas",
+                "x-gitlab-root-namespace-id": "123",
             },
             data={"foo": "bar"},
         )
@@ -58,6 +59,7 @@ def test_x_gitlab_headers_logged_when_set(mock_log_exception):
     assert cap_logs[0]["gitlab_feature_enabled_by_namespace_ids"] == "1,2"
     assert cap_logs[0]["gitlab_feature_enablement_type"] == "duo_pro"
     assert cap_logs[0]["gitlab_realm"] == "saas"
+    assert cap_logs[0]["gitlab_root_namespace_id"] == "123"
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
@@ -73,6 +75,7 @@ def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
     assert cap_logs[0]["gitlab_feature_enabled_by_namespace_ids"] is None
     assert cap_logs[0]["gitlab_feature_enablement_type"] is None
     assert cap_logs[0]["gitlab_realm"] is None
+    assert cap_logs[0]["gitlab_root_namespace_id"] is None
 
 
 @mock.patch("ai_gateway.api.middleware.base.log_exception")
