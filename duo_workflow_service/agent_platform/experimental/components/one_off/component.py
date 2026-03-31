@@ -18,6 +18,9 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
     AgentNode,
 )
 from duo_workflow_service.agent_platform.experimental.components.one_off.nodes.tool_node_with_error_correction import (
+    ATTEMPTS_REMAINING_SENTINEL,
+    MAX_ATTEMPTS_SENTINEL,
+    SUCCESS_SENTINEL,
     ToolNodeWithErrorCorrection,
 )
 from duo_workflow_service.agent_platform.experimental.components.one_off.ui_log import (
@@ -30,6 +33,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKeyTemplate,
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
+from duo_workflow_service.agent_platform.v1.state import IOKey
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
@@ -90,7 +94,7 @@ class OneOffComponent(AgentComponentBase):
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable
-        tool_choice = "any"
+        tool_choice = "auto"
 
         prompt = self.prompt_registry.get_on_behalf(
             self.user,
@@ -141,14 +145,17 @@ class OneOffComponent(AgentComponentBase):
                 events=self.ui_log_events,
                 writer_class=UILogWriterOneOffTools,
             ),
-            tool_calls_key=self._tool_calls_key.to_iokey(
+            tool_calls_key=self._tool_calls_key.to_iokey(  # type: ignore[arg-type]
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),
-            tool_responses_key=self._tool_responses_key.to_iokey(
+            tool_responses_key=self._tool_responses_key.to_iokey(  # type: ignore[arg-type]
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),
-            execution_result_key=self._execution_result_key.to_iokey(
+            execution_result_key=self._execution_result_key.to_iokey(  # type: ignore[arg-type]
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            ),
+            conversation_history_key=IOKey(
+                target="conversation_history", subkeys=[self.name]
             ),
         )
 
@@ -186,17 +193,17 @@ class OneOffComponent(AgentComponentBase):
         # Check if it's a success message
         if (
             isinstance(last_message, HumanMessage)
-            and "completed successfully" in last_message.content
+            and SUCCESS_SENTINEL in last_message.content
         ):
             return outgoing_router.route(state)  # Success - exit component
 
         # Check if it's an error feedback message
         if (
             isinstance(last_message, HumanMessage)
-            and "attempts remaining" in last_message.content
+            and ATTEMPTS_REMAINING_SENTINEL in last_message.content
         ):
             # Parse remaining attempts from the message
-            if "0 attempts remaining" in last_message.content:
+            if MAX_ATTEMPTS_SENTINEL in last_message.content:
                 return outgoing_router.route(
                     state
                 )  # Max attempts reached - exit component

@@ -7,6 +7,10 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from pydantic_core import ValidationError
 
 from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
+    ATTEMPTS_REMAINING_SENTINEL,
+    MAX_ATTEMPTS_SENTINEL,
+    NO_TOOL_CALLS_FEEDBACK_PREFIX,
+    SUCCESS_SENTINEL,
     ToolNodeWithErrorCorrection,
 )
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
@@ -17,13 +21,16 @@ from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import EventEnum
 
+V1_MODULE = (
+    "duo_workflow_service.agent_platform.v1"
+    ".components.one_off.nodes.tool_node_with_error_correction"
+)
+
 
 @pytest.fixture(name="mock_prompt_security")
 def mock_prompt_security_fixture():
     """Fixture for mocking apply_security_scanning."""
-    with patch(
-        "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.apply_security_scanning"
-    ) as mock_security:
+    with patch(f"{V1_MODULE}.apply_security_scanning") as mock_security:
         mock_security.return_value = "Sanitized response"
         yield mock_security
 
@@ -31,9 +38,7 @@ def mock_prompt_security_fixture():
 @pytest.fixture(name="mock_logger")
 def mock_logger_fixture():
     """Fixture for mocking structlog logger."""
-    with patch(
-        "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.structlog"
-    ) as mock_structlog:
+    with patch(f"{V1_MODULE}.structlog") as mock_structlog:
         mock_logger = Mock()
         mock_structlog.stdlib.get_logger.return_value = mock_logger
         yield mock_logger
@@ -42,9 +47,7 @@ def mock_logger_fixture():
 @pytest.fixture(name="mock_tool_monitoring")
 def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
-    with patch(
-        "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.duo_workflow_metrics"
-    ) as mock_metrics:
+    with patch(f"{V1_MODULE}.duo_workflow_metrics") as mock_metrics:
         mock_context_manager = Mock()
         mock_context_manager.__enter__ = Mock(return_value=mock_context_manager)
         mock_context_manager.__exit__ = Mock(return_value=None)
@@ -218,7 +221,7 @@ class TestToolNodeWithErrorCorrectionRun:
         # Check success message (index 2)
         success_message = conversation_messages[2]
         assert isinstance(success_message, HumanMessage)
-        assert "completed successfully" in success_message.content
+        assert SUCCESS_SENTINEL in success_message.content
 
         # Verify tool execution was called
         mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
@@ -229,8 +232,7 @@ class TestToolNodeWithErrorCorrectionRun:
         # Verify ui_history methods were called
         ui_history_one_off.log._log_tool_call_input.assert_called_once()
         ui_history_one_off.log.success.assert_called_once()
-        # pop_state_updates is called twice: once at the beginning and once at the end
-        assert ui_history_one_off.pop_state_updates.call_count == 2
+        ui_history_one_off.pop_state_updates.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_with_io_keys_storage(
@@ -468,10 +470,9 @@ class TestToolNodeWithErrorCorrectionRun:
         # Replace mode: full history (1 existing AIMessage + 1 HumanMessage feedback)
         assert len(conversation_messages) == 2
         assert isinstance(conversation_messages[1], HumanMessage)
-        assert (
-            "Your last response failed to generate the requested tool calls"
-            in conversation_messages[1].content
-        )
+        assert NO_TOOL_CALLS_FEEDBACK_PREFIX in conversation_messages[1].content
+        # Verify the message contains the routing sentinel so _tools_router can handle it
+        assert ATTEMPTS_REMAINING_SENTINEL in conversation_messages[1].content
 
     @pytest.mark.asyncio
     async def test_run_empty_conversation_history(
@@ -492,10 +493,7 @@ class TestToolNodeWithErrorCorrectionRun:
         ]
         assert len(conversation_messages) == 1
         assert isinstance(conversation_messages[0], HumanMessage)
-        assert (
-            "Your last response failed to generate the requested tool calls"
-            in conversation_messages[0].content
-        )
+        assert NO_TOOL_CALLS_FEEDBACK_PREFIX in conversation_messages[0].content
 
     @pytest.mark.asyncio
     async def test_run_no_tool_calls_max_attempts_exceeded(
@@ -594,7 +592,7 @@ class TestToolNodeWithErrorCorrectionErrorHandling:
 
         assert isinstance(feedback, HumanMessage)
         assert "Attempt 1/3" in feedback.content
-        assert "2 attempts remaining" in feedback.content
+        assert f"2 {ATTEMPTS_REMAINING_SENTINEL}" in feedback.content
         assert "tool1" in feedback.content
         assert "tool2" in feedback.content
         assert "Error: Invalid argument" in feedback.content
@@ -611,7 +609,7 @@ class TestToolNodeWithErrorCorrectionErrorHandling:
 
         assert isinstance(feedback, HumanMessage)
         assert "Attempt 3/3" in feedback.content
-        assert "0 attempts remaining" in feedback.content
+        assert MAX_ATTEMPTS_SENTINEL in feedback.content
 
 
 class TestToolNodeWithErrorCorrectionContextTracking:
@@ -718,7 +716,7 @@ class TestToolNodeWithErrorCorrectionContextTracking:
         error_feedback = conversation_messages[-1]
         assert isinstance(error_feedback, HumanMessage)
         assert "Attempt 1/3" in error_feedback.content
-        assert "2 attempts remaining" in error_feedback.content
+        assert f"2 {ATTEMPTS_REMAINING_SENTINEL}" in error_feedback.content
 
     @pytest.mark.asyncio
     async def test_run_max_attempts_reached_sets_failed_status(
@@ -828,9 +826,7 @@ class TestToolNodeWithErrorCorrectionSecurity:
         # Configure apply_security_scanning to raise SecurityException
         security_error = SecurityException("Security validation failed")
 
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.apply_security_scanning"
-        ) as mock_security:
+        with patch(f"{V1_MODULE}.apply_security_scanning") as mock_security:
             mock_security.side_effect = security_error
 
             # Exception is caught internally, error message is returned
@@ -855,9 +851,7 @@ class TestToolNodeWithErrorCorrectionSecurity:
 
     def test_sanitize_response_success(self, tool_node_with_error_correction):
         """Test _sanitize_response method with successful sanitization."""
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction.apply_security_scanning"
-        ) as mock_security:
+        with patch(f"{V1_MODULE}.apply_security_scanning") as mock_security:
             mock_security.return_value = "Sanitized safe response"
 
             result = tool_node_with_error_correction._sanitize_response(
@@ -889,7 +883,8 @@ class TestToolNodeWithErrorCorrectionMonitoring:
 
         # Verify monitoring was called
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
-            tool_name=mock_tool.name
+            tool_name=mock_tool.name,
+            flow_type=tool_node_with_error_correction._flow_type.value,
         )
 
     def test_record_metric_for_tool_failure(

@@ -20,6 +20,9 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     RouterProtocol,
 )
 from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
+    ATTEMPTS_REMAINING_SENTINEL,
+    MAX_ATTEMPTS_SENTINEL,
+    SUCCESS_SENTINEL,
     ToolNodeWithErrorCorrection,
 )
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
@@ -140,7 +143,7 @@ class OneOffComponent(BaseComponent):
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable
-        tool_choice = "any"
+        tool_choice = "auto"
 
         model_metadata = get_model_metadata(self.model_size_preference)
 
@@ -242,17 +245,17 @@ class OneOffComponent(BaseComponent):
         # Check if it's a success message
         if (
             isinstance(last_message, HumanMessage)
-            and "completed successfully" in last_message.content
+            and SUCCESS_SENTINEL in last_message.content
         ):
             return outgoing_router.route(state)  # Success - exit component
 
         # Check if it's an error feedback message
         if (
             isinstance(last_message, HumanMessage)
-            and "attempts remaining" in last_message.content
+            and ATTEMPTS_REMAINING_SENTINEL in last_message.content
         ):
             # Parse remaining attempts from the message
-            if "0 attempts remaining" in last_message.content:
+            if MAX_ATTEMPTS_SENTINEL in last_message.content:
                 return outgoing_router.route(
                     state
                 )  # Max attempts reached - exit component
