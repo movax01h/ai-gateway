@@ -29,8 +29,39 @@ CODE_EMBEDDINGS_PROMPT_ID = "embeddings_code"
 
 
 @router.post("/code_embeddings")
+@router.post("/code_embeddings/index")
 @feature_category(GitLabFeatureCategory.GLOBAL_SEARCH)
-async def code_embeddings(
+async def code_embeddings_index(
+    request: Request,
+    payload: EmbeddingsRequest,
+    current_user: Annotated[StarletteUser, Depends(get_current_user)],
+    prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+):
+    return await _generate_code_embeddings(
+        _request=request,
+        payload=payload,
+        current_user=current_user,
+        prompt_registry=prompt_registry,
+    )
+
+
+@router.post("/code_embeddings/search")
+@feature_category(GitLabFeatureCategory.GLOBAL_SEARCH)
+async def code_embeddings_search(
+    request: Request,
+    payload: EmbeddingsRequest,
+    current_user: Annotated[StarletteUser, Depends(get_current_user)],
+    prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+):
+    return await _generate_code_embeddings(
+        _request=request,
+        payload=payload,
+        current_user=current_user,
+        prompt_registry=prompt_registry,
+    )
+
+
+async def _generate_code_embeddings(
     _request: Request,
     payload: EmbeddingsRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
