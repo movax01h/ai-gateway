@@ -12,6 +12,7 @@ from duo_workflow_service.agent_platform.v1.components.one_off.component import 
 )
 from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.conversation.compaction import CompactionConfig
 
 
 @pytest.fixture(name="prompt_id")
@@ -765,3 +766,149 @@ class TestPromptVariableValidation:
                 mock_toolset,
                 strict_validation=True,
             )
+
+
+class TestOneOffComponentCompaction:
+    """Test suite for OneOffComponent compaction configuration."""
+
+    def test_compaction_default_is_false(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that compaction defaults to False."""
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        assert component.compaction is False
+
+    def test_compaction_accepts_bool_true(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that compaction accepts boolean True."""
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            compaction=True,
+        )
+        assert component.compaction is True
+
+    def test_compaction_accepts_config_object(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that compaction accepts CompactionConfig object."""
+        config = CompactionConfig(
+            max_recent_messages=20,
+            trim_threshold=0.8,
+        )
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            compaction=config,
+        )
+        assert component.compaction == config
+        assert component.compaction.max_recent_messages == 20
+        assert component.compaction.trim_threshold == 0.8
+
+    # pylint: disable=unused-argument
+    @pytest.mark.parametrize(
+        ("compaction_value", "should_create_compactor"),
+        [
+            (False, False),
+            (True, True),
+            (CompactionConfig(), True),
+        ],
+        ids=["disabled", "enabled_bool", "enabled_config"],
+    )
+    def test_attach_creates_compactor_based_on_config(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_state_graph,
+        mock_router,
+        mock_tool_node_cls,
+        compaction_value,
+        should_create_compactor,
+    ):
+        """Test that attach creates compactor only when compaction is enabled."""
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            compaction=compaction_value,
+        )
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
+            ) as mock_agent_node_cls,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.one_off.component.create_conversation_compactor"
+            ) as mock_create_compactor,
+        ):
+            mock_agent_node = Mock()
+            mock_agent_node.name = f"{component_name}#llm"
+            mock_agent_node_cls.return_value = mock_agent_node
+
+            component.attach(mock_state_graph, mock_router)
+
+            if should_create_compactor:
+                mock_create_compactor.assert_called_once()
+                agent_call_kwargs = mock_agent_node_cls.call_args[1]
+                assert agent_call_kwargs["compactor"] is not None
+            else:
+                mock_create_compactor.assert_not_called()
+                agent_call_kwargs = mock_agent_node_cls.call_args[1]
+                assert agent_call_kwargs["compactor"] is None

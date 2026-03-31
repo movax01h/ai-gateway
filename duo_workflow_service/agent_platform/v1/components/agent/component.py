@@ -1,4 +1,4 @@
-from typing import Annotated, ClassVar, Literal, Optional, Self, Type, override
+from typing import Annotated, ClassVar, Literal, Optional, Self, Type, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -38,6 +38,10 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
+from duo_workflow_service.conversation.compaction import (
+    CompactionConfig,
+    create_conversation_compactor,
+)
 from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
@@ -74,6 +78,7 @@ class AgentComponent(BaseComponent):
     prompt_id: str
     prompt_version: Optional[str] = None
     toolset: Toolset
+    compaction: Union[CompactionConfig, bool] = False
     response_schema_id: Optional[str] = None
     response_schema_version: Optional[str] = None
 
@@ -270,6 +275,18 @@ class AgentComponent(BaseComponent):
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
             response_schema=self._response_schema,
+            compactor=(
+                create_conversation_compactor(
+                    config=(
+                        self.compaction
+                        if isinstance(self.compaction, CompactionConfig)
+                        else CompactionConfig()
+                    ),
+                    llm_model=prompt.model,
+                )
+                if self.compaction
+                else None
+            ),
         )
         node_tools = ToolNode(
             name=f"{self.name}#tools",

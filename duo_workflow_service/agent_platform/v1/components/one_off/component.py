@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, ClassVar, Optional, Self, override
+from typing import Any, ClassVar, Optional, Self, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
@@ -35,6 +35,10 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKeyTemplate,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.conversation.compaction import (
+    CompactionConfig,
+    create_conversation_compactor,
+)
 from duo_workflow_service.tools import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
@@ -73,6 +77,7 @@ class OneOffComponent(BaseComponent):
     prompt_id: str
     prompt_version: Optional[str] = None
     toolset: Toolset
+    compaction: Union[CompactionConfig, bool] = False
     max_correction_attempts: int = 3
 
     prompt_registry: BasePromptRegistry = Provide[
@@ -162,6 +167,18 @@ class OneOffComponent(BaseComponent):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            compactor=(
+                create_conversation_compactor(
+                    config=(
+                        self.compaction
+                        if isinstance(self.compaction, CompactionConfig)
+                        else CompactionConfig()
+                    ),
+                    llm_model=prompt.model,
+                )
+                if self.compaction
+                else None
+            ),
         )
 
         # Use enhanced tool node with error correction
