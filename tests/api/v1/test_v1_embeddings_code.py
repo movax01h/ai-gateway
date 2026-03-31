@@ -9,11 +9,6 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from ai_gateway.api.v1 import api_router
 
 
-@pytest.fixture(name="route")
-def route_fixture():
-    return "/embeddings/code_embeddings"
-
-
 @pytest.fixture(name="fast_api_router", scope="class")
 def fast_api_router_fixture():
     return api_router
@@ -24,7 +19,7 @@ def unit_primitive_fixture():
     return GitLabUnitPrimitive.GENERATE_EMBEDDINGS_CODEBASE
 
 
-class TestCodeEmbeddings:
+class BaseTestCodeEmbeddings:
     def _build_params(self, model_provider: str, model_identifier: str | None):
         return {
             "model_metadata": {
@@ -38,8 +33,9 @@ class TestCodeEmbeddings:
         }
 
     def _post_request(
-        self, mock_client: TestClient, route: str, params: dict[str, Any]
+        self, mock_client: TestClient, params: dict[str, Any], route: str | None = None
     ):
+        route = route or self._route()
         return mock_client.post(
             route,
             headers={
@@ -49,6 +45,9 @@ class TestCodeEmbeddings:
             },
             json=params,
         )
+
+    def _route(self):
+        raise NotImplementedError("Implement in child class.")
 
     @pytest.mark.parametrize(
         ("model_provider", "model_identifier", "expected_llm_model"),
@@ -62,14 +61,11 @@ class TestCodeEmbeddings:
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
         mock_litellm_aembedding_response: AsyncMock,
-        route: str,
     ):
         params = self._build_params(
             model_provider=model_provider, model_identifier=model_identifier
         )
-        response = self._post_request(
-            mock_client=mock_client, route=route, params=params
-        )
+        response = self._post_request(mock_client=mock_client, params=params)
 
         assert response.status_code == 200
 
@@ -89,14 +85,11 @@ class TestCodeEmbeddings:
         self,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
-        route: str,
     ):
         params = self._build_params(
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"
         )
-        response = self._post_request(
-            mock_client=mock_client, route=route, params=params
-        )
+        response = self._post_request(mock_client=mock_client, params=params)
 
         assert response.status_code == 200
 
@@ -110,14 +103,11 @@ class TestCodeEmbeddings:
     def test_unsupported_provider(
         self,
         mock_client: TestClient,
-        route: str,
     ):
         params = self._build_params(
             model_provider="not_gitlab", model_identifier="dummy_identifier"
         )
-        response = self._post_request(
-            mock_client=mock_client, route=route, params=params
-        )
+        response = self._post_request(mock_client=mock_client, params=params)
 
         assert response.status_code == 400
         assert response.json() == {
@@ -132,12 +122,9 @@ class TestCodeEmbeddings:
     def test_missing_model_identifier(
         self,
         mock_client: TestClient,
-        route: str,
     ):
         params = self._build_params(model_provider="gitlab", model_identifier=None)
-        response = self._post_request(
-            mock_client=mock_client, route=route, params=params
-        )
+        response = self._post_request(mock_client=mock_client, params=params)
 
         assert response.status_code == 422
 
@@ -149,7 +136,6 @@ class TestCodeEmbeddings:
         self,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
-        route: str,
     ):
         error_message = "Bad request error from litellm"
         mock_litellm_aembedding.side_effect = litellm.BadRequestError(
@@ -159,9 +145,7 @@ class TestCodeEmbeddings:
         params = self._build_params(
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"
         )
-        response = self._post_request(
-            mock_client=mock_client, route=route, params=params
-        )
+        response = self._post_request(mock_client=mock_client, params=params)
 
         assert response.status_code == 400
         assert response.json() == {
@@ -172,7 +156,6 @@ class TestCodeEmbeddings:
         self,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
-        route: str,
     ):
         error_message = "Rate limit error from litellm"
         mock_litellm_aembedding.side_effect = litellm.RateLimitError(
@@ -182,9 +165,32 @@ class TestCodeEmbeddings:
         params = self._build_params(
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"
         )
-        response = self._post_request(
-            mock_client=mock_client, route=route, params=params
-        )
+        response = self._post_request(mock_client=mock_client, params=params)
 
         assert response.status_code == 429
         assert response.json() == {"detail": f"litellm.RateLimitError: {error_message}"}
+
+
+class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
+    def _route(self):
+        return "/embeddings/code_embeddings/index"
+
+    def test_successful_response_base_route(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_litellm_aembedding_response: AsyncMock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+        response = self._post_request(
+            mock_client=mock_client, params=params, route="/embeddings/code_embeddings"
+        )
+
+        assert response.status_code == 200
+
+
+class TestCodeEmbeddingsSearch(BaseTestCodeEmbeddings):
+    def _route(self):
+        return "/embeddings/code_embeddings/search"
