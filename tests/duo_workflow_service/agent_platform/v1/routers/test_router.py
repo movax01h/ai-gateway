@@ -185,7 +185,7 @@ class TestRouter:
         mock_metrics.count_flow_route_decision.assert_called_once_with(
             flow_type="unknown",
             component_name="from",
-            route_value="non_existing_route",
+            route_value="invalid_route",
             is_default_route=True,
         )
 
@@ -219,7 +219,7 @@ class TestRouter:
         mock_metrics.count_flow_route_decision.assert_called_once_with(
             flow_type="unknown",
             component_name="from",
-            route_value="non_existing_route",
+            route_value="invalid_route",
             is_default_route=True,
         )
 
@@ -255,7 +255,7 @@ class TestRouter:
         mock_metrics.count_flow_route_decision.assert_called_once_with(
             flow_type="unknown",
             component_name="from",
-            route_value="None",
+            route_value="invalid_route",
             is_default_route=True,
         )
 
@@ -343,11 +343,12 @@ class TestRouter:
         mock_metrics.count_flow_route_decision.assert_called_once_with(
             flow_type="fix_pipeline",
             component_name="decide_approach",
-            route_value="unmatched_value",
+            route_value="invalid_route",
             is_default_route=True,
         )
 
         call_kwargs = mock_event_client.track_event.call_args[1]
+        assert call_kwargs["additional_properties"].property == "invalid_route"
         assert call_kwargs["additional_properties"].extra == {"is_default_route": True}
 
     @patch(
