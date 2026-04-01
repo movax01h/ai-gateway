@@ -6,7 +6,7 @@ metadata:
   department: eng-dev
   department_group: eng-dev-create-shared-infra
   product_category: duo_workflow
-  owner_email_handle: dgriffith
+  owner_email_handle: bastirehm
 spec:
   regions:
   - us-east1

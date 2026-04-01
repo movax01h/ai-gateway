@@ -7,7 +7,7 @@ duo-workflow-svc-eks:
       gitlab.com/department: eng-dev
       gitlab.com/department_group: eng-dev-create-shared-infra
       gitlab.com/product_category: duo_workflow
-      gitlab.com/owner_email_handle: dgriffith
+      gitlab.com/owner_email_handle: bastirehm
 
   serviceMixins:
     - "runway-eks.service-mixin"
