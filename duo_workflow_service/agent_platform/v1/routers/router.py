@@ -68,11 +68,12 @@ class Router(BaseRouter):
     def _track_route_decision(self, route_value: str, is_default_route: bool) -> None:
         component_name = self.from_component.name
         flow_type_value = self.flow_type.value if self.flow_type else "unknown"
+        logged_route_value = "invalid_route" if is_default_route else route_value
 
         log.info(
             "Flow route decision",
             component_name=component_name,
-            route_value=route_value,
+            route_value=logged_route_value,
             flow_id=self.flow_id,
             flow_type=flow_type_value,
             is_default_route=is_default_route,
@@ -81,14 +82,14 @@ class Router(BaseRouter):
         duo_workflow_metrics.count_flow_route_decision(
             flow_type=flow_type_value,
             component_name=component_name,
-            route_value=route_value,
+            route_value=logged_route_value,
             is_default_route=is_default_route,
         )
 
         if self.internal_event_client and self.flow_type:
             additional_properties = InternalEventAdditionalProperties(
                 label=component_name,
-                property=route_value,
+                property=logged_route_value,
                 value=self.flow_id,
                 is_default_route=is_default_route,
             )
