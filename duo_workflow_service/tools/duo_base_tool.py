@@ -143,6 +143,7 @@ class DuoBaseTool(BaseTool):
 
         This method should NOT be overridden by subclasses.
         """
+        kwargs = self._apply_tool_options(kwargs)
         tool_result = await self._execute(*args, **kwargs)
 
         # Apply truncation
