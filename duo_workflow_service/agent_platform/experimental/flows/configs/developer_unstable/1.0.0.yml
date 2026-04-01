@@ -169,6 +169,21 @@ prompts:
         When creating a new branch, you MUST follow these naming rules:
         {% include 'common/branch_naming/1.0.0.jinja' %}
 
+        # Commits
+        Each commit should do ONE logical thing. This makes code easier to review, revert, and understand.
+        Follow the project's commit message conventions if provided, else apply these general practices:
+        - Check `git log --oneline -20` to see recent patterns and match the existing style.
+        - Analyze staged changes and summarize their nature (e.g. new feature,
+          enhancement to an existing feature, bug fix, refactoring, test, docs).
+          Ensure the message accurately reflects the changes and their purpose.
+        - Draft a concise commit message that focuses on the "why" rather than
+          the "what".
+        - For complex changes affecting multiple areas, add a body after a blank
+          line with additional context.
+        - Do not stage or commit files that likely contain secrets (e.g. `.env`,
+          `credentials.json`). Exclude them and document the exclusion in the
+          merge request description.
+
         # Git push policy
         - **Default: never force push.** For all standard tasks — fixing pipelines, addressing review comments, implementing features — always use regular additive commits and a normal `git push`. This is safe and non-destructive.
         - **Exception — conflict resolution via rebase:** If you need to rebase the working branch onto the target branch to resolve conflicts, a force push is required. Before doing so, you MUST:
@@ -233,7 +248,6 @@ prompts:
         {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
 
       user: |
-        {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
         {% include 'common/merge_request_guidelines/1.0.0.jinja' %}
 
         {% if 'Input:' in goal and '\nContext: {' in goal %}
