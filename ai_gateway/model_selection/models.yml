@@ -251,6 +251,8 @@ models:
       temperature: 0.0
       max_tokens: 4_096
       max_retries: 1
+      extra_headers:
+        anthropic-beta: context-1m-2025-08-07
     prompt_params:
       vertex_location: global
 
@@ -344,6 +346,8 @@ models:
       model: "claude-sonnet-4@20250514"
       custom_llm_provider: "vertex_ai"
       temperature: 0.0
+      extra_headers:
+        anthropic-beta: context-1m-2025-08-07
       max_tokens: 4_096
       max_retries: 1
     prompt_params:
