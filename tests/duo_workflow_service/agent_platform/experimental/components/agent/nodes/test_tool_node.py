@@ -12,6 +12,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.ui_log im
     UILogEventsAgent,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from tests.duo_workflow_service.agent_platform.experimental.components.agent.conftest import (
@@ -68,7 +69,9 @@ def tool_node_fixture(
     """Fixture for ToolNode instance."""
     return ToolNode(
         name="test_tool_node",
-        conversation_history_key_factory=lambda _: conversation_history_key,
+        conversation_history_key=RuntimeIOKey(
+            alias="conversation_history", factory=lambda _: conversation_history_key
+        ),
         toolset=mock_toolset,
         flow_id=flow_id,
         flow_type=flow_type,

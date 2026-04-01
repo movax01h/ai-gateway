@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
 
@@ -36,8 +37,12 @@ class TestFinalResponseNode:
         """Test successful run with output IOKey."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
             response_schema=AgentFinalOutput,
         )
@@ -86,8 +91,12 @@ class TestFinalResponseNode:
         """Test successful run with nested output IOKey."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: nested_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: nested_output
+            ),
             ui_history=ui_history,
             response_schema=AgentFinalOutput,
         )
@@ -137,8 +146,12 @@ class TestFinalResponseNode:
         """Test run with multiple tool calls raises ValueError."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
         )
 
@@ -167,8 +180,12 @@ class TestFinalResponseNode:
         """Test run with multiple tool calls raises ValueError."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
             response_schema=AgentFinalOutput,
         )
@@ -200,8 +217,12 @@ class TestFinalResponseNode:
         """Test run raises ValueError when no final response tool call is found."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
             response_schema=AgentFinalOutput,
         )
@@ -239,8 +260,12 @@ class TestFinalResponseNode:
 
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
             response_schema=AgentFinalOutput,
         )
@@ -271,8 +296,12 @@ class TestFinalResponseNode:
 
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
         )
 
@@ -302,8 +331,12 @@ class TestFinalResponseNode:
         """Test run raises ValueError when no conversation history exists for component."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
         )
 
@@ -327,8 +360,12 @@ class TestFinalResponseNode:
         """Test run raises ValueError when conversation history is empty for component."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
         )
 
@@ -352,8 +389,12 @@ class TestFinalResponseNode:
         """Test run uses the last message in conversation history."""
         node = FinalResponseNode(
             name="test_node",
-            conversation_history_key_factory=lambda _: conversation_history_key,
-            output_key_factory=lambda _: simple_output,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: simple_output
+            ),
             ui_history=ui_history,
             response_schema=AgentFinalOutput,
         )

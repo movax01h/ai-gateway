@@ -42,6 +42,96 @@ flow:
 - **description**: Description of the flow
 - **product_group**: Attributes team ownership of flow (e.g. `agent_foundations`)
 
+## IOKey Abstractions
+
+The experimental version of Flow Registry extends the IOKey hierarchy with a third resolution tier.
+For the foundational `IOKey` and `IOKeyTemplate` abstractions, see the
+[Contribution Guidelines](contribution_guidelines.md#iokey-and-iokeytemplate-abstraction).
+
+| Abstraction | Resolved at | How |
+|---|---|---|
+| `IOKey` | Graph-build time (static) | Direct field values |
+| `IOKeyTemplate` | Graph-build time (parameterised) | `to_iokey(replacements: dict)` |
+| `RuntimeIOKey` | Graph-execution time (runtime) | `to_iokey(state: FlowState)` |
+
+### RuntimeIOKey
+
+`RuntimeIOKey` is an `IOKey` subclass whose concrete identity is resolved at graph-execution time.
+It is used when the concrete state path (target and subkeys) depends on runtime state — for example, a
+subsession-scoped output key whose subsession ID is only known once the graph is running.
+
+#### Key Properties
+
+- **`alias`** (required): The statically-declared Jinja2 template variable name. This allows prompt-input validators
+  to check that every template variable has a corresponding input key without executing the graph.
+- **`factory`**: A callable `(state: FlowState) -> IOKey` that resolves the concrete key at runtime.
+- **`target`**: Raises `RuntimeError` when accessed directly. The concrete target is only known at runtime;
+  use `to_iokey(state).target` to obtain it after resolution.
+
+#### Methods
+
+- **`to_iokey(state: FlowState) -> IOKey`**: Resolves the concrete `IOKey` by calling `factory(state)`.
+- **`to_nested_dict(value, state: FlowState) -> dict`**: Resolves the concrete `IOKey` at runtime and delegates
+  to `IOKey.to_nested_dict(value)`. Requires `state` (unlike the parent's `to_nested_dict(value)`) because the
+  target and subkeys are only known after resolution.
+- **`value_from_state(state)`**: Resolves the key and reads its value from state.
+- **`template_variable_from_state(state)`**: Resolves the key and returns its template variable dict.
+
+#### Construction
+
+```python
+from duo_workflow_service.agent_platform.experimental.state.base import (
+    IOKey,
+    IOKeyTemplate,
+    RuntimeIOKey,
+)
+
+# Wrap a static IOKey for uniform handling in nodes that accept RuntimeIOKey
+static_key = RuntimeIOKey(
+    alias="final_answer",
+    factory=lambda _: IOKey(target="context", subkeys=["my_agent", "final_answer"]),
+)
+
+# Resolve a dynamic key based on runtime state (e.g. active subsession ID)
+template = IOKeyTemplate(
+    target="context",
+    subkeys=[IOKeyTemplate.SUBAGENT_NAME_TEMPLATE, IOKeyTemplate.SUBSESSION_ID_TEMPLATE, "final_answer"],
+)
+dynamic_key = RuntimeIOKey(
+    alias="final_answer",
+    factory=lambda state: template.to_iokey({
+        IOKeyTemplate.SUBAGENT_NAME_TEMPLATE: state["context"]["active_subagent"],
+        IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(state["context"]["active_subsession"]),
+    }),
+)
+```
+
+#### Usage in Nodes
+
+Nodes that write to state accept `RuntimeIOKey` for their output and conversation-history parameters.
+Call `to_iokey(state)` to obtain the resolved `IOKey`, then use its methods:
+
+```python
+async def run(self, state: FlowState) -> dict:
+    output_iokey = self._output_key.to_iokey(state)
+    return output_iokey.to_nested_dict(result_value)
+```
+
+Or use `to_nested_dict` directly on the `RuntimeIOKey` when you have the state available:
+
+```python
+async def run(self, state: FlowState) -> dict:
+    return self._output_key.to_nested_dict(result_value, state)
+```
+
+#### Design Rationale
+
+`RuntimeIOKey` prevents accidental misuse of build-time IOKey APIs on keys whose target is not yet known:
+
+- Accessing `.target` directly raises `RuntimeError` to make the mistake immediately visible.
+- `to_nested_dict` requires `state` as an explicit parameter, making the runtime dependency clear in the call site.
+- The `alias` field provides a stable, statically-known name for prompt-input validation without graph execution.
+
 ## Component Types
 
 ### AgentComponent

@@ -4,9 +4,6 @@ from typing import Any
 import structlog
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    ConversationHistoryKeyFactory,
-)
 from duo_workflow_service.agent_platform.experimental.components.supervisor.delegate_task import (
     DelegateTask,
 )
@@ -15,6 +12,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKey,
     merge_nested_dict,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 
 log = structlog.stdlib.get_logger("subagent_return_node")
 
@@ -45,10 +43,10 @@ class SubagentReturnNode:
             so the node stays decoupled from the concrete import).
         active_subsession_key: ``IOKey`` pointing to the active subsession ID.
         active_subagent_type_key: ``IOKey`` pointing to the active subagent type.
-        final_answer_key_factory: Callable ``(state) -> IOKey`` that resolves the
-            subagent's session-scoped final_answer ``IOKey`` at runtime.
-        supervisor_history_key_factory: Callable ``(state) -> IOKey`` that resolves
-            the supervisor's conversation-history ``IOKey`` at runtime.
+        final_answer_key: ``RuntimeIOKey`` that resolves the subagent's
+            session-scoped final_answer ``IOKey`` at runtime.
+        supervisor_history_key: ``RuntimeIOKey`` that resolves the supervisor's
+            conversation-history ``IOKey`` at runtime.
     """
 
     def __init__(
@@ -58,22 +56,22 @@ class SubagentReturnNode:
         delegate_task_cls: type[DelegateTask],
         active_subsession_key: IOKey,
         active_subagent_type_key: IOKey,
-        final_answer_key_factory: ConversationHistoryKeyFactory,
-        supervisor_history_key_factory: ConversationHistoryKeyFactory,
+        final_answer_key: RuntimeIOKey,
+        supervisor_history_key: RuntimeIOKey,
     ):
         self.name = name
         self._delegate_task_cls = delegate_task_cls
         self._active_subsession_key = active_subsession_key
         self._active_subagent_type_key = active_subagent_type_key
-        self._final_answer_key_factory = final_answer_key_factory
-        self._supervisor_history_key_factory = supervisor_history_key_factory
+        self._final_answer_key = final_answer_key
+        self._supervisor_history_key = supervisor_history_key
 
     async def run(self, state: FlowState) -> dict:
         """Inject subagent result into supervisor conversation history."""
         active_session = self._active_subsession_key.value_from_state(state)
         active_subagent_type = self._active_subagent_type_key.value_from_state(state)
 
-        supervisor_history_key = self._supervisor_history_key_factory(state)
+        supervisor_history_key = self._supervisor_history_key.to_iokey(state)
 
         if active_session is None or active_subagent_type is None:
             raise ValueError(
@@ -83,8 +81,8 @@ class SubagentReturnNode:
                 f"active_subagent_type={active_subagent_type}"
             )
 
-        # Read the subagent's final_answer via the session-scoped IOKey factory
-        final_answer = self._final_answer_key_factory(state).value_from_state(state)
+        # Read the subagent's final_answer via the session-scoped RuntimeIOKey
+        final_answer = self._final_answer_key.to_iokey(state).value_from_state(state)
 
         # Determine status based on whether we got a result
         if final_answer is not None:

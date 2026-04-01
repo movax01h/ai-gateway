@@ -28,7 +28,7 @@ class TestDelegationNodeNewSession:
         active_subsession_key,
         active_subagent_type_key,
         max_subsession_id_key,
-        supervisor_history_key_factory,
+        supervisor_history_runtime_key,
         subsession_history_key_factory,
     ):
         return DelegationNode(
@@ -39,7 +39,7 @@ class TestDelegationNodeNewSession:
             active_subsession_key=active_subsession_key,
             active_subagent_type_key=active_subagent_type_key,
             max_subsession_id_key=max_subsession_id_key,
-            supervisor_history_key_factory=supervisor_history_key_factory,
+            supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
         )
 
@@ -129,7 +129,7 @@ class TestDelegationNodeResumeSession:
         active_subsession_key,
         active_subagent_type_key,
         max_subsession_id_key,
-        supervisor_history_key_factory,
+        supervisor_history_runtime_key,
         subsession_history_key_factory,
     ):
         return DelegationNode(
@@ -140,7 +140,7 @@ class TestDelegationNodeResumeSession:
             active_subsession_key=active_subsession_key,
             active_subagent_type_key=active_subagent_type_key,
             max_subsession_id_key=max_subsession_id_key,
-            supervisor_history_key_factory=supervisor_history_key_factory,
+            supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
         )
 
@@ -337,7 +337,7 @@ class TestDelegationNodeErrorHandling:
         active_subsession_key,
         active_subagent_type_key,
         max_subsession_id_key,
-        supervisor_history_key_factory,
+        supervisor_history_runtime_key,
         subsession_history_key_factory,
     ):
         return DelegationNode(
@@ -348,7 +348,7 @@ class TestDelegationNodeErrorHandling:
             active_subsession_key=active_subsession_key,
             active_subagent_type_key=active_subagent_type_key,
             max_subsession_id_key=max_subsession_id_key,
-            supervisor_history_key_factory=supervisor_history_key_factory,
+            supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
         )
 
@@ -363,7 +363,7 @@ class TestDelegationNodeErrorHandling:
         active_subsession_key,
         active_subagent_type_key,
         max_subsession_id_key,
-        supervisor_history_key_factory,
+        supervisor_history_runtime_key,
         subsession_history_key_factory,
     ):
         """Test that exceeding max_delegations returns error ToolMessage."""
@@ -375,7 +375,7 @@ class TestDelegationNodeErrorHandling:
             active_subsession_key=active_subsession_key,
             active_subagent_type_key=active_subagent_type_key,
             max_subsession_id_key=max_subsession_id_key,
-            supervisor_history_key_factory=supervisor_history_key_factory,
+            supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
         )
 
@@ -411,7 +411,7 @@ class TestDelegationNodeErrorHandling:
         active_subsession_key,
         active_subagent_type_key,
         max_subsession_id_key,
-        supervisor_history_key_factory,
+        supervisor_history_runtime_key,
         subsession_history_key_factory,
     ):
         """Test that None max_delegations imposes no delegation limit."""
@@ -423,7 +423,7 @@ class TestDelegationNodeErrorHandling:
             active_subsession_key=active_subsession_key,
             active_subagent_type_key=active_subagent_type_key,
             max_subsession_id_key=max_subsession_id_key,
-            supervisor_history_key_factory=supervisor_history_key_factory,
+            supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
         )
 

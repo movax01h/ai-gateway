@@ -11,6 +11,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes.age
     AgentNode,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -42,7 +43,9 @@ def agent_node_fixture(
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
-        conversation_history_key_factory=lambda _: conversation_history_key,
+        conversation_history_key=RuntimeIOKey(
+            alias="conversation_history", factory=lambda _: conversation_history_key
+        ),
         internal_event_client=mock_internal_event_client,
     )
 
@@ -62,7 +65,9 @@ def agent_node_with_schema_fixture(
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
-        conversation_history_key_factory=lambda _: conversation_history_key,
+        conversation_history_key=RuntimeIOKey(
+            alias="conversation_history", factory=lambda _: conversation_history_key
+        ),
         internal_event_client=mock_internal_event_client,
         response_schema=AgentFinalOutput,
     )
@@ -235,7 +240,10 @@ class TestAgentNode:
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
-                conversation_history_key_factory=lambda _: conversation_history_key,
+                conversation_history_key=RuntimeIOKey(
+                    alias="conversation_history",
+                    factory=lambda _: conversation_history_key,
+                ),
                 internal_event_client=mock_internal_event_client,
             )
             result = await agent_node.run(base_flow_state)

@@ -5,9 +5,6 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    ConversationHistoryKeyFactory,
-)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -15,6 +12,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.ui_log im
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
@@ -37,14 +35,14 @@ class ToolNode:
     access.
 
     The conversation-history ``IOKey`` is resolved dynamically at runtime via
-    ``conversation_history_key_factory``.  This supports both the common case
-    (static key wrapped in a lambda by the caller) and the supervisor case where
+    ``conversation_history_key``.  This supports both the common case (static key
+    wrapped in a ``RuntimeIOKey`` by the caller) and the supervisor case where
     the key is only known at runtime.
 
     Args:
         name: LangGraph node name.
-        conversation_history_key_factory: Callable ``(state) -> IOKey`` that
-            resolves the conversation-history ``IOKey`` at runtime.
+        conversation_history_key: ``RuntimeIOKey`` that resolves the
+            conversation-history ``IOKey`` at runtime.
         toolset: Collection of tools available for execution.
         flow_id: Identifier of the current flow execution.
         flow_type: Reporting context for internal events and metrics.
@@ -61,7 +59,7 @@ class ToolNode:
         flow_type: GLReportingEventContext,
         internal_event_client: InternalEventsClient,
         ui_history: UIHistory[UILogWriterAgentTools, UILogEventsAgent],
-        conversation_history_key_factory: ConversationHistoryKeyFactory,
+        conversation_history_key: RuntimeIOKey,
     ):
         self.name = name
         self._toolset = toolset
@@ -70,10 +68,10 @@ class ToolNode:
         self._internal_event_client = internal_event_client
         self._logger = structlog.stdlib.get_logger("agent_platform")
         self._ui_history = ui_history
-        self._conversation_history_key_factory = conversation_history_key_factory
+        self._conversation_history_key = conversation_history_key
 
     async def run(self, state: FlowState) -> dict:
-        history_iokey = self._conversation_history_key_factory(state)
+        history_iokey = self._conversation_history_key.to_iokey(state)
         conversation_history = history_iokey.value_from_state(state) or []
 
         # TODO: add ability to register all tool calls in a follow up

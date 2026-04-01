@@ -2,6 +2,7 @@ from enum import StrEnum
 from typing import (
     Annotated,
     Any,
+    Callable,
     ClassVar,
     Final,
     Literal,
@@ -36,8 +37,10 @@ __all__ = [
     "merge_nested_dict",
     "create_nested_dict",
     "merge_nested_dict_reducer",
+    "BaseIOKey",
     "IOKey",
     "IOKeyTemplate",
+    "RuntimeIOKey",
     "get_vars_from_state",
     "conversation_history_replace_reducer",
 ]
@@ -114,10 +117,17 @@ class FlowState(TypedDict):
     context: Annotated[dict[str, Any], merge_nested_dict_reducer]
 
 
-class IOKey(BaseModel):
+class BaseIOKey(BaseModel):
+    """Shared base for all IOKey variants.
+
+    Holds the fields and class-level configuration that are common to both
+    ``IOKey`` (build-time, fully resolved) and ``RuntimeIOKey`` (resolved at
+    graph-execution time).  Concrete subclasses add the fields and validators
+    that are specific to their resolution tier.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
-    target: str
     subkeys: Optional[list[str]] = None
     alias: Optional[str] = None
     literal: Optional[bool] = False
@@ -131,6 +141,10 @@ class IOKey(BaseModel):
         as_: Optional[str] = Field(default=None, alias="as")
         literal_: Optional[bool] = Field(default=False, alias="literal")
         optional_: Optional[bool] = Field(default=False, alias="optional")
+
+
+class IOKey(BaseIOKey):
+    target: str
 
     @model_validator(mode="after")
     def parse_valid_target(self) -> Self:
@@ -279,6 +293,104 @@ class IOKeyTemplate(IOKey):
             replacements.get(subkey, subkey)
             for subkey in self.subkeys  # pylint: disable=not-an-iterable
         ]
+
+
+IOKeyFactory = Callable[[FlowState], IOKey]
+
+
+class RuntimeIOKey(BaseIOKey):
+    """An ``IOKey`` whose concrete identity is resolved at graph-execution time.
+
+    ``IOKey`` and ``IOKeyTemplate`` are both resolved at graph-build time (the
+    latter via ``to_iokey(replacements)``).  ``RuntimeIOKey`` adds a third tier
+    for keys whose concrete path depends on runtime state — for example, a
+    subsession-scoped output key whose subsession ID is only known once the
+    graph is running.
+
+    Unlike ``IOKey``, ``RuntimeIOKey`` does not carry a ``target`` field.  The
+    concrete ``IOKey`` (including its ``target``) is produced at runtime by the
+    ``factory`` callable.  The ``alias`` field (inherited from ``BaseIOKey``,
+    required here) serves as the statically-declared Jinja2 template variable
+    name, enabling prompt-input validation without graph execution.
+
+    Construction::
+
+        RuntimeIOKey(
+            alias="final_answer",
+            factory=lambda state: some_key_template.to_iokey({...state...}),
+        )
+
+    Args:
+        alias: Required. The static template variable name (e.g. ``"goal"``).
+        factory: Callable ``(state) -> IOKey`` that resolves the concrete key
+            at runtime.
+    """
+
+    factory: IOKeyFactory
+
+    @model_validator(mode="after")
+    def validate_alias(self) -> Self:
+        """Ensure ``alias`` is provided.
+
+        ``alias`` is the only build-time requirement for ``RuntimeIOKey`` — it
+        is used by prompt-input validators to reference the template variable
+        name without executing the graph.
+        """
+        if not self.alias or self.alias.strip() == "":
+            raise ValueError("Field 'alias' is required for RuntimeIOKey")
+        return self
+
+    @property
+    def template_variable_name(self) -> str:
+        """Return the statically-declared template variable name.
+
+        This allows prompt-input validators to check that every template variable has a corresponding input key without
+        executing the graph.
+        """
+        return self.alias  # type: ignore[return-value]
+
+    def to_iokey(self, state: FlowState) -> IOKey:
+        """Resolve the concrete ``IOKey`` for the given runtime state.
+
+        Args:
+            state: Current flow state used to determine the concrete key.
+
+        Returns:
+            The resolved ``IOKey`` instance.
+        """
+        return self.factory(state)
+
+    def to_nested_dict(self, value: Any, state: FlowState) -> dict[str, Any]:
+        """Resolve the concrete ``IOKey`` at runtime and delegate ``to_nested_dict``.
+
+        Requires ``state`` so that the concrete key (including its ``target``
+        and ``subkeys``) can be resolved before building the nested dictionary.
+
+        Args:
+            value: The value to be placed at the nested location.
+            state: Current flow state used to resolve the concrete ``IOKey``.
+
+        Returns:
+            A nested dictionary with the structure matching the resolved key's
+            ``target`` and ``subkeys``.
+
+        Examples:
+            key = RuntimeIOKey(
+                alias="status",
+                factory=lambda _: IOKey(target="status"),
+            )
+            key.to_nested_dict("active", state)
+            # Returns: {"status": "active"}
+        """
+        return self.to_iokey(state).to_nested_dict(value)
+
+    def value_from_state(self, state: FlowState) -> Any:
+        """Resolve the concrete IOKey at runtime and read its value from state."""
+        return self.factory(state).value_from_state(state)
+
+    def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
+        """Resolve the concrete IOKey at runtime and return its template variable."""
+        return self.factory(state).template_variable_from_state(state)
 
 
 def get_vars_from_state(inputs: list[IOKey], state: FlowState) -> dict[str, Any]:

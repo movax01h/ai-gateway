@@ -14,12 +14,6 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
     FinalResponseNode,
     ToolNode,
 )
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    ConversationHistoryKeyFactory,
-)
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.final_response_node import (
-    OutputKeyFactory,
-)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -46,7 +40,10 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     IOKeyTemplate,
 )
-from duo_workflow_service.agent_platform.experimental.state.base import IOKey
+from duo_workflow_service.agent_platform.experimental.state.base import (
+    IOKey,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.experimental.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
@@ -309,7 +306,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         - schema tool call → supervisor#final_response
         - other tools → supervisor#tools
         """
-        history_iokey = self._conversation_history_key(state)
+        history_iokey = self._default_conversation_history_key.to_iokey(state)
         history: list[BaseMessage] = history_iokey.value_from_state(state) or []
 
         if not history:
@@ -362,61 +359,71 @@ class SupervisorAgentComponent(AgentComponentBase):
             optional=True,
         )
 
-    def _subsession_history_key_factory_for(
-        self, subagent_name: str
-    ) -> ConversationHistoryKeyFactory:
-        """Return a ``ConversationHistoryKeyFactory`` scoped to a specific subagent.
+    def _subsession_history_key_for(self, subagent_name: str) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` scoped to a specific subagent's conversation history.
 
-        The returned factory reads the active subsession ID from state at runtime
+        The returned ``RuntimeIOKey`` reads the active subsession ID from state at runtime
         and delegates to ``_subsession_history_key_factory``.  Passed into
-        ``SubagentComponent.bind_to_supervisor`` so the subagent never needs to
+        ``AgentComponent.bind_to_supervisor`` so the subagent never needs to
         scan state to discover its supervisor or subsession.
 
         Args:
-            subagent_name: The name of the subagent this factory is scoped to.
+            subagent_name: The name of the subagent this key is scoped to.
         """
-        return lambda state: self._subsession_history_key_factory(
-            subagent_name, self._resolved_active_subsession_key.value_from_state(state)
+        return RuntimeIOKey(
+            alias="conversation_history",
+            factory=lambda state: self._subsession_history_key_factory(
+                subagent_name,
+                self._resolved_active_subsession_key.value_from_state(state),
+            ),
         )
 
-    def _subagent_final_answer_key_factory_for(
-        self, subagent_name: str
-    ) -> OutputKeyFactory:
-        """Return a factory that resolves the final_answer IOKey for a specific subagent.
+    def _subagent_final_answer_key_for(self, subagent_name: str) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` that resolves the final_answer IOKey for a specific subagent.
 
-        The returned factory reads the active subsession ID from state at runtime
+        The returned ``RuntimeIOKey`` reads the active subsession ID from state at runtime
         and builds the IOKey for the given subagent_name.  Passed into
         ``AgentComponent.bind_to_supervisor`` so the subagent knows where to
         write its final answer.
 
         Args:
-            subagent_name: The name of the subagent this factory is scoped to.
+            subagent_name: The name of the subagent this key is scoped to.
         """
-        return lambda state: self._subsession_final_answer_key.to_iokey(
-            {
-                IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
-                IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,
-                IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(
-                    self._resolved_active_subsession_key.value_from_state(state)
-                ),
-            }
+        return RuntimeIOKey(
+            alias="final_answer",
+            factory=lambda state: self._subsession_final_answer_key.to_iokey(
+                {
+                    IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
+                    IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,
+                    IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(
+                        self._resolved_active_subsession_key.value_from_state(state)
+                    ),
+                }
+            ),
         )
 
-    def _active_subagent_final_answer_key_factory(self, state: FlowState) -> IOKey:
-        """Resolve the final_answer IOKey for whichever subagent is currently active.
+    @property
+    def _active_subagent_final_answer_key(self) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` that resolves the final_answer IOKey for the currently active subagent.
 
-        Reads active_subagent_type from state, then delegates to the per-subagent factory.  Used by SubagentReturnNode
-        to read the result from whichever subagent just completed.
+        Reads active_subagent_type from state at runtime, then resolves the per-subagent final_answer key.  Used by
+        SubagentReturnNode to read the result from whichever subagent just completed.
         """
-        active_type = self._resolved_active_subagent_type_key.value_from_state(state)
 
-        if not active_type or active_type not in self.subagent_components:
-            raise ValueError(
-                f"Cannot resolve final_answer key: no active subagent type or "
-                f"'{active_type}' not in managed agents {self.managed_agent_names}"
+        def _factory(state: FlowState) -> IOKey:
+            active_type = self._resolved_active_subagent_type_key.value_from_state(
+                state
             )
 
-        return self._subagent_final_answer_key_factory_for(active_type)(state)
+            if not active_type or active_type not in self.subagent_components:
+                raise ValueError(
+                    f"Cannot resolve final_answer key: no active subagent type or "
+                    f"'{active_type}' not in managed agents {self.managed_agent_names}"
+                )
+
+            return self._subagent_final_answer_key_for(active_type).to_iokey(state)
+
+        return RuntimeIOKey(alias="final_answer", factory=_factory)
 
     def _build_prompt(self, supervisor_tools: list) -> Any:
         """Build the supervisor prompt with the given tool list."""
@@ -449,13 +456,14 @@ class SupervisorAgentComponent(AgentComponentBase):
             supervisor_tools = supervisor_tools + [self._response_schema]
         prompt = self._build_prompt(supervisor_tools)
 
-        output_key = self._final_answer_key.to_iokey(
+        static_output_key = self._final_answer_key.to_iokey(
             {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         )
+        supervisor_history_key = self._default_conversation_history_key
 
         node_agent = AgentNode(
             name=self.__entry_hook__(),
-            conversation_history_key_factory=self._conversation_history_key,
+            conversation_history_key=supervisor_history_key,
             prompt=prompt,
             inputs=self.inputs,
             flow_id=self.flow_id,
@@ -484,7 +492,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         ]
         node_tools = ToolNode(
             name=f"{self.name}#tools",
-            conversation_history_key_factory=self._conversation_history_key,
+            conversation_history_key=supervisor_history_key,
             toolset=self.toolset,
             flow_id=self.flow_id,
             flow_type=self.flow_type,
@@ -495,8 +503,10 @@ class SupervisorAgentComponent(AgentComponentBase):
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
-            conversation_history_key_factory=self._conversation_history_key,
-            output_key_factory=lambda _: output_key,
+            conversation_history_key=supervisor_history_key,
+            output_key=RuntimeIOKey(
+                alias="final_answer", factory=lambda _: static_output_key
+            ),
             ui_history=UIHistory(
                 events=self.ui_log_events,  # type: ignore[arg-type]
                 writer_class=default_ui_log_writer_class(
@@ -516,7 +526,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             active_subsession_key=self._resolved_active_subsession_key,
             active_subagent_type_key=self._resolved_active_subagent_type_key,
             max_subsession_id_key=self._resolved_max_subsession_id_key,
-            supervisor_history_key_factory=self._conversation_history_key,
+            supervisor_history_key=supervisor_history_key,
             subsession_history_key_factory=self._subsession_history_key_factory,
         )
 
@@ -526,8 +536,8 @@ class SupervisorAgentComponent(AgentComponentBase):
             delegate_task_cls=self._delegate_task_cls,
             active_subsession_key=self._resolved_active_subsession_key,
             active_subagent_type_key=self._resolved_active_subagent_type_key,
-            final_answer_key_factory=self._active_subagent_final_answer_key_factory,
-            supervisor_history_key_factory=self._conversation_history_key,
+            final_answer_key=self._active_subagent_final_answer_key,
+            supervisor_history_key=supervisor_history_key,
         )
 
         # --- Add supervisor nodes to graph ---
@@ -567,11 +577,7 @@ class SupervisorAgentComponent(AgentComponentBase):
 
         for agent_name, subagent in self.subagent_components.items():
             subagent.bind_to_supervisor(
-                conversation_history_key_factory=self._subsession_history_key_factory_for(
-                    agent_name
-                ),
-                output_key_factory=self._subagent_final_answer_key_factory_for(
-                    agent_name
-                ),
+                conversation_history_key=self._subsession_history_key_for(agent_name),
+                output_key=self._subagent_final_answer_key_for(agent_name),
             )
             subagent.attach(graph, subagent_router)

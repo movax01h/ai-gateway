@@ -12,11 +12,12 @@ from duo_workflow_service.agent_platform.experimental.components.supervisor.node
     SubagentReturnNode,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys, IOKey
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 
 
-@pytest.fixture(name="final_answer_key_factory")
-def final_answer_key_factory_fixture(supervisor_name):
-    """Factory that resolves the subagent's final_answer IOKey from state."""
+@pytest.fixture(name="final_answer_runtime_key")
+def final_answer_runtime_key_fixture(supervisor_name):
+    """RuntimeIOKey that resolves the subagent's final_answer IOKey from state."""
 
     def factory(state):
         active_session = (
@@ -39,7 +40,7 @@ def final_answer_key_factory_fixture(supervisor_name):
             optional=True,
         )
 
-    return factory
+    return RuntimeIOKey(alias="final_answer", factory=factory)
 
 
 @pytest.fixture(name="return_node")
@@ -48,8 +49,8 @@ def return_node_fixture(
     delegate_task_cls,
     active_subsession_key,
     active_subagent_type_key,
-    supervisor_history_key_factory,
-    final_answer_key_factory,
+    supervisor_history_runtime_key,
+    final_answer_runtime_key,
 ):
     """SubagentReturnNode wired with supervisor-scoped key fixtures."""
     return SubagentReturnNode(
@@ -57,8 +58,8 @@ def return_node_fixture(
         delegate_task_cls=delegate_task_cls,
         active_subsession_key=active_subsession_key,
         active_subagent_type_key=active_subagent_type_key,
-        final_answer_key_factory=final_answer_key_factory,
-        supervisor_history_key_factory=supervisor_history_key_factory,
+        final_answer_key=final_answer_runtime_key,
+        supervisor_history_key=supervisor_history_runtime_key,
     )
 
 

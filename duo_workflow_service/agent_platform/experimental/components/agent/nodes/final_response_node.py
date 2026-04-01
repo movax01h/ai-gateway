@@ -1,17 +1,15 @@
-from typing import Callable, Optional, Type
+from typing import Optional, Type
 
 from langchain_core.messages import AIMessage, ToolMessage
 
 from ai_gateway.response_schemas.base import BaseAgentOutput
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    ConversationHistoryKeyFactory,
-)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
 )
-from duo_workflow_service.agent_platform.experimental.state import (
-    FlowState,
+from duo_workflow_service.agent_platform.experimental.state import FlowState
+from duo_workflow_service.agent_platform.experimental.state.base import (
     IOKey,
+    RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import (
     DefaultUILogWriter,
@@ -19,8 +17,6 @@ from duo_workflow_service.agent_platform.experimental.ui_log import (
 )
 
 __all__ = ["FinalResponseNode"]
-
-OutputKeyFactory = Callable[[FlowState], IOKey]
 
 
 class FinalResponseNode:
@@ -30,18 +26,18 @@ class FinalResponseNode:
     following the Flow Registry guideline of avoiding direct state dictionary
     access.
 
-    Both the conversation-history ``IOKey`` and the output ``IOKey`` are resolved
-    dynamically at runtime via factory callables.  This supports both the common
-    case (static key wrapped in a lambda by the caller) and the supervisor case
-    where the key is only known at runtime.
+    Both the conversation-history ``IOKey`` and the output ``IOKey`` are
+    ``RuntimeIOKey`` instances that resolve the concrete key at runtime.  This
+    supports both the common case (static key wrapped via ``RuntimeIOKey``) and
+    the supervisor case where the key depends on runtime state such as the active
+    subsession ID.
 
     Args:
         name: LangGraph node name.
         ui_history: UI log history writer for final-answer events.
-        conversation_history_key_factory: Callable ``(state) -> IOKey`` that
-            resolves the conversation-history ``IOKey`` at runtime.
-        output_key_factory: Callable ``(state) -> IOKey`` that resolves
-            the output ``IOKey`` at runtime.
+        conversation_history_key: ``RuntimeIOKey`` that resolves the
+            conversation-history ``IOKey`` at runtime.
+        output_key: ``RuntimeIOKey`` that resolves the output ``IOKey`` at runtime.
     """
 
     def __init__(
@@ -50,25 +46,28 @@ class FinalResponseNode:
         name: str,
         ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
         response_schema: Optional[Type[BaseAgentOutput]] = None,
-        conversation_history_key_factory: ConversationHistoryKeyFactory,
-        output_key_factory: OutputKeyFactory,
+        conversation_history_key: RuntimeIOKey,
+        output_key: RuntimeIOKey,
     ):
         self.name = name
         self._ui_history = ui_history
         self._response_schema = response_schema
-        self._conversation_history_key_factory = conversation_history_key_factory
-        self._output_key_factory = output_key_factory
+        self._conversation_history_key = conversation_history_key
+        self._output_key = output_key
 
     async def run(self, state: FlowState) -> dict:
-        last_message, history = self._get_last_ai_message(state)
+        history_iokey = self._conversation_history_key.to_iokey(state)
+        output_iokey = self._output_key.to_iokey(state)
+
+        last_message, history = self._get_last_ai_message(state, history_iokey)
 
         if self._response_schema is not None:
             final_response_text, updates = self._extract_structured_response(
-                last_message, history, state
+                last_message, history, history_iokey, output_iokey
             )
         else:
             final_response_text, updates = self._extract_text_response(
-                last_message, state
+                last_message, output_iokey
             )
 
         self._ui_history.log.success(
@@ -78,8 +77,9 @@ class FinalResponseNode:
 
         return {**self._ui_history.pop_state_updates(), **updates}
 
-    def _get_last_ai_message(self, state: FlowState) -> tuple[AIMessage, list]:
-        history_iokey = self._conversation_history_key_factory(state)
+    def _get_last_ai_message(
+        self, state: FlowState, history_iokey: IOKey
+    ) -> tuple[AIMessage, list]:
         history = history_iokey.value_from_state(state) or []
 
         if not history:
@@ -100,10 +100,12 @@ class FinalResponseNode:
         return last_message, history
 
     def _extract_structured_response(
-        self, last_message: AIMessage, history: list, state: FlowState
+        self,
+        last_message: AIMessage,
+        history: list,
+        history_iokey: IOKey,
+        output_iokey: IOKey,
     ) -> tuple[str, dict]:
-        history_iokey = self._conversation_history_key_factory(state)
-
         if not last_message.tool_calls:
             raise ValueError(
                 f"Response schema requires a tool call but got a text-only response "
@@ -140,16 +142,14 @@ class FinalResponseNode:
             ),
         }
 
-        output = self._output_key_factory(state)
         output_data = parsed_response.to_output()
-        updates.update(output.to_nested_dict(output_data))
+        updates.update(output_iokey.to_nested_dict(output_data))
 
         return parsed_response.to_string_output(), updates
 
     def _extract_text_response(
-        self, last_message: AIMessage, state: FlowState
+        self, last_message: AIMessage, output_iokey: IOKey
     ) -> tuple[str, dict]:
         final_response_text = last_message.text
-        output = self._output_key_factory(state)
 
-        return final_response_text, output.to_nested_dict(final_response_text)
+        return final_response_text, output_iokey.to_nested_dict(final_response_text)
