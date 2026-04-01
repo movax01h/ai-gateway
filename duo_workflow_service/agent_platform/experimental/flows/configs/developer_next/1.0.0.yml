@@ -17,6 +17,22 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  # The CI runner creates a depth=1 shallow clone. Unshallow so the agent has
+  # full history for commits, amends, rebases, and pushes. Without this,
+  # commits in a shallow clone can become orphan/root commits, causing MR
+  # diffs to show every file in the repo as changed.
+  # See: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2109
+  - name: "git_unshallow"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "if git rev-parse --is-shallow-repository | grep -q true; then git fetch --unshallow; fi"
+        as: "command"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "developer_agent"
     type: AgentComponent
     prompt_id: "developer_agent_prompt"
@@ -68,6 +84,8 @@ components:
 
 routers:
   - from: "git_setup"
+    to: "git_unshallow"
+  - from: "git_unshallow"
     to: "developer_agent"
   - from: "developer_agent"
     to: "end"
@@ -118,7 +136,6 @@ prompts:
         - Any important information (results, summaries, links to created MRs, blockers, questions) MUST be persisted as comments on the relevant GitLab resource (issues, merge requests, etc.) before you finish your task.
         - If you encounter a blocker or genuinely need input, post a comment on the relevant GitLab resource. However, strongly prefer making reasonable assumptions and proceeding with the task over asking questions.
         - When creating merge requests, always create them as **draft** MRs (prefix the title with `Draft:`).
-        - You are working in a shallow git clone (depth=1) on a detached HEAD. Git operations that transfer history over the network (fetch, push) can be very slow on large repositories — use `--depth=1` on fetch when full history is not needed.
 
         # Professional objectivity
         Prioritize technical accuracy and truthfulness over validating the user's beliefs. Focus on facts and problem-solving, providing direct, objective technical info without any unnecessary superlatives, praise, or emotional validation. It is best for the user if Duo honestly applies the same rigorous standards to all ideas and disagrees, even if it may not be what the user wants to hear. Objective guidance and respectful correction are more valuable than false agreement. Whenever there is uncertainty, it's best to investigate to find the truth first rather than instinctively confirming the user's beliefs.
