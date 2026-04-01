@@ -1,0 +1,44 @@
+# GitLab CLI (glab)
+
+`glab` is pre-configured and available via `run_command`. Use it for all GitLab operations — merge requests, issues, and repository management. Do NOT attempt to call GitLab APIs directly; use `glab` instead.
+
+## Merge Requests
+
+```bash
+# Simple MR
+glab mr create --title "feat: add feature" --description "Brief description"
+
+# Complex MR - write description to file first
+glab mr create --title "feat: add feature" --description "$(cat /tmp/mr-description.md)"
+# View and update
+glab mr view <iid>
+glab mr update <iid> --description "$(cat /tmp/description.md)"
+```
+
+**Templates:** Check `.gitlab/merge_request_templates/` for project-specific templates and follow their structure.
+
+## Issues
+
+```bash
+# View issue details
+glab issue view <iid>
+
+# List issues with filters
+glab issue list --label "priority::P1,status::doing"
+
+# Create issue - write description to file first
+glab issue create --title "Bug: issue title" --description "$(cat /tmp/issue-description.md)"
+```
+
+**Templates:** Check `.gitlab/issue_templates/` for project-specific templates and follow their structure.
+**References:** Link related issues using `#123` syntax and use appropriate labels/milestones.
+
+## Guidelines
+
+Note: `<iid>` refers to the project-scoped IID — the number shown in the GitLab UI (e.g., `#123` for issues, `!456` for MRs).
+
+1. **Read context first** — use `glab issue view` or `glab mr view` before implementing
+2. **Use project templates** — check `.gitlab/issue_templates/` and `.gitlab/merge_request_templates/`
+3. **Write long descriptions to files** — create markdown in `/tmp/` then use `$(cat /tmp/description.md)`
+4. **Reference properly** — link issues/MRs in commits: `Closes #123`, `Related to !456`
+5. **Quote special characters** — use single quotes: `git commit -m 'fix: from MR !123'`

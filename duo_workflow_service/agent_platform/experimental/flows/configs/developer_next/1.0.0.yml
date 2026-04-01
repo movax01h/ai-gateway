@@ -10,7 +10,7 @@ components:
     type: DeterministicStepComponent
     tool_name: "run_command"
     inputs:
-      - from: "git config user.name \"${DUO_WORKFLOW_GIT_AUTHOR_USER_NAME:-Duo}\"; git config user.email \"${DUO_WORKFLOW_GIT_AUTHOR_EMAIL:-noreply@gitlab.com}\"; proto=\"${DUO_WORKFLOW_GIT_HTTP_BASE_URL%%://*}\"; host=\"${DUO_WORKFLOW_GIT_HTTP_BASE_URL#*://}\"; repo_url=\"${proto}://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD}@${host%/}/${CI_PROJECT_PATH}.git\"; git remote set-url origin \"${repo_url}\""
+      - from: 'git config user.name "${DUO_WORKFLOW_GIT_AUTHOR_USER_NAME:-Duo}"; git config user.email "${DUO_WORKFLOW_GIT_AUTHOR_EMAIL:-noreply@gitlab.com}"; proto="${DUO_WORKFLOW_GIT_HTTP_BASE_URL%%://*}"; host="${DUO_WORKFLOW_GIT_HTTP_BASE_URL#*://}"; repo_url="${proto}://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD}@${host%/}/${CI_PROJECT_PATH}.git"; git remote set-url origin "${repo_url}"'
         as: "command"
         literal: true
     ui_log_events:
@@ -246,6 +246,9 @@ prompts:
         </env>
 
         {% include 'agents_dot_md/base/1.0.0.jinja' %}
+
+
+        {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
 
       user: |
         {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
