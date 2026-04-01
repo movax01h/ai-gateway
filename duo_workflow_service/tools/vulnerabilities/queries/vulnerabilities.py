@@ -167,6 +167,7 @@ GET_VULNERABILITY_DETAILS_QUERY = """
             }
             title
             state
+            webUrl
             identifiers {
                 name
             }
