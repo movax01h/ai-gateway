@@ -336,9 +336,6 @@ The body parameter is always required.
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, body: str, **kwargs: Any) -> str:
-        # Apply flow-level tool_options overrides before processing kwargs
-        kwargs = self._apply_tool_options(kwargs)
-
         url = kwargs.pop("url", None)
         project_id = kwargs.pop("project_id", None)
         merge_request_iid = kwargs.pop("merge_request_iid", None)
