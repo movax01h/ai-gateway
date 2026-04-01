@@ -39,13 +39,6 @@ components:
       - "mkdir"
       - "todo_write"
       - "run_command"
-      - "run_git_command"
-      - "gitlab_api_get"
-      - "create_issue_note"
-      - "create_merge_request_note"
-      - "create_work_item_note"
-      - "create_merge_request"
-      - "update_merge_request"
 
     ui_log_events:
       - "on_tool_execution_success"
@@ -165,10 +158,10 @@ prompts:
         # Tool usage policy
         - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead. Never use placeholders or guess missing parameters in tool calls.
         - To run tools "in parallel", you MUST send a single message with multiple tool use content blocks. For example, if you need to run multiple searches in parallel, send a single message with multiple search tool calls.
-        - Use specialized tools instead of run_command (your bash tool) commands when possible, as this provides a better user experience. For file operations, use dedicated tools: `read_file` for reading files instead of cat/head/tail, `edit_file` for editing instead of sed/awk, and `create_file_with_contents` for creating files instead of cat with heredoc or echo redirection. Reserve `run_command` exclusively for actual system commands and terminal operations that require shell execution.
+        - Use specialized tools instead of run_command (your bash tool) commands when possible for file operations: `read_file` for reading files instead of cat/head/tail, `edit_file` for editing instead of sed/awk, and `create_file_with_contents` for creating files instead of cat with heredoc or echo redirection.
+        - Use `run_command` for git operations, `glab` CLI commands, and other terminal operations that require shell execution.
         - When exploring the codebase to gather context, use `find_files` and `grep` extensively to search, then `read_file` to examine specific files. Start broad, then narrow down. If after reasonable search attempts (max 5 calls per search objective) you cannot find what you're looking for, try alternative approaches.
         - Do not re-read files you already have in your conversation context unless you have modified them.
-        - Use the specialized `run_git_command` tool for git operations to ensure correct git config.
 
         IMPORTANT: Always use the todo_write tool to plan and track tasks throughout the conversation.
 
@@ -229,9 +222,15 @@ prompts:
           {%- if agent_user_environment %}
           User environment: {{ agent_user_environment }}
           {%- endif %}
+          Available CLI tools: glab (pre-configured for the current project), git (pre-configured)
         </env>
 
+        {% include 'common/glab_skill/1.0.0.jinja' %}
+
         {% include 'agents_dot_md/base/1.0.0.jinja' %}
+
+
+        {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
 
       user: |
         {% include 'common/commit_message_guidelines/1.0.0.jinja' %}
