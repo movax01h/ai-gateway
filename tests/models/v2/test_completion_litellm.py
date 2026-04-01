@@ -579,8 +579,11 @@ class TestFireworksRetry:
             response.choices = [MagicMock(text="success")]
             return response
 
-        with patch(
-            "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
+        with (
+            patch("asyncio.sleep", new=AsyncMock()),
+            patch(
+                "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
+            ),
         ):
             result = await fireworks_model.ainvoke({"prefix": "test", "suffix": ""})
 

@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -52,7 +53,7 @@ async def test_astream_with_stream_options_and_stop_reason():
         },
     ]
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         for chunk in mock_chunks:
             yield chunk
 
@@ -124,7 +125,7 @@ async def test_fireworks_logprobs_in_streaming():
         },
     ]
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **kwargs):
         # Verify that logprobs=1 was passed for Fireworks
         assert kwargs.get("logprobs") == 1
         for chunk in mock_chunks:
@@ -320,7 +321,7 @@ async def test_fireworks_503_retries_with_exponential_backoff():
     # Mock to fail twice with 503, then succeed
     call_count = 0
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         nonlocal call_count
         call_count += 1
         if call_count <= 2:
@@ -344,8 +345,11 @@ async def test_fireworks_503_retries_with_exponential_backoff():
         model="test-model", custom_llm_provider="fireworks_ai", max_retries=3
     )
 
-    with patch.object(
-        chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+    with (
+        patch("asyncio.sleep", new=AsyncMock()),
+        patch.object(
+            chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+        ),
     ):
         result = await chat._agenerate(messages=[message])
 
@@ -360,7 +364,7 @@ async def test_non_fireworks_503_fails_immediately():
 
     call_count = 0
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         nonlocal call_count
         call_count += 1
         raise litellm.ServiceUnavailableError(
@@ -391,7 +395,7 @@ async def test_fireworks_retry_respects_120s_timeout():
 
     start_time = time.time()
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         raise litellm.ServiceUnavailableError(
             message="Service temporarily unavailable",
             llm_provider="fireworks_ai",
@@ -427,7 +431,7 @@ async def test_fireworks_exponential_backoff_timing():
 
     call_times = []
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         call_times.append(time.time())
         raise litellm.ServiceUnavailableError(
             message="Service temporarily unavailable",
