@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -349,8 +350,11 @@ async def test_fireworks_503_retries_with_exponential_backoff():
         model="test-model", custom_llm_provider="fireworks_ai", max_retries=3
     )
 
-    with patch.object(
-        chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+    with (
+        patch("asyncio.sleep", new=AsyncMock()),
+        patch.object(
+            chat.client, "acompletion", new=AsyncMock(side_effect=mock_acompletion)
+        ),
     ):
         result = await chat._agenerate(messages=[message])
 
@@ -396,7 +400,7 @@ async def test_fireworks_retry_respects_120s_timeout():
 
     start_time = time.time()
 
-    async def mock_acompletion(*args, **kwargs):
+    async def mock_acompletion(*_args, **_kwargs):
         raise litellm.ServiceUnavailableError(
             message="Service temporarily unavailable",
             llm_provider="fireworks_ai",

@@ -804,8 +804,11 @@ class TestFireworksRetry:
                 )
             return mock_response
 
-        with patch(
-            "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
+        with (
+            patch("asyncio.sleep", new=AsyncMock()),
+            patch(
+                "litellm.atext_completion", new=AsyncMock(side_effect=mock_acompletion)
+            ),
         ):
             result = await fireworks_model._agenerate(messages)
 
