@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.experimental.components.supervisor.dele
     build_delegate_task_model,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys, IOKey
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
@@ -368,6 +369,14 @@ def supervisor_history_key_fixture(supervisor_name):
 def supervisor_history_key_factory_fixture(supervisor_history_key):
     """Fixture for supervisor history key factory (state -> IOKey)."""
     return lambda _state: supervisor_history_key
+
+
+@pytest.fixture(name="supervisor_history_runtime_key")
+def supervisor_history_runtime_key_fixture(supervisor_history_key):
+    """Fixture for supervisor history RuntimeIOKey."""
+    return RuntimeIOKey(
+        alias="conversation_history", factory=lambda _state: supervisor_history_key
+    )
 
 
 @pytest.fixture(name="subsession_history_key_factory")

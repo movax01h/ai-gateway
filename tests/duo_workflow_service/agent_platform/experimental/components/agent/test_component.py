@@ -1,5 +1,6 @@
 """Test suite for AgentComponent class."""
 
+# pylint: disable=too-many-lines
 from typing import ClassVar, Literal
 from unittest.mock import Mock, patch
 
@@ -17,7 +18,10 @@ from duo_workflow_service.agent_platform.experimental.components.agent.ui_log im
     UILogEventsAgent,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
-from duo_workflow_service.agent_platform.experimental.state.base import IOKey
+from duo_workflow_service.agent_platform.experimental.state.base import (
+    IOKey,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 
 
@@ -268,7 +272,7 @@ class TestAgentComponentBase:
         with pytest.raises(NotImplementedError):
             component.attach(mock_state_graph, mock_router)
 
-    def test_conversation_history_key_returns_correct_iokey(
+    def test_default_conversation_history_key_returns_correct_runtime_io_key(
         self,
         component_name,
         flow_id,
@@ -278,7 +282,7 @@ class TestAgentComponentBase:
         mock_prompt_registry,
         mock_internal_event_client,
     ):
-        """_conversation_history_key satisfies the factory protocol and returns the correct IOKey."""
+        """_default_conversation_history_key returns a RuntimeIOKey wrapping the correct static IOKey."""
 
         class ConcreteBase(AgentComponentBase):
             pass
@@ -294,9 +298,10 @@ class TestAgentComponentBase:
             prompt_registry=mock_prompt_registry,
             internal_event_client=mock_internal_event_client,
         )
-        assert callable(component._conversation_history_key)
+        runtime_key = component._default_conversation_history_key
+        assert isinstance(runtime_key, RuntimeIOKey)
 
-        iokey = component._conversation_history_key({})
+        iokey = runtime_key.to_iokey({})
         assert iokey.target == "conversation_history"
         assert iokey.subkeys == [component_name]
         assert iokey.optional is True
@@ -530,10 +535,7 @@ class TestAgentComponentAttachNodes:
         mock_agent_node_cls.assert_called_once()
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
         assert agent_call_kwargs["name"] == f"{component_name}#agent"
-        assert (
-            agent_call_kwargs["conversation_history_key_factory"]
-            == agent_component._conversation_history_key
-        )
+        assert isinstance(agent_call_kwargs["conversation_history_key"], RuntimeIOKey)
         assert (
             agent_call_kwargs["prompt"]
             == mock_prompt_registry.get_on_behalf.return_value
@@ -547,10 +549,7 @@ class TestAgentComponentAttachNodes:
         mock_tool_node_cls.assert_called_once()
         tool_call_kwargs = mock_tool_node_cls.call_args[1]
         assert tool_call_kwargs["name"] == f"{component_name}#tools"
-        assert (
-            tool_call_kwargs["conversation_history_key_factory"]
-            == agent_component._conversation_history_key
-        )
+        assert isinstance(tool_call_kwargs["conversation_history_key"], RuntimeIOKey)
         assert tool_call_kwargs["toolset"] == mock_toolset
         assert tool_call_kwargs["flow_id"] == flow_id
         assert tool_call_kwargs["flow_type"] == flow_type
@@ -565,11 +564,8 @@ class TestAgentComponentAttachNodes:
         mock_final_response_node_cls.assert_called_once()
         final_call_kwargs = mock_final_response_node_cls.call_args[1]
         assert final_call_kwargs["name"] == f"{component_name}#final_response"
-        assert (
-            final_call_kwargs["conversation_history_key_factory"]
-            == agent_component._conversation_history_key
-        )
-        assert callable(final_call_kwargs["output_key_factory"])
+        assert isinstance(final_call_kwargs["conversation_history_key"], RuntimeIOKey)
+        assert isinstance(final_call_kwargs["output_key"], RuntimeIOKey)
 
         # FinalResponse Node UI logging
         assert "ui_history" in final_call_kwargs
@@ -953,24 +949,24 @@ class TestAgentComponentBindToSupervisor:
             description="Test agent for supervisor",
         )
 
-        # Initially factories should have default values
-        assert component._conversation_history_key_factory is not None
-        assert component._output_key_factory is not None
+        # Initially keys should have default values
+        assert isinstance(component._conversation_history_key, RuntimeIOKey)
+        assert isinstance(component._output_key, RuntimeIOKey)
         assert not component._is_bound_to_supervisor
 
-        # Create mock factories
-        mock_history_factory = Mock()
-        mock_output_factory = Mock()
+        # Create mock RuntimeIOKey instances
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
 
         # Bind to supervisor
         component.bind_to_supervisor(
-            conversation_history_key_factory=mock_history_factory,
-            output_key_factory=mock_output_factory,
+            conversation_history_key=mock_history_key,
+            output_key=mock_output_key,
         )
 
-        # Factories should now be set to the provided values
-        assert component._conversation_history_key_factory is mock_history_factory
-        assert component._output_key_factory is mock_output_factory
+        # Keys should now be set to the provided values
+        assert component._conversation_history_key is mock_history_key
+        assert component._output_key is mock_output_key
         assert component._is_bound_to_supervisor
 
     def test_bind_to_supervisor_requires_description(
@@ -997,13 +993,13 @@ class TestAgentComponentBindToSupervisor:
             # No description
         )
 
-        mock_history_factory = Mock()
-        mock_output_factory = Mock()
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
 
         with pytest.raises(ValueError, match="must have a description"):
             component.bind_to_supervisor(
-                conversation_history_key_factory=mock_history_factory,
-                output_key_factory=mock_output_factory,
+                conversation_history_key=mock_history_key,
+                output_key=mock_output_key,
             )
 
     def test_outputs_returns_empty_when_bound(
@@ -1034,11 +1030,11 @@ class TestAgentComponentBindToSupervisor:
         assert len(component.outputs) > 0
 
         # Bind to supervisor
-        mock_history_factory = Mock()
-        mock_output_factory = Mock()
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         component.bind_to_supervisor(
-            conversation_history_key_factory=mock_history_factory,
-            output_key_factory=mock_output_factory,
+            conversation_history_key=mock_history_key,
+            output_key=mock_output_key,
         )
 
         # After binding, outputs should be empty

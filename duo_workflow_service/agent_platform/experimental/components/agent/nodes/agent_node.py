@@ -1,4 +1,4 @@
-from typing import Callable, ClassVar, Optional, Type, cast
+from typing import ClassVar, Optional, Type, cast
 
 import structlog
 from anthropic import APIStatusError
@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKey,
     get_vars_from_state,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.conversation.compaction import (
     ConversationCompactor,
     maybe_compact_history,
@@ -25,8 +26,6 @@ from lib.internal_events import InternalEventsClient
 __all__ = ["AgentNode", "AgentFinalOutput"]
 
 log = structlog.stdlib.get_logger("agent_node")
-
-ConversationHistoryKeyFactory = Callable[[FlowState], IOKey]
 
 
 class AgentFinalOutput(BaseAgentOutput):
@@ -66,8 +65,8 @@ class AgentNode:
     access.
 
     The conversation-history ``IOKey`` is resolved dynamically at runtime via
-    ``conversation_history_key_factory``.  This supports both the common case
-    (static key wrapped in a lambda by the caller) and the supervisor case where
+    ``conversation_history_key``.  This supports both the common case (static key
+    wrapped in a ``RuntimeIOKey`` by the caller) and the supervisor case where
     the key is only known at runtime.
 
     Args:
@@ -77,8 +76,8 @@ class AgentNode:
         prompt: Bound ``Prompt`` instance used to invoke the LLM.
         inputs: ``IOKey`` list describing which state values to pass as prompt
             variables.
-        conversation_history_key_factory: Callable ``(state) -> IOKey`` that
-            resolves the conversation-history ``IOKey`` at runtime.
+        conversation_history_key: ``RuntimeIOKey`` that resolves the
+            conversation-history ``IOKey`` at runtime.
         internal_event_client: Client for tracking internal telemetry events.
     """
 
@@ -87,7 +86,7 @@ class AgentNode:
 
     _inputs: list[IOKey]
 
-    _conversation_history_key_factory: ConversationHistoryKeyFactory
+    _conversation_history_key: RuntimeIOKey
 
     _internal_event_client: InternalEventsClient
 
@@ -104,7 +103,7 @@ class AgentNode:
         prompt: Prompt,
         inputs: list[IOKey],
         internal_event_client: InternalEventsClient,
-        conversation_history_key_factory: ConversationHistoryKeyFactory,
+        conversation_history_key: RuntimeIOKey,
         compactor: ConversationCompactor | None = None,
         response_schema: Optional[Type[BaseAgentOutput]] = None,
     ):
@@ -116,11 +115,11 @@ class AgentNode:
         self._internal_event_client = internal_event_client
         self._error_handler = ModelErrorHandler()
         self._compactor = compactor
-        self._conversation_history_key_factory = conversation_history_key_factory
+        self._conversation_history_key = conversation_history_key
         self._response_schema = response_schema
 
     async def run(self, state: FlowState) -> dict:
-        history_iokey = self._conversation_history_key_factory(state)
+        history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
 

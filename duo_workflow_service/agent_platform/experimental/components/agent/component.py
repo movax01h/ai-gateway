@@ -14,12 +14,6 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
     FinalResponseNode,
     ToolNode,
 )
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    ConversationHistoryKeyFactory,
-)
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.final_response_node import (
-    OutputKeyFactory,
-)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -35,7 +29,10 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     IOKeyTemplate,
 )
-from duo_workflow_service.agent_platform.experimental.state.base import IOKey
+from duo_workflow_service.agent_platform.experimental.state.base import (
+    IOKey,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.experimental.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
@@ -131,23 +128,24 @@ class AgentComponentBase(BaseComponent):
         self._response_schema = response_schema
         return self
 
-    def _conversation_history_key(self, _state: FlowState) -> IOKey:
-        """Return the ``IOKey`` for this component's conversation history.
+    @property
+    def _default_conversation_history_key(self) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` for this component's conversation history.
 
-        Matches the ``ConversationHistoryKeyFactory`` signature so it can be
-        passed directly as ``conversation_history_key_factory=self._conversation_history_key``.
-
-        Args:
-            _state: Current flow state (unused; present to satisfy the factory protocol).
+        The key is static (component-scoped) and does not depend on runtime state,
+        but is wrapped in a ``RuntimeIOKey`` so it can be passed uniformly to nodes
+        that accept ``RuntimeIOKey`` for their conversation-history parameter.
 
         Returns:
-            The resolved ``IOKey`` pointing to this component's conversation history slot.
+            A ``RuntimeIOKey`` wrapping the static ``IOKey`` for this component's
+            conversation history slot.
         """
-        return IOKey(
+        static_key = IOKey(
             target="conversation_history",
             subkeys=[self.name],
             optional=True,
         )
+        return RuntimeIOKey(alias="conversation_history", factory=lambda _: static_key)
 
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
         return f"{self.name}#agent"
@@ -183,49 +181,52 @@ class AgentComponent(AgentComponentBase):
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
-    # Private attributes for key factories with default values.
+    # Private attributes for RuntimeIOKey instances with default values.
     # Overridden by bind_to_supervisor when used as a subagent.
-    _conversation_history_key_factory: ConversationHistoryKeyFactory = PrivateAttr()
-    _output_key_factory: OutputKeyFactory = PrivateAttr()
+    _conversation_history_key: RuntimeIOKey = PrivateAttr()
+    _output_key: RuntimeIOKey = PrivateAttr()
     _is_bound_to_supervisor: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
     def initialize_key_factories(self) -> Self:
-        """Initialize key factories with default values for standalone use.
+        """Initialize RuntimeIOKey instances with default values for standalone use.
 
         These defaults are overridden by bind_to_supervisor when the component is used as a subagent.
         """
-        # Default conversation history factory uses component-scoped key
-        self._conversation_history_key_factory = self._conversation_history_key
+        # Default conversation history key uses component-scoped static key
+        self._conversation_history_key = self._default_conversation_history_key
 
-        # Default output factory returns static component-scoped final_answer key
-        output_key = self._final_answer_key.to_iokey(
+        # Default output key resolves to a static component-scoped final_answer key
+        static_output_key = self._final_answer_key.to_iokey(
             {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         )
-        self._output_key_factory = lambda _: output_key
+        self._output_key = RuntimeIOKey(
+            alias="final_answer",
+            factory=lambda _: static_output_key,
+        )
 
         return self
 
     def bind_to_supervisor(
         self,
         *,
-        conversation_history_key_factory: ConversationHistoryKeyFactory,
-        output_key_factory: OutputKeyFactory,
+        conversation_history_key: RuntimeIOKey,
+        output_key: RuntimeIOKey,
     ) -> None:
         """Bind this agent to a supervisor.
 
         Must be called before ``attach`` when using this component as a subagent.
-        The supervisor passes subsession-scoped key factories so the agent never
-        needs to scan state to discover which supervisor owns it or what the active
-        subsession ID is.
+        The supervisor passes subsession-scoped ``RuntimeIOKey`` instances so the
+        agent never needs to scan state to discover which supervisor owns it or
+        what the active subsession ID is.
 
         When bound to a supervisor, the description field must be set.
 
         Args:
-            conversation_history_key_factory: Callable ``(state) -> IOKey`` that
-                resolves the subsession-scoped conversation-history key at runtime.
-            output_key_factory: Callable ``(state) -> IOKey`` that resolves the
-                subsession-scoped final_answer key at runtime.
+            conversation_history_key: ``RuntimeIOKey`` that resolves the
+                subsession-scoped conversation-history key at runtime.
+            output_key: ``RuntimeIOKey`` that resolves the subsession-scoped
+                final_answer key at runtime.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -234,12 +235,12 @@ class AgentComponent(AgentComponentBase):
             raise ValueError(
                 f"AgentComponent '{self.name}' must have a description when bound to a supervisor."
             )
-        self._conversation_history_key_factory = conversation_history_key_factory
-        self._output_key_factory = output_key_factory
+        self._conversation_history_key = conversation_history_key
+        self._output_key = output_key
         self._is_bound_to_supervisor = True
 
     def _agent_node_router(self, state: FlowState) -> str:
-        history_iokey = self._conversation_history_key_factory(state)
+        history_iokey = self._conversation_history_key.to_iokey(state)
         history: list[BaseMessage] = history_iokey.value_from_state(state) or []
         if not history:
             raise RoutingError(
@@ -346,7 +347,7 @@ class AgentComponent(AgentComponentBase):
 
         node_agent = AgentNode(
             name=self.__entry_hook__(),
-            conversation_history_key_factory=self._conversation_history_key_factory,
+            conversation_history_key=self._conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
             flow_id=self.flow_id,
@@ -368,7 +369,7 @@ class AgentComponent(AgentComponentBase):
         )
         node_tools = ToolNode(
             name=f"{self.name}#tools",
-            conversation_history_key_factory=self._conversation_history_key_factory,
+            conversation_history_key=self._conversation_history_key,
             toolset=self.toolset,
             flow_id=self.flow_id,
             flow_type=self.flow_type,
@@ -379,8 +380,8 @@ class AgentComponent(AgentComponentBase):
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
-            conversation_history_key_factory=self._conversation_history_key_factory,
-            output_key_factory=self._output_key_factory,
+            conversation_history_key=self._conversation_history_key,
+            output_key=self._output_key,
             ui_history=UIHistory(
                 events=self.ui_log_events,
                 writer_class=default_ui_log_writer_class(

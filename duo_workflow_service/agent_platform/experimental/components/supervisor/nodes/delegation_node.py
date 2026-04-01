@@ -3,9 +3,6 @@ from typing import Any, Callable, NamedTuple, Optional
 import structlog
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
-    ConversationHistoryKeyFactory,
-)
 from duo_workflow_service.agent_platform.experimental.components.supervisor.delegate_task import (
     DelegateTask,
 )
@@ -14,6 +11,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKey,
     merge_nested_dict,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 
 # Factory that builds a subsession-scoped conversation-history IOKey given the
 # subagent type name and subsession ID.  Defined as a named type so callers
@@ -103,7 +101,14 @@ class DelegationNode:
         active_subsession_key: IOKey,
         active_subagent_type_key: IOKey,
         max_subsession_id_key: IOKey,
-        supervisor_history_key_factory: ConversationHistoryKeyFactory,
+        supervisor_history_key: RuntimeIOKey,
+        # The subsession history includes subsession id
+        # within IOKey. This node is responsible for resolving new
+        # active subsession id (either assigns new id value
+        # or selects one to resume), therefore at the execution time
+        # active subsession id is not present within graph state
+        # which prevents RuntimeIOKey abstraction from being applicable
+        # in this case
         subsession_history_key_factory: SubsessionHistoryKeyFactory,
     ):
         self.name = name
@@ -113,12 +118,12 @@ class DelegationNode:
         self._active_subsession_key = active_subsession_key
         self._active_subagent_type_key = active_subagent_type_key
         self._max_subsession_id_key = max_subsession_id_key
-        self._supervisor_history_key_factory = supervisor_history_key_factory
+        self._supervisor_history_key = supervisor_history_key
         self._subsession_history_key_factory = subsession_history_key_factory
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Process a delegate_task tool call from the supervisor."""
-        supervisor_history_key = self._supervisor_history_key_factory(state)
+        supervisor_history_key = self._supervisor_history_key.to_iokey(state)
         supervisor_history = supervisor_history_key.value_from_state(state) or []
 
         try:

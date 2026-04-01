@@ -112,7 +112,7 @@ class OneOffComponent(AgentComponentBase):
         # reuse existing agent_node
         agent_node = AgentNode(
             name=self.__entry_hook__(),
-            conversation_history_key_factory=self._conversation_history_key,
+            conversation_history_key=self._default_conversation_history_key,
             prompt=prompt,
             inputs=self.inputs,
             flow_id=self.flow_id,

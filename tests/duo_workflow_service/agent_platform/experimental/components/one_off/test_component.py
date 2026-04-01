@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
 )
+from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
     ATTEMPTS_REMAINING_SENTINEL,
@@ -222,7 +223,7 @@ class TestOneOffComponentAttachNodes:
         mock_agent_node_cls.assert_called_once()
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
         assert agent_call_kwargs["name"] == f"{component_name}#llm"
-        assert callable(agent_call_kwargs["conversation_history_key_factory"])
+        assert isinstance(agent_call_kwargs["conversation_history_key"], RuntimeIOKey)
         assert (
             agent_call_kwargs["prompt"]
             == mock_prompt_registry.get_on_behalf.return_value
