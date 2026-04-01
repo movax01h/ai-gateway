@@ -9,9 +9,8 @@ metadata:
   department: eng-dev
   department_group: eng-dev-modelops-applied-ml
   product_category: custom_models
-  owner_email_handle: sean_carroll
+  owner_email_handle: aying-gl
 spec:
-  image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
   regions:
     - us-east1
   deployment:
@@ -21,7 +20,7 @@ spec:
     scrape_targets:
       - "localhost:8082"
   startup_probe:
-    path: "/monitoring/healthz"
+    path: "/monitoring/ready"
     initial_delay_seconds: 20
     timeout_seconds: 10
     period_seconds: 17
