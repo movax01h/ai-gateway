@@ -74,8 +74,8 @@ async def tool_url_success_response(
 ):
     mock_response = GitLabHttpResponse(
         status_code=200,
-        body=response_data,
-        headers={"content-type": "application/json"},
+        body=json.dumps(response_data),
+        headers={"content-type": "application/json", "X-Next-Page": ""},
     )
 
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
@@ -113,9 +113,11 @@ async def assert_tool_url_error(
 
 @pytest.mark.asyncio
 async def test_list_all_merge_request_notes(gitlab_client_mock, metadata):
+    notes = [{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]
     mock_response = GitLabHttpResponse(
         status_code=200,
-        body=[{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}],
+        body=json.dumps(notes),
+        headers={"X-Next-Page": ""},
     )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
@@ -123,13 +125,12 @@ async def test_list_all_merge_request_notes(gitlab_client_mock, metadata):
 
     response = await tool._arun(project_id=1, merge_request_iid=123)
 
-    expected_response = json.dumps(
-        {"notes": [{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]}
-    )
+    expected_response = json.dumps({"notes": notes})
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/123/notes",
+        params={"page": "1", "per_page": 100},
         parse_json=False,
     )
 
@@ -176,7 +177,9 @@ async def test_list_all_merge_request_notes_with_url_success(
     assert response == expected_response
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path=expected_path, parse_json=False
+        path=expected_path,
+        params={"page": "1", "per_page": 100},
+        parse_json=False,
     )
 
 
@@ -200,6 +203,33 @@ async def test_list_all_merge_request_notes_with_url_error(
         error_contains=error_contains,
         gitlab_client_mock=gitlab_client_mock,
     )
+
+
+@pytest.mark.asyncio
+async def test_list_all_merge_request_notes_pagination(gitlab_client_mock, metadata):
+    """Notes spanning multiple pages are all collected and returned."""
+    page1_notes = [{"id": 1, "body": "Note 1"}, {"id": 2, "body": "Note 2"}]
+    page2_notes = [{"id": 3, "body": "Note 3"}]
+
+    mock_page1 = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(page1_notes),
+        headers={"X-Next-Page": "2"},
+    )
+    mock_page2 = GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(page2_notes),
+        headers={"X-Next-Page": ""},
+    )
+    gitlab_client_mock.aget = AsyncMock(side_effect=[mock_page1, mock_page2])
+
+    tool = ListAllMergeRequestNotes(metadata=metadata)
+
+    response = await tool._arun(project_id=1, merge_request_iid=123)
+
+    expected_response = json.dumps({"notes": page1_notes + page2_notes})
+    assert response == expected_response
+    assert gitlab_client_mock.aget.call_count == 2
 
 
 @pytest.mark.asyncio

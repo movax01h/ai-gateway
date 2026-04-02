@@ -2,6 +2,7 @@ import json
 from abc import abstractmethod
 from typing import Any, ClassVar, List, NamedTuple, Optional, Type, final, override
 
+import structlog
 from langchain_core.tools import BaseTool, ToolException
 from packaging.version import Version
 from pydantic import BaseModel, Field
@@ -14,6 +15,8 @@ from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
     truncate_tool_response,
 )
+
+log = structlog.stdlib.get_logger("workflow")
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
@@ -310,6 +313,84 @@ class DuoBaseTool(BaseTool):
 
         return f"Using {self.name}: {args_str}"
 
+    async def _paginate_get(
+        self,
+        endpoint: str,
+        per_page: int = 100,
+        max_pages: int = 100,
+        extra_params: Optional[dict[str, Any]] = None,
+    ) -> list[Any]:
+        """Fetch all pages from a paginated GitLab REST endpoint.
+
+        Iterates through pages using the ``X-Next-Page`` response header until
+        no further pages are available or ``max_pages`` is reached.  The safety
+        cap on ``max_pages`` guards against infinite loops caused by a
+        misbehaving server that keeps returning a next-page header.
+
+        Args:
+            endpoint: The API path to GET (e.g. ``/api/v4/projects/1/issues/2/notes``).
+            per_page: Number of items to request per page (default 100, GitLab max).
+            max_pages: Maximum number of pages to fetch before stopping (default 100).
+            extra_params: Additional query parameters merged into every request.
+
+        Returns:
+            A flat list of all items collected across all pages.
+
+        Raises:
+            ToolException: If any page request returns a non-success HTTP status,
+                the response body cannot be parsed as JSON, or the parsed response
+                is not a list.
+        """
+        items: list[Any] = []
+        next_page = "1"
+        page_count = 0
+
+        while next_page and page_count < max_pages:
+            page_count += 1
+            params: dict[str, Any] = {"page": next_page, "per_page": per_page}
+            if extra_params:
+                params.update(extra_params)
+
+            response = await self.gitlab_client.aget(
+                path=endpoint,
+                params=params,
+                parse_json=False,
+            )
+
+            if not response.is_success():
+                log.error(
+                    "Paginated GET request failed",
+                    endpoint=endpoint,
+                    status_code=response.status_code,
+                    page=next_page,
+                )
+                raise ToolException(
+                    f"Failed to fetch {endpoint}: HTTP {response.status_code}"
+                )
+
+            try:
+                page_items = json.loads(response.body) if response.body else []
+            except json.JSONDecodeError as e:
+                body_snippet = (
+                    response.body[:200] + "..."
+                    if len(response.body) > 200
+                    else response.body
+                )
+                raise ToolException(
+                    f"Failed to parse JSON from {endpoint}: HTTP {response.status_code}. "
+                    f"Response: {body_snippet}"
+                ) from e
+
+            if not isinstance(page_items, list):
+                raise ToolException(
+                    f"Unexpected response format from {endpoint}: expected list, got {type(page_items).__name__}"
+                )
+            items.extend(page_items)
+
+            next_page = response.headers.get("X-Next-Page", "")
+
+        return items
+
     async def _get_discussion_id_from_note_rest(
         self,
         project_id: str,
@@ -331,38 +412,16 @@ class DuoBaseTool(BaseTool):
         Raises:
             ToolException: If the API call fails, the note is not found, or an error occurs
         """
-        per_page = 100
-        # Safety net: cap at 100 pages (per_page=100 * max_pages=100 = 10,000 discussions).
-        # In practice even the largest open-source MRs rarely exceed a few hundred
-        # threads, so this limit should never be reached. It exists solely to guard
-        # against an infinite loop if the GitLab API unexpectedly keeps returning
-        # a next-page header (e.g. due to a pagination bug on the server side).
-        max_pages = 100
+        endpoint = (
+            f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions"
+        )
         try:
-            next_page = "1"
-            page_count = 0
-            while next_page and page_count < max_pages:
-                page_count += 1
-                response = await self.gitlab_client.aget(
-                    path=f"/api/v4/projects/{project_id}/{resource_type}/{resource_iid}/discussions",
-                    params={"page": next_page, "per_page": per_page},
-                    parse_json=False,
-                )
-                if not response.is_success():
-                    raise ToolException(f"Failed to fetch {resource_type} discussions")
+            discussions = await self._paginate_get(endpoint)
 
-                discussions = json.loads(response.body) if response.body else []
-                if not isinstance(discussions, list):
-                    return {
-                        "error": f"Unexpected response format from {resource_type} discussions API"
-                    }
-
-                for discussion in discussions:
-                    for note in discussion.get("notes", []):
-                        if note.get("id") == note_id:
-                            return {"discussionId": discussion["id"]}
-
-                next_page = response.headers.get("X-Next-Page", "")
+            for discussion in discussions:
+                for note in discussion.get("notes", []):
+                    if note.get("id") == note_id:
+                        return {"discussionId": discussion["id"]}
 
             resource_name = (
                 "merge request" if resource_type == "merge_requests" else "issue"
