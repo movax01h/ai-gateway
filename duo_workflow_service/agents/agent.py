@@ -12,7 +12,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 
 from ai_gateway.model_selection.models import ModelClassProvider
-from ai_gateway.prompts import BasePromptRegistry, prompt_template_to_messages
+from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
@@ -30,6 +30,7 @@ from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import LLMFinishReason, StarletteUser
 from lib.events import GLReportingEventContext
+from lib.prompts.utilities import prompt_template_to_messages
 
 log = structlog.stdlib.get_logger("agent_v2")
 

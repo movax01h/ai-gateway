@@ -56,11 +56,12 @@ from ai_gateway.prompts import (
     Prompt,
     jinja2_formatter,
 )
-from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, TemplateNotFoundError
+from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
+from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
 from tests.conftest import FakeModel
 
 
@@ -159,6 +160,7 @@ configurable_unit_primitives:
                     TOOL_OUTPUT_SECURITY_INCLUDE + "{% include 'system.jinja' %}",
                 ),
                 ("user", "{{content}}"),
+                MessagesPlaceholder("history", optional=True),
             ],
             template_format="jinja2",
         )
@@ -210,6 +212,7 @@ configurable_unit_primitives:
                 ),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("messages"),
+                MessagesPlaceholder("history", optional=True),
             ],
             template_format="jinja2",
         )

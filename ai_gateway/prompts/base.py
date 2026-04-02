@@ -9,7 +9,6 @@ from typing import (
     List,
     MutableMapping,
     Optional,
-    Sequence,
     cast,
     override,
 )
@@ -33,8 +32,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, string
-from langchain_core.prompts.chat import MessageLikeRepresentation
+from langchain_core.prompts import ChatPromptTemplate, string
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.tools import BaseTool
@@ -67,6 +65,10 @@ from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplat
 from ai_gateway.structured_logging import get_request_logger
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
+from lib.prompts.utilities import (
+    TOOL_OUTPUT_SECURITY_INCLUDE,
+    prompt_template_to_messages,
+)
 
 __all__ = [
     "Prompt",
@@ -193,10 +195,6 @@ jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
 jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
 jinja_env.filters["split"] = split_filter
 
-TOOL_OUTPUT_SECURITY_INCLUDE = (
-    jinja_env.get_template("common/tool_output_security/1.0.0.jinja").render() + "\n\n"
-)
-
 log = structlog.stdlib.get_logger("prompts")
 
 
@@ -224,22 +222,6 @@ def jinja2_formatter(template: str, /, **kwargs: Any) -> str:
 
 # Override LangChain's jinja2 formatter so we can specify a loader with access to all our templates
 DEFAULT_FORMATTER_MAPPING["jinja2"] = jinja2_formatter
-
-
-def prompt_template_to_messages(
-    tpl: dict[str, str],
-) -> Sequence[MessageLikeRepresentation]:
-    messages: list[MessageLikeRepresentation] = []
-    security_injected = False
-    for role, content in tpl.items():
-        if role == "placeholder":
-            messages.append(MessagesPlaceholder(content))
-        else:
-            if not security_injected and role.startswith("system"):
-                content = TOOL_OUTPUT_SECURITY_INCLUDE + content
-                security_injected = True
-            messages.append((role, content))
-    return messages
 
 
 class PromptLoggingHandler(BaseCallbackHandler):
