@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from anthropic import APIStatusError
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
@@ -415,3 +415,66 @@ class TestAgentNode:
             f"{AgentFinalOutput.tool_title} raised validation error:"
             in retry_messages_history[1].content
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "truncation_finish_reason,metadata_key",
+        [
+            ("length", "finish_reason"),
+            ("max_tokens", "stop_reason"),
+        ],
+    )
+    async def test_run_truncated_response_returns_with_recovery_message(
+        self,
+        truncation_finish_reason,
+        metadata_key,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        component_name,
+    ):
+        """Test that a truncated LLM response returns immediately with recovery context."""
+        truncated_message = copy.copy(mock_ai_message)
+        truncated_message.content = "I was writing a long response but got cut off..."
+        truncated_message.response_metadata = {metadata_key: truncation_finish_reason}
+        truncated_message.tool_calls = []
+
+        mock_prompt.ainvoke = AsyncMock(return_value=truncated_message)
+
+        result = await agent_node.run(base_flow_state)
+
+        # Only called once — no internal retry, returns to graph loop
+        assert mock_prompt.ainvoke.call_count == 1
+
+        # History includes truncated response + recovery message
+        result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert len(result_history) == 2
+        assert result_history[0] == truncated_message
+        assert isinstance(result_history[1], HumanMessage)
+        assert "cut off" in result_history[1].content
+        assert "concise" in result_history[1].content
+
+    @pytest.mark.asyncio
+    async def test_run_non_truncation_abnormal_finish_reason_does_not_retry(
+        self,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        component_name,
+    ):
+        """Test that non-truncation abnormal finish reasons (e.g. content_filter) do not trigger recovery retry."""
+        content_filter_message = copy.copy(mock_ai_message)
+        content_filter_message.response_metadata = {"finish_reason": "content_filter"}
+        content_filter_message.tool_calls = []
+
+        mock_prompt.ainvoke = AsyncMock(return_value=content_filter_message)
+
+        result = await agent_node.run(base_flow_state)
+
+        # Should only be called once — no retry for content_filter
+        assert mock_prompt.ainvoke.call_count == 1
+
+        result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert result_history == [content_filter_message]

@@ -27,6 +27,7 @@ from lib.context.request_metadata import (
     build_metadata_labels,
     client_capabilities,
     client_type,
+    extract_finish_reason,
     gitlab_realm,
     gitlab_version,
     language_server_version,
@@ -42,6 +43,7 @@ __all__ = [
     "METADATA_LABELS",
     "build_metadata_labels",
     "LLMFinishReason",
+    "extract_finish_reason",
     # llm_operations
     "token_usage",
     "llm_operations",

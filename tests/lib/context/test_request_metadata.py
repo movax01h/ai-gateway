@@ -105,6 +105,15 @@ class TestLLMFinishReason(unittest.TestCase):
         ]
         self.assertEqual(LLMFinishReason.values(), expected_values)
 
+    def test_finish_reason_truncation_values(self):
+        truncation = LLMFinishReason.truncation_values()
+        self.assertIn("length", truncation)
+        self.assertIn("max_tokens", truncation)
+        # content_filter and model_context_window_exceeded are NOT truncation reasons
+        self.assertNotIn("content_filter", truncation)
+        self.assertNotIn("model_context_window_exceeded", truncation)
+        self.assertEqual(len(truncation), 2)
+
     def test_finish_reason_abnormal_values(self):
         abnormal = LLMFinishReason.abnormal_values()
         self.assertIn("length", abnormal)

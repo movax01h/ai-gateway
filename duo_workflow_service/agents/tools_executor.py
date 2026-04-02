@@ -31,7 +31,7 @@ from duo_workflow_service.security.scanner_factory import apply_security_scannin
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
-from lib.context import client_capabilities
+from lib.context import client_capabilities, extract_finish_reason
 from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -116,7 +116,7 @@ class ToolsExecutor:
                 tool_name,
                 tool_call,
                 plan,
-                last_message.response_metadata.get("finish_reason"),
+                extract_finish_reason(last_message.response_metadata),
                 tool_project_name,
             )
             response = result.get("response")

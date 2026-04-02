@@ -19,7 +19,7 @@ from duo_workflow_service.conversation.compaction import (
     maybe_compact_history,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
-from lib.context import LLMFinishReason
+from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 
@@ -113,7 +113,7 @@ class AgentNode:
                     AIMessage,
                     await self._prompt.ainvoke(input={**variables, "history": history}),
                 )
-                finish_reason = completion.response_metadata.get("finish_reason")
+                finish_reason = extract_finish_reason(completion.response_metadata)
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
