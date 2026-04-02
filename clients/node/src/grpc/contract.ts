@@ -34,6 +34,11 @@ export interface ClientEvent {
 export interface StartWorkflowRequest {
   clientVersion: string;
   workflowID: string;
+  /**
+   * Use flowConfigId + flowConfigSchemaVersion + flowVersion instead
+   *
+   * @deprecated
+   */
   workflowDefinition: string;
   goal: string;
   workflowMetadata: string;
@@ -41,9 +46,18 @@ export interface StartWorkflowRequest {
   mcpTools: McpTool[];
   additional_context: AdditionalContext[];
   approval?: Approval | undefined;
-  flowConfig?: { [key: string]: any } | undefined;
+  flowConfig?:
+    | { [key: string]: any }
+    | undefined;
+  /** Platform version: "v1" or "experimental". Required with flowConfigId. */
   flowConfigSchemaVersion?: string | undefined;
   preapproved_tools: string[];
+  /** Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion. */
+  flowConfigId?:
+    | string
+    | undefined;
+  /** Semver flow version, e.g. "1.0.0". Required when flowConfigId is set. */
+  flowVersion?: string | undefined;
 }
 
 export interface ActionResponse {
@@ -413,6 +427,8 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     flowConfig: undefined,
     flowConfigSchemaVersion: undefined,
     preapproved_tools: [],
+    flowConfigId: undefined,
+    flowVersion: undefined,
   };
 }
 
@@ -453,6 +469,12 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     for (const v of message.preapproved_tools) {
       writer.uint32(106).string(v!);
+    }
+    if (message.flowConfigId !== undefined) {
+      writer.uint32(114).string(message.flowConfigId);
+    }
+    if (message.flowVersion !== undefined) {
+      writer.uint32(122).string(message.flowVersion);
     }
     return writer;
   },
@@ -560,6 +582,22 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.preapproved_tools.push(reader.string());
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.flowConfigId = reader.string();
+          continue;
+        }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.flowVersion = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -591,6 +629,8 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       preapproved_tools: globalThis.Array.isArray(object?.preapproved_tools)
         ? object.preapproved_tools.map((e: any) => globalThis.String(e))
         : [],
+      flowConfigId: isSet(object.flowConfigId) ? globalThis.String(object.flowConfigId) : undefined,
+      flowVersion: isSet(object.flowVersion) ? globalThis.String(object.flowVersion) : undefined,
     };
   },
 
@@ -632,6 +672,12 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.preapproved_tools?.length) {
       obj.preapproved_tools = message.preapproved_tools;
     }
+    if (message.flowConfigId !== undefined) {
+      obj.flowConfigId = message.flowConfigId;
+    }
+    if (message.flowVersion !== undefined) {
+      obj.flowVersion = message.flowVersion;
+    }
     return obj;
   },
 
@@ -654,6 +700,8 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.flowConfig = object.flowConfig ?? undefined;
     message.flowConfigSchemaVersion = object.flowConfigSchemaVersion ?? undefined;
     message.preapproved_tools = object.preapproved_tools?.map((e) => e) || [];
+    message.flowConfigId = object.flowConfigId ?? undefined;
+    message.flowVersion = object.flowVersion ?? undefined;
     return message;
   },
 };

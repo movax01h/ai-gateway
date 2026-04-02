@@ -10,6 +10,7 @@ from packaging.version import InvalidVersion, Version
 
 from ai_gateway.container import ContainerApplication
 from contract import contract_pb2, contract_pb2_grpc
+from duo_workflow_service.flow_request import workflow_definition_key_from_proto
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
 )
@@ -72,7 +73,7 @@ def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
 
         try:
             gl_events_context = GLReportingEventContext.from_workflow_definition(
-                message.startRequest.workflowDefinition,
+                workflow_definition_key_from_proto(message.startRequest),
                 is_ai_catalog_item=bool(message.startRequest.flowConfig),
             )
 

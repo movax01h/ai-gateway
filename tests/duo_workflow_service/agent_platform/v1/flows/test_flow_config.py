@@ -288,7 +288,7 @@ class TestFlowConfig:
         with pytest.raises(FileNotFoundError) as exc_info:
             FlowConfig.from_yaml_config("nonexistent")
 
-        assert "nonexistent file not found" in str(exc_info.value)
+        assert "nonexistent/1.0.0 file not found" in str(exc_info.value)
 
     def test_flowconfig_from_yaml_config_invalid_yaml(self, tmp_path):
         """Test loading invalid YAML raises YAMLError."""
@@ -449,6 +449,7 @@ class TestListConfigs:
 
         assert len(result) == 1
         assert result[0]["flow_identifier"] == "test_config"
+        assert result[0]["flow_version"] == "1.0.0"
         assert result[0]["version"] == "v1"
         assert result[0]["environment"] == "chat"
         assert "config" in result[0]
@@ -697,3 +698,74 @@ class TestListConfigs:
         # Verify JSON config is valid
         parsed_config = json.loads(result[0]["config"])
         assert parsed_config == minimal_config
+
+    def test_list_configs_multiple_versions_of_same_flow(self, tmp_path):
+        """Test list_configs discovers all versions of the same flow."""
+        config_v1 = {
+            "flow": {"entry_point": "agent"},
+            "components": [{"name": "agent", "type": "AgentComponent"}],
+            "routers": [{"from": "agent", "to": "end"}],
+            "environment": "chat",
+            "version": "v1",
+        }
+        config_v2 = {
+            "flow": {"entry_point": "agent_v2"},
+            "components": [{"name": "agent_v2", "type": "AgentComponent"}],
+            "routers": [{"from": "agent_v2", "to": "end"}],
+            "environment": "chat",
+            "version": "v1",
+        }
+
+        flow_dir = tmp_path / "my_flow"
+        flow_dir.mkdir()
+        (flow_dir / "1.0.0.yml").write_text(yaml.dump(config_v1))
+        (flow_dir / "2.0.0.yml").write_text(yaml.dump(config_v2))
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            result = list_configs()
+
+        assert len(result) == 2
+        versions = {r["flow_version"] for r in result}
+        assert versions == {"1.0.0", "2.0.0"}
+        assert all(r["flow_identifier"] == "my_flow" for r in result)
+
+    def test_list_configs_ignores_non_yml_in_flow_dirs(
+        self, tmp_path, sample_config_data
+    ):
+        """Test list_configs only picks up .yml files inside flow directories."""
+        flow_dir = tmp_path / "my_flow"
+        flow_dir.mkdir()
+        (flow_dir / "1.0.0.yml").write_text(yaml.dump(sample_config_data))
+        (flow_dir / "README.md").write_text("# Notes")
+        (flow_dir / "config.json").write_text("{}")
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
+            result = list_configs()
+
+        assert len(result) == 1
+        assert result[0]["flow_version"] == "1.0.0"
+
+
+class TestFromYamlConfigExplicitVersion:
+    """Test from_yaml_config with explicit flow_version parameter."""
+
+    def test_loads_explicit_version(self, tmp_path):
+        """from_yaml_config('myflow', '2.0.0') should load configs/myflow/2.0.0.yml."""
+        config_data = {
+            "flow": {"entry_point": "agent"},
+            "components": [{"name": "agent", "type": "AgentComponent"}],
+            "routers": [{"from": "agent", "to": "end"}],
+            "environment": "ambient",
+            "version": "v1",
+        }
+
+        flow_dir = tmp_path / "myflow"
+        flow_dir.mkdir()
+        yaml_file = flow_dir / "2.0.0.yml"
+        yaml_file.write_text(yaml.dump(config_data))
+
+        with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
+            result = FlowConfig.from_yaml_config("myflow", "2.0.0")
+
+        assert result.environment == "ambient"
+        assert result.version == "v1"

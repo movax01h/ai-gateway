@@ -35,9 +35,37 @@ configs/
     2.0.0.yml                    # Breaking changes
 ```
 
-**Note: For now, we only do support version `1.0.0.yml`. There is work ongoing for full version support.**
-
 The API version (v1, experimental) is already determined by the root path (`agent_platform/v1` vs `agent_platform/experimental`), so it's not included in the directory structure.
+
+### Requesting a Flow
+
+There are two ways to request a flow from a client:
+
+#### Structured proto fields (recommended)
+
+Use `flowConfigId`, `flowConfigSchemaVersion`, and `flowVersion` in `StartWorkflowRequest`:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `flowConfigId` | Yes | Flow name, e.g. `"developer"` |
+| `flowConfigSchemaVersion` | Yes | Platform version: `"v1"` or `"experimental"` |
+| `flowVersion` | Yes | Flow version, e.g. `"1.0.0"` or `"2.0.0"` |
+
+All three fields must be provided together.
+`flowConfigId` and `flowConfig` are mutually exclusive — the server rejects requests that set both.
+
+#### Deprecated `workflowDefinition` string
+
+Set `workflowDefinition` to `"<flow_name>/<api_version>"` (e.g. `"developer/v1"`). This always resolves to the default version (`1.0.0`) and is kept for backward compatibility with older clients.
+
+#### Resolution priority
+
+When a request arrives, the server resolves the flow in this order:
+
+1. If `flowConfigId` + `flowConfigSchemaVersion` + `flowVersion` are set → loads `configs/{flowConfigId}/{flowVersion}.yml`
+1. If `flowConfig` + `flowConfigSchemaVersion` are set → uses the inline config struct directly
+1. If `workflowDefinition` matches a known legacy workflow name (`software_development`, `chat`, etc.) → uses that workflow class directly. Otherwise, parses it as `"flow_name/api_version"` and loads `configs/{flow_name}/1.0.0.yml`
+1. If no fields are set → defaults to the `software_development` workflow
 
 ## Development Plan
 
@@ -403,7 +431,7 @@ Use the `duo run` command with the `--flow-config` flag pointing to your flow YA
 
 ```shell
 duo run \
-  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow.yml \
+  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow/1.0.0.yml \
   --flow-config-schema-version v1 \
   -g "Your goal description here"
 ```
@@ -418,7 +446,7 @@ export DUO_WORKFLOW_ADDITIONAL_CONTEXT_CONTENT='[{"Category":"your_category","Co
 
 ```shell
 duo run \
-  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow.yml \
+  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow/1.0.0.yml \
   --flow-config-schema-version v1 \
   -g "Your goal description here"
 ```

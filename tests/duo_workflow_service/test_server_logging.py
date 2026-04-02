@@ -45,7 +45,7 @@ def mock_usage_quota_service(mock_duo_workflow_service_container):
 @patch("duo_workflow_service.server.log")
 @patch("duo_workflow_service.server_helpers.current_event_context")
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_enhanced_logging_with_context(
     mock_resolve_workflow,
     mock_abstract_workflow_class,
@@ -141,7 +141,7 @@ async def test_execute_workflow_enhanced_logging_with_context(
 @patch("duo_workflow_service.server_helpers.log")
 @patch("duo_workflow_service.server_helpers.current_event_context")
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_enhanced_logging_without_context(
     mock_resolve_workflow,
     mock_abstract_workflow_class,

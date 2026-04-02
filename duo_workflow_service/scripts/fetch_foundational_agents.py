@@ -122,6 +122,9 @@ def save_workflow_to_file(
     where each flow name gets its own directory and versions are separate files
     within that directory.
     """
+    # This always saves as the default version (1.0.0). Bundling multiple
+    # major versions side by side for self-hosted instances is not yet
+    # supported.
     agent_dir: str = os.path.join(flow_config_model.DIRECTORY_PATH, agent_id)
     filepath: str = os.path.join(agent_dir, f"{DEFAULT_FLOW_VERSION}.yml")
 

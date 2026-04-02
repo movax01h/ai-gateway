@@ -13,12 +13,18 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     PartialFlowConfig,
 )
+from duo_workflow_service.flow_request import (
+    InlineFlowRequest,
+    LegacyWorkflowRequest,
+    RegistryFlowRequest,
+)
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
     CHAT_AGENT_COMPONENT_ENVIRONMENT,
+    _load_flow_from_registry,
     list_configs,
-    resolve_workflow_class,
+    resolve_flow,
 )
 from duo_workflow_service.workflows.software_development import Workflow
 
@@ -66,7 +72,7 @@ def build_chat_flow_config(
     version=None,
     routers=None,
     flow=None,
-    partial=False,
+    is_partial=False,
     environment=CHAT_AGENT_COMPONENT_ENVIRONMENT,
 ):
     mock_flow_cls = Mock()
@@ -88,9 +94,9 @@ def build_chat_flow_config(
                 "prompt_template": {"user": "test"},
             }
         ]
-    if routers is None and not partial:
+    if routers is None and not is_partial:
         routers = []
-    if flow is None and not partial:
+    if flow is None and not is_partial:
         flow = {}
 
     struct_data = {
@@ -127,16 +133,10 @@ def build_chat_flow_config(
 
 
 def test_registry_resolve():
-    # Test resolving a non-existent workflow
-    with pytest.raises(ValueError, match="Unsupported workflow_definition value"):
-        resolve_workflow_class("non_existent_workflow")
-
-    # Test resolving a non-existent Flow Registry version
-    with pytest.raises(ValueError, match="Unknown Flow version"):
-        resolve_workflow_class("non_existent_workflow/unknown")
-
     # Test that resolved class is a subclass of AbstractWorkflow
-    resolved_class = resolve_workflow_class("software_development")
+    resolved_class = resolve_flow(
+        LegacyWorkflowRequest(workflow_definition="software_development")
+    )
     assert issubclass(resolved_class, AbstractWorkflow)
     assert resolved_class == Workflow
 
@@ -159,10 +159,8 @@ def test_registry_flow_versions_return_correct_classes(version):
         }
     )
 
-    result = resolve_workflow_class(
-        workflow_definition=None,
-        flow_config=struct,
-        flow_config_schema_version=version,
+    result = resolve_flow(
+        InlineFlowRequest(config_struct=struct, schema_version=version)
     )
     # Should return a partial function
     assert isinstance(result, partial)
@@ -175,9 +173,13 @@ def test_registry_flow_versions_return_correct_classes(version):
 
 
 def test_registry_resolve_unknown_flow_version():
-    """Test resolving flow with unknown version raises ValueError."""
-    with pytest.raises(ValueError, match="Unknown Flow version: unknown_version"):
-        resolve_workflow_class("prototype/unknown_version")
+    """Test resolving flow with unknown version raises ValidationError."""
+    with pytest.raises(ValidationError, match="Invalid flowConfigSchemaVersion"):
+        RegistryFlowRequest(
+            config_id="prototype",
+            schema_version="unknown_version",
+            version="1.0.0",
+        )
 
 
 def test_registry_resolve_flow_config_error():
@@ -191,11 +193,19 @@ def test_registry_resolve_flow_config_error():
         "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
         {"experimental": (mock_flow_config_cls, Mock(), Mock())},
     ):
-        with pytest.raises(ValueError, match="Unknown Flow"):
-            resolve_workflow_class("nonexistent/experimental")
+        with pytest.raises(ValueError, match="Unknown flow"):
+            resolve_flow(
+                RegistryFlowRequest(
+                    config_id="nonexistent",
+                    schema_version="experimental",
+                    version="1.0.0",
+                )
+            )
 
 
-def test_resolve_workflow_class_with_flow_config(simple_flow_config):
+def test_resolve_flow_with_flow_config(
+    simple_flow_config,
+):  # pylint: disable=redefined-outer-name
     """Test resolving workflow class with flow config protobuf."""
     mocks = simple_flow_config
 
@@ -215,10 +225,10 @@ def test_resolve_workflow_class_with_flow_config(simple_flow_config):
             return_value=mocks["expected_dict"],
         ),
     ):
-        result = resolve_workflow_class(
-            workflow_definition=None,
-            flow_config=mocks["struct"],
-            flow_config_schema_version="experimental",
+        result = resolve_flow(
+            InlineFlowRequest(
+                config_struct=mocks["struct"], schema_version="experimental"
+            )
         )
 
         assert isinstance(result, partial)
@@ -241,7 +251,7 @@ def test_resolve_workflow_class_with_flow_config(simple_flow_config):
     ],
     ids=["basic", "no_entry_point"],
 )
-def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
+def test_resolve_flow_with_chat_flow_config_success(config_params):
     mocks = build_chat_flow_config(**config_params)
 
     with (
@@ -260,10 +270,8 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
             return_value=mocks["expected_dict"],
         ),
     ):
-        result = resolve_workflow_class(
-            workflow_definition=None,
-            flow_config=mocks["struct"],
-            flow_config_schema_version="v1",
+        result = resolve_flow(
+            InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
         )
 
         assert isinstance(result, partial)
@@ -277,7 +285,7 @@ def test_resolve_workflow_class_with_chat_flow_config_success(config_params):
         assert result.keywords == expected_kwargs
 
 
-def test_resolve_workflow_class_with_chat_flow_config_extracts_agent_name():
+def test_resolve_flow_with_chat_flow_config_extracts_agent_name():
     """Test that agent_name is extracted from chat-partial flow config."""
     components = [
         {
@@ -305,10 +313,8 @@ def test_resolve_workflow_class_with_chat_flow_config_extracts_agent_name():
             return_value=mocks["expected_dict"],
         ),
     ):
-        result = resolve_workflow_class(
-            workflow_definition=None,
-            flow_config=mocks["struct"],
-            flow_config_schema_version="v1",
+        result = resolve_flow(
+            InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
         )
 
         assert isinstance(result, partial)
@@ -376,9 +382,7 @@ def test_resolve_workflow_class_with_chat_flow_config_extracts_agent_name():
         "both_prompts_and_version",
     ],
 )
-def test_resolve_workflow_class_with_chat_flow_config_failure(
-    config_params, expected_error
-):
+def test_resolve_flow_with_chat_flow_config_failure(config_params, expected_error):
     mocks = build_chat_flow_config(**config_params)
 
     with (
@@ -398,10 +402,8 @@ def test_resolve_workflow_class_with_chat_flow_config_failure(
         ),
     ):
         with pytest.raises(ValueError, match=expected_error):
-            resolve_workflow_class(
-                workflow_definition=None,
-                flow_config=mocks["struct"],
-                flow_config_schema_version="v1",
+            resolve_flow(
+                InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
             )
 
 
@@ -410,7 +412,7 @@ def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
 
     # Test 1: chat-partial with missing routers and flow should succeed
     chat_partial_config = build_chat_flow_config(
-        partial=True, environment="chat-partial"
+        is_partial=True, environment="chat-partial"
     )
 
     with (
@@ -429,15 +431,15 @@ def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
             return_value=chat_partial_config["expected_dict"],
         ),
     ):
-        result = resolve_workflow_class(
-            workflow_definition=None,
-            flow_config=chat_partial_config["struct"],
-            flow_config_schema_version="v1",
+        result = resolve_flow(
+            InlineFlowRequest(
+                config_struct=chat_partial_config["struct"], schema_version="v1"
+            )
         )
         assert isinstance(result, partial)
 
     # Test 2: chat environment with missing routers and flow should fail
-    chat_config = build_chat_flow_config(partial=True, environment="chat")
+    chat_config = build_chat_flow_config(is_partial=True, environment="chat")
 
     with (
         patch(
@@ -457,10 +459,10 @@ def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
     ):
         # Should raise ValidationError because routers and flow are required for FlowConfig
         with pytest.raises((ValueError, ValidationError)):
-            resolve_workflow_class(
-                workflow_definition=None,
-                flow_config=chat_config["struct"],
-                flow_config_schema_version="v1",
+            resolve_flow(
+                InlineFlowRequest(
+                    config_struct=chat_config["struct"], schema_version="v1"
+                )
             )
 
 
@@ -531,15 +533,45 @@ def test_all_flow_configs_are_valid():
     }
 
     for version, directory in flow_config_directories.items():
-        for config_file in directory.glob("*.yml"):
-            workflow_definition = f"{config_file.stem}/{version}"
+        for config_file in directory.glob("*/*.yml"):
+            flow_name = config_file.parent.name
+            flow_version = config_file.stem  # e.g. "1.0.0"
             try:
-                resolve_workflow_class(workflow_definition)
+                resolve_flow(
+                    RegistryFlowRequest(
+                        config_id=flow_name,
+                        schema_version=version,
+                        version=flow_version,
+                    )
+                )
             except (ValueError, ValidationError) as e:
                 validation_errors.append(
-                    f"Validation failed for {workflow_definition}: {e}"
+                    f"Validation failed for {flow_name}/{version} (v{flow_version}): {e}"
                 )
 
     if validation_errors:
         error_message = "\n".join(validation_errors)
         pytest.fail(f"Flow config validation errors:\n{error_message}")
+
+
+class TestLoadFlowFromRegistry:
+    """Tests for _load_flow_from_registry (YAML-based flow loader)."""
+
+    def test_explicit_version_passes_correct_path(self):
+        """Verify that the version argument is forwarded verbatim to from_yaml_config."""
+        mock_config_cls = Mock()
+        mock_config = Mock()
+        mock_config.environment = "ambient"
+        mock_config.components = []
+        mock_config.prompts = None
+        mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
+
+        with patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {"v1": (mock_config_cls, Mock(), Mock())},
+        ):
+            with patch("duo_workflow_service.workflows.registry.flow_factory"):
+                _load_flow_from_registry("developer", "v1", "2.0.0")
+                mock_config_cls.from_yaml_config.assert_called_once_with(
+                    "developer", "2.0.0"
+                )
