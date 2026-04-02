@@ -6,7 +6,7 @@ from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompt_values import ChatPromptValue
 
-from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, Prompt
+from ai_gateway.prompts.base import Prompt
 from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
@@ -23,6 +23,7 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from lib.internal_events.event_enum import CategoryEnum
+from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
 from tests.conftest import FakeModel
 
 

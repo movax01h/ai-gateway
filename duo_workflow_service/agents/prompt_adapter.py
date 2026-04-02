@@ -8,7 +8,6 @@ from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt, jinja2_formatter
-from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.state import ChatWorkflowState
@@ -23,6 +22,7 @@ from duo_workflow_service.slash_commands.goal_parser import (
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from lib.context import get_model_metadata
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
+from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
 
 VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
 

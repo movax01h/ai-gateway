@@ -26,6 +26,9 @@ def prompt_template_to_messages(
     """Convert a prompt template dictionary to a sequence of message representations.
 
     Automatically prepends the tool output security instruction to the first system message.
+    Automatically appends an optional ``MessagesPlaceholder("history")`` when not already
+    present, to prevent silent infinite loops when AgentNode passes history but the template
+    does not declare it.
 
     Args:
         tpl: A dictionary mapping role names to content strings. If the role is
@@ -49,4 +52,13 @@ def prompt_template_to_messages(
                 content = TOOL_OUTPUT_SECURITY_INCLUDE + content
                 security_injected = True
             messages.append((role, content))
+
+    # Automatically add optional history placeholder if not present to prevent
+    # silent infinite loops when AgentNode passes history but template doesn't declare it
+    if not any(
+        isinstance(m, MessagesPlaceholder) and m.variable_name == "history"
+        for m in messages
+    ):
+        messages.append(MessagesPlaceholder("history", optional=True))
+
     return messages

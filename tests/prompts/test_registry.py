@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from langchain.tools import BaseTool
 from langchain_anthropic import ChatAnthropic
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import (
     Runnable,
@@ -26,11 +26,12 @@ from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.prompts import LocalPromptRegistry, Prompt
-from ai_gateway.prompts.base import TOOL_OUTPUT_SECURITY_INCLUDE, TemplateNotFoundError
+from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
 
 
 class MockPromptTemplateClass(Runnable):
@@ -732,7 +733,10 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 None,
                 True,
                 "Test prompt 1.0.1",
-                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    MessagesPlaceholder("history", optional=True),
+                ],
                 "claude-3-5-sonnet-20241022",
                 {
                     "cache_control_injection_points": [
@@ -753,7 +757,10 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 None,
                 True,
                 "Test prompt 1.0.2-dev",
-                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    MessagesPlaceholder("history", optional=True),
+                ],
                 "claude-3-5-sonnet-20241022",
                 {
                     "cache_control_injection_points": [
@@ -774,7 +781,10 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 None,
                 True,
                 "Test prompt 1.0.0",
-                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    MessagesPlaceholder("history", optional=True),
+                ],
                 "claude-3-5-sonnet-20241022",
                 {
                     "cache_control_injection_points": [
@@ -795,7 +805,10 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 None,
                 True,
                 "Test prompt 0.0.1",
-                [("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1")],
+                [
+                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    MessagesPlaceholder("history", optional=True),
+                ],
                 "claude-3-haiku-20240307",
                 {},
                 {
@@ -815,6 +828,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-haiku-20240307",
                 {"stop": ["Foo", "Bar"], "timeout": 60},
@@ -840,6 +854,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "amazon_q",
                 {
@@ -866,6 +881,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "custom",
                 {
@@ -904,6 +920,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "custom",
                 {
@@ -942,6 +959,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "custom",
                 {
@@ -977,6 +995,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "general",  # The model_metadata.name overrides the prompt file's model name
                 {
@@ -1007,6 +1026,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Claude 4.5 Template"),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-sonnet-4-5-20250929",
                 {
@@ -1040,6 +1060,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                         TOOL_OUTPUT_SECURITY_INCLUDE + "Claude Vertex 4.5 Template",
                     ),
                     ("user", "Template2"),
+                    MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-sonnet-4-5@20250929",
                 {

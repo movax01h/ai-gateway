@@ -4,10 +4,11 @@
 import pytest
 from langchain_core.prompts import ChatPromptTemplate
 
-from ai_gateway.prompts.base import jinja_env, prompt_template_to_messages
+from ai_gateway.prompts.base import jinja_env
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
+from lib.prompts.utilities import prompt_template_to_messages
 
 PROJECT_ID = 39903947
 PROJECT_URL = (
