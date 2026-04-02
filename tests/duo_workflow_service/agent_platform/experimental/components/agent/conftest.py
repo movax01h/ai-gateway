@@ -1,6 +1,6 @@
 """Shared fixtures for agent component tests."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -165,6 +165,7 @@ def mock_ai_message_fixture():
         "finish_reason": "stop"
     }  # OpenAI format used by LiteLLM
     mock_message.tool_calls = []
+    mock_message.invalid_tool_calls = []
     mock_message.additional_kwargs = {}
     return mock_message
 

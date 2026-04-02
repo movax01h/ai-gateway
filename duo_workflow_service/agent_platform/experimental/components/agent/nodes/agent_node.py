@@ -2,7 +2,7 @@ from typing import ClassVar, Optional, Type, cast
 
 import structlog
 from anthropic import APIStatusError
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import ConfigDict, Field
 from pydantic_core import ValidationError
 
@@ -18,8 +18,9 @@ from duo_workflow_service.conversation.compaction import (
     ConversationCompactor,
     maybe_compact_history,
 )
+from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
-from lib.context import LLMFinishReason
+from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 
@@ -118,6 +119,11 @@ class AgentNode:
         self._conversation_history_key = conversation_history_key
         self._response_schema = response_schema
 
+    _TRUNCATION_RECOVERY_MESSAGE = (
+        "Your response was too long and got cut off. "
+        "Be more concise and use smaller, incremental steps."
+    )
+
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
@@ -133,7 +139,22 @@ class AgentNode:
                     AIMessage,
                     await self._prompt.ainvoke(input={**variables, "history": history}),
                 )
-                finish_reason = completion.response_metadata.get("finish_reason")
+                finish_reason = extract_finish_reason(completion.response_metadata)
+                if finish_reason in LLMFinishReason.truncation_values():
+                    log.warning(
+                        "LLM response was truncated due to token limit; "
+                        "injecting recovery message and returning to graph loop",
+                        finish_reason=finish_reason,
+                    )
+                    history = restore_message_consistency(
+                        [
+                            *history,
+                            completion,
+                            HumanMessage(content=self._TRUNCATION_RECOVERY_MESSAGE),
+                        ]
+                    )
+                    return history_iokey.to_nested_dict(history)
+
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 

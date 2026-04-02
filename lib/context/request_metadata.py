@@ -7,7 +7,11 @@ from contextvars import ContextVar
 from enum import Enum
 from typing import Optional
 
+import structlog
+
 from lib.language_server import LanguageServerVersion
+
+log = structlog.stdlib.get_logger("request_metadata")
 
 # Context variables for request metadata
 client_type: ContextVar[Optional[str]] = ContextVar("client_type", default=None)
@@ -96,12 +100,42 @@ class LLMFinishReason(str, Enum):
         return [e.value for e in cls]
 
     @classmethod
-    def abnormal_values(cls):
-        """Return abnormal finish reason values as a list."""
-        abnormal = [
+    def truncation_values(cls) -> list["LLMFinishReason"]:
+        """Return finish reasons that indicate the response was truncated by the output token limit.
+
+        These reasons mean the model had more to say but was cut off, making the response incomplete. They are distinct
+        from content-filter stops or context-window errors.
+        """
+        return [cls.LENGTH, cls.MAX_TOKENS]
+
+    @classmethod
+    def abnormal_values(cls) -> list["LLMFinishReason"]:
+        """Return abnormal finish reasons."""
+        return [
             cls.LENGTH,
             cls.CONTENT_FILTER,
             cls.MAX_TOKENS,
             cls.MODEL_CONTEXT_WINDOW_EXCEEDED,
         ]
-        return [e.value for e in abnormal]
+
+
+def extract_finish_reason(metadata: dict) -> Optional[LLMFinishReason]:
+    """Extract the finish reason from LangChain response_metadata.
+
+    Different providers use different keys:
+    - Anthropic: "stop_reason"
+    - OpenAI / Vertex / Mistral: "finish_reason"
+    - Bedrock Converse: "stopReason"
+    """
+    for key in ("stop_reason", "finish_reason", "stopReason"):
+        if value := metadata.get(key):
+            try:
+                return LLMFinishReason(value)
+            except ValueError:
+                log.warning(
+                    "Unknown LLM finish reason encountered",
+                    finish_reason=value,
+                    metadata_key=key,
+                )
+                return None
+    return None

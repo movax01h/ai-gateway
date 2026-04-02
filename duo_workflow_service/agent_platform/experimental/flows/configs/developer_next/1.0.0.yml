@@ -107,11 +107,8 @@ flow:
 prompts:
   - name: "developer_agent_prompt"
     prompt_id: "developer_agent_prompt"
-    model:
-      params:
-        max_tokens: 32_768
     params:
-      timeout: 60
+      timeout: 120
     unit_primitives:
       - duo_agent_platform
     prompt_template:

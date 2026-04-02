@@ -35,7 +35,7 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.handover import HandoverTool
 from duo_workflow_service.tracking.errors import log_exception
-from lib.context import LLMFinishReason, StarletteUser
+from lib.context import LLMFinishReason, StarletteUser, extract_finish_reason
 from lib.events import GLReportingEventContext
 from lib.prompts.utilities import prompt_template_to_messages
 
@@ -109,7 +109,9 @@ class Agent(BaseAgent):
 
                 model_completion = await super().ainvoke(input)
 
-                finish_reason = model_completion.response_metadata.get("finish_reason")
+                finish_reason = extract_finish_reason(
+                    model_completion.response_metadata
+                )
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 

@@ -36,7 +36,7 @@ from duo_workflow_service.slash_commands.error_handler import (
 )
 from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tracking.errors import log_exception
-from lib.context import LLMFinishReason
+from lib.context import LLMFinishReason, extract_finish_reason
 
 log = structlog.stdlib.get_logger("chat_agent")
 
@@ -308,7 +308,7 @@ class ChatAgent:
                 agent_response = await self._get_agent_response(state)
 
                 # Check for abnormal finish reasons
-                finish_reason = agent_response.response_metadata.get("finish_reason")
+                finish_reason = extract_finish_reason(agent_response.response_metadata)
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
