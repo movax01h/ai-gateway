@@ -154,6 +154,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             registry=registry,
         )
 
+        self.agent_platform_response_schema_output_counter = Counter(
+            "agent_platform_response_schema_output_total",
+            "Count of response schema outputs tracked in Duo Workflow",
+            ["flow_type", "component_name"] + METADATA_LABELS,
+            registry=registry,
+        )
+
         self.agent_platform_flow_route_decision_counter = Counter(
             "agent_platform_flow_route_decision_total",
             "Count of flow routing decisions in Duo Workflow",
@@ -237,6 +244,17 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             flow_type=flow_type,
             failure_reason=failure_reason,
             session_type=session_type_context.get(),
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_response_schema_output(
+        self,
+        flow_type: str = "unknown",
+        component_name: str = "unknown",
+    ) -> None:
+        self.agent_platform_response_schema_output_counter.labels(
+            flow_type=flow_type,
+            component_name=component_name,
             **build_metadata_labels(),
         ).inc()
 

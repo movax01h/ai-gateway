@@ -1,5 +1,6 @@
 # pylint: disable=file-naming-for-tests
-from unittest.mock import Mock
+import json
+from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -381,3 +382,147 @@ class TestFinalResponseNode:
         tool_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
         assert tool_messages[0].tool_call_id == "last_tool_id"
         assert result["context"]["result"] == "Last response"
+
+
+class TestResponseSchemaTracking:
+    """Test suite for response schema tracking in FinalResponseNode."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.final_response_node.duo_workflow_metrics"
+    )
+    async def test_tracking_emits_metric_and_event(
+        self,
+        mock_metrics,
+        component_name,
+        simple_output,
+        flow_state_with_message,
+        ui_history,
+    ):
+        """Test that tracking emits metric and internal event."""
+        from duo_workflow_service.tracking.response_schema_tracking_context import (
+            response_schema_tracking_results,
+        )
+        from lib.events import GLReportingEventContext
+        from lib.internal_events.event_enum import EventEnum
+
+        flow_type = GLReportingEventContext("fix_pipeline", "fix_pipeline/v1", False)
+        mock_event_client = Mock()
+
+        node = FinalResponseNode(
+            component_name=component_name,
+            name="test_node",
+            output=simple_output,
+            ui_history=ui_history,
+            response_schema=AgentFinalOutput,
+            response_schema_tracking=True,
+            flow_id="test_flow_123",
+            flow_type=flow_type,
+            internal_event_client=mock_event_client,
+        )
+
+        token = response_schema_tracking_results.set({})
+        try:
+            await node.run(flow_state_with_message)
+
+            mock_metrics.count_response_schema_output.assert_called_once_with(
+                flow_type="fix_pipeline",
+                component_name=component_name,
+            )
+
+            mock_event_client.track_event.assert_called_once()
+            call_kwargs = mock_event_client.track_event.call_args[1]
+            assert (
+                call_kwargs["event_name"]
+                == EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT.value
+            )
+            additional_props = call_kwargs["additional_properties"]
+            assert additional_props.label == component_name
+            assert call_kwargs["category"] == "fix_pipeline"
+            json.loads(additional_props.property)
+
+            # extra contains individual output fields when output is a dict
+            # (AgentFinalOutput.to_output() returns a string, so extra is empty here)
+
+            results = response_schema_tracking_results.get()
+            assert component_name in results
+        finally:
+            response_schema_tracking_results.reset(token)
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.final_response_node.duo_workflow_metrics"
+    )
+    async def test_tracking_disabled_does_not_emit(
+        self,
+        mock_metrics,
+        component_name,
+        simple_output,
+        flow_state_with_message,
+        ui_history,
+    ):
+        """Test that tracking is not emitted when response_schema_tracking=False."""
+        from duo_workflow_service.tracking.response_schema_tracking_context import (
+            response_schema_tracking_results,
+        )
+
+        mock_event_client = Mock()
+
+        node = FinalResponseNode(
+            component_name=component_name,
+            name="test_node",
+            output=simple_output,
+            ui_history=ui_history,
+            response_schema=AgentFinalOutput,
+            response_schema_tracking=False,
+            internal_event_client=mock_event_client,
+        )
+
+        token = response_schema_tracking_results.set({})
+        try:
+            await node.run(flow_state_with_message)
+
+            mock_metrics.count_response_schema_output.assert_not_called()
+            mock_event_client.track_event.assert_not_called()
+            assert response_schema_tracking_results.get() == {}
+        finally:
+            response_schema_tracking_results.reset(token)
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.final_response_node.duo_workflow_metrics"
+    )
+    async def test_tracking_without_event_client_still_emits_metric_and_contextvar(
+        self,
+        mock_metrics,
+        component_name,
+        simple_output,
+        flow_state_with_message,
+        ui_history,
+    ):
+        """Test that metric and ContextVar are set even without an internal event client."""
+        from duo_workflow_service.tracking.response_schema_tracking_context import (
+            response_schema_tracking_results,
+        )
+
+        node = FinalResponseNode(
+            component_name=component_name,
+            name="test_node",
+            output=simple_output,
+            ui_history=ui_history,
+            response_schema=AgentFinalOutput,
+            response_schema_tracking=True,
+            flow_id="test_flow_123",
+            flow_type=None,
+            internal_event_client=None,
+        )
+
+        token = response_schema_tracking_results.set({})
+        try:
+            await node.run(flow_state_with_message)
+
+            mock_metrics.count_response_schema_output.assert_called_once()
+            results = response_schema_tracking_results.get()
+            assert component_name in results
+        finally:
+            response_schema_tracking_results.reset(token)

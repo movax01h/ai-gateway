@@ -42,6 +42,7 @@ components:
     prompt_version: "^1.0.0"
     response_schema_id: "fix_pipeline_next_decide_approach"
     response_schema_version: "^1.0.0"
+    response_schema_tracking: true
     inputs:
       - from: "context:fix_pipeline_context.final_answer"
         as: "fix_pipeline_context_results"

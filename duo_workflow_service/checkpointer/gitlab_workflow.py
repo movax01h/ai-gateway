@@ -64,6 +64,9 @@ from duo_workflow_service.tracking.duo_workflow_metrics import (
     session_type_context,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.response_schema_tracking_context import (
+    response_schema_tracking_results,
+)
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
@@ -303,6 +306,7 @@ class GitLabWorkflow(
                 return MemorySaver()
 
             init_llm_operations()
+            response_schema_tracking_results.set({})
             self._flow_start_time = time.time()
 
             config: RunnableConfig = {"configurable": {}}
@@ -556,10 +560,23 @@ class GitLabWorkflow(
             # No event to track for other statuses
             return
 
-        extra_kwargs = {}
+        extra_kwargs: dict[str, Any] = {}
         if hasattr(self, "_flow_start_time"):
             extra_kwargs["duration_seconds"] = round(
                 time.time() - self._flow_start_time, 3
+            )
+
+        tracked_outputs = response_schema_tracking_results.get() or {}
+        for component_name, output_data in tracked_outputs.items():
+            extra_kwargs[f"{component_name}_output"] = json.dumps(
+                output_data, default=str
+            )
+            self._logger.info(
+                "Response schema output at workflow completion",
+                component_name=component_name,
+                response_output=output_data,
+                workflow_outcome=status,
+                workflow_id=self._workflow_id,
             )
 
         self._track_internal_event(

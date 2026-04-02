@@ -16,6 +16,7 @@ class EventEnum(StrEnum):
     WORKFLOW_TOOL_FAILURE = "duo_workflow_tool_failure"
     WORKFLOW_TOOL_SUCCESS = "duo_workflow_tool_success"
     WORKFLOW_ROUTE_DECISION = "duo_workflow_flow_route_decision"
+    WORKFLOW_RESPONSE_SCHEMA_OUTPUT = "duo_workflow_response_schema_output"
 
 
 class EventLabelEnum(StrEnum):

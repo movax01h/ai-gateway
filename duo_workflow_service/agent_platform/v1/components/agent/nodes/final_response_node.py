@@ -1,5 +1,7 @@
+import json
 from typing import Optional, Type
 
+import structlog
 from langchain_core.messages import AIMessage, ToolMessage
 
 from ai_gateway.response_schemas.base import BaseAgentOutput
@@ -13,8 +15,18 @@ from duo_workflow_service.agent_platform.v1.state import (
     create_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import DefaultUILogWriter, UIHistory
+from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.tracking.response_schema_tracking_context import (
+    response_schema_tracking_results,
+)
+from lib.events import GLReportingEventContext
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["FinalResponseNode"]
+
+log = structlog.stdlib.get_logger("final_response_node")
 
 
 class FinalResponseNode:
@@ -26,12 +38,20 @@ class FinalResponseNode:
         output: Optional[IOKey],
         ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
         response_schema: Optional[Type[BaseAgentOutput]] = None,
+        response_schema_tracking: bool = False,
+        flow_id: Optional[str] = None,
+        flow_type: Optional[GLReportingEventContext] = None,
+        internal_event_client: Optional[InternalEventsClient] = None,
     ):
         self._component_name = component_name
         self.name = name
         self._output = output
         self._ui_history = ui_history
         self._response_schema = response_schema
+        self._response_schema_tracking = response_schema_tracking
+        self._flow_id = flow_id
+        self._flow_type = flow_type
+        self._internal_event_client = internal_event_client
 
     async def run(self, state: FlowState) -> dict:
         last_message = self._get_last_ai_message(state)
@@ -93,6 +113,9 @@ class FinalResponseNode:
 
         parsed_response = self._response_schema(**final_response_call["args"])
 
+        if self._response_schema_tracking:
+            self._track_response_schema_output(parsed_response)
+
         updates: dict = {
             FlowStateKeys.CONVERSATION_HISTORY: {
                 self._component_name: [
@@ -126,3 +149,44 @@ class FinalResponseNode:
                 updates[self._output.target] = final_response_text
 
         return final_response_text, updates
+
+    def _track_response_schema_output(self, parsed_response: BaseAgentOutput) -> None:
+        output_data = parsed_response.to_output()
+        flow_type_value = self._flow_type.value if self._flow_type else "unknown"
+
+        log.info(
+            "Response schema output tracked",
+            component_name=self._component_name,
+            flow_id=self._flow_id,
+            flow_type=flow_type_value,
+            response_output=output_data,
+        )
+
+        duo_workflow_metrics.count_response_schema_output(
+            flow_type=flow_type_value,
+            component_name=self._component_name,
+        )
+
+        if self._internal_event_client and self._flow_type:
+            extra = {}
+            if isinstance(output_data, dict):
+                extra = {field: str(value) for field, value in output_data.items()}
+
+            additional_properties = InternalEventAdditionalProperties(
+                label=self._component_name,
+                property=json.dumps(output_data, default=str),
+                value=self._flow_id,
+                **extra,
+            )
+            self._internal_event_client.track_event(
+                event_name=EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT.value,
+                additional_properties=additional_properties,
+                category=flow_type_value,
+            )
+
+        # Store in ContextVar for access by the checkpointer at workflow completion.
+        # Mutate the dict in-place so changes are visible to the parent async task
+        # (ContextVar.set() in a child task only affects that task's context copy).
+        current_results = response_schema_tracking_results.get()
+        if current_results is not None:
+            current_results[self._component_name] = output_data

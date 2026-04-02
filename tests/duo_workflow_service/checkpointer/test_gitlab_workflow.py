@@ -1723,3 +1723,64 @@ async def test_stalled_workflow_raises_error(
     assert "Stalled workflow can not be executed. Please create a new workflow." in str(
         exc_info.value
     )
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_includes_response_schema_tracking(
+    gitlab_workflow,
+    internal_event_client: Mock,
+):
+    """Test that completion event includes response schema tracking data from ContextVar."""
+    from duo_workflow_service.tracking.response_schema_tracking_context import (
+        response_schema_tracking_results,
+    )
+
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_client = Mock()
+
+    token = response_schema_tracking_results.set(
+        {
+            "fix_pipeline_decide_approach": {
+                "failure_category": "test_failure",
+                "suggested_fix_type": "code_fix",
+            }
+        }
+    )
+    try:
+        await gitlab_workflow._track_workflow_completion("finished")
+    finally:
+        response_schema_tracking_results.reset(token)
+
+    internal_event_client.track_event.assert_called_once()
+    call_kwargs = internal_event_client.track_event.call_args[1]
+    additional_props = call_kwargs["additional_properties"]
+
+    assert additional_props.extra["fix_pipeline_decide_approach_output"] == json.dumps(
+        {"failure_category": "test_failure", "suggested_fix_type": "code_fix"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_omits_tracking_when_absent(
+    gitlab_workflow,
+    internal_event_client: Mock,
+):
+    """Test that completion event has no tracking data when no components tracked."""
+    from duo_workflow_service.tracking.response_schema_tracking_context import (
+        response_schema_tracking_results,
+    )
+
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_client = Mock()
+
+    token = response_schema_tracking_results.set({})
+    try:
+        await gitlab_workflow._track_workflow_completion("finished")
+    finally:
+        response_schema_tracking_results.reset(token)
+
+    internal_event_client.track_event.assert_called_once()
+    call_kwargs = internal_event_client.track_event.call_args[1]
+    additional_props = call_kwargs["additional_properties"]
+
+    assert "fix_pipeline_decide_approach_output" not in additional_props.extra

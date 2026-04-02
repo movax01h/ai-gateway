@@ -81,6 +81,7 @@ class AgentComponent(BaseComponent):
     compaction: Union[CompactionConfig, bool] = False
     response_schema_id: Optional[str] = None
     response_schema_version: Optional[str] = None
+    response_schema_tracking: bool = False
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -111,6 +112,11 @@ class AgentComponent(BaseComponent):
             raise ValueError(
                 "response_schema_id and response_schema_version must be provided together. "
                 "Either provide both or omit both for default text-only mode."
+            )
+
+        if self.response_schema_tracking and not self.response_schema_id:
+            raise ValueError(
+                "response_schema_tracking requires response_schema_id to be set."
             )
 
         # Resolve the response schema
@@ -312,6 +318,10 @@ class AgentComponent(BaseComponent):
                 ),
             ),
             response_schema=self._response_schema,
+            response_schema_tracking=self.response_schema_tracking,
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
         )
 
         graph.add_node(self.__entry_hook__(), node_agent.run)

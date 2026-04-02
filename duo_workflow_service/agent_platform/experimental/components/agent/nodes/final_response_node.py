@@ -1,5 +1,7 @@
+import json
 from typing import Optional, Type
 
+import structlog
 from langchain_core.messages import AIMessage, ToolMessage
 
 from ai_gateway.response_schemas.base import BaseAgentOutput
@@ -15,8 +17,18 @@ from duo_workflow_service.agent_platform.experimental.ui_log import (
     DefaultUILogWriter,
     UIHistory,
 )
+from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.tracking.response_schema_tracking_context import (
+    response_schema_tracking_results,
+)
+from lib.events import GLReportingEventContext
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["FinalResponseNode"]
+
+log = structlog.stdlib.get_logger("final_response_node")
 
 
 class FinalResponseNode:
@@ -48,12 +60,22 @@ class FinalResponseNode:
         response_schema: Optional[Type[BaseAgentOutput]] = None,
         conversation_history_key: RuntimeIOKey,
         output_key: RuntimeIOKey,
+        response_schema_tracking: bool = False,
+        component_name: Optional[str] = None,
+        flow_id: Optional[str] = None,
+        flow_type: Optional[GLReportingEventContext] = None,
+        internal_event_client: Optional[InternalEventsClient] = None,
     ):
         self.name = name
         self._ui_history = ui_history
         self._response_schema = response_schema
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
+        self._response_schema_tracking = response_schema_tracking
+        self._component_name = component_name
+        self._flow_id = flow_id
+        self._flow_type = flow_type
+        self._internal_event_client = internal_event_client
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -133,6 +155,9 @@ class FinalResponseNode:
 
         parsed_response = self._response_schema(**final_response_call["args"])
 
+        if self._response_schema_tracking:
+            self._track_response_schema_output(parsed_response)
+
         # Append ToolMessage completion response to existing history for replace-based reducer.
         # The reducer will replace this component's conversation history with the complete list.
         updates: dict = {
@@ -153,3 +178,45 @@ class FinalResponseNode:
         final_response_text = last_message.text
 
         return final_response_text, output_iokey.to_nested_dict(final_response_text)
+
+    def _track_response_schema_output(self, parsed_response: BaseAgentOutput) -> None:
+        output_data = parsed_response.to_output()
+        flow_type_value = self._flow_type.value if self._flow_type else "unknown"
+        component_name = self._component_name or self.name
+
+        log.info(
+            "Response schema output tracked",
+            component_name=component_name,
+            flow_id=self._flow_id,
+            flow_type=flow_type_value,
+            response_output=output_data,
+        )
+
+        duo_workflow_metrics.count_response_schema_output(
+            flow_type=flow_type_value,
+            component_name=component_name,
+        )
+
+        if self._internal_event_client and self._flow_type:
+            extra = {}
+            if isinstance(output_data, dict):
+                extra = {field: str(value) for field, value in output_data.items()}
+
+            additional_properties = InternalEventAdditionalProperties(
+                label=component_name,
+                property=json.dumps(output_data, default=str),
+                value=self._flow_id,
+                **extra,
+            )
+            self._internal_event_client.track_event(
+                event_name=EventEnum.WORKFLOW_RESPONSE_SCHEMA_OUTPUT.value,
+                additional_properties=additional_properties,
+                category=flow_type_value,
+            )
+
+        # Store in ContextVar for access by the checkpointer at workflow completion.
+        # Mutate the dict in-place so changes are visible to the parent async task
+        # (ContextVar.set() in a child task only affects that task's context copy).
+        current_results = response_schema_tracking_results.get()
+        if current_results is not None:
+            current_results[component_name] = output_data

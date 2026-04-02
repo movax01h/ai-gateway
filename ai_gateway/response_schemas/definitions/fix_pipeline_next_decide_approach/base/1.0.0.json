@@ -1,9 +1,40 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "fix_pipeline_next_decide_approach_response",
-    "description": "Response schema for the fix_pipeline_next_decide_approach agent that decides the approach for fixing a pipeline.",
+    "description": "Response schema for the fix_pipeline_next_decide_approach agent that classifies pipeline failures and decides the approach for fixing a pipeline.",
     "type": "object",
     "properties": {
+        "failure_category": {
+            "type": "string",
+            "description": "The category of the pipeline failure. Use the most specific category that fits.",
+            "enum": [
+                "runner_system_failure",
+                "environment_failure",
+                "network_failure",
+                "permissions_failure",
+                "resource_limit_failure",
+                "ci_config_error",
+                "test_failure",
+                "lint_failure",
+                "build_failure",
+                "dependency_failure",
+                "insufficient_context",
+                "security_sensitive",
+                "unknown_failure"
+            ]
+        },
+        "suggested_fix_type": {
+            "type": "string",
+            "description": "The suggested type of fix for the pipeline failure.",
+            "enum": [
+                "code_fix",
+                "update_ci_config",
+                "update_dependencies",
+                "retry_job",
+                "comment_only",
+                "no_action"
+            ]
+        },
         "decision": {
             "type": "string",
             "description": "Use 'create_fix_on_new_mr' when confident a fix can be created and no merge_request_url is present. Use 'create_fix_on_existing_mr' when confident a fix can be created and a merge_request_url is present. Use 'add_comment' when not confident or unable to create a fix.",
@@ -11,5 +42,5 @@
             "examples": ["add_comment", "create_fix_on_new_mr", "create_fix_on_existing_mr"]
         }
     },
-    "required": ["decision"]
+    "required": ["failure_category", "suggested_fix_type", "decision"]
 }
