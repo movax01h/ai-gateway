@@ -25,7 +25,7 @@ message ClientEvent {
 message StartWorkflowRequest {
     string clientVersion = 1;
     string workflowID = 2;
-    string workflowDefinition = 3;
+    string workflowDefinition = 3 [deprecated = true]; // Use flowConfigId + flowConfigSchemaVersion + flowVersion instead
     string goal = 4;
     string workflowMetadata = 5;
     repeated string clientCapabilities = 6;
@@ -34,8 +34,10 @@ message StartWorkflowRequest {
     repeated AdditionalContext additional_context = 9 [json_name = "additional_context"];
     optional Approval approval = 10;
     optional google.protobuf.Struct flowConfig = 11;
-    optional string flowConfigSchemaVersion = 12;
+    optional string flowConfigSchemaVersion = 12; // Platform version: "v1" or "experimental". Required with flowConfigId.
     repeated string preapproved_tools = 13 [json_name = "preapproved_tools"];
+    optional string flowConfigId = 14;    // Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
+    optional string flowVersion = 15;     // Semver flow version, e.g. "1.0.0". Required when flowConfigId is set.
 }
 
 message ActionResponse {

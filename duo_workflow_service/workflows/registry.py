@@ -13,6 +13,7 @@ from typing import (
     overload,
 )
 
+import structlog
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
@@ -29,12 +30,17 @@ from duo_workflow_service.agent_platform.experimental.flows import (
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
-from duo_workflow_service.agent_platform.utils import parse_workflow_definition
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.agent_platform.v1.flows import (
     PartialFlowConfig as V1PartialFlowConfig,
+)
+from duo_workflow_service.flow_request import (
+    FlowRequest,
+    InlineFlowRequest,
+    LegacyWorkflowRequest,
+    RegistryFlowRequest,
 )
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.prompt_security import PromptSecurity
@@ -48,6 +54,8 @@ from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TypeWorkflow,
 )
+
+log = structlog.stdlib.get_logger("registry")
 
 current_directory = Path(__file__).parent
 _WORKFLOWS: list[TypeWorkflow] = [
@@ -307,61 +315,99 @@ def get_flow_classes(
     return flow_config_cls, flow_cls
 
 
-def resolve_workflow_class(
-    workflow_definition: Optional[str],
-    flow_config: Optional[struct_pb2.Struct] = None,
-    flow_config_schema_version: Optional[str] = None,
+def _load_flow_from_registry(
+    config_id: str,
+    schema_version: str,
+    version: str,
 ) -> FlowFactory:
-    """Resolve a workflow class based on definition or FlowConfig protobuf.
+    """Load and instantiate a flow from a YAML config file.
 
     Args:
-        workflow_definition: The workflow definition string (legacy approach)
-        flow_config: the protobuf Struct containing flow config data
-        flow_config_schema_version: version of the flow that's provided
-        by default it's "experimental"
-
-    Returns:
-        A FlowFactory callable that creates workflow instances
+        config_id: Flow name (e.g. "developer").
+        schema_version: Platform version — "v1" or "experimental".
+        version: Semver flow version (e.g. "1.0.0").
 
     Raises:
-        ValueError: If workflow cannot be resolved or is invalid
+        ValueError: If schema_version is unsupported or the flow cannot be loaded.
+                    Path traversal is enforced by _safe_resolve inside from_yaml_config.
     """
-    if flow_config and flow_config_schema_version:
-        try:
-            config_dict: Dict[str, Any] = MessageToDict(flow_config)
-            flow_config_cls, flow_cls = get_flow_classes(
-                flow_config_schema_version, config_dict.get("environment", None)
-            )
-            config = _convert_struct_to_flow_config(
-                struct=flow_config,
-                flow_config_schema_version=flow_config_schema_version,
-                flow_config_cls=flow_config_cls,
-            )
-            return flow_factory(flow_cls, config)
-        except Exception as e:
-            raise ValueError(
-                f"Failed to create flow from FlowConfig protobuf: {e}"
-            ) from e
+    if schema_version not in _FLOW_BY_VERSIONS:
+        log.warning(
+            "Unknown flow config schema version requested",
+            schema_version=schema_version,
+            config_id=config_id,
+            supported_versions=list(_FLOW_BY_VERSIONS.keys()),
+        )
+        raise ValueError(f"Invalid flowConfigSchemaVersion: '{schema_version}'.")
 
-    if not workflow_definition:
-        # backward compatibility for old GitLab instances
-        return software_development.Workflow
-
-    if workflow_definition in _WORKFLOWS_LOOKUP:
-        return _WORKFLOWS_LOOKUP[workflow_definition]
-
-    flow_version, flow_config_path = parse_workflow_definition(workflow_definition)
-
-    if flow_version not in _FLOW_BY_VERSIONS:
-        raise ValueError(f"Unknown Flow version: {flow_version}")
+    flow_config_cls, flow_cls = get_flow_classes(schema_version)
 
     try:
-        flow_config_cls, flow_cls = get_flow_classes(flow_version)
-        config = flow_config_cls.from_yaml_config(flow_config_path)
-
+        config = flow_config_cls.from_yaml_config(config_id, version)
         return flow_factory(flow_cls, config)
-    except Exception:
-        raise ValueError(f"Unknown Flow: {workflow_definition}")
+    except FileNotFoundError as e:
+        raise ValueError(
+            f"Unknown flow: {config_id}/{schema_version} (version {version} not found)"
+        ) from e
+    except Exception as e:
+        log.warning(
+            "Failed to load flow config",
+            config_id=config_id,
+            schema_version=schema_version,
+            version=version,
+            error=str(e),
+        )
+        raise ValueError(
+            f"Failed to load flow {config_id}/{schema_version} (version {version})"
+        ) from e
+
+
+def _load_flow_from_inline_config(
+    config_struct: struct_pb2.Struct,
+    schema_version: str,
+) -> FlowFactory:
+    """Create a flow from an inline protobuf Struct config."""
+    try:
+        config_dict: Dict[str, Any] = MessageToDict(config_struct)
+        flow_config_cls, flow_cls = get_flow_classes(
+            schema_version, config_dict.get("environment", None)
+        )
+        config = _convert_struct_to_flow_config(
+            struct=config_struct,
+            flow_config_schema_version=schema_version,
+            flow_config_cls=flow_config_cls,
+        )
+        return flow_factory(flow_cls, config)
+    except Exception as e:
+        raise ValueError(f"Failed to create flow from FlowConfig protobuf: {e}") from e
+
+
+def resolve_flow(flow_request: FlowRequest) -> FlowFactory:
+    """Resolve a validated FlowRequest to a callable that creates workflow instances.
+
+    All input validation has already been performed by ``normalize_flow_request``.
+    This function only handles resolution — it does not validate field combinations.
+    """
+    if isinstance(flow_request, RegistryFlowRequest):
+        return _load_flow_from_registry(
+            flow_request.config_id,
+            flow_request.schema_version,
+            flow_request.version,
+        )
+
+    if isinstance(flow_request, InlineFlowRequest):
+        return _load_flow_from_inline_config(
+            flow_request.config_struct,
+            flow_request.schema_version,
+        )
+
+    if isinstance(flow_request, LegacyWorkflowRequest):
+        if flow_request.workflow_definition in _WORKFLOWS_LOOKUP:
+            return _WORKFLOWS_LOOKUP[flow_request.workflow_definition]
+        # Backward compatibility for old GitLab instances with no workflow definition.
+        return software_development.Workflow
+
+    raise ValueError(f"Unknown flow request type: {type(flow_request)}")
 
 
 def list_configs():

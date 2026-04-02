@@ -288,7 +288,7 @@ class TestFlowConfig:
         with pytest.raises(FileNotFoundError) as exc_info:
             FlowConfig.from_yaml_config("nonexistent")
 
-        assert "nonexistent file not found" in str(exc_info.value)
+        assert "nonexistent/1.0.0 file not found" in str(exc_info.value)
 
     def test_flowconfig_from_yaml_config_invalid_yaml(self, tmp_path):
         """Test loading invalid YAML raises YAMLError."""

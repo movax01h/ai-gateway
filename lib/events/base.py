@@ -1,7 +1,9 @@
 from enum import StrEnum
 from typing import Self
 
-from duo_workflow_service.agent_platform.utils import parse_workflow_definition
+from duo_workflow_service.agent_platform.utils import (
+    parse_deprecated_workflow_definition,
+)
 
 
 class FeatureQualifiedNameStatic(StrEnum):
@@ -145,7 +147,7 @@ class GLReportingEventContext:
             value = "software_development"
 
         try:
-            _, legacy_workflow_type = parse_workflow_definition(value)
+            _, legacy_workflow_type = parse_deprecated_workflow_definition(value)
             new_flow_type = value
         except ValueError:
             legacy_workflow_type = value

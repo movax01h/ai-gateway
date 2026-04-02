@@ -28,7 +28,6 @@ logger = structlog.stdlib.get_logger(__name__)
 
 INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
 DEFAULT_FLOW_VERSION = "1.0.0"
-_DEFAULT_FLOW_VERSION = DEFAULT_FLOW_VERSION  # backward-compat alias
 
 
 def _safe_resolve(path: Path, base_path: Path) -> Path:
@@ -103,19 +102,25 @@ class BaseFlowConfig(BaseModel):
         return json_schemas_by_category
 
     @classmethod
-    def from_yaml_config(cls, path: str) -> Self:
+    def from_yaml_config(cls, flow_id: str, flow_version: Optional[str] = None) -> Self:
+        """Load a flow config from its YAML file.
+
+        Args:
+            flow_id: Flow name (e.g. "developer").
+            flow_version: Explicit version (e.g. "2.0.0"). None uses the default (1.0.0).
+                Path traversal is prevented by _safe_resolve.
+        """
+        version = flow_version or DEFAULT_FLOW_VERSION
         try:
             base_path = cls.DIRECTORY_PATH.resolve()
-            yaml_path = _safe_resolve(
-                base_path / path / f"{_DEFAULT_FLOW_VERSION}.yml", base_path
-            )
-
+            yaml_path = _safe_resolve(base_path / flow_id / f"{version}.yml", base_path)
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)
-
             return cls(**yaml_content)
         except FileNotFoundError:
-            raise FileNotFoundError(f"{path} file not found in {cls.DIRECTORY_PATH}")
+            raise FileNotFoundError(
+                f"{flow_id}/{version} file not found in {cls.DIRECTORY_PATH}"
+            )
         except yaml.YAMLError as e:
             raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
 
@@ -132,10 +137,9 @@ def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, s
         List of dicts containing flow metadata and JSON-serialized configuration.
     """
     configs = []
-    for config_file in flow_config_cls.DIRECTORY_PATH.glob(
-        f"*/{_DEFAULT_FLOW_VERSION}.yml"
-    ):
+    for config_file in flow_config_cls.DIRECTORY_PATH.glob("*/*.yml"):
         flow_name = config_file.parent.name
+        flow_version = config_file.stem  # e.g. "1.0.0" from "1.0.0.yml"
         try:
             base_path = flow_config_cls.DIRECTORY_PATH.resolve()
             yaml_path = _safe_resolve(config_file, base_path)
@@ -147,6 +151,7 @@ def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, s
             configs.append(
                 {
                     "flow_identifier": flow_name,
+                    "flow_version": flow_version,
                     "version": config.version,
                     "environment": config.environment,
                     "config": json.dumps(config_data, indent=2),

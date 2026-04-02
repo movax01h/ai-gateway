@@ -28,6 +28,7 @@ from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
 from duo_workflow_service import server as server_module
 from duo_workflow_service.executor.outbox import OutboxSignal
+from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import (
     DuoWorkflowService,
@@ -466,12 +467,12 @@ async def test_list_flows_with_filters(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_when_no_events_ends(
-    mock_resolve_workflow,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
 ):
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -500,12 +501,12 @@ async def test_execute_workflow_when_no_events_ends(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_when_message_too_large_cancels_workflow(
-    mock_resolve_workflow,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
 ):
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -549,15 +550,15 @@ async def test_execute_workflow_when_message_too_large_cancels_workflow(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_when_nothing_in_outbox(
-    mock_resolve_workflow, mock_abstract_workflow_class
+    mock_resolve_flow, mock_abstract_workflow_class
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     def side_effect():
         mock_workflow.is_done = True
@@ -585,9 +586,9 @@ async def test_execute_workflow_when_nothing_in_outbox(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_workflow_is_cancelled_on_parent_task_cancellation(
-    mock_resolve_workflow, mock_abstract_workflow_class
+    mock_resolve_flow, mock_abstract_workflow_class
 ):
     """Test that workflow task is properly cancelled when parent task is cancelled."""
     mock_workflow = mock_abstract_workflow_class.return_value
@@ -595,7 +596,7 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
     mock_workflow.last_gitlab_status = "running"
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     mock_workflow.get_from_outbox = AsyncMock(
         side_effect=asyncio.CancelledError("Task cancelled")
@@ -708,9 +709,9 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
 )
 @patch("duo_workflow_service.server.current_monitoring_context")
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_status_codes(
-    mock_resolve_workflow,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
     mock_current_monitoring_context,
     workflow_error,
@@ -730,7 +731,7 @@ async def test_execute_workflow_status_codes(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     mock_monitoring_context = MagicMock()
     mock_monitoring_context.workflow_stop_reason = stop_reason
@@ -784,11 +785,11 @@ async def test_execute_workflow_status_codes(
     ],
 )
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 @patch("duo_workflow_service.server.log_exception")
 async def test_execute_workflow_cancellation_handling(
     mock_log_exception,
-    mock_resolve_workflow,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
     cancel_error_message,
     expected_status,
@@ -810,7 +811,7 @@ async def test_execute_workflow_cancellation_handling(
     mock_workflow.get_from_outbox = AsyncMock(
         side_effect=asyncio.CancelledError(cancel_error_message)
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -847,7 +848,7 @@ async def test_execute_workflow_cancellation_handling(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 @pytest.mark.parametrize(
     ("unidirectional_streaming_enabled", "request_iterator_count"),
     [
@@ -856,7 +857,7 @@ async def test_execute_workflow_cancellation_handling(
     ],
 )
 async def test_execute_workflow(
-    mock_resolve_workflow,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
     unidirectional_streaming_enabled,
     request_iterator_count,
@@ -891,7 +892,7 @@ async def test_execute_workflow(
             OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
         ]
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -1403,9 +1404,9 @@ async def test_signal_handler_sets_not_serving_on_shutdown(signal_type):
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_missing_workflow_metadata(
-    mock_resolve_workflow, mock_abstract_workflow_class
+    mock_resolve_flow, mock_abstract_workflow_class
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
@@ -1416,7 +1417,7 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -1457,9 +1458,9 @@ async def test_execute_workflow_missing_workflow_metadata(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_valid_workflow_metadata(
-    mock_resolve_workflow, mock_abstract_workflow_class
+    mock_resolve_flow, mock_abstract_workflow_class
 ):
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
@@ -1469,7 +1470,7 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
     mcp_tools = [
         contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
     ]
@@ -1781,11 +1782,11 @@ async def test_track_self_hosted_execute_workflow_billing_event(_mock_container)
     ],
 )
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 @patch("duo_workflow_service.server.language_server_version")
 async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     mock_language_server_version,
-    mock_resolve_workflow,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
     request,
     flow_config_name,
@@ -1804,7 +1805,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     flow_config = request.getfixturevalue(flow_config_name)
     flow_config_struct = struct_pb2.Struct()
@@ -1836,15 +1837,23 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     with pytest.raises(StopAsyncIteration):
         await anext(result)
 
-    mock_resolve_workflow.assert_called_once_with("test", flow_config, expected_version)
+    expected_struct = struct_pb2.Struct()
+    expected_struct.update(flow_config)
+    mock_resolve_flow.assert_called_once_with(
+        InlineFlowRequest(
+            config_struct=expected_struct,
+            schema_version=expected_version,
+            workflow_definition="test",
+        )
+    )
 
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.duo_workflow_metrics")
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_tracks_receive_start_request_internal_event(
-    mock_resolve_workflow, mock_abstract_workflow_class, mock_duo_workflow_metrics
+    mock_resolve_flow, mock_abstract_workflow_class, mock_duo_workflow_metrics
 ):
     """Test that both the receive_start_request internal event and Prometheus metric are tracked when ExecuteWorkflow is
     called."""
@@ -1856,7 +1865,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -1990,18 +1999,23 @@ async def test_send_events_sends_skips_checkpoint_if_already_sent():
         ("security_analyst_agent/v1", "security_analyst_agent/v1"),
         ("chat", "chat"),
         ("software_development", "software_development"),
-        ("", ""),
+        (
+            "",
+            "software_development",
+        ),  # empty defaults to software_development via normalization
     ],
 )
 @patch("duo_workflow_service.server.AbstractWorkflow")
-@patch("duo_workflow_service.server.resolve_workflow_class")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.GLReportingEventContext")
 async def test_workflow_definition_mapping(
-    mock_resolve_workflow,
+    mock_gl_event_context_cls,
+    mock_resolve_flow,
     mock_abstract_workflow_class,
     workflow_definition,
     expected_mapped_definition,
 ):
-    """Integration test: verify workflow definitions are mapped before resolution in ExecuteWorkflow."""
+    """Integration test: verify experimental→v1 mapping is applied before billing/metrics."""
     # Setup mocks
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
@@ -2010,7 +2024,10 @@ async def test_workflow_definition_mapping(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_gl_event_context_cls.from_workflow_definition.return_value = MagicMock(
+        value="test"
+    )
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -2040,10 +2057,134 @@ async def test_workflow_definition_mapping(
     with pytest.raises(StopAsyncIteration):
         await anext(result)
 
-    # Verify resolve_workflow_class was called with the MAPPED definition
-    mock_resolve_workflow.assert_called_once()
-    called_workflow_def = mock_resolve_workflow.call_args[0][0]
-    assert called_workflow_def == expected_mapped_definition, (
-        f"Expected workflow definition '{workflow_definition}' to be mapped to "
-        f"'{expected_mapped_definition}', but resolve_workflow_class was called with '{called_workflow_def}'"
+    # Verify the MAPPED definition was passed to GLReportingEventContext (billing/metrics)
+    mock_gl_event_context_cls.from_workflow_definition.assert_called_once_with(
+        expected_mapped_definition, False
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_flow_config_id_happy_path(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+):
+    """Server resolves flowConfigId + flowConfigSchemaVersion + flowVersion correctly."""
+    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="test-id",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                goal="test goal",
+            )
+        )
+
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.invocation_metadata.return_value = []
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once_with(
+        RegistryFlowRequest(config_id="developer", schema_version="v1", version="1.0.0")
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_flow_config_id_and_flow_config_conflict(
+    mock_resolve_flow,
+):
+    """Server returns INVALID_ARGUMENT when both flowConfigId and flowConfig are set."""
+    flow_config = struct_pb2.Struct()
+    flow_config.update({"version": "v1", "environment": "test"})
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="test-id",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                flowConfig=flow_config,
+                goal="test",
+            )
+        )
+
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.abort.side_effect = grpc.RpcError("Aborted")
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    # Validation fails before resolution — resolve_flow should never be called
+    mock_resolve_flow.assert_not_called()
+    mock_context.abort.assert_called_once()
+    assert mock_context.abort.call_args[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    assert "mutually exclusive" in mock_context.abort.call_args[0][1]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_value_error_from_resolve_returns_invalid_argument(
+    mock_resolve_flow,
+):
+    """ValueError from resolve_flow surfaces as INVALID_ARGUMENT, not INTERNAL."""
+    mock_resolve_flow.side_effect = ValueError("Unknown flow: bad/v1")
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="test-id",
+                workflowDefinition="software_development",
+                goal="test",
+            )
+        )
+
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    mock_context.abort.side_effect = grpc.RpcError("Aborted")
+    mock_context.invocation_metadata.return_value = []
+    servicer = DuoWorkflowService()
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    mock_context.abort.assert_called()
+    abort_calls = [
+        c
+        for c in mock_context.abort.call_args_list
+        if c[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    ]
+    assert len(abort_calls) > 0, "Expected INVALID_ARGUMENT abort"

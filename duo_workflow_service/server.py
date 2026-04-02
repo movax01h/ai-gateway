@@ -18,7 +18,6 @@ from gitlab_cloud_connector import (
     TokenAuthority,
     data_model,
 )
-from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
@@ -32,6 +31,7 @@ from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.executor.outbox import OutboxSignal
+from duo_workflow_service.flow_request import normalize_flow_request
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
@@ -78,7 +78,7 @@ from duo_workflow_service.tracking import MonitoringContext, current_monitoring_
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
-from duo_workflow_service.workflows.registry import FlowFactory, resolve_workflow_class
+from duo_workflow_service.workflows.registry import FlowFactory, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
@@ -166,12 +166,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             aiter(request_iterator)
         )
 
-        client_capabilities.set(
-            set(start_workflow_request.startRequest.clientCapabilities)
-        )
+        start_req = start_workflow_request.startRequest
+
+        client_capabilities.set(set(start_req.clientCapabilities))
+
+        try:
+            flow_request = normalize_flow_request(
+                start_req, language_server_version.get()
+            )
+        except ValueError as e:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
         workflow_definition = map_workflow_definition(
-            start_workflow_request.startRequest.workflowDefinition
+            flow_request.to_legacy_identifier()
         )
         unit_primitive = choose_unit_primitive(workflow_definition)
         legacy_unit_primitive = choose_legacy_unit_primitive(workflow_definition)
@@ -193,7 +200,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         monitoring_context: MonitoringContext = current_monitoring_context.get()
 
-        workflow_id = start_workflow_request.startRequest.workflowID
+        workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)
 
         log.info(
@@ -202,7 +209,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             extra=build_logging_context(workflow_id, workflow_definition),
         )
 
-        flow_config = start_workflow_request.startRequest.flowConfig
+        flow_config = start_req.flowConfig
         gl_event_context = GLReportingEventContext.from_workflow_definition(
             workflow_definition, bool(flow_config)
         )
@@ -220,9 +227,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             category=gl_event_context.value,
         )
 
-        goal = start_workflow_request.startRequest.goal
+        goal = start_req.goal
 
-        if start_workflow_request.startRequest.additional_context:
+        if start_req.additional_context:
             additional_context = [
                 AdditionalContext(
                     category=e.category,
@@ -230,7 +237,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     content=e.content,
                     metadata=json.loads(e.metadata),
                 )
-                for e in start_workflow_request.startRequest.additional_context
+                for e in start_req.additional_context
             ]
         else:
             additional_context = None
@@ -238,28 +245,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow_metadata = {}
         monitoring_context.workflow_id = workflow_id
         monitoring_context.workflow_definition = workflow_definition
-        if start_workflow_request.startRequest.workflowMetadata:
-            workflow_metadata = json.loads(
-                start_workflow_request.startRequest.workflowMetadata
-            )
+        if start_req.workflowMetadata:
+            workflow_metadata = json.loads(start_req.workflowMetadata)
 
         mcp_tools = []
-        if start_workflow_request.startRequest.mcpTools:
-            mcp_tools = list(start_workflow_request.startRequest.mcpTools)
-
-        flow_config_schema_version = (
-            start_workflow_request.startRequest.flowConfigSchemaVersion or None
-        )
-
-        lsp_version = language_server_version.get()
-
-        if not lsp_version or lsp_version.ignore_broken_flow_schema_version():
-            flow_config_schema_version = MessageToDict(flow_config).get("version")
+        if start_req.mcpTools:
+            mcp_tools = list(start_req.mcpTools)
 
         try:
-            workflow_class: FlowFactory = resolve_workflow_class(
-                workflow_definition, flow_config, flow_config_schema_version
-            )
+            workflow_class: FlowFactory = resolve_flow(flow_request)
         except SecurityException as e:
             log.error(
                 "Flow config security validation failed",
@@ -271,6 +265,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 grpc.StatusCode.CANCELLED,
                 f"Flow configuration failed security validation: {str(e)}",
             )
+        except ValueError as e:
+            log.error(
+                "Flow resolution failed",
+                workflow_id=workflow_id,
+                workflow_definition=workflow_definition,
+                error=str(e),
+            )
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
         workflow: AbstractWorkflow = workflow_class(
             workflow_id=workflow_id,
@@ -280,7 +282,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             mcp_tools=mcp_tools,
             additional_context=additional_context,
             approval=start_workflow_request.startRequest.approval,
-            language_server_version=lsp_version,
+            language_server_version=language_server_version.get(),
             preapproved_tools=list(
                 start_workflow_request.startRequest.preapproved_tools
             ),

@@ -12,7 +12,8 @@ pre-commit:
       run: |
         MYPY_SAFE_FILES=$(poetry run python scripts/filter_mypy_excludes.py {staged_files})
 
-        export STAGED_FILES="$(echo '{staged_files}')"
+        # Filter out auto-generated protobuf files that cannot be linted
+        export STAGED_FILES="$(echo '{staged_files}' | tr ' ' '\n' | grep -v 'contract_pb2\.py' | tr '\n' ' ')"
 
         # Run mypy separately with filtered files
         if [[ -n "$MYPY_SAFE_FILES" ]]; then
