@@ -428,20 +428,10 @@ class ListAllMergeRequestNotes(DuoBaseTool):
                 f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
                 f"{validation_result.merge_request_iid}/notes"
             )
-            response = await self.gitlab_client.aget(
-                path=path,
-                parse_json=False,
-            )
-
-            if not response.is_success():
-                log.error(
-                    "Failed to fetch merge request notes: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
-
-            return json.dumps({"notes": response.body})
+            notes = await self._paginate_get(path)
+            return json.dumps({"notes": notes})
         except Exception as e:
+            log.error("Failed to fetch merge request notes: %s", e)
             return json.dumps({"error": str(e)})
 
     def format_display_message(

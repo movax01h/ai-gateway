@@ -474,10 +474,14 @@ async def test_get_discussion_id_from_note_rest_api_failure(
     """Test when API call fails."""
     mock_response = Mock()
     mock_response.is_success.return_value = False
+    mock_response.status_code = 500
 
     gitlab_client_mock.aget.return_value = mock_response
 
-    with pytest.raises(ToolException, match="Failed to fetch issues discussions"):
+    with pytest.raises(
+        ToolException,
+        match=r"Failed to fetch /api/v4/projects/123/issues/42/discussions",
+    ):
         await tool_with_client._get_discussion_id_from_note_rest(
             project_id="123",
             resource_type="issues",
@@ -505,11 +509,13 @@ async def test_get_discussion_id_from_note_rest_api_failure_mid_pagination(
 
     mock_response_page2 = Mock()
     mock_response_page2.is_success.return_value = False
+    mock_response_page2.status_code = 500
 
     gitlab_client_mock.aget.side_effect = [mock_response_page1, mock_response_page2]
 
     with pytest.raises(
-        ToolException, match="Failed to fetch merge_requests discussions"
+        ToolException,
+        match=r"Failed to fetch /api/v4/projects/123/merge_requests/42/discussions",
     ):
         await tool_with_client._get_discussion_id_from_note_rest(
             project_id="123",
@@ -648,3 +654,171 @@ def test_apply_tool_options_different_tool_name():
     result = tool._apply_tool_options(kwargs)
 
     assert result["flag"] is False
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_single_page(tool_with_client, gitlab_client_mock):
+    """All items fit on one page; no further requests are made."""
+    items = [{"id": 1}, {"id": 2}]
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = json.dumps(items)
+    mock_response.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._paginate_get("/api/v4/projects/1/issues/2/notes")
+
+    assert result == items
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/1/issues/2/notes",
+        params={"page": "1", "per_page": 100},
+        parse_json=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_multiple_pages(tool_with_client, gitlab_client_mock):
+    """Items span multiple pages; all are collected in order."""
+    page1 = [{"id": 1}, {"id": 2}]
+    page2 = [{"id": 3}]
+
+    mock_page1 = Mock()
+    mock_page1.is_success.return_value = True
+    mock_page1.body = json.dumps(page1)
+    mock_page1.headers = {"X-Next-Page": "2"}
+
+    mock_page2 = Mock()
+    mock_page2.is_success.return_value = True
+    mock_page2.body = json.dumps(page2)
+    mock_page2.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.side_effect = [mock_page1, mock_page2]
+
+    result = await tool_with_client._paginate_get("/api/v4/projects/1/issues/2/notes")
+
+    assert result == page1 + page2
+    assert gitlab_client_mock.aget.call_count == 2
+    gitlab_client_mock.aget.assert_any_call(
+        path="/api/v4/projects/1/issues/2/notes",
+        params={"page": "1", "per_page": 100},
+        parse_json=False,
+    )
+    gitlab_client_mock.aget.assert_any_call(
+        path="/api/v4/projects/1/issues/2/notes",
+        params={"page": "2", "per_page": 100},
+        parse_json=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_extra_params(tool_with_client, gitlab_client_mock):
+    """Extra query parameters are forwarded on every request."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = json.dumps([{"id": 1}])
+    mock_response.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    await tool_with_client._paginate_get(
+        "/api/v4/projects/1/notes",
+        extra_params={"sort": "asc"},
+    )
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/1/notes",
+        params={"page": "1", "per_page": 100, "sort": "asc"},
+        parse_json=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_non_success_response_raises(
+    tool_with_client, gitlab_client_mock
+):
+    """A non-success HTTP response raises ToolException."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = False
+    mock_response.status_code = 403
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    with pytest.raises(
+        ToolException,
+        match=r"Failed to fetch /api/v4/projects/1/notes: HTTP 403",
+    ):
+        await tool_with_client._paginate_get("/api/v4/projects/1/notes")
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_max_pages_safety_net(tool_with_client, gitlab_client_mock):
+    """Pagination stops after max_pages even if the server keeps returning a next page."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = json.dumps([{"id": 1}])
+    # Always signal another page to simulate a misbehaving server
+    mock_response.headers = {"X-Next-Page": "2"}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._paginate_get(
+        "/api/v4/projects/1/notes", max_pages=3
+    )
+
+    # 3 pages × 1 item each
+    assert len(result) == 3
+    assert gitlab_client_mock.aget.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_empty_body(tool_with_client, gitlab_client_mock):
+    """An empty response body is treated as an empty page."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = None
+    mock_response.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    result = await tool_with_client._paginate_get("/api/v4/projects/1/notes")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_invalid_json_raises(tool_with_client, gitlab_client_mock):
+    """A response body that is not valid JSON raises ToolException with endpoint and status code."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.status_code = 200
+    mock_response.body = "<html>Not JSON</html>"
+    mock_response.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    with pytest.raises(
+        ToolException,
+        match=r"Failed to parse JSON from /api/v4/projects/1/notes: HTTP 200",
+    ):
+        await tool_with_client._paginate_get("/api/v4/projects/1/notes")
+
+
+@pytest.mark.asyncio
+async def test_paginate_get_non_list_response_raises(
+    tool_with_client, gitlab_client_mock
+):
+    """A JSON response that is not a list raises ToolException with the actual type name."""
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.status_code = 200
+    mock_response.body = json.dumps({"id": 1, "title": "unexpected object"})
+    mock_response.headers = {"X-Next-Page": ""}
+
+    gitlab_client_mock.aget.return_value = mock_response
+
+    with pytest.raises(
+        ToolException,
+        match=r"Unexpected response format from /api/v4/projects/1/notes: expected list, got dict",
+    ):
+        await tool_with_client._paginate_get("/api/v4/projects/1/notes")
