@@ -359,6 +359,11 @@ def apply_token_based_trim(
         Trimmed list of messages that fits within the context window
     """
     if not messages:
+        logger.info(
+            "apply_token_based_trim called with empty messages",
+            component_name=component_name,
+            max_context_tokens=max_context_tokens,
+        )
         return []
 
     token_budget = int(TRIM_THRESHOLD * max_context_tokens)
@@ -385,8 +390,6 @@ def apply_token_based_trim(
         return messages
 
     t_start = time.perf_counter()
-    token_counter = TikTokenCounter(component_name)
-    initial_tokens = token_counter.count_tokens(messages, include_tool_tokens=True)
 
     logger.info(
         "Starting trimming",
