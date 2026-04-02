@@ -62,6 +62,7 @@ build:self-hosted-ai-gateway-latest-image:
     - docker buildx build
         --file docker/fips/Dockerfile
         --tag "$TARGET_IMAGE"
+        --build-arg GITLAB_API_TOKEN=$GITLAB_API_TOKEN
         --build-context hardening=https://gitlab.com/gitlab-org/build/CNG.git#v18.3.5:hardening
         .
     - docker push "$TARGET_IMAGE"
