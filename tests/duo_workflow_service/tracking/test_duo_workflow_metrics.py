@@ -32,6 +32,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "agent_platform_session_abort_counter",
             "agent_platform_tool_failure_counter",
             "agent_platform_receive_start_counter",
+            "agent_platform_response_schema_output_counter",
             "agent_platform_flow_route_decision_counter",
         ]:
             mock_histogram = MagicMock()
@@ -395,6 +396,22 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             flow_type="fix_pipeline",
             component_name="decide_approach",
             route_value="create_fix",
+        )
+
+    def test_count_response_schema_output(self):
+        self._assert_counter_called(
+            "agent_platform_response_schema_output_counter",
+            "count_response_schema_output",
+            {
+                "flow_type": "fix_pipeline",
+                "component_name": "fix_pipeline_decide_approach",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+            },
+            flow_type="fix_pipeline",
+            component_name="fix_pipeline_decide_approach",
         )
 
 

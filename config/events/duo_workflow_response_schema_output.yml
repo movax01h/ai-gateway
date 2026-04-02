@@ -1,0 +1,17 @@
+---
+description: Tracks when a component produces a response schema output
+internal_events: true
+action: duo_workflow_response_schema_output
+product_group: duo_workflow
+additional_properties:
+  label:
+    description: The component name that produced the response schema output
+  property:
+    description: JSON-serialized response schema output data
+  value:
+    description: Flow Id
+milestone: '18.10'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5012
+tiers:
+  - premium
+  - ultimate
