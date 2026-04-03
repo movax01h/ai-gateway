@@ -120,11 +120,16 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
             assert prompt.model.disable_streaming
 
         # Check that at least one version is available and loads for each selectable model
+        unit_primitive_config = unit_primitive_config_map.get(
+            feature_setting_for_prompt_id(prompt_id)
+        )
+        if unit_primitive_config is None:
+            # Graph node prompts don't have their own unit primitive entries;
+            # they use duo_agent_platform as fallback, which is tested separately.
+            continue
         selectable_model_metadata = [
             create_model_metadata({"provider": "gitlab", "identifier": model})
-            for model in unit_primitive_config_map[
-                feature_setting_for_prompt_id(prompt_id)
-            ].selectable_models
+            for model in unit_primitive_config.selectable_models
         ]
         for model in selectable_model_metadata:
             prompt = registry.get(

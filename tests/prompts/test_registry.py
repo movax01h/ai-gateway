@@ -189,6 +189,12 @@ configurable_unit_primitives:
     default_model: "test"
     selectable_models:
       - "test"
+  - feature_setting: "duo_agent_platform"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_model: "test"
+    selectable_models:
+      - "test"
 """,
     )
     fs.create_file(
@@ -1557,3 +1563,24 @@ class TestGetRequiredVariables:
         )
         with pytest.raises(Exception):
             registry.get_required_variables("test/bad_include", prompt_version="^1.0.0")
+
+    def test_graph_node_falls_back_to_duo_agent_platform(
+        self, registry: LocalPromptRegistry
+    ):
+        """Graph nodes with no matching feature setting fall back to duo_agent_platform model."""
+        metadata = registry._default_model_metadata(
+            "unknown_graph_step", "1.0.0", is_graph_node=True
+        )
+        assert (
+            metadata.name == "test"
+        )  # duo_agent_platform default_model in test fixture
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_non_graph_node_raises_for_unknown_feature_setting(
+        self, registry: LocalPromptRegistry
+    ):
+        """Non-graph-node callers get a ValueError for unknown feature settings."""
+        with pytest.raises(ValueError, match="Invalid feature setting: unknown_step"):
+            registry._default_model_metadata(
+                "unknown_step", "1.0.0", is_graph_node=False
+            )

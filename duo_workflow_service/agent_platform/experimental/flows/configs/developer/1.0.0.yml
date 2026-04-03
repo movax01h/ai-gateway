@@ -14,6 +14,7 @@ components:
   - name: "create_repository_branch"
     type: AgentComponent
     prompt_id: "create_repository_branch"
+    model_size_preference: "small"
     prompt_version: "^1.0.0"
     toolset:
       - "run_git_command"
@@ -42,6 +43,7 @@ components:
     prompt_id: "create_merge_request"
     prompt_version: "^1.0.0"
     tool_name: "create_merge_request"
+    model_size_preference: "small"
     inputs:
       - from: "context:goal"
         as: "issue_url"

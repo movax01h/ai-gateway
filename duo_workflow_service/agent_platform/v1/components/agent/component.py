@@ -265,6 +265,7 @@ class AgentComponent(BaseComponent):
             model_metadata=model_metadata,
             tools=tools,  # type: ignore[arg-type]
             tool_choice=tool_choice,
+            is_graph_node=True,
             internal_event_extra={
                 "agent_name": self.name,
                 "workflow_id": self.flow_id,

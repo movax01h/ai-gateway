@@ -632,6 +632,8 @@ class BasePromptRegistry(ABC):
         prompt_version: str | None,
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[List[BaseTool]] = None,
+        tool_choice: Optional[str] = None,
+        is_graph_node: bool = False,
         **kwargs: Any,
     ) -> Prompt:
         pass
@@ -673,6 +675,7 @@ class BasePromptRegistry(ABC):
         model_metadata: Optional[TypeModelMetadata] = None,
         internal_event_category=__name__,
         tools: Optional[List[BaseTool]] = None,
+        is_graph_node: bool = False,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -686,6 +689,7 @@ class BasePromptRegistry(ABC):
             prompt_version or self._DEFAULT_VERSION,
             model_metadata,
             tools,
+            is_graph_node=is_graph_node,
             **kwargs,
         )
         prompt.set_limits(self.model_limits)

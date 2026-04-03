@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """Test suite for OneOffComponent class."""
 
 from unittest.mock import ANY, Mock, patch
@@ -211,6 +212,7 @@ class TestOneOffComponentAttachNodes:
             model_metadata=None,
             tools=mock_toolset.bindable,
             tool_choice="auto",
+            is_graph_node=True,
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,

@@ -1,6 +1,7 @@
+# pylint: disable=unused-argument,line-too-long,too-many-lines,file-naming-for-tests
 from dataclasses import dataclass
 from typing import Optional
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from dependency_injector import containers
@@ -10,6 +11,11 @@ from langchain.tools import BaseTool
 from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router
+from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
+    ModelMetadata,
+    TypeModelMetadata,
+)
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatLiteLLMDefinition,
@@ -21,19 +27,12 @@ from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
 
 __all__ = [
-    "auth_user",
     "TestEditorContentCompletion",
     "TestEditorContentGeneration",
     "TestUnauthorizedScopes",
     "TestIncomingRequest",
     "TestUnauthorizedIssuer",
 ]
-
-from ai_gateway.model_metadata import (
-    AmazonQModelMetadata,
-    ModelMetadata,
-    TypeModelMetadata,
-)
 
 
 @pytest.fixture(name="route")
@@ -734,7 +733,9 @@ class TestEditorContentGeneration:
                 )
 
                 assert response.status_code == 200
-                mock.assert_called_with(*test_case.expected_arguments)
+                mock.assert_called_with(
+                    *test_case.expected_arguments, is_graph_node=False
+                )
 
     @pytest.mark.parametrize(
         ("prompt", "want_called"),
