@@ -1,7 +1,9 @@
 from typing import Any, AsyncIterator, Optional, override
 
+from langchain_core.messages import AIMessage
+
 from ai_gateway.model_selection import LLMDefinition
-from ai_gateway.models.base import ModelMetadata
+from ai_gateway.models.base import ModelMetadata, TokensConsumptionMetadata
 from ai_gateway.models.base_text import (
     TextGenModelBase,
     TextGenModelChunk,
@@ -65,11 +67,22 @@ class AgentModel(TextGenModelBase):
             metadata_score = response.response_metadata["score"]
             if metadata_score is not None:
                 score = metadata_score
+
+        metadata = None
+        if isinstance(response, AIMessage) and isinstance(
+            response.usage_metadata, dict
+        ):
+            metadata = TokensConsumptionMetadata(
+                input_tokens=int(response.usage_metadata.get("input_tokens") or 0),
+                output_tokens=int(response.usage_metadata.get("output_tokens") or 0),
+            )
+
         return TextGenModelOutput(
             text=response_content,
             # Give a high value, the model doesn't return scores.
             score=score,
             safety_attributes=SafetyAttributes(),
+            metadata=metadata,
         )
 
     async def _handle_stream(

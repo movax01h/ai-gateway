@@ -15,7 +15,6 @@ from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import ChatModelBase
 from ai_gateway.models.base_text import TextGenModelBase
 from ai_gateway.tokenizer import init_tokenizer
-from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.billing_events.client import BillingEventsClient
 
 __all__ = [
@@ -89,7 +88,6 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
     litellm = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     agent_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
-    snowplow_instrumentator = providers.Dependency(instance_of=SnowplowInstrumentator)
     billing_event_client = providers.Dependency(instance_of=BillingEventsClient)
 
     config = providers.Configuration(strict=True)
@@ -201,6 +199,5 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
         agent_model=models.agent_model,
         amazon_q_model=models.amazon_q_model,
         config=config,
-        snowplow_instrumentator=snowplow.instrumentator,
         billing_event_client=billing_event.client,
     )

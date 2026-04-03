@@ -16,9 +16,14 @@ from structlog.testing import capture_logs
 
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
-from ai_gateway.api.v2.code.completions import _track_code_suggestions_event
+from ai_gateway.api.v2.code.completions import (
+    _get_provider_config,
+    _track_code_suggestions_event,
+)
+from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
+from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
@@ -308,7 +313,6 @@ class TestCodeCompletions:
             file_name=current_file["file_name"],
             editor_lang=current_file.get("language_identifier", None),
             stream=False,
-            snowplow_event_context=ANY,
             user=ANY,  # Added user parameter for billing event tracking
             **code_completions_kwargs,
         )
@@ -963,7 +967,6 @@ class TestCodeCompletions:
             "file_name": current_file["file_name"],
             "editor_lang": current_file.get("language_identifier", None),
             "stream": True,
-            "snowplow_event_context": ANY,
             "user": ANY,  # Added user parameter for billing event tracking
         }
 

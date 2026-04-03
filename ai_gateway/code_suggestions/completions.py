@@ -264,7 +264,7 @@ class CodeCompletions:
     def _get_tokens_consumption_metadata(
         self, prompt: Prompt, response: Optional[TextGenModelOutput] = None
     ) -> TokensConsumptionMetadata:
-        input_tokens = sum(
+        estimated_input_tokens = sum(
             component.length_tokens for component in prompt.metadata.components.values()
         )
 
@@ -277,11 +277,20 @@ class CodeCompletions:
                 else 0
             )
 
+            input_tokens = (
+                response.metadata.input_tokens
+                if response.metadata
+                and isinstance(getattr(response.metadata, "input_tokens", None), int)
+                and response.metadata.input_tokens > 0
+                else estimated_input_tokens
+            )
+
             if response.metadata and hasattr(
                 response.metadata, "max_output_tokens_used"
             ):
                 max_output_tokens_used = response.metadata.max_output_tokens_used
         else:
+            input_tokens = estimated_input_tokens
             output_tokens = 0
 
         context_tokens_sent = 0
