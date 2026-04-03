@@ -255,12 +255,10 @@ class LiteLlmChatModel(ChatModelBase):
             after_callback()
 
     def _extract_suggestion_metadata(self, suggestion):
+        usage = suggestion.usage if hasattr(suggestion, "usage") else None
         return TokensConsumptionMetadata(
-            output_tokens=(
-                suggestion.usage.completion_tokens
-                if hasattr(suggestion, "usage")
-                else 0
-            ),
+            input_tokens=usage.prompt_tokens if usage else 0,
+            output_tokens=usage.completion_tokens if usage else 0,
         )
 
     @classmethod
@@ -479,13 +477,12 @@ class LiteLlmTextGenModel(TextGenModelBase):
         return suggestion.choices[0].message.content
 
     def _extract_suggestion_metadata(self, suggestion, max_output_tokens):
-        output_tokens = (
-            suggestion.usage.completion_tokens if hasattr(suggestion, "usage") else 0
-        )
-
+        usage = suggestion.usage if hasattr(suggestion, "usage") else None
+        output_tokens = usage.completion_tokens if usage else 0
         max_output_tokens_used = output_tokens == max_output_tokens
 
         return TokensConsumptionMetadata(
+            input_tokens=usage.prompt_tokens if usage else 0,
             output_tokens=output_tokens,
             max_output_tokens_used=max_output_tokens_used,
         )

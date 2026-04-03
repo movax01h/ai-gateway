@@ -57,7 +57,7 @@ from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
-from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
+from ai_gateway.tracking import SnowplowEvent
 from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.context import StarletteUser, get_current_user
@@ -184,7 +184,6 @@ async def completions(
         payload=payload,
         code_completions=code_completions,
         current_user=current_user,
-        snowplow_event_context=snowplow_event_context,
         **kwargs,
     )
 
@@ -743,7 +742,6 @@ async def _execute_code_completion(
     payload: CompletionsRequestWithVersion,
     code_completions: CodeCompletions,
     current_user: StarletteUser,
-    snowplow_event_context: Optional[SnowplowEventContext] = None,
     **kwargs: dict,
 ) -> any:
     output = await code_completions.execute(
@@ -753,7 +751,6 @@ async def _execute_code_completion(
         editor_lang=payload.current_file.language_identifier,
         stream=payload.stream or False,  # Ensure stream is bool, not None
         user=current_user.cloud_connector_user,  # Pass the underlying CloudConnectorUser
-        snowplow_event_context=snowplow_event_context,
         **kwargs,
     )
 

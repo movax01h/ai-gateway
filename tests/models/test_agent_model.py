@@ -1,16 +1,18 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.agent_model import AgentModel
+from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.models.base_text import TextGenModelOutput
 from ai_gateway.prompts.base import Prompt
 
 
-class TestAgentModel:
+class TestAgentModel:  # pylint: disable=too-many-public-methods
     @pytest.fixture(name="prompt")
     def prompt_fixture(self) -> Prompt:
         async def _stream_prompt(*_args, **_kwargs):
@@ -20,8 +22,9 @@ class TestAgentModel:
         prompt = MagicMock(spec=Prompt)
         prompt.name = "test"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(
-                content="whole part", response_metadata={"score": 0.95}
+            return_value=AIMessage(
+                content="whole part",
+                response_metadata={"score": 0.95},
             )
         )
         prompt.astream = MagicMock(side_effect=_stream_prompt)
@@ -61,8 +64,9 @@ class TestAgentModel:
         prompt.name = "test"
         prompt.model_name = "mixtral"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(
-                content="underscore\\_mistral output", response_metadata={"score": 0.85}
+            return_value=AIMessage(
+                content="underscore\\_mistral output",
+                response_metadata={"score": 0.85},
             )
         )
         prompt.astream = MagicMock(side_effect=_stream_prompt)
@@ -205,3 +209,42 @@ class TestAgentModel:
         assert isinstance(response, TextGenModelOutput)
         assert response.text == "test content"
         assert response.score == 0.999
+
+    @pytest.mark.asyncio
+    async def test_generate_propagates_usage_metadata(self, params):
+        """Test that usage_metadata from AIMessage is propagated to TextGenModelOutput."""
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.model_name = "test-model"
+        ai_message = AIMessage(
+            content="test content",
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        prompt.ainvoke = AsyncMock(return_value=ai_message)
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=False)
+
+        assert isinstance(response, TextGenModelOutput)
+        assert response.text == "test content"
+        assert isinstance(response.metadata, TokensConsumptionMetadata)
+        assert response.metadata.input_tokens == 10
+        assert response.metadata.output_tokens == 5
+
+    @pytest.mark.asyncio
+    async def test_generate_without_usage_metadata_has_no_metadata(self, params):
+        """Test that missing usage_metadata results in no metadata on TextGenModelOutput."""
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.model_name = "test-model"
+        prompt.ainvoke = AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AsyncMock(
+                content="test content", response_metadata={}
+            )
+        )
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=False)
+
+        assert isinstance(response, TextGenModelOutput)
+        assert response.metadata is None
