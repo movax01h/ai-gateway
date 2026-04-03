@@ -97,6 +97,8 @@ class _StubPromptRegistry(BasePromptRegistry):
         prompt_version: Optional[str],
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[List[BaseTool]] = None,
+        tool_choice: Optional[str] = None,
+        is_graph_node: bool = False,
         **kwargs: Any,
     ) -> Prompt:
         """Not reached during validation — ``get_on_behalf`` is intercepted instead."""

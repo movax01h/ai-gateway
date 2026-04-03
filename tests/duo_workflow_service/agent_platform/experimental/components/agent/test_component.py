@@ -1,3 +1,4 @@
+# pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
 """Test suite for AgentComponent class."""
 
 # pylint: disable=too-many-lines
@@ -524,6 +525,7 @@ class TestAgentComponentAttachNodes:
             prompt_version,
             tools=mock_toolset.bindable,
             tool_choice="auto",
+            is_graph_node=True,
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,

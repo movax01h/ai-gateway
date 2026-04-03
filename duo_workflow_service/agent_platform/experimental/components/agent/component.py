@@ -1,4 +1,14 @@
-from typing import Annotated, ClassVar, Literal, Optional, Self, Type, Union, override
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Optional,
+    Self,
+    Type,
+    Union,
+    override,
+)
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -149,6 +159,22 @@ class AgentComponentBase(BaseComponent):
 
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
         return f"{self.name}#agent"
+
+    def _build_prompt(self, tools: list, tool_choice: str) -> Any:
+        """Build the agent prompt with the given tool list and tool choice."""
+        return self.prompt_registry.get_on_behalf(
+            self.user,
+            self.prompt_id,
+            self.prompt_version,
+            tools=tools,
+            tool_choice=tool_choice,
+            is_graph_node=True,
+            internal_event_extra={
+                "agent_name": self.name,
+                "workflow_id": self.flow_id,
+                "workflow_type": self.flow_type.value,
+            },
+        )
 
     def _agent_node_router(self, state: FlowState) -> str:
         raise NotImplementedError
@@ -332,18 +358,7 @@ class AgentComponent(AgentComponentBase):
             tools = self.toolset.bindable
             tool_choice = "auto"
 
-        prompt = self.prompt_registry.get_on_behalf(
-            self.user,
-            self.prompt_id,
-            self.prompt_version,
-            tools=tools,  # type: ignore[arg-type]
-            tool_choice=tool_choice,
-            internal_event_extra={
-                "agent_name": self.name,
-                "workflow_id": self.flow_id,
-                "workflow_type": self.flow_type.value,
-            },
-        )
+        prompt = self._build_prompt(tools=tools, tool_choice=tool_choice)
 
         node_agent = AgentNode(
             name=self.__entry_hook__(),

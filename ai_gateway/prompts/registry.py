@@ -278,8 +278,13 @@ class LocalPromptRegistry(BasePromptRegistry):
         return versions[str(compatible_versions[0])]
 
     def _default_model_metadata(
-        self, prompt_id: str, prompt_version: str
+        self, prompt_id: str, prompt_version: str, is_graph_node: bool = False
     ) -> TypeModelMetadata:
+        if is_graph_node:
+            return create_model_metadata(
+                {"provider": "gitlab", "feature_setting": "duo_agent_platform"}
+            )
+
         # For backwards compatibility with client code that doesn't send model_metadata and would've used the model from
         # the `base` prompt, create model metadata from know version mappings or the feature setting default
         if identifier := LEGACY_MODEL_MAPPING.get(prompt_id, {}).get(
@@ -341,11 +346,14 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[List[BaseTool]] = None,
         tool_choice: Optional[str] = None,  # auto, any, <tool name>. By default, auto.
+        is_graph_node: bool = False,
         **kwargs: Any,
     ) -> Prompt:
         try:
             if not model_metadata:
-                model_metadata = self._default_model_metadata(prompt_id, prompt_version)  # type: ignore[arg-type]
+                model_metadata = self._default_model_metadata(
+                    prompt_id, prompt_version, is_graph_node  # type: ignore[arg-type]
+                )
 
             family = model_metadata.family if model_metadata else []
             prompt_path = self._resolve_id(prompt_id, family)

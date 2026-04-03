@@ -1,3 +1,4 @@
+# pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument,file-naming-for-tests
 """Test suite for AgentComponent class."""
 
 # pylint: disable=file-naming-for-tests
@@ -133,7 +134,7 @@ def agent_component_no_output_fixture(
         name=component_name,
         flow_id=flow_id,
         flow_type=flow_type,
-        user=user,
+        user=user,  # noqa: F821  # pylint: disable=undefined-variable
         inputs=["context:user_input", "context:task_description"],
         prompt_id=prompt_id,
         prompt_version=prompt_version,
@@ -313,6 +314,7 @@ class TestAgentComponentAttachNodes:
             model_metadata=None,
             tools=mock_toolset.bindable,
             tool_choice="auto",
+            is_graph_node=True,
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,

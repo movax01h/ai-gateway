@@ -160,6 +160,7 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         model_metadata: Optional[TypeModelMetadata] = None,
         tools: Optional[list[BaseTool]] = None,
         tool_choice: Optional[str] = None,  # auto, any, <tool name>. By default, auto.
+        is_graph_node: bool = False,
         **kwargs: Any,
     ) -> Prompt:
         if not prompt_version:

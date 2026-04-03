@@ -212,6 +212,7 @@ class TestOneOffComponentAttachNodes:
             prompt_version,
             tools=mock_toolset.bindable,
             tool_choice="auto",
+            is_graph_node=True,
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,

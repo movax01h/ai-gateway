@@ -425,21 +425,10 @@ class SupervisorAgentComponent(AgentComponentBase):
 
         return RuntimeIOKey(alias="final_answer", factory=_factory)
 
-    def _build_prompt(self, supervisor_tools: list) -> Any:
+    def _build_prompt(self, tools: list, tool_choice: str = "auto") -> Any:
         """Build the supervisor prompt with the given tool list."""
         tool_choice = "any" if self._response_schema is not None else "auto"
-        return self.prompt_registry.get_on_behalf(
-            self.user,
-            self.prompt_id,
-            self.prompt_version,
-            tools=supervisor_tools,
-            tool_choice=tool_choice,
-            internal_event_extra={
-                "agent_name": self.name,
-                "workflow_id": self.flow_id,
-                "workflow_type": self.flow_type.value,
-            },
-        )
+        return super()._build_prompt(tools=tools, tool_choice=tool_choice)
 
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         """Attach the supervisor and all subagent subgraphs to the graph.
@@ -454,7 +443,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         supervisor_tools = self.toolset.bindable + [self._delegate_task_cls]
         if self._response_schema is not None:
             supervisor_tools = supervisor_tools + [self._response_schema]
-        prompt = self._build_prompt(supervisor_tools)
+        prompt = self._build_prompt(tools=supervisor_tools)
 
         static_output_key = self._final_answer_key.to_iokey(
             {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}

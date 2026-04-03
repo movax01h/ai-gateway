@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument,line-too-long,file-naming-for-tests
 from typing import Any, List, Optional
 from unittest.mock import patch
 
@@ -229,7 +230,7 @@ class TestPrompt:
         )
 
         mock_registry_get.compatible_versions = compatible_versions
-        mock_registry_get.assert_called_with(*expected_get_args)
+        mock_registry_get.assert_called_with(*expected_get_args, is_graph_node=False)
         assert response.status_code == expected_status
 
         actual_response = response.json()
@@ -281,7 +282,9 @@ class TestPrompt:
             },
         )
 
-        mock_registry_get.assert_called_with("test", "^2.0.0", None, None)
+        mock_registry_get.assert_called_with(
+            "test", "^2.0.0", None, None, is_graph_node=False
+        )
         assert response.status_code == 200
         assert response.json() == expected_response
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
@@ -339,6 +342,8 @@ class TestMisdirectedRequest:
                 ),
             },
         )
-        mock_registry_get.assert_called_with("test", "^1.0.0", model_metadata, None)
+        mock_registry_get.assert_called_with(
+            "test", "^1.0.0", model_metadata, None, is_graph_node=False
+        )
         assert response.status_code == 421
         assert response.json() == {"detail": "401: Unauthorized"}
