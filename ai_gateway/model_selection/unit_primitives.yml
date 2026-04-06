@@ -293,3 +293,17 @@ configurable_unit_primitives:
     default_model: "text_embedding_005_vertex"
     selectable_models:
       - "text_embedding_005_vertex"
+  - feature_setting: "review_merge_request"
+    unit_primitives:
+      - "review_merge_request"
+    default_model: "claude_sonnet_4_20250514_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_5_20250929"
+    dev:
+      selectable_models:
+        - "gpt_5_2"
+      group_ids:
+        - 9970
