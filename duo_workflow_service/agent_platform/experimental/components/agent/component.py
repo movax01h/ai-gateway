@@ -28,9 +28,6 @@ from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
 )
-from duo_workflow_service.agent_platform.experimental.components.registry import (
-    register_component,
-)
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     IOKeyTemplate,
@@ -159,9 +156,9 @@ class AgentComponentBase(BaseComponent):
         raise NotImplementedError
 
 
-@register_component(decorators=[inject])
+@inject
 class AgentComponent(AgentComponentBase):
-    """Registered AgentComponent for use in flow configs.
+    """AgentComponent for use in flow configs.
 
     Provides the standard single-agent ReAct loop (agent ↔ tools, final_response) with dependency injection applied.
 

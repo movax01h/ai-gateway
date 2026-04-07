@@ -67,12 +67,18 @@ needed to complete its task.
 #### Optional Parameters
 
 - **description**: Human-readable description of the agent's purpose and capabilities. **Required when the agent is
-  managed by a SupervisorAgentComponent** (listed in `managed_agents`). The supervisor uses this description to help
+  used as a sub-agent** (listed in another agent's `managed_agents`). The supervisor uses this description to help
   the LLM decide when to delegate tasks to this agent.
 - **prompt_version**: Semantic version constraint (e.g., `"^1.0.0"`). If omitted or `null`, uses locally defined prompt
   from flow YAML.
 - **inputs**: List of input data sources (default: `["context:goal"]`)
 - **toolset**: List of tools available to the agent
+- **managed_agents**: List of sub-agent names this agent supervises. When provided, the agent runs in
+  [Supervisor Mode](#supervisor-mode) and gains access to `delegate_task` and `final_response_tool` automatically.
+  Every name must correspond to another `AgentComponent` with a `description` field in the same flow config.
+- **max_delegations**: Maximum number of `delegate_task` calls allowed before the supervisor is forced to call
+  `final_response_tool`. Must be ≥ 1 when set. When omitted (default), no delegation limit is enforced. Only
+  applicable in Supervisor Mode.
 - **compaction**: Configuration for conversation compaction. When enabled, automatically summarizes older conversation
   history to stay within token limits. See [Conversation Compaction](../context_management/compaction.md) for details.
 - **ui_log_events**: UI logging configuration
@@ -80,14 +86,16 @@ needed to complete its task.
 
 #### Usage Modes
 
-AgentComponent can be used in two modes:
+AgentComponent can be used in three modes:
 
 1. **Standalone Mode**: Used as a regular component in the flow. The `description` field is optional.
-1. **Managed Mode**: Used as a subagent managed by a SupervisorAgentComponent. In this mode:
+1. **Managed Mode**: Used as a sub-agent delegated to by a supervisor agent. In this mode:
    - The `description` field is **required**
    - The component must be listed in the supervisor's `managed_agents`
    - The supervisor binds the agent to subsession-scoped conversation history
    - Output keys are dynamically resolved based on the active subsession
+1. **Supervisor Mode**: Orchestrates multiple specialised sub-agents via explicit delegation. Enabled by providing the
+   `managed_agents` parameter. See [Supervisor Mode](#supervisor-mode) below.
 
 #### Available Tools
 
@@ -251,6 +259,124 @@ components:
           - "on_tool_execution_success"
           - "on_tool_execution_failed"
       ui_role_as: "agent"
+```
+
+#### AgentComponent with Compaction Example
+
+For long-running agents that may accumulate extensive conversation history, enable compaction to automatically summarize
+older context:
+
+```yaml
+components:
+  - name: "code_assistant"
+    type: AgentComponent
+    prompt_id: "code_review_helper"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset:
+      - "read_file"
+      - "edit_file"
+      - "list_dir"
+    compaction: true  # Enable with default settings
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+```
+
+With custom compaction settings:
+
+```yaml
+components:
+  - name: "code_assistant"
+    type: AgentComponent
+    prompt_id: "code_review_helper"
+    prompt_version: "^1.0.0"
+    inputs: ["context:goal"]
+    toolset:
+      - "read_file"
+      - "edit_file"
+    compaction:
+      max_recent_messages: 15
+      trim_threshold: 0.8
+    ui_log_events:
+      - "on_agent_final_answer"
+```
+
+#### Supervisor Mode
+
+When `managed_agents` is provided, the AgentComponent acts as a supervisor that orchestrates multiple specialized
+sub-agents via explicit delegation. The supervisor runs a standard ReAct loop but has access to a `delegate_task` tool
+in addition to its regular tools. When the LLM calls `delegate_task`, the framework:
+
+1. Assigns or resumes a numbered **subsession** for the named sub-agent
+1. Seeds the sub-agent's conversation history with the delegation prompt
+1. Routes execution to the sub-agent's ReAct loop
+1. On sub-agent completion, injects the result back into the supervisor's history as a `ToolMessage` and returns
+   control to the supervisor
+
+The supervisor can start new subsessions or resume prior ones by providing the `subsession_id` returned in the
+delegation result.
+
+##### Supervisor Constraints
+
+- `managed_agents` must contain at least one name.
+- Every name in `managed_agents` must reference an `AgentComponent` with a `description` field defined in the same
+  flow config.
+- An `AgentComponent` may be owned by at most one supervisor; the flow builder removes it from the top-level component
+  list once claimed.
+- The flow builder scans all components to resolve sub-agent dependencies, so managed `AgentComponent` entries may
+  appear anywhere in the `components` list relative to their supervisor.
+- The prompt should instruct the LLM on when and how to use `delegate_task` and `final_response_tool`.
+
+##### Supervisor Outputs
+
+- **conversation_history:{supervisor_name}**: The supervisor's own message history
+- **context:{supervisor_name}.final_answer**: The supervisor's final response
+- **status**: Updated workflow status
+
+##### Complete Supervisor Mode Example
+
+```yaml
+components:
+    - name: "developer"
+      type: AgentComponent
+      description: "Implements code changes, creates and edits files."
+      prompt_id: "developer_agent"
+      toolset:
+          - "read_file"
+          - "edit_file"
+          - "create_file_with_contents"
+          - "list_dir"
+
+    - name: "tester"
+      type: AgentComponent
+      description: "Writes and runs automated tests."
+      prompt_id: "tester_agent"
+      toolset:
+          - "read_file"
+          - "create_file_with_contents"
+          - "run_command"
+
+    - name: "supervisor"
+      type: AgentComponent
+      prompt_id: "supervisor_agent"
+      managed_agents:
+          - "developer"
+          - "tester"
+      max_delegations: 20
+      toolset:
+          - "get_issue"
+      ui_log_events:
+          - "on_agent_final_answer"
+          - "on_tool_execution_success"
+          - "on_tool_execution_failed"
+
+routers:
+    - from: "supervisor"
+      to: "end"
+
+flow:
+    entry_point: "supervisor"
 ```
 
 ### HumanInputComponent
@@ -644,111 +770,6 @@ routers:
       to: "end"  # Always end after error reporting
 ```
 
-### SupervisorAgentComponent
-
-The `SupervisorAgentComponent` orchestrates multiple specialised sub-agents via explicit
-delegation. The supervisor runs a standard ReAct loop but has access to a
-`delegate_task` tool in addition to its regular tools. When the LLM calls
-`delegate_task`, the framework:
-
-1. Assigns or resumes a numbered **subsession** for the named sub-agent
-1. Seeds the sub-agent's conversation history with the delegation prompt
-1. Routes execution to the sub-agent's ReAct loop
-1. On sub-agent completion, injects the result back into the supervisor's
-   history as a `ToolMessage` and returns control to the supervisor
-
-The supervisor can start new subsessions or resume prior ones by providing the
-`subsession_id` returned in the delegation result. All subagents are declared
-as `AgentComponent` with a `description` field and listed under `managed_agents`.
-
-#### Required Parameters
-
-- **name**: Unique identifier for this component instance. Must not contain `:` or `.` characters.
-- **type**: Must be `"SupervisorAgentComponent"`
-- **prompt_id**: ID of the prompt template. The prompt should instruct the LLM
-  on when and how to use `delegate_task` and `final_response_tool`.
-- **managed_agents**: List of `AgentComponent` names that this supervisor manages.
-  Every name must correspond to an `AgentComponent` with a `description` field defined in the `components` list.
-
-#### Optional Parameters
-
-- **prompt_version**: Semantic version constraint (e.g. `"^1.0.0"`). Omit to use a locally defined prompt.
-- **inputs**: List of input data sources (default: `["context:goal"]`)
-- **toolset**: Additional tools available to the supervisor alongside `delegate_task` and `final_response_tool`
-- **max_delegations**: Maximum number of `delegate_task` calls allowed before the
-  supervisor is forced to call `final_response_tool`. Must be ≥ 1 when set.
-  When omitted (default), no delegation limit is enforced.
-- **ui_log_events**: UI logging configuration — supports `on_agent_final_answer`,
-  `on_tool_execution_success`, `on_tool_execution_failed`
-- **ui_role_as**: Display role in UI (`"agent"` or `"tool"`, default `"agent"`)
-
-#### Constraints
-
-- `managed_agents` must contain at least one name.
-- Every name in `managed_agents` must reference an `AgentComponent` with a `description` field defined in the
-  same flow config.
-- An `AgentComponent` may be owned by at most one supervisor; the flow builder
-  removes it from the top-level component list once claimed.
-- The flow builder scans all components to resolve subagent dependencies, so managed
-  `AgentComponent` entries may appear anywhere in the `components` list relative to their supervisor.
-
-#### Outputs
-
-- **conversation_history:{supervisor_name}**: The supervisor's own message history
-- **context:{supervisor_name}.final_answer**: The supervisor's final response
-- **status**: Updated workflow status
-
-#### UI Log Events
-
-- **on_agent_final_answer**: Logged when the supervisor calls `final_response_tool`
-- **on_tool_execution_success**: Logged when a regular tool (not `delegate_task`) succeeds
-- **on_tool_execution_failed**: Logged when a regular tool fails
-
-#### Complete SupervisorAgentComponent Example
-
-```yaml
-components:
-    - name: "developer"
-      type: AgentComponent
-      description: "Implements code changes, creates and edits files."
-      prompt_id: "developer_agent"
-      toolset:
-          - "read_file"
-          - "edit_file"
-          - "create_file_with_contents"
-          - "list_dir"
-
-    - name: "tester"
-      type: AgentComponent
-      description: "Writes and runs automated tests."
-      prompt_id: "tester_agent"
-      toolset:
-          - "read_file"
-          - "create_file_with_contents"
-          - "run_command"
-
-    - name: "supervisor"
-      type: SupervisorAgentComponent
-      prompt_id: "supervisor_agent"
-      managed_agents:
-          - "developer"
-          - "tester"
-      max_delegations: 20
-      toolset:
-          - "get_issue"
-      ui_log_events:
-          - "on_agent_final_answer"
-          - "on_tool_execution_success"
-          - "on_tool_execution_failed"
-
-routers:
-    - from: "supervisor"
-      to: "end"
-
-flow:
-    entry_point: "supervisor"
-```
-
 ---
 
 ## Flow Examples
@@ -965,6 +986,67 @@ routers:
 
 flow:
     entry_point: "file_reader"
+```
+
+### Multi-Agent Supervisor Flow
+
+This example demonstrates a supervisor agent that delegates tasks to specialised sub-agents:
+
+```yaml
+version: "experimental"
+environment: remote
+
+components:
+    - name: "developer"
+      type: AgentComponent
+      description: "Implements code changes, creates and edits files based on requirements."
+      prompt_id: "developer_agent"
+      prompt_version: "^1.0.0"
+      toolset:
+          - "read_file"
+          - "edit_file"
+          - "create_file_with_contents"
+          - "list_dir"
+          - "find_files"
+      ui_log_events:
+          - "on_agent_final_answer"
+          - "on_tool_execution_success"
+
+    - name: "tester"
+      type: AgentComponent
+      description: "Writes and runs automated tests to verify code correctness."
+      prompt_id: "tester_agent"
+      prompt_version: "^1.0.0"
+      toolset:
+          - "read_file"
+          - "create_file_with_contents"
+          - "run_command"
+      ui_log_events:
+          - "on_agent_final_answer"
+          - "on_tool_execution_success"
+
+    - name: "supervisor"
+      type: AgentComponent
+      prompt_id: "supervisor_agent"
+      prompt_version: "^1.0.0"
+      inputs: [ "context:goal" ]
+      managed_agents:
+          - "developer"
+          - "tester"
+      max_delegations: 20
+      toolset:
+          - "get_issue"
+      ui_log_events:
+          - "on_agent_final_answer"
+          - "on_tool_execution_success"
+          - "on_tool_execution_failed"
+
+routers:
+    - from: "supervisor"
+      to: "end"
+
+flow:
+    entry_point: "supervisor"
 ```
 
 More examples will be added as the framework matures and additional use cases are identified.

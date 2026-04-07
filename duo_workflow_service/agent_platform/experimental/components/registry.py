@@ -1,11 +1,15 @@
 from collections.abc import Mapping
-from typing import Callable, Optional, Self, Sequence, TypeAlias, override
+from typing import Any, Callable, Optional, Self, Sequence, TypeAlias, override
 
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
 )
 
-__all__ = ["ComponentRegistry", "register_component"]
+__all__ = [
+    "ComponentRegistry",
+    "register_component",
+    "register_component_factory",
+]
 
 
 ComponentClassAlias: TypeAlias = type[BaseComponent] | Callable[..., BaseComponent]
@@ -157,6 +161,61 @@ class ComponentRegistry(Mapping):
     def __iter__(self):
         yield from self._registry.__iter__()
 
+    def register_factory(
+        self,
+        name: str,
+        factory: Callable[..., BaseComponent],
+    ) -> Callable[..., BaseComponent]:
+        """Register a factory callable under a given name in the ComponentRegistry.
+
+        Unlike :meth:`register`, this method accepts any callable that produces
+        ``BaseComponent`` instances — it does not require the callable to be a
+        ``BaseComponent`` subclass itself.  This is the preferred way to register
+        factory functions or classes that dispatch to different component
+        implementations at runtime.
+
+        The factory is stored directly in the registry under ``name``.  If a
+        component is already registered under that name a ``KeyError`` is raised.
+
+        The factory callable is wrapped to validate that it returns a
+        ``BaseComponent`` instance at call time, raising ``TypeError`` if the
+        return value is not a ``BaseComponent`` subclass instance.
+
+        Args:
+            name: The registry key under which the factory will be stored.
+            factory: Any callable that accepts keyword arguments and returns a
+                ``BaseComponent`` instance.
+
+        Returns:
+            The wrapped factory callable, so this method can be used as a
+            decorator or called directly.
+
+        Raises:
+            KeyError: If a component or factory is already registered under ``name``.
+
+        Example:
+            Direct call:
+            >>> registry = ComponentRegistry.instance()
+            >>> registry.register_factory("AgentComponent", my_factory_fn)
+        """
+        if name in self:
+            raise KeyError(
+                f"Component '{name}' is already registered. Use a different name"
+            )
+
+        def _validated_factory(*args: Any, **kwargs: Any) -> BaseComponent:
+            result = factory(*args, **kwargs)
+            if not isinstance(result, BaseComponent):
+                raise TypeError(
+                    f"Factory '{name}' must return a BaseComponent instance, "
+                    f"got {type(result).__name__!r} instead"
+                )
+            return result
+
+        self._registry[name] = _validated_factory
+
+        return _validated_factory
+
 
 def register_component(
     decorators: Optional[Sequence[DecoratorAlias]] = None,
@@ -209,5 +268,53 @@ def register_component(
         registered_class = registry.register(cls, decorators if decorators else [])
 
         return registered_class
+
+    return decorator
+
+
+def register_component_factory(
+    name: str,
+) -> Callable:
+    """Decorator to register a factory callable with the ComponentRegistry.
+
+    This decorator provides a convenient way to register factory functions with
+    the global ComponentRegistry instance under a given name.  It is the
+    factory-callable counterpart to :func:`register_component` and wraps
+    :meth:`ComponentRegistry.register_factory`.
+
+    Unlike :func:`register_component`, which requires the decorated object to be
+    a ``BaseComponent`` subclass, this decorator accepts any callable that
+    returns a ``BaseComponent`` instance.  The return value is validated at
+    call time — a ``TypeError`` is raised if the factory returns something that
+    is not a ``BaseComponent`` instance.
+
+    Args:
+        name: The registry key under which the factory will be stored.
+
+    Returns:
+        A decorator function that registers the factory callable and returns it
+        unchanged.
+
+    Raises:
+        KeyError: If a component or factory is already registered under ``name``.
+
+    Example:
+        Basic usage:
+        >>> @register_component_factory("AgentComponent")
+        ... def my_factory(**kwargs: Any) -> AgentComponentBase:
+        ...     return AgentComponent(**kwargs)
+
+        With dependency injection:
+        >>> @register_component_factory("MyComponent")
+        ... def my_factory(**kwargs: Any) -> BaseComponent:
+        ...     return MyConcreteComponent(**kwargs)
+    """
+
+    def decorator(
+        factory: Callable[..., BaseComponent],
+    ) -> Callable[..., BaseComponent]:
+        registry = ComponentRegistry.instance()
+        registry.register_factory(name, factory)
+        return factory
 
     return decorator

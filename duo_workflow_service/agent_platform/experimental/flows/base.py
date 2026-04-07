@@ -17,9 +17,6 @@ from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     EndComponent,
 )
-from duo_workflow_service.agent_platform.experimental.components.supervisor.component import (
-    SupervisorAgentComponent,
-)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
     load_component_class,
@@ -293,12 +290,15 @@ class Flow(AbstractWorkflow):
     ) -> bool:
         """Check if a component has dependencies that haven't been built yet.
 
-        Currently only SupervisorAgentComponent has dependencies (managed_agents).
+        A component has unresolved dependencies when it declares ``managed_agents``
+        and at least one of those agents has not yet been built.  This applies to
+        both ``SupervisorAgentComponent`` (explicit type) and ``AgentComponent``
+        configs that include ``managed_agents`` (resolved via the factory).
         """
-        if comp_config["type"] != SupervisorAgentComponent.__name__:
+        managed_agent_names = comp_config.get("managed_agents", [])
+        if not managed_agent_names:
             return False
 
-        managed_agent_names = comp_config.get("managed_agents", [])
         return any(name not in components for name in managed_agent_names)
 
     def _instantiate_component(
@@ -307,60 +307,41 @@ class Flow(AbstractWorkflow):
         comp_params: dict,
         components: dict[str, BaseComponent],
     ) -> None:
-        """Instantiate a single component and add it to the components dict."""
+        """Instantiate a single component and add it to the components dict.
+
+        For ``AgentComponent`` configs the shared ``_built_components`` dict is
+        injected so the factory can resolve subagent references for supervisor
+        dispatch.  After the component is created, ``Flow`` inspects its
+        ``subagent_components`` attribute (present on
+        :class:`SupervisorAgentComponent`) and removes the consumed subagents
+        from the shared dict.  This keeps the mutation explicit and owned by
+        ``Flow`` rather than hidden inside the factory.
+        """
         comp_name = comp_config["name"]
-        comp_class = load_component_class(comp_config["type"])
+        comp_type = comp_config["type"]
+        comp_class = load_component_class(comp_type)
 
         if comp_name in components:
             raise ValueError(
                 f"Duplicate component name: '{comp_name}'. Component names must be unique."
             )
 
-        # For supervisors, resolve subagent references and inject them
-        if comp_config["type"] == SupervisorAgentComponent.__name__:
-            subagents = self._resolve_subagents(comp_config, components)
-            comp_params["subagent_components"] = subagents
+        # AgentComponent configs are handled by a factory that needs the shared
+        # components dict to resolve subagent references (for supervisor dispatch).
+        if comp_type == "AgentComponent":
+            comp_params["_built_components"] = components
 
-        components[comp_name] = comp_class(**comp_params)
+        component = comp_class(**comp_params)
+        components[comp_name] = component
 
-    def _resolve_subagents(
-        self,
-        supervisor_config: dict,
-        components: dict[str, BaseComponent],
-    ) -> dict[str, BaseComponent]:
-        """Resolve managed subagent references for a supervisor.
-
-        Pops each managed_agents name from the components dict, transferring
-        ownership to the supervisor. This prevents subagents from appearing
-        in routers, being shared across supervisors, or being used as entry
-        points. Type validation is handled by SupervisorAgentComponent's
-        model validator.
-
-        Args:
-            supervisor_config: The supervisor's component config dict.
-            components: Already-built component instances (mutated — subagents
-                are removed).
-
-        Returns:
-            Dictionary mapping subagent names to their component instances.
-
-        Raises:
-            ValueError: If a managed agent name is not found in components.
-        """
-        supervisor_name = supervisor_config["name"]
-        managed_agent_names = supervisor_config.get("managed_agents", [])
-        subagents: dict[str, BaseComponent] = {}
-
-        for agent_name in managed_agent_names:
-            if agent_name not in components:
-                raise ValueError(
-                    f"Supervisor '{supervisor_name}' references managed agent "
-                    f"'{agent_name}' which is not defined in components."
-                )
-
-            subagents[agent_name] = components.pop(agent_name)
-
-        return subagents
+        # If the newly created component consumed subagents (i.e. it is a
+        # SupervisorAgentComponent), remove those subagents from the shared dict
+        # so they are not exposed as top-level components (entry points, routers,
+        # etc.).  The factory reads _built_components without mutating it; Flow
+        # is the explicit owner of the dict and performs the cleanup here.
+        if hasattr(component, "subagent_components"):
+            for consumed_name in component.subagent_components:
+                components.pop(consumed_name, None)
 
     def _build_routers(
         self, components: dict[str, BaseComponent], graph: StateGraph
