@@ -656,14 +656,14 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     async def test_ainvoke_retries_on_read_error(self, prompt: Prompt):
-        """Test that ainvoke retries on httpx.ReadError and succeeds on second attempt."""
+        """Test that ainvoke retries on httpx.ReadError and succeeds on third attempt."""
         success_response = AIMessage(content="Hello!")
         call_count = 0
 
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count < 3:
                 raise httpx.ReadError("Connection reset by peer")
             return success_response
 
@@ -672,7 +672,7 @@ configurable_unit_primitives:
                 result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert result == success_response
-        assert call_count == 2
+        assert call_count == 3
 
     @pytest.mark.asyncio
     async def test_ainvoke_raises_after_exhausting_retries_on_read_error(
@@ -698,7 +698,7 @@ configurable_unit_primitives:
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count < 3:
                 raise httpx.ReadTimeout(
                     "Timeout on reading data from socket", request=request
                 )
@@ -709,7 +709,7 @@ configurable_unit_primitives:
                 result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert result == success_response
-        assert call_count == 2
+        assert call_count == 3
 
     @pytest.mark.asyncio
     async def test_ainvoke_retries_on_mid_stream_fallback_error(self, prompt: Prompt):
@@ -720,7 +720,7 @@ configurable_unit_primitives:
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count < 3:
                 raise MidStreamFallbackError(
                     "Overloaded", model="claude-3", llm_provider="anthropic"
                 )
@@ -731,7 +731,7 @@ configurable_unit_primitives:
                 result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert result == success_response
-        assert call_count == 2
+        assert call_count == 3
 
     @pytest.mark.asyncio
     async def test_ainvoke_retries_on_api_connection_error(self, prompt: Prompt):
@@ -743,7 +743,7 @@ configurable_unit_primitives:
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count < 3:
                 raise APIConnectionError(request=request)
             return success_response
 
@@ -752,7 +752,7 @@ configurable_unit_primitives:
                 result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert result == success_response
-        assert call_count == 2
+        assert call_count == 3
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -807,7 +807,7 @@ configurable_unit_primitives:
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count < 3:
                 raise error
             return success_response
 
@@ -816,7 +816,7 @@ configurable_unit_primitives:
                 result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert result == success_response
-        assert call_count == 2
+        assert call_count == 3
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -864,7 +864,7 @@ configurable_unit_primitives:
         async def flaky_ainvoke(*_args, **_kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count < 3:
                 raise error
             return success_response
 
@@ -873,7 +873,7 @@ configurable_unit_primitives:
                 result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert result == success_response
-        assert call_count == 2
+        assert call_count == 3
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -939,9 +939,10 @@ configurable_unit_primitives:
                 with pytest.raises(httpx.ReadError):
                     await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
-        assert len(sleep_calls) == 2
+        assert len(sleep_calls) == 3
         assert sleep_calls[0] == pytest.approx(3.0)
         assert sleep_calls[1] == pytest.approx(9.0)
+        assert sleep_calls[2] == pytest.approx(27.0)
 
     @pytest.mark.parametrize(
         "tool_choice",

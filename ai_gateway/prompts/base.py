@@ -134,7 +134,7 @@ def _is_retryable(exc: BaseException) -> bool:
 
 @retry(
     reraise=True,
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(4),
     wait=wait_exponential(multiplier=3, min=3, max=29, exp_base=3),
     retry=retry_if_exception(_is_retryable),
     before_sleep=before_sleep_log(_log, logging.WARNING),
