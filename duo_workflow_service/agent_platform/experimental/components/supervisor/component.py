@@ -21,9 +21,6 @@ from duo_workflow_service.agent_platform.experimental.components.agent.ui_log im
 from duo_workflow_service.agent_platform.experimental.components.base import (
     RouterProtocol,
 )
-from duo_workflow_service.agent_platform.experimental.components.registry import (
-    register_component,
-)
 from duo_workflow_service.agent_platform.experimental.components.supervisor.delegate_task import (
     ManagedAgentConfig,
     build_delegate_task_model,
@@ -80,7 +77,7 @@ class _SubagentRouter:
         return f"{self._supervisor_name}#subagent_return"
 
 
-@register_component(decorators=[inject])
+@inject
 class SupervisorAgentComponent(AgentComponentBase):
     """Supervisor component that orchestrates subagents via delegate_task tool.
 
@@ -179,48 +176,56 @@ class SupervisorAgentComponent(AgentComponentBase):
     @model_validator(mode="before")
     @classmethod
     def validate_and_consume_managed_agents(cls, data: Any) -> Any:
-        """Validate managed_agents against subagent_components and consume it.
+        """Validate managed_agents, select subagents from the pool, and consume managed_agents.
 
-        The YAML config declares `managed_agents: [...]` as the human-facing
-        list of subagent names. The flow builder resolves these to actual
-        component instances and passes them as `subagent_components`.
+        The YAML config declares ``managed_agents: [...]`` as the human-facing
+        list of subagent names.  The factory passes the full pool of already-built
+        components as ``subagent_components``.
 
-        This validator:
-        1. Validates that every name in managed_agents has a matching entry
-            in subagent_components
-        2. Validates that every subagent has bind_to_supervisor method and description
-        3. Removes managed_agents from the data (not stored on the model)
-
-        managed_agents is consumed here and never stored — the runtime model
-        uses subagent_components.keys() as the source of truth.
+        This validator centralises all subagent-selection logic.
+        It validates that ``managed_agents`` is non-empty, selects only the
+        named agents from the ``subagent_components`` pool (raising
+        ``ValueError`` for any missing name), validates that every selected
+        subagent exposes ``bind_to_supervisor``, replaces
+        ``subagent_components`` with the filtered dict, and removes
+        ``managed_agents`` so the runtime model uses
+        ``subagent_components.keys()`` as the source of truth.
         """
         if isinstance(data, dict):
             managed_agents = data.pop("managed_agents", None)
-            sub_agents = data.get("subagent_components", {})
+            all_components = data.pop("subagent_components", {})
 
-            if managed_agents is not None:
-                if not managed_agents:
+            if managed_agents is None:
+                raise ValueError(
+                    "SupervisorAgentComponent requires managed_agents to be provided."
+                )
+
+            if not managed_agents:
+                raise ValueError(
+                    "SupervisorAgentComponent requires at least one managed agent."
+                )
+
+            selected_components: dict[str, Any] = {}
+            for agent_name in managed_agents:
+                if agent_name not in all_components:
                     raise ValueError(
-                        "SupervisorAgentComponent requires at least one managed agent."
+                        f"Managed agent '{agent_name}' not found in subagent_components. "
+                        f"Available: {list(all_components.keys())}"
                     )
-                for agent_name in managed_agents:
-                    if sub_agents and agent_name not in sub_agents:
-                        raise ValueError(
-                            f"Managed agent '{agent_name}' not found in subagent_components. "
-                            f"Available: {list(sub_agents.keys())}"
-                        )
+                selected_components[agent_name] = all_components[agent_name]
 
-            if sub_agents:
-                for name, component in sub_agents.items():
-                    # Check if component has bind_to_supervisor method
-                    if not hasattr(component, "bind_to_supervisor") or not callable(
-                        getattr(component, "bind_to_supervisor")
-                    ):
-                        raise ValueError(
-                            f"Managed agent '{name}' of type '{type(component).__name__}' "
-                            f"does not have a bind_to_supervisor method. "
-                            f"Managed agents must have a bind_to_supervisor method."
-                        )
+            # Replace the full pool with only the selected subagents
+            data["subagent_components"] = selected_components
+
+            for name, component in selected_components.items():
+                if not hasattr(component, "bind_to_supervisor") or not callable(
+                    getattr(component, "bind_to_supervisor")
+                ):
+                    raise ValueError(
+                        f"Managed agent '{name}' of type '{type(component).__name__}' "
+                        f"does not have a bind_to_supervisor method. "
+                        f"Managed agents must have a bind_to_supervisor method."
+                    )
 
         return data
 

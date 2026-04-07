@@ -233,7 +233,7 @@ class TestSupervisorAgentComponentInit:
             ([], 5, "empty", "at least one managed agent"),
             (None, 0, None, "max_delegations must be at least 1"),
             (None, -1, None, "max_delegations must be at least 1"),
-            (None, 5, "empty", "at least one subagent component"),
+            (None, 5, "empty", "not found in subagent_components"),
             (None, 5, "missing_tester", "Managed agent 'tester' not found"),
             (None, 5, "wrong_type", "does not have a bind_to_supervisor method"),
         ],
@@ -295,6 +295,35 @@ class TestSupervisorAgentComponentInit:
                 managed_agents if managed_agents is not None else managed_agent_names,
                 max_delegations,
                 subagent_components_by_key[subagent_components_key],
+                mock_schema_registry,
+            )
+
+    def test_none_managed_agents_raises(
+        self,
+        supervisor_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        max_delegations,
+        mock_sub_agents,
+        mock_schema_registry,
+    ):
+        """Test that passing managed_agents=None raises ValueError to prevent UnboundLocalError."""
+        with pytest.raises(ValueError, match="managed_agents to be provided"):
+            _make_supervisor(
+                supervisor_name,
+                flow_id,
+                flow_type,
+                user,
+                mock_toolset,
+                mock_prompt_registry,
+                mock_internal_event_client,
+                None,  # managed_agents explicitly None
+                max_delegations,
+                mock_sub_agents,
                 mock_schema_registry,
             )
 
