@@ -52,6 +52,42 @@ async def test_convert_mcp_tools_to_configs():
     assert second_config["args_schema"] == {"properties": {}}
 
 
+def test_convert_mcp_tools_trusted_skips_warning():
+    """Test that trusted MCP tools do not get the untrusted warning prepended."""
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="gitlab_search",
+            description="GitLab search tool",
+            inputSchema="{}",
+            trusted=True,
+        ),
+        contract_pb2.McpTool(
+            name="random_tool",
+            description="Random tool",
+            inputSchema="{}",
+            trusted=False,
+        ),
+        contract_pb2.McpTool(
+            name="default_tool",
+            description="Default tool",
+            inputSchema="{}",
+        ),
+    ]
+
+    result = convert_mcp_tools_to_configs(mcp_tools)
+
+    assert len(result) == 3
+
+    # Trusted tool should NOT have the warning
+    assert result[0]["description"] == "GitLab search tool"
+
+    # Explicitly untrusted tool should have the warning
+    assert result[1]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nRandom tool"
+
+    # Default (trusted=False) should have the warning
+    assert result[2]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nDefault tool"
+
+
 @pytest.mark.asyncio
 async def test_mcp_tool_instance_creation_and_execution():
     """Test that McpTool instances can be created from configs and executed."""

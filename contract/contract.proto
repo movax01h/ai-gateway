@@ -219,6 +219,7 @@ message McpTool {
     string inputSchema = 3;
     optional Icons icons = 4;
     optional ToolAnnotations annotations = 5;
+    optional bool trusted = 6;
 }
 
 message Icons {

@@ -329,18 +329,20 @@ class ToolAnnotations(_message.Message):
     def __init__(self, title: _Optional[str] = ..., read_only_hint: bool = ..., destructive_hint: bool = ..., idempotent_hint: bool = ..., open_world_hint: bool = ...) -> None: ...
 
 class McpTool(_message.Message):
-    __slots__ = ("name", "description", "inputSchema", "icons", "annotations")
+    __slots__ = ("name", "description", "inputSchema", "icons", "annotations", "trusted")
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     INPUTSCHEMA_FIELD_NUMBER: _ClassVar[int]
     ICONS_FIELD_NUMBER: _ClassVar[int]
     ANNOTATIONS_FIELD_NUMBER: _ClassVar[int]
+    TRUSTED_FIELD_NUMBER: _ClassVar[int]
     name: str
     description: str
     inputSchema: str
     icons: Icons
     annotations: ToolAnnotations
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ...) -> None: ...
+    trusted: bool
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ..., trusted: bool = ...) -> None: ...
 
 class Icons(_message.Message):
     __slots__ = ("items",)

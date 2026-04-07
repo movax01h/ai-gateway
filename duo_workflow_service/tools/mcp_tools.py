@@ -157,7 +157,12 @@ def convert_mcp_tools_to_configs(
         except json.JSONDecodeError:
             args_schema = {}
 
-        description = f"{UNTRUSTED_MCP_WARNING}\n\n{tool.description}"
+        is_trusted = getattr(tool, "trusted", False)
+        description = (
+            tool.description
+            if is_trusted
+            else f"{UNTRUSTED_MCP_WARNING}\n\n{tool.description}"
+        )
 
         result.append(
             McpToolConfig(
