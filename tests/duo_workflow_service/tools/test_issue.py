@@ -953,6 +953,92 @@ async def test_update_issue(gitlab_client_mock, metadata):
 
 
 @pytest.mark.asyncio
+async def test_update_issue_with_add_labels(gitlab_client_mock, metadata):
+    gitlab_client_mock.aput = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 123,
+                "title": "Test Issue",
+                "labels": ["bug", "critical", "new-label"],
+            },
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    tool = UpdateIssue(description="update issue description", metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1,
+        issue_iid=123,
+        add_labels="new-label",
+    )
+
+    expected_response = json.dumps(
+        {
+            "updated_issue": {
+                "id": 123,
+                "title": "Test Issue",
+                "labels": ["bug", "critical", "new-label"],
+            }
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/projects/1/issues/123",
+        body=json.dumps(
+            {
+                "add_labels": "new-label",
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_issue_with_remove_labels(gitlab_client_mock, metadata):
+    gitlab_client_mock.aput = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 123,
+                "title": "Test Issue",
+                "labels": ["bug"],
+            },
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    tool = UpdateIssue(description="update issue description", metadata=metadata)
+
+    response = await tool._arun(
+        project_id=1,
+        issue_iid=123,
+        remove_labels="critical",
+    )
+
+    expected_response = json.dumps(
+        {
+            "updated_issue": {
+                "id": 123,
+                "title": "Test Issue",
+                "labels": ["bug"],
+            }
+        }
+    )
+    assert response == expected_response
+
+    gitlab_client_mock.aput.assert_called_once_with(
+        path="/api/v4/projects/1/issues/123",
+        body=json.dumps(
+            {
+                "remove_labels": "critical",
+            }
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_issue_with_epic_id(gitlab_client_mock, metadata):
     gitlab_client_mock.aput = AsyncMock(
         return_value=GitLabHttpResponse(

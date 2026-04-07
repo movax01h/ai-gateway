@@ -367,7 +367,16 @@ class UpdateIssueInput(IssueResourceInput):
         description=f"Description of the issue. Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.",
     )
     labels: Optional[str] = Field(
-        default=None, description="Comma-separated list of label names"
+        default=None,
+        description="Comma-separated label names. Replaces all existing labels on the issue. "
+        "Set to an empty string to unassign all labels. "
+        "To add or remove labels without replacing, use add_labels or remove_labels instead.",
+    )
+    add_labels: Optional[str] = Field(
+        default=None, description="Comma-separated label names to add to an issue"
+    )
+    remove_labels: Optional[str] = Field(
+        default=None, description="Comma-separated label names to remove from an issue"
     )
     assignee_ids: Optional[list[int]] = Field(
         default=None,
