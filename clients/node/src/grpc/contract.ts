@@ -235,6 +235,7 @@ export interface McpTool {
   inputSchema: string;
   icons?: Icons | undefined;
   annotations?: ToolAnnotations | undefined;
+  trusted?: boolean | undefined;
 }
 
 export interface Icons {
@@ -3355,7 +3356,7 @@ export const ToolAnnotations: MessageFns<ToolAnnotations> = {
 };
 
 function createBaseMcpTool(): McpTool {
-  return { name: "", description: "", inputSchema: "", icons: undefined, annotations: undefined };
+  return { name: "", description: "", inputSchema: "", icons: undefined, annotations: undefined, trusted: undefined };
 }
 
 export const McpTool: MessageFns<McpTool> = {
@@ -3374,6 +3375,9 @@ export const McpTool: MessageFns<McpTool> = {
     }
     if (message.annotations !== undefined) {
       ToolAnnotations.encode(message.annotations, writer.uint32(42).fork()).join();
+    }
+    if (message.trusted !== undefined) {
+      writer.uint32(48).bool(message.trusted);
     }
     return writer;
   },
@@ -3425,6 +3429,14 @@ export const McpTool: MessageFns<McpTool> = {
           message.annotations = ToolAnnotations.decode(reader, reader.uint32());
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.trusted = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3441,6 +3453,7 @@ export const McpTool: MessageFns<McpTool> = {
       inputSchema: isSet(object.inputSchema) ? globalThis.String(object.inputSchema) : "",
       icons: isSet(object.icons) ? Icons.fromJSON(object.icons) : undefined,
       annotations: isSet(object.annotations) ? ToolAnnotations.fromJSON(object.annotations) : undefined,
+      trusted: isSet(object.trusted) ? globalThis.Boolean(object.trusted) : undefined,
     };
   },
 
@@ -3461,6 +3474,9 @@ export const McpTool: MessageFns<McpTool> = {
     if (message.annotations !== undefined) {
       obj.annotations = ToolAnnotations.toJSON(message.annotations);
     }
+    if (message.trusted !== undefined) {
+      obj.trusted = message.trusted;
+    }
     return obj;
   },
 
@@ -3476,6 +3492,7 @@ export const McpTool: MessageFns<McpTool> = {
     message.annotations = (object.annotations !== undefined && object.annotations !== null)
       ? ToolAnnotations.fromPartial(object.annotations)
       : undefined;
+    message.trusted = object.trusted ?? undefined;
     return message;
   },
 };
