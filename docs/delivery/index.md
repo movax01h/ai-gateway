@@ -7,7 +7,7 @@ flowchart LR
     subgraph AIGWRepo["Repository"]
       AIGWRepoMain["main"]
       subgraph AIGWGT["Git Tags"]
-        AIGWv1["self-hosted-v18.6.0-ee, etc [^1]"]
+        AIGWv1["self-hosted-v18.11.0-ee, etc [^1]"]
       end
       subgraph AIGWSB["Stable Branches"]
           AIGWb1["stable-18-6-ee, etc [^2]"]
@@ -41,7 +41,8 @@ flowchart LR
     end
   end
   subgraph DockerHub["Docker Hub"]
-    DHub1["model-gateway-self-hosted:self-hosted-v18.6.0-ee, etc [^10]"]
+    DHub1["model-gateway-self-hosted:self-hosted-v18.11.0-ee, etc [^10]"]
+    DHub2["model-gateway-self-hosted-fips:self-hosted-v18.11.0-ee, etc [^11]"]
   end
   AIGWRepo -- push mirror [^3] --> AIGWSRepo
   AIGWRepoMain -- build --> AIGWCR1
@@ -54,6 +55,7 @@ flowchart LR
   RunwayDWS -- deploy --> DWSFleet
   GitLabLSP -- depends --> AIGWPR1
   AIGWGT -- push [^4] --> DHub1
+  AIGWGT -- push [^4] --> DHub2
 ```
 
 Notes:
@@ -64,13 +66,14 @@ Notes:
   - e.g. When a merge request is merged into `main` branch of the canonical repository:
     - The merge commit in the canonical repository triggers a CI/CD pipeline in the canonical project.
     - The merge commit is immediately mirrored to the security repository. The merge commit in the security project triggers a CI/CD pipeline in the security project.
-- `[^4]`: When a Git-Tag is created, a CI/CD pipeline builds and push the Docker image to Docker Hub. See [Release](./release.md) for more information.
+- `[^4]`: When a Git-Tag is created, a CI/CD pipeline builds and pushes Docker images (including FIPS variants) to Docker Hub. See [Release](./release.md) for more information.
 - `[^5]`: Node gRPC client lib that is used by [GitLab-LSP](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp).
 - `[^6]`: [AIGW deployment project](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/ai-gateway)
 - `[^7]`: [DWS deployment project](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc)
 - `[^8]`: Docker images that are used for non-production environments e.g. `dws-loadtest` Runway deployment.
 - `[^9]`: Requested by GitLab.com, Dedicated and Self-managed GitLab customers (except self-hosted Duo customers).
 - `[^10]`: Pulled by self-hosted Duo customers who host AIGW/DWS fleet on their own (e.g. airgapped). See [Install the GitLab AI gateway](https://docs.gitlab.com/install/install_ai_gateway/) and [GitLab Duo Self-Hosted](https://docs.gitlab.com/administration/gitlab_duo_self_hosted/) for more information.
+- `[^11]`: FIPS-compliant variant of the self-hosted image. Follows the same release process. See [FIPS-compliant images](./release.md#fips-compliant-images).
 
 Related docs:
 

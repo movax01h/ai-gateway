@@ -38,7 +38,19 @@ To view released versions of AI Gateway, visit the following links:
 
 - [Releases](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/releases): This page lists the released versions and changelogs.
 - [Container Registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry): This page lists the released Docker images e.g. `registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway:v1.0.0`
-- [DockerHub](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry): This page lists the released images that match a GitLab version e.g. `docker/gitlab/model-gateway:gitlab-v17.2`
+- [DockerHub](https://hub.docker.com/r/gitlab/model-gateway/tags): This page lists the released images that match a GitLab version e.g. `docker/gitlab/model-gateway:gitlab-v17.2`
+- [FIPS-compliant images](#fips-compliant-images): FIPS self-hosted image registry locations.
+
+## FIPS-compliant images
+
+FIPS-compliant images of the self-hosted AI Gateway follow the same [release process](#self-hosted-ai-gateway-release-process) as the standard images. They are built and published automatically when a `self-hosted-` tag is created. These images are intended for customers in GovCloud or air-gapped environments that require FIPS 140-2 validated cryptography.
+
+FIPS images are available at:
+
+- [GitLab Container Registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/9518478) — `model-gateway/self-hosted-fips` (primary)
+- [DockerHub](https://hub.docker.com/r/gitlab/model-gateway-self-hosted-fips/tags) — `gitlab/model-gateway-self-hosted-fips` (mirror only)
+
+Prefer pulling from the GitLab Container Registry. DockerHub is a mirror and may not be reachable in restricted environments.
 
 ## Self-hosted AI Gateway release process
 
