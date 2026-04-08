@@ -1,0 +1,13 @@
+---
+name: Classify Code Review Mention Intent
+model:
+  params:
+    max_tokens: 50
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'classify_code_review_mention_intent/system/1.0.0.jinja' %}
+  user: |
+    {% include 'classify_code_review_mention_intent/user/1.0.0.jinja' %}
+params:
+  timeout: 30

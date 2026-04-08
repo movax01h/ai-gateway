@@ -1,0 +1,10 @@
+---
+name: Amazon Q Classify Code Review Mention Intent
+unit_primitive: amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'classify_code_review_mention_intent/system/1.0.0.jinja' %}
+  user: |
+    {% include 'classify_code_review_mention_intent/user/1.0.0.jinja' %}
+params:
+  timeout: 30
