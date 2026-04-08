@@ -58,7 +58,7 @@ tests:evaluation:
   needs:
     - install
   variables:
-    EXECUTION_MODEL: "claude-haiku-4-5-20251001"
+    EXECUTION_MODEL: "claude-sonnet-4-6"
     VALIDATION_MODEL: "claude-haiku-4-5-20251001"
   script:
     - |
@@ -77,10 +77,14 @@ tests:agents:analytics:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
-        - duo_workflow_service/agent_platform/v1/flows/configs/analytics_agent.yml
+        - duo_workflow_service/agent_platform/v1/flows/configs/analytics_agent/**/*
         - agent_tests/analytics_agent/**/*
       when: on_success
     - when: manual
+  parallel:
+    matrix:
+      - EXECUTION_MODEL: "claude-haiku-4-5-20251001"
+      - EXECUTION_MODEL: "claude-sonnet-4-6"
 
 .test-base: &test-base
   stage: test

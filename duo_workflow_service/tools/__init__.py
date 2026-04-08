@@ -11,6 +11,7 @@ from .duo_base_tool import format_tool_display_message
 from .epic import *
 from .filesystem import *
 from .findings import *
+from .get_glql_schema import *
 from .git import *
 from .handover import *
 from .issue import *

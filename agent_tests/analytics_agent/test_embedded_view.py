@@ -5,13 +5,15 @@ Validates proper YAML structure for embedded views.
 
 import pytest
 
+from agent_tests.helpers import ask_agent
+
 from .helpers import (
     SAMPLE_ISSUES,
     SAMPLE_MRS,
     glql_response,
     mock_glql_response,
 )
-from agent_tests.helpers import ask_agent
+
 
 @pytest.mark.asyncio
 async def test_embedded_view_has_required_fields(
@@ -28,6 +30,7 @@ async def test_embedded_view_has_required_fields(
         "Create a dashboard view of recent MRs in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -53,6 +56,7 @@ async def test_ordered_list_display_type(
         "Give me a numbered list of open issues in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -76,6 +80,7 @@ async def test_list_display_type(
         "Give me a list of open MRs in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -99,6 +104,7 @@ async def test_title_field_included_when_requested(
         "Create a view called 'Critical Bugs' for high priority bugs in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

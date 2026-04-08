@@ -15,6 +15,7 @@ from .helpers import (
     mock_glql_response,
 )
 
+
 @pytest.mark.asyncio
 async def test_analytical_question_answers_first(
     analytics_agent,
@@ -30,6 +31,7 @@ async def test_analytical_question_answers_first(
         "How many merge requests were merged this month in the gitlab-org group?",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -54,6 +56,7 @@ async def test_query_request_shows_embedded_view(
         "Write a GLQL query for open issues in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -78,6 +81,7 @@ async def test_visualization_request_shows_embedded_view(
         "Show me all open issues in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -85,6 +89,7 @@ async def test_visualization_request_shows_embedded_view(
             "The response uses embedded view format with display, fields, and query parameters",
         ]
     )
+
 
 @pytest.mark.asyncio
 async def test_ide_analytical_question_answers_first(
@@ -102,6 +107,7 @@ async def test_ide_analytical_question_answers_first(
         + "How many merge requests were merged this month in the gitlab-org group?",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -129,6 +135,7 @@ async def test_ide_query_request_uses_markdown(
         + "Write a GLQL query for open issues in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -154,6 +161,7 @@ async def test_ide_visualization_request_uses_markdown(
         IDE_ADDITIONAL_CONTEXT + "Show me all open issues in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

@@ -48,11 +48,29 @@ def glql_tool(mock_gitlab_client):
 
 
 @pytest.fixture
+def glql_schema_tool():
+    """GetGlqlSchema tool (no GitLab client needed)."""
+    from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
+
+    return GetGlqlSchema(metadata={})
+
+
+@pytest.fixture
 def work_item_note_tool(mock_gitlab_client):
     """CreateWorkItemNote tool with mocked GitLab client."""
     from duo_workflow_service.tools.work_item import CreateWorkItemNote
 
     return CreateWorkItemNote(metadata={"gitlab_client": mock_gitlab_client})
+
+
+@pytest.fixture
+def merge_request_note_tool(mock_gitlab_client):
+    """CreateMergeRequestNote tool with mocked GitLab client."""
+    from duo_workflow_service.tools.merge_request import CreateMergeRequestNote
+
+    return CreateMergeRequestNote(
+        metadata={"gitlab_client": mock_gitlab_client, "gitlab_host": "gitlab.com"}
+    )
 
 
 @pytest.fixture
@@ -77,23 +95,32 @@ def analytics_system_template():
 def analytics_agent(
     real_llm,
     analytics_system_template,
+    glql_schema_tool,
     glql_tool,
     work_item_note_tool,
+    merge_request_note_tool,
     mock_tools_registry,
 ):
     """Analytics agent with real LLM and mocked tools."""
     from duo_workflow_service.agents.chat_agent import ChatAgent
     from duo_workflow_service.tools.toolset import Toolset
 
+    all_tools = [
+        glql_schema_tool,
+        glql_tool,
+        work_item_note_tool,
+        merge_request_note_tool,
+    ]
+
     RealLLMPromptAdapter = make_prompt_adapter_class()
     adapter = RealLLMPromptAdapter(
         model=real_llm,
         system_template=analytics_system_template,
-        tools=[glql_tool, work_item_note_tool],
+        tools=all_tools,
         agent_name="analytics_agent",
     )
 
-    tools_dict = {tool.name: tool for tool in [glql_tool, work_item_note_tool]}
+    tools_dict = {tool.name: tool for tool in all_tools}
     return ChatAgent(
         name="analytics_agent",
         prompt_adapter=adapter,

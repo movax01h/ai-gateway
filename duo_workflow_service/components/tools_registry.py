@@ -123,6 +123,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     GetVulnerabilityDetails,
     EvaluateVulnerabilityFalsePositiveStatus,
     tools.ExtractLinesFromText,
+    tools.GetGlqlSchema,
     tools.RunGLQLQuery,
     BuildReviewMergeRequestContext,
     GetSecurityFindingDetails,

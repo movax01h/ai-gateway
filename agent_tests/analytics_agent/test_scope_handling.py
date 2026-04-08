@@ -5,13 +5,14 @@ Validates scope assumptions and scope notes in responses.
 
 import pytest
 
+from agent_tests.helpers import ask_agent
+
 from .helpers import (
     SAMPLE_ISSUES,
     SAMPLE_MRS,
     glql_response,
     mock_glql_response,
 )
-from agent_tests.helpers import ask_agent
 
 
 @pytest.mark.asyncio
@@ -31,7 +32,9 @@ async def test_scope_note_when_assuming_project(
 
     await result.assert_llm_validates(
         [
-            "The response indicates the group or project being used, either in the response or in the underlying query, OR ask for clarification on which project/group to use",
+            "The response indicates the group or project being used, "
+            "either in the response or in the underlying query, "
+            "OR ask for clarification on which project/group to use",
         ]
     )
 
@@ -51,6 +54,7 @@ async def test_explicit_group_level_request(
         "Show me all open MRs across the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -74,6 +78,7 @@ async def test_explicit_project_level_request(
         "List issues in the gitlab-org/gitlab-test project",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

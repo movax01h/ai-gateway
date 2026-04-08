@@ -5,8 +5,10 @@ Validates graceful handling of edge cases like empty results.
 
 import pytest
 
-from .helpers import EMPTY_RESPONSE, glql_response, mock_glql_response
 from agent_tests.helpers import ask_agent
+
+from .helpers import EMPTY_RESPONSE, glql_response, mock_glql_response
+
 
 @pytest.mark.asyncio
 async def test_empty_results_handled_gracefully(
@@ -23,6 +25,7 @@ async def test_empty_results_handled_gracefully(
         "Show me issues with label ~nonexistent-label-xyz123 in the gitlab-org group",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
