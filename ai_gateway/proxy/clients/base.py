@@ -8,11 +8,10 @@ import litellm
 from fastapi import status
 from fastapi.responses import JSONResponse
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from litellm.proxy._types import ProxyException
+from litellm.proxy._types import ProxyException, UserAPIKeyAuth
 from litellm.proxy.pass_through_endpoints.pass_through_endpoints import (
     create_pass_through_route,
 )
-from litellm.proxy.proxy_server import UserAPIKeyAuth
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
@@ -200,6 +199,8 @@ async def litellm_async_success_callback(
         # Raw response, fallback to simple parsing
         response_json = json.loads(response)
         usage_metadata = response_json.get("usage")
+    else:
+        return
 
     if not usage_metadata:
         return
