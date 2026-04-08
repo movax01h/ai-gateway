@@ -296,12 +296,14 @@ configurable_unit_primitives:
   - feature_setting: "review_merge_request"
     unit_primitives:
       - "review_merge_request"
-    default_model: "claude_sonnet_4_20250514_vertex"
+    default_model: "claude_sonnet_4_6_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
     dev:
       selectable_models:
         - "gpt_5_2"
