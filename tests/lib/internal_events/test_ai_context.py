@@ -21,6 +21,7 @@ class TestAIContext:
             ephemeral_5m_input_tokens=25,
             ephemeral_1h_input_tokens=75,
             cache_read=5,
+            cache_creation=10,
         )
 
         assert ai_context.session_id == "session123"
@@ -33,6 +34,7 @@ class TestAIContext:
         assert ai_context.ephemeral_5m_input_tokens == 25
         assert ai_context.ephemeral_1h_input_tokens == 75
         assert ai_context.cache_read == 5
+        assert ai_context.cache_creation == 10
 
     def test_creates_ai_context_with_minimal_fields(self):
         """Test that AIContext can be instantiated with no fields (all None)."""
@@ -48,6 +50,7 @@ class TestAIContext:
         assert ai_context.ephemeral_5m_input_tokens is None
         assert ai_context.ephemeral_1h_input_tokens is None
         assert ai_context.cache_read is None
+        assert ai_context.cache_creation is None
 
     def test_creates_ai_context_with_partial_fields(self):
         """Test that AIContext can be instantiated with some fields."""
@@ -99,6 +102,7 @@ class TestAIContext:
             "ephemeral_5m_input_tokens",
             "ephemeral_1h_input_tokens",
             "cache_read",
+            "cache_creation",
         }
 
         assert set(context_dict.keys()) == expected_fields
@@ -117,6 +121,7 @@ class TestAIContext:
             "ephemeral_5m_input_tokens": 30,
             "ephemeral_1h_input_tokens": 90,
             "cache_read": 10,
+            "cache_creation": 20,
         }
 
         ai_context = AIContext(
@@ -130,6 +135,7 @@ class TestAIContext:
             ephemeral_5m_input_tokens=context_data.get("ephemeral_5m_input_tokens"),
             ephemeral_1h_input_tokens=context_data.get("ephemeral_1h_input_tokens"),
             cache_read=context_data.get("cache_read"),
+            cache_creation=context_data.get("cache_creation"),
         )
 
         assert ai_context.session_id == "session123"
@@ -137,6 +143,7 @@ class TestAIContext:
         assert ai_context.flow_type == "software_development"
         assert ai_context.input_tokens == 150
         assert ai_context.total_tokens == 225
+        assert ai_context.cache_creation == 20
 
     def test_ai_context_handles_missing_keys_with_dict_get(self):
         """Test that .get() returns None for missing keys."""
@@ -150,9 +157,11 @@ class TestAIContext:
             workflow_id=context_data.get("workflow_id"),
             input_tokens=context_data.get("input_tokens"),
             output_tokens=context_data.get("output_tokens"),
+            cache_creation=context_data.get("cache_creation"),
         )
 
         assert ai_context.session_id == "session123"
         assert ai_context.workflow_id is None
         assert ai_context.input_tokens == 100
         assert ai_context.output_tokens is None
+        assert ai_context.cache_creation is None

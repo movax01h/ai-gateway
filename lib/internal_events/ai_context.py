@@ -13,6 +13,8 @@ class AIContext:
     This context follows the com.gitlab/ai_context/jsonschema/1-0-0 schema.
     """
 
+    # pylint: disable=too-many-instance-attributes
+
     session_id: Optional[str] = None
     workflow_id: Optional[str] = None
     flow_type: Optional[str] = None
@@ -23,3 +25,4 @@ class AIContext:
     ephemeral_5m_input_tokens: Optional[int] = None
     ephemeral_1h_input_tokens: Optional[int] = None
     cache_read: Optional[int] = None
+    cache_creation: Optional[int] = None

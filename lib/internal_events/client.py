@@ -20,7 +20,7 @@ class InternalEventsClient:
     """Client to handle internal events using SnowplowClient."""
 
     STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-7"
-    AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-0"
+    AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-1"
     REQUEST_TIMEOUT = (5.0, 10.0)
 
     def __init__(
@@ -173,6 +173,7 @@ class InternalEventsClient:
             ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
             ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
             cache_read=extra.get("cache_read"),
+            cache_creation=extra.get("cache_creation"),
         )
 
         ai_context = AIContext(
@@ -186,6 +187,7 @@ class InternalEventsClient:
             ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
             ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
             cache_read=extra.get("cache_read"),
+            cache_creation=extra.get("cache_creation"),
         )
 
         structured_event = StructuredEvent(
