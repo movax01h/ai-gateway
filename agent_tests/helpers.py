@@ -107,9 +107,9 @@ class AgentResult:
 
     def assert_has_tool_calls(self) -> "AgentResult":
         """Assert that the agent made at least one tool call."""
-        assert self.tool_calls, (
-            f"Agent must call at least one tool. Response: {self.content[:500]}"
-        )
+        assert (
+            self.tool_calls
+        ), f"Agent must call at least one tool. Response: {self.content[:500]}"
         return self
 
     async def assert_llm_validates(self, criteria: list[str]) -> "AgentResult":
@@ -133,9 +133,9 @@ class AgentResult:
 
 async def ask_agent(
     agent: Any,
-    initial_state_factory: Callable[[str], dict],
+    initial_state_factory: Callable[..., dict],
     question: str,
-    max_turns: int = 5,
+    max_turns: int = 10,
     validation_model: str = "",
 ) -> AgentResult:
     """Ask the agent a question and run until final response.

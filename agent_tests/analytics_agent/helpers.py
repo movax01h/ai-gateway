@@ -101,6 +101,80 @@ SAMPLE_MRS = [
     },
 ]
 
+SAMPLE_PIPELINES = [
+    {
+        "id": "gid://gitlab/Ci::Pipeline/1001",
+        "iid": "101",
+        "status": "failed",
+        "ref": "main",
+        "sha": "abc123def456",
+        "source": "push",
+        "duration": 320,
+        "name": "Build & Test",
+    },
+    {
+        "id": "gid://gitlab/Ci::Pipeline/1002",
+        "iid": "102",
+        "status": "success",
+        "ref": "feature-branch",
+        "sha": "789ghi012jkl",
+        "source": "merge_request_event",
+        "duration": 180,
+        "name": "MR Pipeline",
+    },
+]
+
+SAMPLE_JOBS = [
+    {
+        "id": "gid://gitlab/Ci::Build/2001",
+        "name": "rspec unit",
+        "stage": "test",
+        "status": "failed",
+        "duration": 95,
+        "kind": "build",
+        "failureMessage": "Exit code 1",
+    },
+    {
+        "id": "gid://gitlab/Ci::Build/2002",
+        "name": "deploy-production",
+        "stage": "deploy",
+        "status": "success",
+        "duration": 42,
+        "kind": "build",
+        "failureMessage": None,
+    },
+    {
+        "id": "gid://gitlab/Ci::Bridge/2003",
+        "name": "trigger-downstream",
+        "stage": "deploy",
+        "status": "success",
+        "duration": 5,
+        "kind": "bridge",
+        "failureMessage": None,
+    },
+]
+
+SAMPLE_PROJECTS = [
+    {
+        "id": "gid://gitlab/Project/1",
+        "name": "GitLab",
+        "fullPath": "gitlab-org/gitlab",
+        "visibility": "public",
+        "starCount": 8500,
+        "openIssuesCount": 45000,
+        "openMergeRequestsCount": 1200,
+    },
+    {
+        "id": "gid://gitlab/Project/2",
+        "name": "GitLab Runner",
+        "fullPath": "gitlab-org/gitlab-runner",
+        "visibility": "public",
+        "starCount": 2300,
+        "openIssuesCount": 800,
+        "openMergeRequestsCount": 50,
+    },
+]
+
 EMPTY_RESPONSE: list[dict[str, Any]] = []
 
 REALISTIC_ISSUE_TITLES = [

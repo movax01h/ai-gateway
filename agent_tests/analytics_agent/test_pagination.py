@@ -5,6 +5,8 @@ Validates proper pagination behavior for different query types.
 
 import pytest
 
+from agent_tests.helpers import ask_agent
+
 from .helpers import (
     SAMPLE_ISSUES,
     SAMPLE_MRS,
@@ -12,7 +14,6 @@ from .helpers import (
     glql_response,
     mock_glql_response,
 )
-from agent_tests.helpers import ask_agent
 
 
 @pytest.mark.asyncio
@@ -30,11 +31,11 @@ async def test_count_query_single_call(
         "How many open issues are there in the gitlab-org group?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     result.assert_tool_call_count("run_glql_query", 1)
+    result.assert_tool_call_count("get_glql_schema", 1)
     await result.assert_llm_validates(
         [
-            "The response provides a specific count/number of issues, i.e. 150 without paginating.",
+            "The response provides the correct count/number of issues 150 without paginating.",
         ]
     )
 
@@ -54,8 +55,8 @@ async def test_limited_results_single_call(
         "Show me the last 20 merged MRs in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     result.assert_tool_call_count("run_glql_query", 1)
+    result.assert_tool_call_count("get_glql_schema", 1)
     await result.assert_llm_validates(
         [
             "The GLQL query includes 'limit: 20' or similar to respect the user's requested limit",
@@ -92,13 +93,16 @@ async def test_full_analysis_paginates(
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Looking at all the issues in the gitlab-org group, analyse the main areas of work based on the issue title and description",
+        "Looking at all the issues in the gitlab-org group, "
+        "analyse the main areas of work based on the issue title and description",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     result.assert_tool_call_count("run_glql_query", 3)
+    result.assert_tool_call_count("get_glql_schema", 1)
+
     await result.assert_llm_validates(
         [
             "The response provides analysis or categorisation of different work areas based on the issue data",
+            "The agent fetched all 3 pages, using max page size of 100",
         ]
     )

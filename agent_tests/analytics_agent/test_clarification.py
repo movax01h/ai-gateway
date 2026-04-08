@@ -1,10 +1,11 @@
 """Clarification Behavior Tests.
 
-Validates that the agent asks for clarification on ambiguous terms
-but proceeds with assumptions on clear questions.
+Validates that the agent asks for clarification on ambiguous terms but proceeds with assumptions on clear questions.
 """
 
 import pytest
+
+from agent_tests.helpers import ask_agent
 
 from .helpers import (
     SAMPLE_ISSUES,
@@ -12,7 +13,7 @@ from .helpers import (
     glql_response,
     mock_glql_response,
 )
-from agent_tests.helpers import ask_agent
+
 
 @pytest.mark.asyncio
 async def test_ambiguous_team_triggers_clarification(
@@ -30,6 +31,7 @@ async def test_ambiguous_team_triggers_clarification(
     )
 
     result.assert_not_called_tool("run_glql_query")
+    result.assert_not_called_tool("get_glql_schema")
     await result.assert_llm_validates(
         ["The response asks for clarification about what 'team' means "]
     )
@@ -50,6 +52,7 @@ async def test_ambiguous_bugs_and_quarter_triggers_clarification(
         "How many bugs were created this quarter?",
     )
 
+    result.assert_not_called_tool("get_glql_schema")
     result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -74,6 +77,7 @@ async def test_ambiguous_velocity_triggers_clarification(
         "What's our team's velocity?",
     )
 
+    result.assert_not_called_tool("get_glql_schema")
     result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -97,10 +101,12 @@ async def test_clear_question_proceeds_without_clarification(
         "How many merge requests with label ~bug were merged in the last 7 days in the gitlab-org group?",
     )
 
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The response provides a direct answer without asking clarifying questions about which project/group to use",
+            "The response provides a direct answer without asking "
+            "clarifying questions about which project/group to use",
             "The response includes the count of 7 merge requests",
         ]
     )

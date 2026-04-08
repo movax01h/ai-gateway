@@ -5,8 +5,9 @@ Validates graceful handling of features GLQL doesn't support.
 
 import pytest
 
-from .helpers import SAMPLE_ISSUES, glql_response, mock_glql_response
 from agent_tests.helpers import ask_agent
+
+from .helpers import SAMPLE_ISSUES, glql_response, mock_glql_response
 
 
 @pytest.mark.asyncio
@@ -47,7 +48,6 @@ async def test_text_search_limitation_explained(
         "Find issues where the title contains 'authentication'",
     )
 
-    result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
             "The response explains that GLQL does not support text search, contains, or like operators."

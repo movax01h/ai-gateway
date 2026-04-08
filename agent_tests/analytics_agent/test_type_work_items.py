@@ -1,229 +1,229 @@
-"""GLQL Syntax Tests.
+"""Work Item data source tests.
 
-Validates adherence to GLQL syntax rules, restrictions, operators, and functions that apply across all data sources.
+Validates that the agent generates correct GLQL queries for Work Item types (Issue, Epic, Task, etc.), including query
+fields, display fields, sorting, and scope requirements.
 """
 
 import pytest
 
 from agent_tests.helpers import ask_agent
 
-from .helpers import SAMPLE_ISSUES, SAMPLE_MRS, glql_response, mock_glql_response
+from .helpers import SAMPLE_ISSUES, glql_response, mock_glql_response
 
 
 @pytest.mark.asyncio
-async def test_invalid_sort_field_uses_valid_alternative(
+async def test_work_item_type_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use valid sort field instead of assignee."""
+    """Should filter by work item type using the type field."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Show me open issues sorted by assignee in the gitlab-org group",
+        "Show me all open tasks in the gitlab-org group",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The response uses a valid sort field (like created, updated, title) "
-            "instead of assignee and explains that sorting by assignee is not supported"
+            "The GLQL query includes type = Task",
+            "The GLQL query filters by state = opened",
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_label_syntax_with_tilde_prefix(
+async def test_work_item_date_filters(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use proper label syntax with ~ prefix."""
+    """Should use date comparison operators for created and due fields."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Find all issues with the priority-high label in the gitlab-org group",
+        "Show me issues created in the last month that are due within a week in the gitlab-org group",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            'The GLQL query uses the ~ prefix for labels (e.g., ~priority-high or ~"priority-high")',
+            "The GLQL query filters created using a relative time expression like -1m",
+            "The GLQL query filters due using a relative time expression like 1w",
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_milestone_syntax_with_percent_prefix(
+async def test_work_item_health_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use proper milestone syntax with % prefix."""
+    """Should filter by health status."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Show me issues in milestone v1.0 in the gitlab-org group",
+        'Show me issues with health status "needs attention" in the gitlab-org group',
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            'The GLQL query uses the % prefix for milestones (e.g., %v1.0 or %"v1.0")',
+            'The GLQL query filters by health = "needs attention"',
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_limit_maximum_of_100(
+async def test_work_item_iteration_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should respect limit maximum of 100."""
+    """Should filter by iteration."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Show me the last 101 issues in the gitlab-org group",
+        "Show me issues in the current iteration in the gitlab-org group",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The GLQL query has a limit of 100 or less.",
-            "The response mentions that 100 is the maximum allowed limit",
+            "The GLQL query filters by iteration = current",
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_and_logic_for_multiple_labels(
+async def test_work_item_weight_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use AND logic correctly for multiple labels."""
+    """Should filter by weight."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Find issues with both ~bug and ~security labels in the gitlab-org group",
+        "Show me issues with weight 5 in the gitlab-org group",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The GLQL query uses multiple 'label = ~x and label = ~y' conditions for AND logic.",
-            "It does not use 'label in (~bug, ~security)' which would be OR logic",
+            "The GLQL query filters by weight = 5",
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_labels_in_fields(
+async def test_work_item_display_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should include labels in fields when requested."""
+    """Should use appropriate display fields for work items."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Show me issues with their labels displayed in the gitlab-org group",
+        "Show me open issues in the gitlab-org group with their title, assignee, labels, milestone and due date",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The GLQL query includes 'labels' in the fields parameter",
+            "The GLQL embedded view fields include title, assignee, labels, milestone, and due",
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_negation_operator(
+async def test_work_item_sort_by_due_date(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use != operator correctly for negation."""
+    """Should sort by due date when requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Show me open issues not assigned to me in the gitlab-org group",
+        "Show me open issues in the gitlab-org group sorted by due date, earliest first",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The GLQL query uses 'assignee != currentUser()'",
+            "The GLQL embedded view sorts by due asc or dueDate asc",
         ]
     )
 
 
 @pytest.mark.asyncio
-async def test_current_user_for_my_queries(
+async def test_work_item_sort_by_popularity(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use currentUser() for 'my' queries."""
-    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
-
-    result = await ask_agent(
-        analytics_agent,
-        initial_state,
-        "Show me my open merge requests in the gitlab-org group",
-    )
-
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
-    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
-    await result.assert_llm_validates(
-        [
-            "The response indicates filtering by the current user, evidenced by: currentUser() in the GLQL query",
-        ]
-    )
-
-
-@pytest.mark.asyncio
-async def test_current_user_for_assigned_items(
-    analytics_agent,
-    initial_state,
-    mock_gitlab_client,
-):
-    """Should use currentUser() for assigned items."""
+    """Should sort by popularity when requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "What issues from the gitlab-org group are assigned to me?",
+        "Show me the most popular open issues in the gitlab-org group",
     )
 
     result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "The GLQL query uses 'assignee = currentUser()' to filter by the current user",
+            "The GLQL embedded view sorts by popularity desc",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_epic_sort_by_milestone_not_supported(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Should warn that milestone sort is not supported for epics."""
+    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Can you show all epics in the gitlab-org group, sorted by milestone?",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    await result.assert_llm_validates(
+        [
+            "The response explains that sorting by milestone "
+            "is not supported for epics, or uses an alternative sort field",
         ]
     )

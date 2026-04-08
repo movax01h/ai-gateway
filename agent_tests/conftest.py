@@ -28,8 +28,8 @@ def pytest_addoption(parser):
     """Add custom CLI options for model selection."""
     parser.addoption(
         "--execution-model",
-        default="claude-haiku-4-5-20251001",
-        help="Anthropic model for agent execution (default: claude-haiku-4-5-20251001)",
+        default="claude-sonnet-4-6",
+        help="Anthropic model for agent execution (default: claude-sonnet-4-6)",
     )
     parser.addoption(
         "--validation-model",
