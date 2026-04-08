@@ -182,6 +182,29 @@ class TestInMemoryPromptRegistry:
         ):
             in_memory_registry.get(prompt_id, prompt_version=None)
 
+    @pytest.mark.parametrize("is_graph_node", [True, False])
+    def test_get_versioned_prompt_forwards_is_graph_node(
+        self, in_memory_registry, mock_shared_registry, prompt, is_graph_node
+    ):
+        """is_graph_node must be forwarded to shared_registry.get() for versioned prompts.
+
+        Regression test: when is_graph_node=True is passed for a flow-node prompt
+        that has no entry in unit_primitives.yml, InMemoryPromptRegistry must relay
+        the flag so that LocalPromptRegistry._default_model_metadata can fall back to
+        duo_agent_platform instead of raising "Invalid feature setting: <prompt_id>".
+        """
+        mock_shared_registry.get.return_value = prompt
+
+        in_memory_registry.get(
+            "secret_vulnerability_source_file_agent_prompt",
+            prompt_version="1.0.0",
+            is_graph_node=is_graph_node,
+        )
+
+        mock_shared_registry.get.assert_called_once()
+        _, kwargs = mock_shared_registry.get.call_args
+        assert kwargs["is_graph_node"] is is_graph_node
+
     def test_get_local_prompt_missing_prompt_template(self, in_memory_registry):
         """Test error when prompt_template key is missing."""
         prompt_id = "missing_template_prompt"

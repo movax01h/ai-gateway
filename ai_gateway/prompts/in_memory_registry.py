@@ -177,5 +177,6 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             model_metadata,
             tools,
             tool_choice,
+            is_graph_node=is_graph_node,
             **kwargs,
         )
