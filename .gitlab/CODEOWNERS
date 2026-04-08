@@ -27,5 +27,8 @@
 # - TOOL_SECURITY_OVERRIDES dictionary
 /duo_workflow_service/security/prompt_security.py
 
+[Analytics Instrumentation] @gitlab-org/analytics-section/analytics-instrumentation/engineers @gitlab-org/analytics-section/analytics-instrumentation/external-reviewers
+/config/events/
+
 ^[Infrastructure]
 * @gitlab-org/production-engineering @gitlab-org/scalability
