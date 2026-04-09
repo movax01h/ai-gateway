@@ -1,16 +1,16 @@
-* @gitlab-org/maintainers/ai-gateway @gitlab-org/production-engineering @gitlab-org/scalability @gitlab-org/maintainers/duo-workflow-service
+* @gitlab-org/maintainers/ai-gateway @gitlab-org/maintainers/duo-workflow-service
 
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/ai-gateway
 
-[Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service @gitlab-org/production-engineering @gitlab-org/scalability
+[Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service
 /duo_workflow_service/
 /clients/
 /contract/
 /tests/duo_workflow_service/
 
-[AI Gateway] @gitlab-org/maintainers/ai-gateway @gitlab-org/production-engineering @gitlab-org/scalability
+[AI Gateway] @gitlab-org/maintainers/ai-gateway
 /ai_gateway/
 /tests/ai_gateway/
 
