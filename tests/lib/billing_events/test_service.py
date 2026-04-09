@@ -87,6 +87,7 @@ class TestBillingEventService:
                         "token_count": 150,
                         "prompt_tokens": 100,
                         "completion_tokens": 50,
+                        "agent_name": None,
                     }
                 ],
             },

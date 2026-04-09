@@ -131,6 +131,7 @@ class TestWatchContainer:
                 "model_provider": "test_provider",
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
+                "agent_name": None,
             },
             {
                 "token_count": 15,
@@ -139,6 +140,7 @@ class TestWatchContainer:
                 "model_provider": "test_provider",
                 "prompt_tokens": 5,
                 "completion_tokens": 10,
+                "agent_name": None,
             },
             {
                 "token_count": 3,
@@ -147,6 +149,7 @@ class TestWatchContainer:
                 "model_provider": "test_provider",
                 "prompt_tokens": 1,
                 "completion_tokens": 2,
+                "agent_name": None,
             },
         ]
 
@@ -240,6 +243,7 @@ class TestWatchContainer:
                     "model_provider": "test_provider",
                     "prompt_tokens": 10,
                     "completion_tokens": 15,
+                    "agent_name": None,
                 }
             ]
 
@@ -247,6 +251,29 @@ class TestWatchContainer:
 
         contextvars.copy_context().run(run)
         contextvars.copy_context().run(run)
+
+    @mock.patch("prometheus_client.Counter.labels")
+    def test_register_token_usage_with_agent_name(self, mock_counters, container):
+        init_token_usage()
+        init_llm_operations()
+
+        container.register_token_usage(
+            "test_model",
+            {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25},
+            {"agent_name": "planning_agent"},
+        )
+
+        assert llm_operations.get() == [
+            {
+                "token_count": 25,
+                "model_id": "test_model",
+                "model_engine": "test_provider",
+                "model_provider": "test_provider",
+                "prompt_tokens": 10,
+                "completion_tokens": 15,
+                "agent_name": "planning_agent",
+            }
+        ]
 
     @mock.patch("prometheus_client.Gauge.labels")
     @mock.patch("prometheus_client.Counter.labels")

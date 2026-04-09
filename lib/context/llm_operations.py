@@ -7,7 +7,7 @@ debugging.
 from contextvars import ContextVar
 
 type TokenUsage = dict[str, dict[str, int]]
-type LlmOperations = list[dict[str, str | int]]
+type LlmOperations = list[dict[str, str | int | None]]
 
 token_usage: ContextVar[TokenUsage | None] = ContextVar("token_usage", default=None)
 llm_operations: ContextVar[LlmOperations | None] = ContextVar(

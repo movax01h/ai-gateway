@@ -73,6 +73,7 @@ async def test_valid_proxy_request(
                     "model_provider": "my-model-provider",
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
+                    "agent_name": None,
                 }
             ],
         ),
@@ -88,6 +89,7 @@ async def test_valid_proxy_request(
                     "model_provider": "my-model-provider",
                     "prompt_tokens": 8,
                     "completion_tokens": 2,
+                    "agent_name": None,
                 }
             ],
         ),
