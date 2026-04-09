@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -552,3 +552,96 @@ async def test_interceptor_with_both_versions(
     assert event_context.instance_version == "16.11.0"
     assert "lsp_version" in event_context.extra
     assert event_context.extra["lsp_version"] == "7.43.0"
+
+
+@pytest.mark.asyncio
+async def test_interceptor_logs_per_field_warning_when_required_fields_missing(
+    interceptor, mock_continuation, mock_user
+):
+    """Test that one warning is logged per missing required field."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        # missing global_user_id, host_name, deployment_type
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    handler_call_details.method = "/duo_workflow.v1.DuoWorkflow/Execute"
+    current_user.set(mock_user)
+
+    with patch("lib.internal_events.context_validator.log") as mock_log:
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+        warning_fields = {
+            c[1]["missing_field"] for c in mock_log.warning.call_args_list
+        }
+        assert {
+            "global_user_id",
+            "host_name",
+            "deployment_type",
+        }.issubset(warning_fields)
+
+        for c in mock_log.warning.call_args_list:
+            assert c[0][0] == "Internal event context missing required field"
+            assert c[1]["field_type"] == "required"
+            assert c[1]["grpc_method"] == "/duo_workflow.v1.DuoWorkflow/Execute"
+            assert "correlation_id" in c[1]
+
+
+@pytest.mark.asyncio
+async def test_interceptor_logs_per_field_info_when_contextual_fields_missing(
+    interceptor, mock_continuation, mock_user
+):
+    """Test that one info log is emitted per missing contextual field."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-host",
+        "x-gitlab-deployment-type": ".com",
+        "x-gitlab-project-id": "42",
+        "x-gitlab-namespace-id": "7",
+        # missing contextual: feature_enabled_by_namespace_ids, is_gitlab_team_member, etc.
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    handler_call_details.method = "/duo_workflow.v1.DuoWorkflow/Execute"
+    current_user.set(mock_user)
+
+    with patch("lib.internal_events.context_validator.log") as mock_log:
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+        mock_log.warning.assert_not_called()
+
+        info_fields = {c[1]["missing_field"] for c in mock_log.info.call_args_list}
+        assert "is_gitlab_team_member" in info_fields
+        assert "ultimate_parent_namespace_id" in info_fields
+
+        for c in mock_log.info.call_args_list:
+            assert c[0][0] == "Internal event context missing contextual field"
+            assert c[1]["field_type"] == "contextual"
+
+
+@pytest.mark.asyncio
+async def test_interceptor_no_logs_when_all_fields_present(
+    interceptor, mock_continuation, mock_user
+):
+    """Test that no logs are emitted when all fields are present."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-host",
+        "x-gitlab-deployment-type": ".com",
+        "x-gitlab-feature-enabled-by-namespace-ids": "1,2,3",
+        "x-gitlab-is-a-gitlab-member": "true",
+        "x-gitlab-root-namespace-id": "99",
+        "x-gitlab-project-id": "42",
+        "x-gitlab-namespace-id": "7",
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
+
+    with patch("lib.internal_events.context_validator.log") as mock_log:
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+        mock_log.warning.assert_not_called()
+        mock_log.info.assert_not_called()

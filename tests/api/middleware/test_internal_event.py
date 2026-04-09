@@ -8,6 +8,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_CLIENT_NAME,
     X_GITLAB_CLIENT_TYPE,
     X_GITLAB_CLIENT_VERSION,
+    X_GITLAB_DEPLOYMENT_TYPE,
     X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER,
     X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
     X_GITLAB_GLOBAL_USER_ID_HEADER,
@@ -165,6 +166,133 @@ async def test_middleware_set_context(internal_event_middleware, user):
         assert context["tracked_internal_events"] == []
 
     internal_event_middleware.app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+async def test_middleware_logs_per_field_warning_when_required_fields_missing(
+    internal_event_middleware,
+):
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [],
+            "user": None,
+        }
+    )
+    scope = request.scope
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch("lib.internal_events.context_validator.log") as mock_log,
+    ):
+        await internal_event_middleware(scope, receive, send)
+
+        # One warning per missing required field
+        warning_fields = {
+            c[1]["missing_field"] for c in mock_log.warning.call_args_list
+        }
+        assert {
+            "realm",
+            "instance_id",
+            "global_user_id",
+            "host_name",
+            "unique_instance_id",
+            "deployment_type",
+        }.issubset(warning_fields)
+
+        # Each call has the right structure
+        for c in mock_log.warning.call_args_list:
+            assert c[0][0] == "Internal event context missing required field"
+            assert c[1]["field_type"] == "required"
+            assert c[1]["endpoint"] == "/api/endpoint"
+            assert "correlation_id" in c[1]
+
+
+@pytest.mark.asyncio
+async def test_middleware_logs_per_field_info_when_contextual_fields_missing(
+    internal_event_middleware, user
+):
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [
+                (X_GITLAB_REALM_HEADER.lower().encode(), b"saas"),
+                (X_GITLAB_INSTANCE_ID_HEADER.lower().encode(), b"inst-123"),
+                (X_GITLAB_HOST_NAME_HEADER.lower().encode(), b"gitlab.com"),
+                (X_GITLAB_GLOBAL_USER_ID_HEADER.lower().encode(), b"user-456"),
+                (X_GITLAB_DEPLOYMENT_TYPE.lower().encode(), b".com"),
+                (X_GITLAB_PROJECT_ID.lower().encode(), b"42"),
+                (X_GITLAB_NAMESPACE_ID.lower().encode(), b"7"),
+            ],
+            "user": user,
+        }
+    )
+    scope = request.scope
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch("lib.internal_events.context_validator.log") as mock_log,
+    ):
+        await internal_event_middleware(scope, receive, send)
+
+        # No warnings — all required fields present
+        mock_log.warning.assert_not_called()
+
+        # One info per missing contextual field
+        info_fields = {c[1]["missing_field"] for c in mock_log.info.call_args_list}
+        # feature_enabled_by_namespace_ids defaults to [] (not None) so it's not missing
+        assert "is_gitlab_team_member" in info_fields
+        assert "ultimate_parent_namespace_id" in info_fields
+
+        for c in mock_log.info.call_args_list:
+            assert c[0][0] == "Internal event context missing contextual field"
+            assert c[1]["field_type"] == "contextual"
+
+
+@pytest.mark.asyncio
+async def test_middleware_no_logs_when_all_fields_present(
+    internal_event_middleware, user
+):
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [
+                (X_GITLAB_REALM_HEADER.lower().encode(), b"saas"),
+                (X_GITLAB_INSTANCE_ID_HEADER.lower().encode(), b"inst-123"),
+                (X_GITLAB_HOST_NAME_HEADER.lower().encode(), b"gitlab.com"),
+                (X_GITLAB_GLOBAL_USER_ID_HEADER.lower().encode(), b"user-456"),
+                (X_GITLAB_DEPLOYMENT_TYPE.lower().encode(), b".com"),
+                (
+                    X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER.lower().encode(),
+                    b"1,2",
+                ),
+                (X_GITLAB_TEAM_MEMBER_HEADER.lower().encode(), b"true"),
+                (X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), b"99"),
+                (X_GITLAB_PROJECT_ID.lower().encode(), b"42"),
+                (X_GITLAB_NAMESPACE_ID.lower().encode(), b"7"),
+            ],
+            "user": user,
+        }
+    )
+    scope = request.scope
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch("lib.internal_events.context_validator.log") as mock_log,
+    ):
+        await internal_event_middleware(scope, receive, send)
+
+        mock_log.warning.assert_not_called()
+        mock_log.info.assert_not_called()
 
 
 @pytest.mark.asyncio
