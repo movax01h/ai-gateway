@@ -11,14 +11,12 @@ from langchain_core.messages import (
 )
 
 from duo_workflow_service.conversation.trimmer import (
-    _deduplicate_additional_context,
     _estimate_tokens_from_history,
     _pretrim_large_messages,
+    apply_token_based_trim,
     restore_message_consistency,
-    trim_conversation_history,
 )
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
-from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 # Error message for invalid tool call responses
 INVALID_TOOL_ERROR_MESSAGE = (
@@ -52,60 +50,6 @@ def test_pretrim_large_messages():
         result[1].content
         == "Previous message was too large for context window and was omitted. Please respond based on the visible context."
     )
-
-
-def test_deduplicate_additional_context():
-    messages = [
-        HumanMessage(
-            content="Message 1",
-            additional_kwargs={
-                "additional_context": [
-                    AdditionalContext(category="issue", content="Extra 1")
-                ]
-            },
-        ),
-        HumanMessage(
-            content="Message 2",
-            additional_kwargs={
-                "additional_context": [{"content": "Extra 2"}, {"content": "Extra 1"}]
-            },
-        ),
-        HumanMessage(
-            content="Message 3",
-            additional_kwargs={
-                "additional_context": [{"content": "Extra 2"}, {"content": "Extra 1"}]
-            },
-        ),
-        HumanMessage(
-            content="Message 4",
-            additional_kwargs={
-                "additional_context": [
-                    AdditionalContext(category="issue", content="Extra 1"),
-                    AdditionalContext(category="issue", content="Extra 2"),
-                    AdditionalContext(category="issue", content="Extra 3"),
-                ]
-            },
-        ),
-    ]
-
-    result = _deduplicate_additional_context(cast(List[BaseMessage], messages))
-
-    assert len(result) == 4
-
-    assert len(result[0].additional_kwargs["additional_context"]) == 1
-    assert result[0].additional_kwargs["additional_context"][0].content == "Extra 1"
-
-    assert len(result[1].additional_kwargs["additional_context"]) == 1
-    # Extra 2 was in a dict in the last item and we don't change the type
-    assert (
-        result[1].additional_kwargs["additional_context"][0].get("content") == "Extra 2"
-    )
-
-    # Everything in Message 3 was duplicated from above
-    assert len(result[2].additional_kwargs["additional_context"]) == 0
-
-    assert len(result[3].additional_kwargs["additional_context"]) == 1
-    assert result[3].additional_kwargs["additional_context"][0].content == "Extra 3"
 
 
 @pytest.mark.parametrize(
@@ -321,17 +265,17 @@ def test_restore_message_consistency_tool_message_before_tool_call():
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
 @patch("duo_workflow_service.conversation.trimmer._estimate_tokens_from_history")
-def test_trim_conversation_history_preserves_tool_messages(
+def test_apply_token_based_trim_preserves_tool_messages(
     mock_estimate_tokens,
     mock_token_counter_cls,
     mock_trim_messages,
 ):
-    """Test that trim_conversation_history passes tool messages through unchanged.
+    """Test that apply_token_based_trim passes tool messages through unchanged.
 
     Message consistency repair (orphaned ToolMessages, dangling AIMessages) is intentionally NOT done in
-    trim_conversation_history — it runs on the write path (state reducer) and its output is checkpointed.  Repairing
-    there would persist synthetic ToolMessages into the checkpoint, causing the LLM to re-enter an infinite tool-call
-    loop on every resume/retry.
+    apply_token_based_trim — it runs on the write path (state reducer) and its output is checkpointed.  Repairing there
+    would persist synthetic ToolMessages into the checkpoint, causing the LLM to re-enter an infinite tool-call loop on
+    every resume/retry.
 
     Consistency is repaired at read time in AgentPromptTemplate.invoke and ChatAgentPromptTemplate.invoke, just before
     the prompt is sent to the LLM.
@@ -361,11 +305,11 @@ def test_trim_conversation_history_preserves_tool_messages(
 
     mock_trim_messages.return_value = original_messages.copy()
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=original_messages, component_name="agent_a", max_context_tokens=400_000
     )
 
-    # trim_conversation_history must return messages unchanged —
+    # apply_token_based_trim must return messages unchanged —
     # no consistency repair, no message type conversion.
     assert [type(m) for m in result] == [type(m) for m in original_messages]
     assert [m.model_dump() for m in result] == original_serialized
@@ -375,7 +319,7 @@ def test_trim_conversation_history_preserves_tool_messages(
     assert [m.model_dump() for m in original_messages] == original_serialized
 
 
-def test_trim_conversation_history_exceeding_context_limit():
+def test_apply_token_based_trim_exceeding_context_limit():
     """Test that messages are trimmed when exceeding context limit."""
     messages = [
         SystemMessage(content="system message"),
@@ -384,7 +328,7 @@ def test_trim_conversation_history_exceeding_context_limit():
         HumanMessage(content="third a message"),
     ]
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=22
     )
 
@@ -395,7 +339,7 @@ def test_trim_conversation_history_exceeding_context_limit():
     assert len(result) <= len(messages)
 
 
-def test_trim_conversation_history_with_tool_messages_exceeding_context_limit_for_existing_message():
+def test_apply_token_based_trim_with_tool_messages_exceeding_context_limit_for_existing_message():
     """Test trimming with tool messages that exceed context limit."""
     messages = [
         SystemMessage(content="system message"),
@@ -406,7 +350,7 @@ def test_trim_conversation_history_with_tool_messages_exceeding_context_limit_fo
         ToolMessage(content="second tool message", tool_call_id="tool-call-2"),
     ]
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages,
         component_name="agent_a",
         max_context_tokens=20,  # Very small limit
@@ -423,7 +367,7 @@ def test_trim_conversation_history_with_tool_messages_exceeding_context_limit_fo
             assert msg.tool_call_id is not None
 
 
-def test_trim_conversation_history_single_message_too_large():
+def test_apply_token_based_trim_single_message_too_large():
     """Test that single oversized messages are replaced with placeholder."""
     large_content = "This is a very large message. " * 5000  # ~30k tokens
     messages = [
@@ -435,7 +379,7 @@ def test_trim_conversation_history_single_message_too_large():
 
     # Budget = 0.7 * 50_000 = 35_000; single message limit = 0.65 * 35_000 = 22_750
     # The large message (~30k tokens) exceeds the single message limit
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages,
         component_name="agent_a",
         max_context_tokens=50_000,
@@ -453,7 +397,7 @@ def test_trim_conversation_history_single_message_too_large():
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
 @patch("duo_workflow_service.conversation.trimmer._estimate_tokens_from_history")
-def test_trim_conversation_history_error_handling(
+def test_apply_token_based_trim_error_handling(
     mock_estimate_tokens, mock_token_counter_cls, mock_trim_messages
 ):
     """Test fallback mechanism when trim_messages raises an exception."""
@@ -471,7 +415,7 @@ def test_trim_conversation_history_error_handling(
         HumanMessage(content="second message"),
     ]
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -788,7 +732,7 @@ def test_restore_message_consistency_tool_message_not_immediately_after_ai():
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
 @patch("duo_workflow_service.conversation.trimmer._estimate_tokens_from_history")
-def test_trim_conversation_history_empty_result_handling(
+def test_apply_token_based_trim_empty_result_handling(
     mock_estimate_tokens, mock_token_counter_cls, mock_trim_messages
 ):
     """Test fallback when trim_messages returns empty list."""
@@ -806,7 +750,7 @@ def test_trim_conversation_history_empty_result_handling(
         HumanMessage(content="new message"),
     ]
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -821,14 +765,14 @@ def test_trim_conversation_history_empty_result_handling(
 
 
 @patch("duo_workflow_service.conversation.trimmer.logger")
-def test_trim_conversation_history_without_warnings(mock_logger):
+def test_apply_token_based_trim_without_warnings(mock_logger):
     """Test that no warnings are logged when trimming succeeds normally."""
     messages = [
         SystemMessage(content="system message"),
         HumanMessage(content="new message"),
     ]
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -839,7 +783,7 @@ def test_trim_conversation_history_without_warnings(mock_logger):
 
 
 @patch("duo_workflow_service.conversation.trimmer.logger")
-def test_trim_conversation_history_single_human_message_no_unnecessary_fallback(
+def test_apply_token_based_trim_single_human_message_no_unnecessary_fallback(
     mock_logger,
 ):
     """Test that single human message doesn't trigger unnecessary fallback.
@@ -851,7 +795,7 @@ def test_trim_conversation_history_single_human_message_no_unnecessary_fallback(
     # First call: trim a single human message
     messages_1 = [HumanMessage(content="first message")]
 
-    result_1 = trim_conversation_history(
+    result_1 = apply_token_based_trim(
         messages=messages_1, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -876,7 +820,7 @@ def test_trim_conversation_history_single_human_message_no_unnecessary_fallback(
         HumanMessage(content="second message"),
     ]
 
-    result_2 = trim_conversation_history(
+    result_2 = apply_token_based_trim(
         messages=messages_2, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -888,7 +832,7 @@ def test_trim_conversation_history_single_human_message_no_unnecessary_fallback(
 
 
 @patch("duo_workflow_service.conversation.trimmer.logger")
-def test_trim_conversation_history_skips_when_under_budget(mock_logger):
+def test_apply_token_based_trim_skips_when_under_budget(mock_logger):
     """Verify that when messages are well under budget, expensive trimming is skipped but the function still returns the
     messages (with maintenance applied)."""
     messages = cast(
@@ -900,7 +844,7 @@ def test_trim_conversation_history_skips_when_under_budget(mock_logger):
         ],
     )
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -930,7 +874,7 @@ def test_trim_conversation_history_skips_when_under_budget(mock_logger):
 @patch("duo_workflow_service.conversation.trimmer._estimate_tokens_from_history")
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
-def test_trim_conversation_history_trims_when_over_threshold(
+def test_apply_token_based_trim_trims_when_over_threshold(
     mock_token_counter_cls,
     mock_trim_messages,
     mock_estimate_tokens,
@@ -962,7 +906,7 @@ def test_trim_conversation_history_trims_when_over_threshold(
     )
     mock_trim_messages.return_value = trimmed
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=input_messages, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -973,7 +917,7 @@ def test_trim_conversation_history_trims_when_over_threshold(
     assert len(result) == 2
 
 
-def test_trim_conversation_history_under_budget_returns_messages_unchanged():
+def test_apply_token_based_trim_under_budget_returns_messages_unchanged():
     """Verify messages are returned unchanged when under budget.
 
     Uses a realistic conversation: system prompt, user message, AI with tool_calls,
@@ -996,7 +940,7 @@ def test_trim_conversation_history_under_budget_returns_messages_unchanged():
         ],
     )
 
-    result = trim_conversation_history(
+    result = apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=400_000
     )
 
@@ -1023,7 +967,7 @@ def test_trim_conversation_history_under_budget_returns_messages_unchanged():
 @patch("duo_workflow_service.conversation.trimmer._estimate_tokens_from_history")
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.TikTokenCounter")
-def test_trim_conversation_history_threshold_boundary(
+def test_apply_token_based_trim_threshold_boundary(
     mock_token_counter_cls,
     mock_trim_messages,
     mock_estimate_tokens,
@@ -1052,7 +996,7 @@ def test_trim_conversation_history_threshold_boundary(
         ],
     )
 
-    trim_conversation_history(
+    apply_token_based_trim(
         messages=messages, component_name="agent_a", max_context_tokens=100_000
     )
 

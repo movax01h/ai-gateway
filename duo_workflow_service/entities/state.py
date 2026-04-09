@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from duo_workflow_service.conversation.trimmer import (
     LEGACY_MAX_CONTEXT_TOKENS,
-    trim_conversation_history,
+    apply_token_based_trim,
 )
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
@@ -150,7 +150,7 @@ def _conversation_history_reducer(
         existing_messages = reduced.get(agent_name, [])
         combined_messages = existing_messages + new_messages
 
-        reduced[agent_name] = trim_conversation_history(
+        reduced[agent_name] = apply_token_based_trim(
             messages=combined_messages,
             component_name=agent_name,
             max_context_tokens=get_model_max_context_token_limit(),
