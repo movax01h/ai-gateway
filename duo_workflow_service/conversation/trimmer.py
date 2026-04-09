@@ -119,44 +119,6 @@ def _pretrim_large_messages(
     return processed_messages
 
 
-def _deduplicate_additional_context(messages: List[BaseMessage]) -> List[BaseMessage]:
-    """Remove duplicate <additional_context> tags, keeping only the first occurrence.
-
-    Deduplication is done based on identical content and not ids. If the content changes then the old content and the
-    new content will both be kept.
-    """
-    seen_contexts = set()
-    result = []
-
-    for message in messages:
-        contexts = message.additional_kwargs.get("additional_context") or []
-
-        new_contexts = []
-
-        for ctx in contexts:
-            content = None
-            if hasattr(ctx, "content"):
-                content = ctx.content
-            else:
-                # For some reason it's a dict sometimes
-                content = ctx.get("content", "")
-            if content not in seen_contexts:
-                new_contexts.append(ctx)
-                seen_contexts.add(content)
-
-        if new_contexts != contexts:
-            message_copy = message.model_copy()
-            message_copy.additional_kwargs = {
-                **message.additional_kwargs,
-                "additional_context": new_contexts,
-            }
-            message = message_copy
-
-        result.append(message)
-
-    return result
-
-
 def _ai_message_tool_call_ids(msg: AIMessage) -> list[str]:
     """Return a deduplicated, ordered list of tool-call IDs declared by an AIMessage."""
     all_calls = msg.tool_calls + msg.invalid_tool_calls
@@ -285,57 +247,6 @@ def _fallback_messages(
     return system_messages + non_system_messages[-n:]
 
 
-def trim_conversation_history(
-    messages: List[BaseMessage],
-    component_name: str,
-    max_context_tokens: int,
-) -> List[BaseMessage]:
-    """Trim conversation history to fit within the model's context window.
-
-    Combines preprocessing and token-based trimming:
-    1. Preprocessing (always runs): Deduplicates additional context tags
-    2. Token-based trim (conditional): Trims to fit token budget
-
-    Note: Message consistency repair (orphaned ToolMessages, dangling AIMessages
-    with unresolved tool_calls) is intentionally NOT performed here.  This
-    function runs inside the LangGraph state reducer and its output is
-    checkpointed — repairing here would persist synthetic ToolMessages into the
-    checkpoint state, causing a resume/retry loop.  Consistency is repaired at
-    read time in AgentPromptTemplate.invoke and ChatAgentPromptTemplate.invoke.
-
-    Args:
-        messages: List of messages to trim
-        component_name: Name of the component/agent (used for token counting and logging)
-        max_context_tokens: Maximum number of tokens allowed in the context window
-
-    Returns:
-        Trimmed list of messages that fits within the context window
-    """
-    messages = preprocess_conversation_history(messages)
-    return apply_token_based_trim(messages, component_name, max_context_tokens)
-
-
-def preprocess_conversation_history(messages: List[BaseMessage]) -> List[BaseMessage]:
-    """Apply cheap preprocessing to conversation history.
-
-    Always runs regardless of token count. These operations are O(n) and don't
-    require token counting.
-
-    Operations:
-    1. Deduplicates additional context tags (keeps first occurrence)
-
-    Args:
-        messages: List of messages to preprocess
-
-    Returns:
-        Preprocessed list of messages
-    """
-    if not messages:
-        return []
-
-    return _deduplicate_additional_context(messages)
-
-
 def apply_token_based_trim(
     messages: List[BaseMessage],
     component_name: str,
@@ -344,6 +255,13 @@ def apply_token_based_trim(
     """Apply token-based trimming to conversation history.
 
     Only runs when token count exceeds budget. This is expensive due to token counting.
+
+    Note: Message consistency repair (orphaned ToolMessages, dangling AIMessages
+    with unresolved tool_calls) is intentionally NOT performed here.  This
+    function runs inside the LangGraph state reducer and its output is
+    checkpointed — repairing here would persist synthetic ToolMessages into the
+    checkpoint state, causing a resume/retry loop.  Consistency is repaired at
+    read time in AgentPromptTemplate.invoke and ChatAgentPromptTemplate.invoke.
 
     Operations:
     1. Replaces oversized single messages with placeholders

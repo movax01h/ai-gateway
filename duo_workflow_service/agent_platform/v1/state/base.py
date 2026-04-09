@@ -16,8 +16,6 @@ from typing import (
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from duo_workflow_service.conversation.trimmer import preprocess_conversation_history
-
 # TODO: Remove dependency on legacy duo workflow packages
 from duo_workflow_service.entities.state import (
     UiChatLog,
@@ -116,11 +114,7 @@ def conversation_history_replace_reducer(
         if new_messages is None:
             continue
 
-        if new_messages == []:
-            reduced[agent_name] = []
-            continue
-
-        reduced[agent_name] = preprocess_conversation_history(messages=new_messages)
+        reduced[agent_name] = new_messages
 
     return reduced
 
