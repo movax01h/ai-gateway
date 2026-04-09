@@ -1,5 +1,7 @@
 """Test suite for ToolNodeWithErrorCorrection class."""
 
+# pylint: disable=unused-argument,file-naming-for-tests,import-outside-toplevel
+
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -11,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_w
     MAX_ATTEMPTS_SENTINEL,
     NO_TOOL_CALLS_FEEDBACK_PREFIX,
     SUCCESS_SENTINEL,
+    ToolExecutionStatus,
     ToolNodeWithErrorCorrection,
 )
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
@@ -539,22 +542,34 @@ class TestToolNodeWithErrorCorrectionErrorHandling:
         """Test _extract_errors_from_responses method."""
         # Create tool messages with various content matching our specific error formats
         tool_exception_message = ToolMessage(
-            content="Tool exception occurred due to invalid input", tool_call_id="1"
+            content="Tool exception occurred due to invalid input",
+            tool_call_id="1",
+            status=ToolExecutionStatus.ERROR,
         )
         type_error_message = ToolMessage(
             content="Tool test_tool execution failed due to wrong arguments",
             tool_call_id="2",
+            status=ToolExecutionStatus.ERROR,
         )
         validation_error_message = ToolMessage(
             content="Tool test_tool raised validation error: Field required",
             tool_call_id="3",
+            status=ToolExecutionStatus.ERROR,
         )
         runtime_error_message = ToolMessage(
-            content="Tool runtime exception due to connection timeout", tool_call_id="4"
+            content="Tool runtime exception due to connection timeout",
+            tool_call_id="4",
+            status=ToolExecutionStatus.ERROR,
         )
-        not_found_message = ToolMessage(content="Tool xyz not found", tool_call_id="5")
+        not_found_message = ToolMessage(
+            content="Tool xyz not found",
+            tool_call_id="5",
+            status=ToolExecutionStatus.ERROR,
+        )
         success_message = ToolMessage(
-            content="Operation completed successfully", tool_call_id="6"
+            content="Operation completed successfully",
+            tool_call_id="6",
+            status=ToolExecutionStatus.SUCCESS,
         )
 
         tool_responses = [

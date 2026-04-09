@@ -1,5 +1,5 @@
 import json
-import re
+from enum import Enum
 from typing import Any
 
 import structlog
@@ -39,7 +39,14 @@ NO_TOOL_CALLS_FEEDBACK_PREFIX = (
 )
 
 
-class ToolNodeWithErrorCorrection:
+class ToolExecutionStatus(str, Enum):
+    """Status values returned by tool execution."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+
+
+class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attributes
     """Enhanced ToolNode that tracks errors and provides feedback for correction loops."""
 
     def __init__(
@@ -72,74 +79,97 @@ class ToolNodeWithErrorCorrection:
         self.execution_result_key = execution_result_key
         self._conversation_history_key = conversation_history_key
 
-    async def run(self, state: FlowState) -> dict[str, Any]:
-        """Execute tools with error correction tracking."""
-        result: dict[str, Any] = {
-            **self._ui_history.pop_state_updates(),
-        }
+    def _handle_empty_toolset(self, conversation_history: list) -> dict[str, Any]:
+        """Handle the case when toolset is empty.
 
-        # Get conversation history (needed for replace-mode reducer)
-        conversation_history = (
-            self._conversation_history_key.value_from_state(state) or []
+        Args:
+            conversation_history: Current conversation history
+
+        Returns:
+            State update dict with error message
+        """
+        result: dict[str, Any] = {**self._ui_history.pop_state_updates()}
+
+        human_message = HumanMessage(
+            content=(
+                "The agent has no tools configured. "
+                f"Review agent privileges configuration. {MAX_ATTEMPTS_SENTINEL}"
+            )
+        )
+        conversation_history_dict = self._conversation_history_key.to_nested_dict(
+            conversation_history + [human_message]
+        )
+        result = merge_nested_dict(result, conversation_history_dict)
+
+        if self.execution_result_key:
+            status_dict = self.execution_result_key.to_nested_dict("failed")
+            result = merge_nested_dict(result, status_dict)
+
+        return result
+
+    def _handle_no_tool_calls(
+        self,
+        conversation_history: list,
+        context: dict[str, Any],
+        context_dict: dict[str, Any],
+        attempts: int,
+    ) -> dict[str, Any]:
+        """Handle the case when no tool calls are present.
+
+        Args:
+            conversation_history: Current conversation history
+            context: Current context dictionary
+            context_dict: Nested context dictionary for merging
+            attempts: Current correction attempt count
+
+        Returns:
+            State update dict with error feedback
+        """
+        result: dict[str, Any] = {**self._ui_history.pop_state_updates()}
+
+        feedback_message = (
+            f"{NO_TOOL_CALLS_FEEDBACK_PREFIX}. If you were unable to "
+            "generate tool calls because you encountered an unresolvable blocker (e.g., authentication "
+            "errors, missing credentials, unavailable external resources, or environmental constraints "
+            "beyond the scope of available tools), summarize what was completed, what failed, and why — "
+            "then stop. Do not attempt further tool calls. If your last response failed to generate tool "
+            "calls due to a transient issue (e.g., a formatting error, hallucination, or network "
+            "interruption), you MUST retry and generate valid tool calls now to continue your assignment."
+        )
+        error_feedback = self._create_error_feedback(
+            [feedback_message], [], attempts + 1, context
         )
 
-        if len(self._toolset) == 0:
-            human_message = HumanMessage(
-                content=(
-                    "The agent has no tools configured. "
-                    f"Review agent privileges configuration. {MAX_ATTEMPTS_SENTINEL}"
-                )
-            )
-            conversation_history_dict = self._conversation_history_key.to_nested_dict(
-                conversation_history + [human_message]
-            )
-            result = merge_nested_dict(result, conversation_history_dict)
-            if self.execution_result_key:
-                status_dict = self.execution_result_key.to_nested_dict("failed")
-                result = merge_nested_dict(result, status_dict)
-            return result
+        conversation_history_dict = self._conversation_history_key.to_nested_dict(
+            conversation_history + [error_feedback]
+        )
+        result = merge_nested_dict(result, conversation_history_dict)
+        result = merge_nested_dict(result, context_dict)
 
-        # Get current context for error tracking
-        context = state.get("context", {}).get(self._component_name, {})
-        context_dict = IOKey(
-            target="context", subkeys=[self._component_name]
-        ).to_nested_dict(context)
-        attempts = context.get("correction_attempts", 0)
+        # If we are out of attempts then update execution status to failed
+        if attempts + 1 >= self.max_correction_attempts and self.execution_result_key:
+            status_dict = self.execution_result_key.to_nested_dict("failed")
+            result = merge_nested_dict(result, status_dict)
 
-        # Get tool calls from the last message
-        last_message = conversation_history[-1] if conversation_history else None
-        tool_calls = getattr(last_message, "tool_calls", []) if last_message else []
+        return result
+
+    async def _execute_all_tool_calls(
+        self,
+        tool_calls: list[dict],
+        conversation_history: list,
+        result: dict[str, Any],
+    ) -> tuple[list[ToolMessage], dict[str, Any]]:
+        """Execute all tool calls and return responses.
+
+        Args:
+            tool_calls: List of tool calls to execute
+            conversation_history: Current conversation history
+            result: Current result dictionary to update
+
+        Returns:
+            Tuple of (tool_responses, updated_result)
+        """
         tool_responses = []
-
-        # When LLM decides it cannot continue because of technical/tool limitations
-        if not tool_calls:
-            feedback_message = (
-                f"{NO_TOOL_CALLS_FEEDBACK_PREFIX}. If you were unable to "
-                "generate tool calls because you encountered an unresolvable blocker (e.g., authentication "
-                "errors, missing credentials, unavailable external resources, or environmental constraints "
-                "beyond the scope of available tools), summarize what was completed, what failed, and why — "
-                "then stop. Do not attempt further tool calls. If your last response failed to generate tool "
-                "calls due to a transient issue (e.g., a formatting error, hallucination, or network "
-                "interruption), you MUST retry and generate valid tool calls now to continue your assignment."
-            )
-            error_feedback = self._create_error_feedback(
-                [feedback_message], [], attempts + 1, context
-            )
-
-            conversation_history_dict = self._conversation_history_key.to_nested_dict(
-                conversation_history + [error_feedback]
-            )
-            result = merge_nested_dict(result, conversation_history_dict)
-            result = merge_nested_dict(result, context_dict)
-
-            # If we are out of attempts then update execution status to failed
-            if (
-                attempts + 1 >= self.max_correction_attempts
-                and self.execution_result_key
-            ):
-                status_dict = self.execution_result_key.to_nested_dict("failed")
-                result = merge_nested_dict(result, status_dict)
-            return result
 
         # Execute each tool call
         for tool_call in tool_calls:
@@ -149,6 +179,7 @@ class ToolNodeWithErrorCorrection:
 
             if tool_name not in self._toolset:
                 response = f"Tool {tool_name} not found"
+                status = ToolExecutionStatus.ERROR
             else:
                 self._ui_history.log._log_tool_call_input(
                     tool=self._toolset[tool_name],
@@ -156,7 +187,7 @@ class ToolNodeWithErrorCorrection:
                     event=UILogEventsOneOff.ON_TOOL_CALL_INPUT,
                 )
 
-                response = await self._execute_tool(
+                response, status = await self._execute_tool(
                     tool=self._toolset[tool_name],
                     tool_call_args=tool_call_args,
                 )
@@ -170,6 +201,7 @@ class ToolNodeWithErrorCorrection:
                 ToolMessage(
                     content=sanitized,  # type: ignore[arg-type]
                     tool_call_id=tool_call_id,
+                    status=status,
                 )
             )
 
@@ -187,77 +219,175 @@ class ToolNodeWithErrorCorrection:
             tool_responses_dict = self.tool_responses_key.to_nested_dict(tool_responses)
             result = merge_nested_dict(result, tool_responses_dict)
 
+        return tool_responses, result
+
+    def _handle_tool_execution_errors(
+        self,
+        errors: list[str],
+        tool_calls: list[dict],
+        tool_responses: list[ToolMessage],
+        conversation_history: list,
+        context: dict[str, Any],
+        context_dict: dict[str, Any],
+        attempts: int,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle tool execution errors.
+
+        Args:
+            errors: List of error messages
+            tool_calls: List of tool calls that were executed
+            tool_responses: List of tool responses
+            conversation_history: Current conversation history
+            context: Current context dictionary
+            context_dict: Nested context dictionary for merging
+            attempts: Current correction attempt count
+            result: Current result dictionary to update
+
+        Returns:
+            State update dict with error feedback
+        """
+        # Create error feedback message for LLM
+        error_feedback = self._create_error_feedback(
+            errors, tool_calls, attempts + 1, context
+        )
+
+        # Update conversation_history with error feedback appended
+        conversation_history_dict = self._conversation_history_key.to_nested_dict(
+            conversation_history + tool_responses + [error_feedback]
+        )
+        result = merge_nested_dict(result, conversation_history_dict)
+
+        # Update context with correction attempts
+        result = merge_nested_dict(result, context_dict)
+
+        # If we are out of attempts then update execution status to failed
+        if attempts + 1 >= self.max_correction_attempts and self.execution_result_key:
+            status_dict = self.execution_result_key.to_nested_dict("failed")
+            result = merge_nested_dict(result, status_dict)
+
+        return result
+
+    def _handle_tool_execution_success(
+        self,
+        tool_responses: list[ToolMessage],
+        conversation_history: list,
+        attempts: int,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Handle successful tool execution.
+
+        Args:
+            tool_responses: List of tool responses
+            conversation_history: Current conversation history
+            attempts: Current correction attempt count
+            result: Current result dictionary to update
+
+        Returns:
+            State update dict with success message
+        """
+        # Store parsed responses for deterministic downstream access
+        if tool_responses:
+            parsed = {}
+            for resp in tool_responses:
+                try:
+                    content = (
+                        json.loads(resp.content)
+                        if isinstance(resp.content, str)
+                        else resp.content
+                    )
+                    if isinstance(content, dict):
+                        parsed.update(content)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if parsed:
+                parsed_key = IOKey(
+                    target="context",
+                    subkeys=[self._component_name, "parsed_responses"],
+                )
+                result = merge_nested_dict(result, parsed_key.to_nested_dict(parsed))
+
+        # Success - create success message in conversation_history
+        success_message = HumanMessage(
+            content=f"Tool execution {SUCCESS_SENTINEL} after {attempts} correction attempts."
+        )
+
+        # Update conversation_history with success message appended
+        conversation_history_dict = self._conversation_history_key.to_nested_dict(
+            conversation_history + tool_responses + [success_message]
+        )
+        result = merge_nested_dict(result, conversation_history_dict)
+
+        # Add success to execution status key
+        if self.execution_result_key:
+            status_dict = self.execution_result_key.to_nested_dict("success")
+            result = merge_nested_dict(result, status_dict)
+
+        return result
+
+    async def run(self, state: FlowState) -> dict[str, Any]:
+        """Execute tools with error correction tracking."""
+        result: dict[str, Any] = {
+            **self._ui_history.pop_state_updates(),
+        }
+
+        # Get conversation history (needed for replace-mode reducer)
+        conversation_history = (
+            self._conversation_history_key.value_from_state(state) or []
+        )
+
+        if len(self._toolset) == 0:
+            return self._handle_empty_toolset(conversation_history)
+
+        # Get current context for error tracking
+        context = state.get("context", {}).get(self._component_name, {})
+        context_dict = IOKey(
+            target="context", subkeys=[self._component_name]
+        ).to_nested_dict(context)
+        attempts = context.get("correction_attempts", 0)
+
+        # Get tool calls from the last message
+        last_message = conversation_history[-1] if conversation_history else None
+        tool_calls = getattr(last_message, "tool_calls", []) if last_message else []
+
+        # When LLM decides it cannot continue because of technical/tool limitations
+        if not tool_calls:
+            return self._handle_no_tool_calls(
+                conversation_history, context, context_dict, attempts
+            )
+
+        # Execute all tool calls
+        tool_responses, result = await self._execute_all_tool_calls(
+            tool_calls, conversation_history, result
+        )
+
         # Check for errors in tool responses
         errors = self._extract_errors_from_responses(tool_responses)
 
         if errors:
-            # Create error feedback message for LLM
-            error_feedback = self._create_error_feedback(
-                errors, tool_calls, attempts + 1, context
+            return self._handle_tool_execution_errors(
+                errors,
+                tool_calls,
+                tool_responses,
+                conversation_history,
+                context,
+                context_dict,
+                attempts,
+                result,
             )
 
-            # Update conversation_history with error feedback appended
-            conversation_history_dict = self._conversation_history_key.to_nested_dict(
-                conversation_history + tool_responses + [error_feedback]
-            )
-            result = merge_nested_dict(result, conversation_history_dict)
-
-            # Update context with correction attempts
-            result = merge_nested_dict(result, context_dict)
-
-            # If we are out of attempts then update execution status to failed
-            if (
-                attempts + 1 >= self.max_correction_attempts
-                and self.execution_result_key
-            ):
-                status_dict = self.execution_result_key.to_nested_dict("failed")
-                result = merge_nested_dict(result, status_dict)
-            return result
-        else:
-            # Store parsed responses for deterministic downstream access
-            if tool_responses:
-                parsed = {}
-                for resp in tool_responses:
-                    try:
-                        content = (
-                            json.loads(resp.content)
-                            if isinstance(resp.content, str)
-                            else resp.content
-                        )
-                        if isinstance(content, dict):
-                            parsed.update(content)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                if parsed:
-                    parsed_key = IOKey(
-                        target="context",
-                        subkeys=[self._component_name, "parsed_responses"],
-                    )
-                    result = merge_nested_dict(
-                        result, parsed_key.to_nested_dict(parsed)
-                    )
-
-            # Success - create success message in conversation_history
-            success_message = HumanMessage(
-                content=f"Tool execution {SUCCESS_SENTINEL} after {attempts} correction attempts."
-            )
-
-            # Update conversation_history with success message appended
-            conversation_history_dict = self._conversation_history_key.to_nested_dict(
-                conversation_history + tool_responses + [success_message]
-            )
-            result = merge_nested_dict(result, conversation_history_dict)
-
-            # Add success to execution status key
-            if self.execution_result_key:
-                status_dict = self.execution_result_key.to_nested_dict("success")
-                result = merge_nested_dict(result, status_dict)
-            return result
+        return self._handle_tool_execution_success(
+            tool_responses, conversation_history, attempts, result
+        )
 
     async def _execute_tool(
         self, tool_call_args: dict[str, Any], tool: BaseTool
-    ) -> str:
-        """Execute a tool with error handling and tracking."""
+    ) -> tuple[str, ToolExecutionStatus]:
+        """Execute a tool with error handling and tracking.
+
+        Returns:
+            tuple[str, ToolExecutionStatus]: (response_content, status)
+        """
         try:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._flow_type.value
@@ -276,7 +406,7 @@ class ToolNodeWithErrorCorrection:
                 tool_response=tool_call_result,
             )
 
-            return tool_call_result
+            return tool_call_result, ToolExecutionStatus.SUCCESS
         except Exception as e:
             response = getattr(e, "response", None)
             self._ui_history.log.error(
@@ -294,7 +424,7 @@ class ToolNodeWithErrorCorrection:
             else:
                 err_format = self._format_execution_error(tool_name=tool.name, error=e)
 
-            return err_format
+            return err_format, ToolExecutionStatus.ERROR
 
     def _sanitize_response(
         self,
@@ -437,35 +567,22 @@ class ToolNodeWithErrorCorrection:
     def _extract_errors_from_responses(
         self, tool_responses: list[ToolMessage]
     ) -> list[str]:
-        """Extract error messages from tool responses."""
+        """Extract error messages from tool responses by checking status field.
+
+        Returns:
+            list[str]: List of error messages from responses with status="error".
+        """
         errors = []
 
-        # Regex patterns for our specific error message formats
-        error_patterns = [
-            r"tool exception occurred due to",  # from _format_tool_exception
-            r"execution failed due to",  # from _format_type_error_response
-            r"raised validation error",  # from _format_validation_error
-            r"runtime exception due to",  # from _format_execution_error
-            r"tool \w+ not found",  # from tool not found case - matches "Tool xyz not found"
-        ]
-
         for response in tool_responses:
-            content = response.content
-            content_to_check = None
-            if isinstance(content, str):
-                content_to_check = content
-            if isinstance(content, list):
-                # Convert list content to string for error pattern matching
-                content_to_check = " ".join(str(item) for item in content)
-            if not content_to_check:
-                continue
+            if response.status == ToolExecutionStatus.ERROR.value:
+                if isinstance(response.content, str):
+                    errors.append(response.content)
+                elif isinstance(response.content, list):
+                    errors.append(" ".join(str(item) for item in response.content))
+                else:
+                    errors.append(str(response.content))
 
-            # Check for our specific error message formats using regex
-            if any(
-                re.search(pattern, content_to_check, re.IGNORECASE)
-                for pattern in error_patterns
-            ):
-                errors.append(content_to_check)
         return errors
 
     def _create_error_feedback(
