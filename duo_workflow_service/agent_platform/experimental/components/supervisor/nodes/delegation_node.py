@@ -28,7 +28,7 @@ class ExtractedDelegateCall(NamedTuple):
 
     Attributes:
         call_id: The tool call ID, used to match the corresponding ToolMessage response.
-        delegation: The parsed DelegateTask instance containing subagent_type,
+        delegation: The parsed DelegateTask instance containing subagent_name,
             subsession_id, and prompt.
     """
 
@@ -43,12 +43,17 @@ class SubsessionResult(NamedTuple):
         subsession_id: The ID of the subsession (new or resumed).
         new_max_id: The updated maximum subsession ID.  For new subsessions
             this equals ``subsession_id``; for resumed ones it is unchanged.
-        conversation: The subagent's conversation history to write to state.
+        state_updates: All state writes produced by the subsession processing,
+            ready to be merged into the graph state by ``run()``.  For new
+            subsessions this includes both the empty conversation-history write
+            and the subsession-scoped goal IOKey write; for resumed subsessions
+            it contains the updated conversation history with the new
+            HumanMessage appended.
     """
 
     subsession_id: int
     new_max_id: int
-    conversation: list[BaseMessage]
+    state_updates: dict[str, Any]
 
 
 class DelegationFatalError(Exception):
@@ -79,7 +84,9 @@ class DelegationNode:
 
     Responsibilities:
     - Assigns or validates subsession IDs
-    - Seeds or appends HumanMessage to subagent conversation history
+    - For new subsessions: writes the delegation prompt to the subsession-scoped goal IOKey;
+        conversation history starts empty (subagent reads goal via inputs)
+    - For resumed subsessions: appends a HumanMessage to the existing conversation history
     - Sets the active subsession context
     - Tracks delegation count for safety limits
 
@@ -99,7 +106,7 @@ class DelegationNode:
         delegate_task_cls: type[DelegateTask],
         delegation_count_key: IOKey,
         active_subsession_key: IOKey,
-        active_subagent_type_key: IOKey,
+        active_subagent_name_key: IOKey,
         max_subsession_id_key: IOKey,
         supervisor_history_key: RuntimeIOKey,
         # The subsession history includes subsession id
@@ -110,16 +117,18 @@ class DelegationNode:
         # which prevents RuntimeIOKey abstraction from being applicable
         # in this case
         subsession_history_key_factory: SubsessionHistoryKeyFactory,
+        subsession_goal_key_factory: Callable[[str, int], IOKey],
     ):
         self.name = name
         self._max_delegations = max_delegations
         self._delegate_task_cls = delegate_task_cls
         self._delegation_count_key = delegation_count_key
         self._active_subsession_key = active_subsession_key
-        self._active_subagent_type_key = active_subagent_type_key
+        self._active_subagent_name_key = active_subagent_name_key
         self._max_subsession_id_key = max_subsession_id_key
         self._supervisor_history_key = supervisor_history_key
         self._subsession_history_key_factory = subsession_history_key_factory
+        self._subsession_goal_key_factory = subsession_goal_key_factory
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Process a delegate_task tool call from the supervisor."""
@@ -144,18 +153,19 @@ class DelegationNode:
                     call_ids=[call_id],
                 )
 
-            subagent_type = str(delegation.subagent_type)
+            subagent_name = str(delegation.subagent_name)
 
             if delegation.subsession_id is None:
                 subsession_result = self._start_new_subsession(
                     max_subsession_id=max_subsession_id,
+                    subagent_name=subagent_name,
                     prompt=delegation.prompt,
                 )
             else:
                 subsession_result = self._resume_subsession(
                     state=state,
                     subsession_id=delegation.subsession_id,
-                    subagent_type=subagent_type,
+                    subagent_name=subagent_name,
                     max_subsession_id=max_subsession_id,
                     prompt=delegation.prompt,
                     call_id=call_id,
@@ -179,7 +189,7 @@ class DelegationNode:
         log.info(
             "Delegating task",
             supervisor=f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}",
-            subagent_type=subagent_type,
+            subagent_name=subagent_name,
             subsession_id=subsession_result.subsession_id,
             delegation_count=delegation_count + 1,
             is_resume=delegation.subsession_id is not None,
@@ -189,7 +199,7 @@ class DelegationNode:
         for iokey, value in (
             (self._max_subsession_id_key, subsession_result.new_max_id),
             (self._active_subsession_key, subsession_result.subsession_id),
-            (self._active_subagent_type_key, subagent_type),
+            (self._active_subagent_name_key, subagent_name),
             (self._delegation_count_key, delegation_count + 1),
         ):
             context_updates = merge_nested_dict(
@@ -197,13 +207,7 @@ class DelegationNode:
                 iokey.to_nested_dict(value),
             )
 
-        subagent_history_iokey = self._subsession_history_key_factory(
-            subagent_type, subsession_result.subsession_id
-        )
-        return {
-            **subagent_history_iokey.to_nested_dict(subsession_result.conversation),
-            **context_updates,
-        }
+        return merge_nested_dict(context_updates, subsession_result.state_updates)
 
     def _extract_delegate_call(
         self,
@@ -291,22 +295,33 @@ class DelegationNode:
         self,
         *,
         max_subsession_id: int,
+        subagent_name: str,
         prompt: str,
     ) -> SubsessionResult:
-        """Start a new subsession, seeding it with the delegation prompt.
+        """Start a new subsession with an empty conversation history.
+
+        Writes the delegation prompt to the subsession-scoped goal IOKey
+        (``context:<supervisor>__<subagent>__<id>/goal``) so the subagent reads
+        it as its ``{{goal}}`` template variable.  No ``HumanMessage`` is seeded
+        into the conversation history — the subagent starts fresh and receives
+        the goal through its prompt inputs.
 
         Returns a ``SubsessionResult`` with ``subsession_id == new_max_id``
-        (both equal ``max_subsession_id + 1``).
+        (both equal ``max_subsession_id + 1``) and ``state_updates`` containing
+        only the subsession-scoped goal IOKey write.  The conversation history
+        for the new subsession is implicitly empty (no key exists in state yet),
+        so no explicit empty-list write is needed.
 
         Note: for a new subsession ``subsession_id == new_max_id``, whereas for
         a resumed subsession they differ (``new_max_id`` stays unchanged).  The
         uniform return type keeps the call-site consistent for both branches.
         """
         subsession_id = max_subsession_id + 1
+        goal_iokey = self._subsession_goal_key_factory(subagent_name, subsession_id)
         return SubsessionResult(
             subsession_id=subsession_id,
             new_max_id=subsession_id,
-            conversation=[HumanMessage(content=prompt)],
+            state_updates=goal_iokey.to_nested_dict(prompt),
         )
 
     def _resume_subsession(
@@ -314,14 +329,15 @@ class DelegationNode:
         *,
         state: FlowState,
         subsession_id: int,
-        subagent_type: str,
+        subagent_name: str,
         max_subsession_id: int,
         prompt: str,
         call_id: str,
     ) -> SubsessionResult:
         """Resume an existing subsession, appending the new prompt as a HumanMessage.
 
-        Returns a ``SubsessionResult`` with ``new_max_id`` unchanged.
+        Returns a ``SubsessionResult`` with ``new_max_id`` unchanged and
+        ``state_updates`` containing the updated conversation history.
         Raises ``DelegationError`` for recoverable failures (invalid ID, missing history).
         """
         if subsession_id < 1 or subsession_id > max_subsession_id:
@@ -332,7 +348,7 @@ class DelegationNode:
             )
 
         subsession_history_iokey = self._subsession_history_key_factory(
-            subagent_type, subsession_id
+            subagent_name, subsession_id
         )
         existing_history: list[BaseMessage] = (
             subsession_history_iokey.value_from_state(state) or []
@@ -341,13 +357,15 @@ class DelegationNode:
         if not existing_history:
             raise DelegationError(
                 f"No conversation history found for subsession {subsession_id} "
-                f"(subagent_type: {subagent_type}). The subsession may belong to "
-                f"a different subagent type.",
+                f"(subagent_name: {subagent_name}). The subsession may belong to "
+                f"a different subagent.",
                 call_ids=[call_id],
             )
 
         return SubsessionResult(
             subsession_id=subsession_id,
             new_max_id=max_subsession_id,
-            conversation=existing_history + [HumanMessage(content=prompt)],
+            state_updates=subsession_history_iokey.to_nested_dict(
+                existing_history + [HumanMessage(content=prompt)]
+            ),
         )

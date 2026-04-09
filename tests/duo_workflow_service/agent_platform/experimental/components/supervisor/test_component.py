@@ -537,7 +537,7 @@ class TestSupervisorExecutionFlow:
     ):
         """Agent → delegation → (no active subagent) → agent → final_response → exit.
 
-        The delegation node returns state with active_subagent_type=None, so _delegation_router falls back to the
+        The delegation node returns state with active_subagent_name=None, so _delegation_router falls back to the
         supervisor agent node rather than routing into a subagent subgraph (which would require a real attached
         subagent).
         """
@@ -577,7 +577,7 @@ class TestSupervisorExecutionFlow:
             **base_flow_state,
             "context": {
                 supervisor_name: {
-                    "active_subagent_type": None,
+                    "active_subagent_name": None,
                     "active_subsession": None,
                 }
             },
@@ -779,7 +779,7 @@ class TestSupervisorExecutionFlow:
             **base_flow_state,
             "context": {
                 supervisor_name: {
-                    "active_subagent_type": developer_name,
+                    "active_subagent_name": developer_name,
                     "active_subsession": 1,
                 }
             },
@@ -789,7 +789,7 @@ class TestSupervisorExecutionFlow:
             **base_flow_state,
             "context": {
                 supervisor_name: {
-                    "active_subagent_type": None,
+                    "active_subagent_name": None,
                     "active_subsession": None,
                 }
             },

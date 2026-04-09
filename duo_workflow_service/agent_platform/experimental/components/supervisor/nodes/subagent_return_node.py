@@ -42,7 +42,7 @@ class SubagentReturnNode:
         delegate_task_cls: The DelegateTask model class (passed by the component
             so the node stays decoupled from the concrete import).
         active_subsession_key: ``IOKey`` pointing to the active subsession ID.
-        active_subagent_type_key: ``IOKey`` pointing to the active subagent type.
+        active_subagent_name_key: ``IOKey`` pointing to the active subagent name.
         final_answer_key: ``RuntimeIOKey`` that resolves the subagent's
             session-scoped final_answer ``IOKey`` at runtime.
         supervisor_history_key: ``RuntimeIOKey`` that resolves the supervisor's
@@ -55,30 +55,30 @@ class SubagentReturnNode:
         name: str,
         delegate_task_cls: type[DelegateTask],
         active_subsession_key: IOKey,
-        active_subagent_type_key: IOKey,
+        active_subagent_name_key: IOKey,
         final_answer_key: RuntimeIOKey,
         supervisor_history_key: RuntimeIOKey,
     ):
         self.name = name
         self._delegate_task_cls = delegate_task_cls
         self._active_subsession_key = active_subsession_key
-        self._active_subagent_type_key = active_subagent_type_key
+        self._active_subagent_name_key = active_subagent_name_key
         self._final_answer_key = final_answer_key
         self._supervisor_history_key = supervisor_history_key
 
     async def run(self, state: FlowState) -> dict:
         """Inject subagent result into supervisor conversation history."""
         active_session = self._active_subsession_key.value_from_state(state)
-        active_subagent_type = self._active_subagent_type_key.value_from_state(state)
+        active_subagent_name = self._active_subagent_name_key.value_from_state(state)
 
         supervisor_history_key = self._supervisor_history_key.to_iokey(state)
 
-        if active_session is None or active_subagent_type is None:
+        if active_session is None or active_subagent_name is None:
             raise ValueError(
                 f"No active subsession found for supervisor "
                 f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}. "
                 f"active_subsession={active_session}, "
-                f"active_subagent_type={active_subagent_type}"
+                f"active_subagent_name={active_subagent_name}"
             )
 
         # Read the subagent's final_answer via the session-scoped RuntimeIOKey
@@ -91,7 +91,7 @@ class SubagentReturnNode:
         else:
             status = DelegationStatus.ERROR
             result_content = (
-                f"Sub-agent '{active_subagent_type}' subsession {active_session} "
+                f"Subagent '{active_subagent_name}' subsession {active_session} "
                 f"did not produce a final_answer."
             )
 
@@ -110,7 +110,7 @@ class SubagentReturnNode:
 
         # Build XML delegation result
         xml_result = self._format_delegation_result(
-            subagent_type=active_subagent_type,
+            subagent_name=active_subagent_name,
             subsession_id=active_session,
             status=status,
             content=result_content,
@@ -119,7 +119,7 @@ class SubagentReturnNode:
         log.info(
             "Sub-agent returned",
             supervisor=f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}",
-            subagent_type=active_subagent_type,
+            subagent_name=active_subagent_name,
             subsession_id=active_session,
             status=status,
         )
@@ -133,7 +133,7 @@ class SubagentReturnNode:
         # Reset active session context using IOKeys
         context_updates: dict[str, Any] = merge_nested_dict(
             self._active_subsession_key.to_nested_dict(None),
-            self._active_subagent_type_key.to_nested_dict(None),
+            self._active_subagent_name_key.to_nested_dict(None),
         )
 
         return {
@@ -195,7 +195,7 @@ class SubagentReturnNode:
 
     @staticmethod
     def _format_delegation_result(
-        subagent_type: str,
+        subagent_name: str,
         subsession_id: int,
         status: DelegationStatus,
         content: str,
@@ -208,7 +208,7 @@ class SubagentReturnNode:
         if status == DelegationStatus.ERROR:
             return (
                 f"<delegation_result>\n"
-                f"  <subagent_type>{subagent_type}</subagent_type>\n"
+                f"  <subagent_name>{subagent_name}</subagent_name>\n"
                 f"  <subsession_id>{subsession_id}</subsession_id>\n"
                 f"  <status>{status}</status>\n"
                 f"  <error>\n"
@@ -219,7 +219,7 @@ class SubagentReturnNode:
 
         return (
             f"<delegation_result>\n"
-            f"  <subagent_type>{subagent_type}</subagent_type>\n"
+            f"  <subagent_name>{subagent_name}</subagent_name>\n"
             f"  <subsession_id>{subsession_id}</subsession_id>\n"
             f"  <status>{status}</status>\n"
             f"  <result>\n"

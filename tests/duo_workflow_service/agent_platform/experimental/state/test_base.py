@@ -1362,6 +1362,107 @@ class TestConversationHistoryReplaceReducer:
         assert result is not current
 
 
+class TestBaseIOKeyTemplateVariableName:
+    """Tests for BaseIOKey.template_variable_name."""
+
+    def test_always_raises_not_implemented_error(self):
+        """BaseIOKey.template_variable_name always raises NotImplementedError.
+
+        BaseIOKey carries no ``target`` field and therefore cannot provide a
+        meaningful default implementation.  All concrete subclasses must override
+        this property.
+        """
+
+        class _ConcreteBaseIOKey(BaseIOKey):
+            """Minimal concrete subclass that does NOT override template_variable_name."""
+
+        key = _ConcreteBaseIOKey()
+        with pytest.raises(NotImplementedError):
+            _ = key.template_variable_name
+
+    def test_raises_not_implemented_error_even_with_alias(self):
+        """BaseIOKey.template_variable_name raises NotImplementedError even when alias is set."""
+
+        class _ConcreteBaseIOKey(BaseIOKey):
+            pass
+
+        key = _ConcreteBaseIOKey(alias="my_alias")
+        with pytest.raises(NotImplementedError):
+            _ = key.template_variable_name
+
+    def test_raises_not_implemented_error_even_with_subkeys(self):
+        """BaseIOKey.template_variable_name raises NotImplementedError even when subkeys are set."""
+
+        class _ConcreteBaseIOKey(BaseIOKey):
+            pass
+
+        key = _ConcreteBaseIOKey(subkeys=["some", "subkey"])
+        with pytest.raises(NotImplementedError):
+            _ = key.template_variable_name
+
+
+class TestIOKeyTemplateVariableName:
+    """Tests for IOKey.template_variable_name."""
+
+    @pytest.mark.parametrize(
+        "target,subkeys,alias,literal,expected",
+        [
+            # bare target — no alias, no subkeys
+            ("status", None, None, False, "status"),
+            ("context", None, None, False, "context"),
+            # last subkey wins when no alias
+            ("context", ["project", "name"], None, False, "name"),
+            ("context", ["a", "b", "c"], None, False, "c"),
+            # alias wins over subkeys
+            ("context", ["project", "name"], "my_alias", False, "my_alias"),
+            # alias wins over bare target
+            ("status", None, "current_status", False, "current_status"),
+            # literal: alias is the variable name
+            ("literal_value", None, "greeting", True, "greeting"),
+        ],
+        ids=[
+            "bare_target_status",
+            "bare_target_context",
+            "last_subkey",
+            "last_of_three_subkeys",
+            "alias_over_subkeys",
+            "alias_over_target",
+            "literal_uses_alias",
+        ],
+    )
+    def test_template_variable_name(self, target, subkeys, alias, literal, expected):
+        """IOKey.template_variable_name returns the correct variable name."""
+        key = IOKey(target=target, subkeys=subkeys, alias=alias, literal=literal)
+        assert key.template_variable_name == expected
+
+    def test_template_variable_from_state_uses_template_variable_name(self):
+        """IOKey.template_variable_from_state delegates key selection to template_variable_name."""
+        state: FlowState = {
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {"project": {"name": "test-project"}},
+        }
+        key = IOKey(target="context", subkeys=["project", "name"])
+        result = key.template_variable_from_state(state)
+        # The key in the result must match template_variable_name
+        assert key.template_variable_name in result
+        assert result[key.template_variable_name] == "test-project"
+
+    def test_template_variable_from_state_literal_uses_template_variable_name(self):
+        """IOKey.template_variable_from_state uses template_variable_name for literal keys."""
+        state: FlowState = {
+            "status": WorkflowStatusEnum.PLANNING,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {},
+        }
+        key = IOKey(target="hello_world", literal=True, alias="greeting")
+        result = key.template_variable_from_state(state)
+        assert key.template_variable_name == "greeting"
+        assert result == {"greeting": "hello_world"}
+
+
 class TestRuntimeIOKey:
     """Tests for RuntimeIOKey class."""
 

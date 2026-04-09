@@ -142,6 +142,24 @@ class BaseIOKey(BaseModel):
         literal_: Optional[bool] = Field(default=False, alias="literal")
         optional_: Optional[bool] = Field(default=False, alias="optional")
 
+    @property
+    def template_variable_name(self) -> str:
+        """Return the Jinja2 template variable name this input will be exposed as.
+
+        Subclasses must override this property to provide their own resolution
+        logic.  ``BaseIOKey`` itself carries no ``target`` field and therefore
+        cannot provide a meaningful default implementation.
+
+        Returns:
+            The variable name a Jinja2 template would see for this input.
+
+        Raises:
+            NotImplementedError: Always — concrete subclasses must override.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override template_variable_name."
+        )
+
 
 class IOKey(BaseIOKey):
     target: str
@@ -213,21 +231,29 @@ class IOKey(BaseIOKey):
             optional=optional,
         )
 
+    @property
+    def template_variable_name(self) -> str:
+        """Return the Jinja2 template variable name this input will be exposed as.
+
+        This is the single source of truth for key selection: ``alias`` wins if
+        set (covers both literal and aliased inputs), then the last subkey, then
+        the bare target.  ``template_variable_from_state`` delegates to this
+        property so the rule is never duplicated.
+
+        Returns:
+            The variable name a Jinja2 template would see for this input.
+        """
+        if self.literal or self.alias:
+            return self.alias  # type: ignore[return-value]
+        if self.subkeys:
+            return self.subkeys[-1]
+        return self.target
+
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         # self.target presence in state is validated in parse_valid_target
         # thereby state[self.target] will always succeed
-        if self.literal:
-            return {self.alias: self.target}  # type: ignore[dict-item]
-
-        value = self.value_from_state(state)
-
-        if self.alias:
-            return {self.alias: value}
-
-        if not self.subkeys:
-            return {self.target: value}
-
-        return {self.subkeys[-1]: value}  # pylint: disable=unsubscriptable-object
+        value = self.target if self.literal else self.value_from_state(state)
+        return {self.template_variable_name: value}
 
     def value_from_state(self, state: FlowState) -> Any:
         # self.target presence in state is validated in parse_valid_target
@@ -393,7 +419,9 @@ class RuntimeIOKey(BaseIOKey):
         return self.factory(state).template_variable_from_state(state)
 
 
-def get_vars_from_state(inputs: list[IOKey], state: FlowState) -> dict[str, Any]:
+def get_vars_from_state(
+    inputs: list[IOKey | RuntimeIOKey], state: FlowState
+) -> dict[str, Any]:
     variables: dict[str, Any] = {}
 
     for inp in inputs:

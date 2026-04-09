@@ -11,6 +11,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     FlowStateKeys,
     IOKey,
+    RuntimeIOKey,
     get_vars_from_state,
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
@@ -25,7 +26,7 @@ class RequestNode(BaseModel):
     name: str
     component_name: str
     message_template: Optional[str]
-    inputs: list[IOKey]
+    inputs: list[IOKey | RuntimeIOKey]
     ui_history: Optional[UIHistory[AgentLogWriter, UILogEventsHumanInput]] = None
 
     @model_validator(mode="after")
