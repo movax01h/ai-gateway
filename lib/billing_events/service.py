@@ -31,6 +31,7 @@ class LLMOperation(BaseModel):
         model_provider: Provider of the model (e.g., 'anthropic', 'openai')
         prompt_tokens: Number of tokens in the prompt
         completion_tokens: Number of tokens in the completion
+        agent_name: Name of the agent that triggered this operation, if any
     """
 
     token_count: int
@@ -39,6 +40,7 @@ class LLMOperation(BaseModel):
     model_provider: str
     prompt_tokens: int
     completion_tokens: int
+    agent_name: str | None = None
 
 
 class SelfHostedLLMOperations:

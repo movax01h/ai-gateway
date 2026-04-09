@@ -248,7 +248,10 @@ class ModelRequestInstrumentator:
 
             _update_token_usage(model, usage)
 
-            self._update_llm_operations(model, usage)
+            agent_name = (
+                internal_event_extra.get("agent_name") if internal_event_extra else None
+            )
+            self._update_llm_operations(model, usage, agent_name)
             self._track_usage(model, usage, internal_event_extra or {})
 
             INFERENCE_INPUT_TOKENS.labels(**token_usage_labels).inc(
@@ -353,7 +356,9 @@ class ModelRequestInstrumentator:
                     **token_usage_data,
                 )
 
-        def _update_llm_operations(self, model: str, usage: UsageMetadata):
+        def _update_llm_operations(
+            self, model: str, usage: UsageMetadata, agent_name: str | None = None
+        ) -> None:
             current_llm_operations = llm_operations.get()
 
             if current_llm_operations is None:
@@ -367,6 +372,7 @@ class ModelRequestInstrumentator:
                     "model_provider": self.model_provider,
                     "prompt_tokens": usage["input_tokens"],
                     "completion_tokens": usage["output_tokens"],
+                    "agent_name": agent_name,
                 }
             )
 
