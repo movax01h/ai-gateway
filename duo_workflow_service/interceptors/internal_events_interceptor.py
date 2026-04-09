@@ -27,7 +27,11 @@ from duo_workflow_service.interceptors import (
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.correlation_id_interceptor import correlation_id
 from lib.context import gitlab_version, language_server_version
-from lib.internal_events import EventContext, current_event_context
+from lib.internal_events import (
+    EventContext,
+    current_event_context,
+    validate_event_context,
+)
 
 
 def convert_feature_enabled_string_to_list(
@@ -115,6 +119,8 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             client_type=metadata.get(X_GITLAB_CLIENT_TYPE_HEADER, None) or None,
             client_version=metadata.get(X_GITLAB_CLIENT_VERSION_HEADER, None) or None,
         )
+
+        validate_event_context(context, grpc_method=handler_call_details.method)
 
         current_event_context.set(context)
 

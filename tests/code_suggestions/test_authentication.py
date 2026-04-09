@@ -555,12 +555,13 @@ async def test_failed_authorization_logging(
         assert response.status_code == expected_status_code
         assert response.json() == expected_response
 
-        assert len(cap_logs) == 1
-        assert cap_logs[0]["status_code"] == expected_status_code
-        assert cap_logs[0]["method"] == "POST"
+        access_logs = [l for l in cap_logs if "status_code" in l]
+        assert len(access_logs) == 1
+        assert access_logs[0]["status_code"] == expected_status_code
+        assert access_logs[0]["method"] == "POST"
         # Check that all expected keys are present in the log
         expected_keys = set(expected_log_keys + log_keys)
-        actual_keys = set(cap_logs[0].keys())
+        actual_keys = set(access_logs[0].keys())
         assert expected_keys.issubset(
             actual_keys
         ), f"Missing keys: {expected_keys - actual_keys}"

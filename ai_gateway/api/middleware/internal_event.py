@@ -31,6 +31,7 @@ from lib.internal_events import (
     EventContext,
     current_event_context,
     tracked_internal_events,
+    validate_event_context,
 )
 
 
@@ -110,6 +111,8 @@ class InternalEventMiddleware:
             ultimate_parent_namespace_id=root_namespace_id,
             deployment_type=request.headers.get(X_GITLAB_DEPLOYMENT_TYPE),
         )
+        validate_event_context(context, endpoint=request.url.path)
+
         current_event_context.set(context)
         tracked_internal_events.set(set())
 
