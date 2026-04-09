@@ -129,6 +129,12 @@ class GitLabApiGet(DuoBaseTool):
         "- Repository Tree: /api/v4/projects/{id}/repository/tree with params={'path': 'sub/dir', 'ref': 'HEAD'}\n"
         "- Repository File: /api/v4/projects/{id}/repository/files/{file_path} with params={'ref': 'HEAD'}\n"
         "- Users: /api/v4/users/{id}\n"
+        "\nPagination:\n"
+        "- List endpoints return paginated results. Always set params={'per_page': 100} to fetch the maximum "
+        "number of items per request.\n"
+        "- The response includes a 'pagination' object with 'next_page', 'total', and 'total_pages' fields. "
+        "However, 'total' and 'total_pages' are omitted if there are more than 10,000 records. "
+        "If 'next_page' is not empty, pass params={'page': <next_page>, 'per_page': 100} to fetch the next page.\n"
         "\nTips:\n"
         "- Use ref=HEAD for repository file and tree requests to automatically resolve the default branch.\n"
         "- Use the params dict for query parameters (e.g., path, ref, per_page),"
@@ -222,12 +228,18 @@ class GitLabApiGet(DuoBaseTool):
                 else:
                     result = json.loads(response.body)
 
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "data": result,
-                    }
-                )
+                response_payload: dict = {
+                    "status": "success",
+                    "data": result,
+                }
+
+                # Only attach pagination when headers are present to keep single-resource
+                # responses lean and preserve backward compatibility.
+                pagination = self._extract_pagination_headers(response)
+                if pagination:
+                    response_payload["pagination"] = pagination
+
+                return json.dumps(response_payload)
             except json.JSONDecodeError:
                 # If response is not JSON, return as string
                 return json.dumps(
@@ -250,6 +262,33 @@ class GitLabApiGet(DuoBaseTool):
                     "details": str(e),
                 }
             )
+
+    @staticmethod
+    def _extract_pagination_headers(response: Any) -> Optional[Dict[str, str]]:
+        """Extract GitLab pagination headers from a response.
+
+        Returns a dict with pagination metadata if any pagination headers are present, or None if the response has no
+        pagination info.
+        """
+        raw_headers = getattr(response, "headers", {}) or {}
+        # Normalize to lowercase keys so the lookup works regardless of whether
+        # the HTTP client preserves the original casing or lowercases all names.
+        headers = {k.lower(): v for k, v in raw_headers.items()}
+        next_page = headers.get("x-next-page", "")
+        total = headers.get("x-total", "")
+        total_pages = headers.get("x-total-pages", "")
+
+        if not any([next_page, total, total_pages]):
+            return None
+
+        pagination: Dict[str, str] = {}
+        if next_page:
+            pagination["next_page"] = next_page
+        if total:
+            pagination["total"] = total
+        if total_pages:
+            pagination["total_pages"] = total_pages
+        return pagination
 
     def format_display_message(
         self, args: GitLabApiGetInput, _tool_response: Any = None
