@@ -23,21 +23,21 @@ class TestDelegateTaskBase:
     def test_create_with_all_fields(self):
         """Test creating DelegateTask with all fields."""
         task = DelegateTask(
-            subagent_type="developer",
+            subagent_name="developer",
             subsession_id=1,
             prompt="Implement the feature",
         )
-        assert task.subagent_type == "developer"
+        assert task.subagent_name == "developer"
         assert task.subsession_id == 1
         assert task.prompt == "Implement the feature"
 
     def test_create_with_no_subsession_id(self):
         """Test creating DelegateTask with subsession_id=None (new subsession)."""
         task = DelegateTask(
-            subagent_type="tester",
+            subagent_name="tester",
             prompt="Write tests for the feature",
         )
-        assert task.subagent_type == "tester"
+        assert task.subagent_name == "tester"
         assert task.subsession_id is None
         assert task.prompt == "Write tests for the feature"
 
@@ -53,14 +53,14 @@ class TestDelegateTaskBase:
                 "id": "call_123",
                 "name": "delegate_task",
                 "args": {
-                    "subagent_type": "developer",
+                    "subagent_name": "developer",
                     "subsession_id": None,
                     "prompt": "Do the work",
                 },
             }
         ]
         task = DelegateTask.from_ai_message(ai_msg)
-        assert task.subagent_type == "developer"
+        assert task.subagent_name == "developer"
         assert task.subsession_id is None
         assert task.prompt == "Do the work"
 
@@ -99,23 +99,23 @@ class TestBuildDelegateTaskModel:
         model = build_delegate_task_model(managed_agents_config)
         assert model.model_config["title"] == "delegate_task"
 
-    def test_subagent_type_constrained_to_enum(self, managed_agents_config):
-        """Test that subagent_type is constrained to the provided agent names."""
+    def test_subagent_name_constrained_to_enum(self, managed_agents_config):
+        """Test that subagent_name is constrained to the provided agent names."""
         model = build_delegate_task_model(managed_agents_config)
 
         task = model(
-            subagent_type="developer",
+            subagent_name="developer",
             prompt="Do work",
         )
-        assert str(task.subagent_type) == "developer"
+        assert str(task.subagent_name) == "developer"
 
-    def test_invalid_subagent_type_raises_validation_error(self, managed_agents_config):
-        """Test that an invalid subagent_type raises ValidationError."""
+    def test_invalid_subagent_name_raises_validation_error(self, managed_agents_config):
+        """Test that an invalid subagent_name raises ValidationError."""
         model = build_delegate_task_model(managed_agents_config)
 
         with pytest.raises(ValidationError):
             model(
-                subagent_type="nonexistent_agent",
+                subagent_name="nonexistent_agent",
                 prompt="Do work",
             )
 
@@ -125,7 +125,7 @@ class TestBuildDelegateTaskModel:
         """Test that the JSON schema only contains valid agent names."""
         model = build_delegate_task_model(managed_agents_config)
 
-        field_annotation = model.model_fields["subagent_type"].annotation
+        field_annotation = model.model_fields["subagent_name"].annotation
         enum_names = {member.value for member in field_annotation}
         assert enum_names == set(managed_agent_names)
 
@@ -133,8 +133,8 @@ class TestBuildDelegateTaskModel:
         """Test building model with a single agent."""
         config = [ManagedAgentConfig(name="solo_agent", description="Does everything.")]
         model = build_delegate_task_model(config)
-        task = model(subagent_type="solo_agent", prompt="Work alone")
-        assert str(task.subagent_type) == "solo_agent"
+        task = model(subagent_name="solo_agent", prompt="Work alone")
+        assert str(task.subagent_name) == "solo_agent"
 
     def test_model_inherits_from_delegate_task(self, managed_agents_config):
         """Test that the built model inherits from DelegateTask."""
@@ -146,24 +146,24 @@ class TestBuildDelegateTaskModel:
         """Test that prompt field is required."""
         model = build_delegate_task_model(managed_agents_config)
         with pytest.raises(ValidationError):
-            model(subagent_type="developer")
+            model(subagent_name="developer")
 
     def test_subsession_id_optional(self, managed_agents_config):
         """Test that subsession_id defaults to None."""
         model = build_delegate_task_model(managed_agents_config)
-        task = model(subagent_type="developer", prompt="Work")
+        task = model(subagent_name="developer", prompt="Work")
         assert task.subsession_id is None
 
     def test_subsession_id_with_value(self, managed_agents_config):
         """Test that subsession_id can be set to an integer."""
         model = build_delegate_task_model(managed_agents_config)
-        task = model(subagent_type="developer", subsession_id=3, prompt="Resume work")
+        task = model(subagent_name="developer", subsession_id=3, prompt="Resume work")
         assert task.subsession_id == 3
 
     def test_field_description_contains_agent_descriptions(self, managed_agents_config):
-        """Test that the subagent_type field description embeds agent descriptions."""
+        """Test that the subagent_name field description embeds agent descriptions."""
         model = build_delegate_task_model(managed_agents_config)
-        field_description = model.model_fields["subagent_type"].description
+        field_description = model.model_fields["subagent_name"].description
         assert "developer" in field_description
         assert "tester" in field_description
         # Descriptions from the config should appear too

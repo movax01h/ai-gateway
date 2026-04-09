@@ -94,7 +94,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         supervisor#agent ↔ supervisor#tools (regular tools)
         supervisor#agent → supervisor#delegation (delegate_task)
         supervisor#agent → supervisor#final_response (final_response_tool)
-        supervisor#delegation → <subagent>#agent (routes by subagent_type)
+        supervisor#delegation → <subagent>#agent (routes by subagent_name)
         <subagent>#final_response → supervisor#subagent_return
         supervisor#subagent_return → supervisor#agent (loop)
     """
@@ -112,9 +112,9 @@ class SupervisorAgentComponent(AgentComponentBase):
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "active_subsession"],
         optional=True,
     )
-    _active_subagent_type_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+    _active_subagent_name_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
-        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "active_subagent_type"],
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "active_subagent_name"],
         optional=True,
     )
     _max_subsession_id_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
@@ -143,7 +143,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         # Orchestration metadata
         _delegation_count_key,
         _active_subsession_key,
-        _active_subagent_type_key,
+        _active_subagent_name_key,
         _max_subsession_id_key,
     )
 
@@ -267,9 +267,9 @@ class SupervisorAgentComponent(AgentComponentBase):
         )
 
     @property
-    def _resolved_active_subagent_type_key(self) -> IOKey:
-        """Resolve the active_subagent_type ``IOKey`` for this supervisor instance."""
-        return self._active_subagent_type_key.to_iokey(
+    def _resolved_active_subagent_name_key(self) -> IOKey:
+        """Resolve the active_subagent_name ``IOKey`` for this supervisor instance."""
+        return self._active_subagent_name_key.to_iokey(
             {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
         )
 
@@ -288,16 +288,16 @@ class SupervisorAgentComponent(AgentComponentBase):
     def _delegation_router(self, state: FlowState) -> str:
         """Router for the delegation node conditional edge.
 
-        Reads active_subagent_type written by DelegationNode.run() and routes to the appropriate subagent entry node.
+        Reads active_subagent_name written by DelegationNode.run() and routes to the appropriate subagent entry node.
         Falls back to the supervisor's own agent node when delegation failed (error ToolMessage was injected instead of
-        setting active_subagent_type).
+        setting active_subagent_name).
         """
-        active_subagent_type = self._resolved_active_subagent_type_key.value_from_state(
+        active_subagent_name = self._resolved_active_subagent_name_key.value_from_state(
             state
         )
 
-        if active_subagent_type and active_subagent_type in self.managed_agent_names:
-            return f"{active_subagent_type}#agent"
+        if active_subagent_name and active_subagent_name in self.managed_agent_names:
+            return f"{active_subagent_name}#agent"
 
         # Delegation failed — route back to supervisor so LLM can react
         return f"{self.name}#agent"
@@ -350,14 +350,14 @@ class SupervisorAgentComponent(AgentComponentBase):
         return f"{self.name}#tools"
 
     def _subsession_history_key_factory(
-        self, subagent_type: str, subsession_id: int
+        self, subagent_name: str, subsession_id: int
     ) -> IOKey:
         """Build the subsession-scoped conversation-history IOKey.
 
         Encapsulates the key naming convention so nodes never need to know it.
         Matches the ``SubsessionHistoryKeyFactory`` signature.
         """
-        key = f"{self.name}{SUBSESSION_KEY_SEPARATOR}{subagent_type}{SUBSESSION_KEY_SEPARATOR}{subsession_id}"
+        key = f"{self.name}{SUBSESSION_KEY_SEPARATOR}{subagent_name}{SUBSESSION_KEY_SEPARATOR}{subsession_id}"
         return IOKey(
             target="conversation_history",
             subkeys=[key],
@@ -378,6 +378,43 @@ class SupervisorAgentComponent(AgentComponentBase):
         return RuntimeIOKey(
             alias="conversation_history",
             factory=lambda state: self._subsession_history_key_factory(
+                subagent_name,
+                self._resolved_active_subsession_key.value_from_state(state),
+            ),
+        )
+
+    def _subsession_goal_key_factory(
+        self, subagent_name: str, subsession_id: int
+    ) -> IOKey:
+        """Build the subsession-scoped goal IOKey.
+
+        Encapsulates the key naming convention so nodes never need to know it.
+
+        Args:
+            subagent_name: The name of the subagent.
+            subsession_id: The numeric subsession ID.
+        """
+        key = f"{self.name}{SUBSESSION_KEY_SEPARATOR}{subagent_name}{SUBSESSION_KEY_SEPARATOR}{subsession_id}"
+        return IOKey(
+            target="context",
+            subkeys=[key, "goal"],
+            optional=True,
+        )
+
+    def _subsession_goal_key_for(self, subagent_name: str) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` scoped to a specific subagent's goal.
+
+        The returned ``RuntimeIOKey`` reads the active subsession ID from state at runtime
+        and delegates to ``_subsession_goal_key``.  Passed into
+        ``AgentComponent.bind_to_supervisor`` so the subagent's ``AgentNode``
+        can read the delegation prompt from the correct subsession-scoped location.
+
+        Args:
+            subagent_name: The name of the subagent this key is scoped to.
+        """
+        return RuntimeIOKey(
+            alias="goal",
+            factory=lambda state: self._subsession_goal_key_factory(
                 subagent_name,
                 self._resolved_active_subsession_key.value_from_state(state),
             ),
@@ -411,22 +448,22 @@ class SupervisorAgentComponent(AgentComponentBase):
     def _active_subagent_final_answer_key(self) -> RuntimeIOKey:
         """Return a ``RuntimeIOKey`` that resolves the final_answer IOKey for the currently active subagent.
 
-        Reads active_subagent_type from state at runtime, then resolves the per-subagent final_answer key.  Used by
+        Reads active_subagent_name from state at runtime, then resolves the per-subagent final_answer key.  Used by
         SubagentReturnNode to read the result from whichever subagent just completed.
         """
 
         def _factory(state: FlowState) -> IOKey:
-            active_type = self._resolved_active_subagent_type_key.value_from_state(
+            active_name = self._resolved_active_subagent_name_key.value_from_state(
                 state
             )
 
-            if not active_type or active_type not in self.subagent_components:
+            if not active_name or active_name not in self.subagent_components:
                 raise ValueError(
-                    f"Cannot resolve final_answer key: no active subagent type or "
-                    f"'{active_type}' not in managed agents {self.managed_agent_names}"
+                    f"Cannot resolve final_answer key: no active subagent name or "
+                    f"'{active_name}' not in managed agents {self.managed_agent_names}"
                 )
 
-            return self._subagent_final_answer_key_for(active_type).to_iokey(state)
+            return self._subagent_final_answer_key_for(active_name).to_iokey(state)
 
         return RuntimeIOKey(alias="final_answer", factory=_factory)
 
@@ -518,10 +555,11 @@ class SupervisorAgentComponent(AgentComponentBase):
             delegate_task_cls=self._delegate_task_cls,
             delegation_count_key=self._resolved_delegation_count_key,
             active_subsession_key=self._resolved_active_subsession_key,
-            active_subagent_type_key=self._resolved_active_subagent_type_key,
+            active_subagent_name_key=self._resolved_active_subagent_name_key,
             max_subsession_id_key=self._resolved_max_subsession_id_key,
             supervisor_history_key=supervisor_history_key,
             subsession_history_key_factory=self._subsession_history_key_factory,
+            subsession_goal_key_factory=self._subsession_goal_key_factory,
         )
 
         # --- Subagent return node ---
@@ -529,7 +567,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             name=f"{self.name}#subagent_return",
             delegate_task_cls=self._delegate_task_cls,
             active_subsession_key=self._resolved_active_subsession_key,
-            active_subagent_type_key=self._resolved_active_subagent_type_key,
+            active_subagent_name_key=self._resolved_active_subagent_name_key,
             final_answer_key=self._active_subagent_final_answer_key,
             supervisor_history_key=supervisor_history_key,
         )
@@ -573,5 +611,6 @@ class SupervisorAgentComponent(AgentComponentBase):
             subagent.bind_to_supervisor(
                 conversation_history_key=self._subsession_history_key_for(agent_name),
                 output_key=self._subagent_final_answer_key_for(agent_name),
+                goal_key=self._subsession_goal_key_for(agent_name),
             )
             subagent.attach(graph, subagent_router)

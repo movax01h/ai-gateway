@@ -85,7 +85,7 @@ class AgentNode:
     name: str
     _prompt: Prompt
 
-    _inputs: list[IOKey]
+    _inputs: list[IOKey | RuntimeIOKey]
 
     _conversation_history_key: RuntimeIOKey
 
@@ -102,7 +102,7 @@ class AgentNode:
         flow_type: GLReportingEventContext,
         name: str,
         prompt: Prompt,
-        inputs: list[IOKey],
+        inputs: list[IOKey | RuntimeIOKey],
         internal_event_client: InternalEventsClient,
         conversation_history_key: RuntimeIOKey,
         compactor: ConversationCompactor | None = None,

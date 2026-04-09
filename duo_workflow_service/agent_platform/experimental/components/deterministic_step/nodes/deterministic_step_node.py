@@ -11,6 +11,7 @@ from duo_workflow_service.agent_platform.experimental.components.deterministic_s
 from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     IOKey,
+    RuntimeIOKey,
     get_vars_from_state,
     merge_nested_dict,
 )
@@ -38,7 +39,7 @@ class DeterministicStepNode:
         *,
         name: str,
         tool_name: str,
-        inputs: list[IOKey],
+        inputs: list[IOKey | RuntimeIOKey],
         flow_id: str,
         flow_type: GLReportingEventContext,
         internal_event_client: InternalEventsClient,

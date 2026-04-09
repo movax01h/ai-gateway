@@ -30,7 +30,7 @@ def build_delegate_task_model(
 
     Returns:
         A DelegateTask Pydantic model class with the SubagentEnum type for
-        subagent_type.
+        subagent_name.
     """
     subagent_enum = StrEnum(  # type: ignore[misc]
         "SubagentEnum", {cfg["name"]: cfg["name"] for cfg in managed_agents_config}
@@ -44,7 +44,7 @@ def build_delegate_task_model(
     dynamic_model = create_model(
         "DynamicDelegateTask",
         __base__=DelegateTask,
-        subagent_type=(
+        subagent_name=(
             subagent_enum,
             Field(
                 description=(
@@ -81,7 +81,7 @@ class DelegateTask(BaseModel):
 
     tool_title: ClassVar[str] = "delegate_task"
 
-    subagent_type: str = Field(description="The specialist agent to delegate to.")
+    subagent_name: str = Field(description="The specialist agent to delegate to.")
     subsession_id: Optional[int] = Field(
         default=None,
         description=(

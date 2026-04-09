@@ -241,6 +241,7 @@ class AgentComponent(AgentComponentBase):
         *,
         conversation_history_key: RuntimeIOKey,
         output_key: RuntimeIOKey,
+        goal_key: RuntimeIOKey,
     ) -> None:
         """Bind this agent to a supervisor.
 
@@ -256,6 +257,11 @@ class AgentComponent(AgentComponentBase):
                 subsession-scoped conversation-history key at runtime.
             output_key: ``RuntimeIOKey`` that resolves the subsession-scoped
                 final_answer key at runtime.
+            goal_key: ``RuntimeIOKey`` that resolves the subsession-scoped goal
+                key at runtime.  The resolved IOKey replaces the static
+                ``context:goal`` input so the subagent reads the delegation
+                prompt written by ``DelegationNode`` rather than the shared
+                flow goal.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -267,6 +273,14 @@ class AgentComponent(AgentComponentBase):
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
         self._is_bound_to_supervisor = True
+
+        # Ensure subagent does not read shared `context:goal` directly
+        self.inputs = [
+            inp
+            for inp in self.inputs
+            if inp.template_variable_name != goal_key.template_variable_name
+        ]
+        self.inputs.append(goal_key)
 
     def _agent_node_router(self, state: FlowState) -> str:
         history_iokey = self._conversation_history_key.to_iokey(state)

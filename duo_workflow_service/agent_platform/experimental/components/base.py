@@ -10,6 +10,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowStateKeys,
     IOKey,
     IOKeyTemplate,
+    RuntimeIOKey,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.events import GLReportingEventContext
@@ -35,7 +36,7 @@ class BaseComponent(BaseModel, ABC):
 
     supported_environments: ClassVar[tuple[str, ...]] = ()
 
-    inputs: list[IOKey] = Field(default_factory=list)
+    inputs: list[IOKey | RuntimeIOKey] = Field(default_factory=list)
     name: str
     flow_id: str
     flow_type: GLReportingEventContext
@@ -52,7 +53,10 @@ class BaseComponent(BaseModel, ABC):
     @model_validator(mode="after")
     def validate_base_fields(self) -> Self:
         for inp in self.inputs:
-            if inp.literal:
+            # RuntimeIOKey's target is only known during
+            # session execution time, therefore it can't be validated
+            # at compilation time
+            if isinstance(inp, RuntimeIOKey) or inp.literal:
                 continue
 
             if inp.target not in self._allowed_input_targets:

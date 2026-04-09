@@ -26,10 +26,11 @@ class TestDelegationNodeNewSession:
         delegate_task_cls,
         delegation_count_key,
         active_subsession_key,
-        active_subagent_type_key,
+        active_subagent_name_key,
         max_subsession_id_key,
         supervisor_history_runtime_key,
         subsession_history_key_factory,
+        subsession_goal_key_factory,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -37,10 +38,11 @@ class TestDelegationNodeNewSession:
             delegate_task_cls=delegate_task_cls,
             delegation_count_key=delegation_count_key,
             active_subsession_key=active_subsession_key,
-            active_subagent_type_key=active_subagent_type_key,
+            active_subagent_name_key=active_subagent_name_key,
             max_subsession_id_key=max_subsession_id_key,
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
         )
 
     @pytest.mark.asyncio
@@ -62,11 +64,11 @@ class TestDelegationNodeNewSession:
         supervisor_ctx = ctx[supervisor_name]
         assert supervisor_ctx["max_subsession_id"] == 1
         assert supervisor_ctx["active_subsession"] == 1
-        assert supervisor_ctx["active_subagent_type"] == developer_name
+        assert supervisor_ctx["active_subagent_name"] == developer_name
         assert supervisor_ctx["delegation_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_new_session_seeds_conversation_history(
+    async def test_new_session_does_not_write_conversation_history(
         self,
         delegation_node,
         supervisor_flow_state,
@@ -74,17 +76,20 @@ class TestDelegationNodeNewSession:
         developer_name,
         ai_message_with_delegate,
     ):
-        """Test that a new session seeds conversation history with HumanMessage."""
+        """Test that a new session does not write an empty conversation history entry.
+
+        The delegation prompt is written to the subsession-scoped goal IOKey instead of being seeded as a HumanMessage.
+        The subagent reads the goal via its prompt inputs (RuntimeIOKey), not from conversation history. No explicit
+        empty-list write is needed — the history is implicitly absent until the subagent runs.
+        """
         state = supervisor_flow_state
         state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
 
         result = await delegation_node.run(state)
 
         session_key = f"{supervisor_name}__{developer_name}__1"
-        history = result[FlowStateKeys.CONVERSATION_HISTORY][session_key]
-        assert len(history) == 1
-        assert isinstance(history[0], HumanMessage)
-        assert history[0].content == "Implement the feature"
+        # No conversation_history entry is written for a new subsession
+        assert session_key not in result.get(FlowStateKeys.CONVERSATION_HISTORY, {})
 
     @pytest.mark.asyncio
     async def test_new_session_increments_from_existing(
@@ -100,7 +105,7 @@ class TestDelegationNodeNewSession:
             supervisor_name: {
                 "max_subsession_id": 3,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 2,
             }
         }
@@ -115,6 +120,26 @@ class TestDelegationNodeNewSession:
         assert ctx["active_subsession"] == 4
         assert ctx["delegation_count"] == 3
 
+    @pytest.mark.asyncio
+    async def test_new_session_writes_goal_to_subsession_key(
+        self,
+        delegation_node,
+        supervisor_flow_state,
+        supervisor_name,
+        developer_name,
+        ai_message_with_delegate,
+    ):
+        """Test that a new session writes the delegation prompt to the subsession-scoped goal IOKey."""
+        state = supervisor_flow_state
+        state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
+
+        result = await delegation_node.run(state)
+
+        # The goal should be written to context:<supervisor>__<subagent>__<subsession_id>/goal
+        goal_key = f"{supervisor_name}__{developer_name}__1"
+        ctx = result[FlowStateKeys.CONTEXT]
+        assert ctx[goal_key]["goal"] == "Implement the feature"
+
 
 class TestDelegationNodeResumeSession:
     """Tests for DelegationNode resuming existing sessions."""
@@ -127,10 +152,11 @@ class TestDelegationNodeResumeSession:
         delegate_task_cls,
         delegation_count_key,
         active_subsession_key,
-        active_subagent_type_key,
+        active_subagent_name_key,
         max_subsession_id_key,
         supervisor_history_runtime_key,
         subsession_history_key_factory,
+        subsession_goal_key_factory,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -138,10 +164,11 @@ class TestDelegationNodeResumeSession:
             delegate_task_cls=delegate_task_cls,
             delegation_count_key=delegation_count_key,
             active_subsession_key=active_subsession_key,
-            active_subagent_type_key=active_subagent_type_key,
+            active_subagent_name_key=active_subagent_name_key,
             max_subsession_id_key=max_subsession_id_key,
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
         )
 
     @pytest.mark.asyncio
@@ -162,7 +189,7 @@ class TestDelegationNodeResumeSession:
             supervisor_name: {
                 "max_subsession_id": 1,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 0,
             }
         }
@@ -178,6 +205,42 @@ class TestDelegationNodeResumeSession:
         assert history[0].content == "Original task"
         assert isinstance(history[1], HumanMessage)
         assert history[1].content == "Fix the bug in the implementation"
+
+    @pytest.mark.asyncio
+    async def test_resume_does_not_write_goal_key(
+        self,
+        delegation_node,
+        supervisor_name,
+        developer_name,
+        ai_message_with_delegate_resume,
+        base_flow_state,
+    ):
+        """Test that resuming a session does NOT write the goal to the subsession-scoped goal IOKey.
+
+        For resumed sessions, the delegation prompt is appended as a HumanMessage to the conversation history instead.
+        """
+        session_key = f"{supervisor_name}__{developer_name}__1"
+        goal_key = f"{supervisor_name}__{developer_name}__1"
+
+        state = {**base_flow_state}
+        state["context"] = {
+            supervisor_name: {
+                "max_subsession_id": 1,
+                "active_subsession": None,
+                "active_subagent_name": None,
+                "delegation_count": 0,
+            }
+        }
+        state["conversation_history"] = {
+            supervisor_name: [ai_message_with_delegate_resume],
+            session_key: [HumanMessage(content="Original task")],
+        }
+
+        result = await delegation_node.run(state)
+
+        # Goal key should NOT be written for resumed sessions
+        ctx = result.get(FlowStateKeys.CONTEXT, {})
+        assert goal_key not in ctx
 
     @pytest.mark.asyncio
     async def test_resume_does_not_increment_max_id(
@@ -196,7 +259,7 @@ class TestDelegationNodeResumeSession:
             supervisor_name: {
                 "max_subsession_id": 1,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 0,
             }
         }
@@ -224,7 +287,7 @@ class TestDelegationNodeResumeSession:
             "id": delegate_tool_call_id,
             "name": DelegateTask.tool_title,
             "args": {
-                "subagent_type": developer_name,
+                "subagent_name": developer_name,
                 "subsession_id": 5,
                 "prompt": "Resume",
             },
@@ -237,7 +300,7 @@ class TestDelegationNodeResumeSession:
             supervisor_name: {
                 "max_subsession_id": 1,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 0,
             }
         }
@@ -267,7 +330,7 @@ class TestDelegationNodeResumeSession:
             "id": delegate_tool_call_id,
             "name": DelegateTask.tool_title,
             "args": {
-                "subagent_type": developer_name,
+                "subagent_name": developer_name,
                 "subsession_id": 0,
                 "prompt": "Resume",
             },
@@ -280,7 +343,7 @@ class TestDelegationNodeResumeSession:
             supervisor_name: {
                 "max_subsession_id": 1,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 0,
             }
         }
@@ -308,7 +371,7 @@ class TestDelegationNodeResumeSession:
             supervisor_name: {
                 "max_subsession_id": 1,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 0,
             }
         }
@@ -335,10 +398,11 @@ class TestDelegationNodeErrorHandling:
         delegate_task_cls,
         delegation_count_key,
         active_subsession_key,
-        active_subagent_type_key,
+        active_subagent_name_key,
         max_subsession_id_key,
         supervisor_history_runtime_key,
         subsession_history_key_factory,
+        subsession_goal_key_factory,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -346,10 +410,11 @@ class TestDelegationNodeErrorHandling:
             delegate_task_cls=delegate_task_cls,
             delegation_count_key=delegation_count_key,
             active_subsession_key=active_subsession_key,
-            active_subagent_type_key=active_subagent_type_key,
+            active_subagent_name_key=active_subagent_name_key,
             max_subsession_id_key=max_subsession_id_key,
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
         )
 
     @pytest.mark.asyncio
@@ -361,10 +426,11 @@ class TestDelegationNodeErrorHandling:
         base_flow_state,
         delegation_count_key,
         active_subsession_key,
-        active_subagent_type_key,
+        active_subagent_name_key,
         max_subsession_id_key,
         supervisor_history_runtime_key,
         subsession_history_key_factory,
+        subsession_goal_key_factory,
     ):
         """Test that exceeding max_delegations returns error ToolMessage."""
         node = DelegationNode(
@@ -373,10 +439,11 @@ class TestDelegationNodeErrorHandling:
             delegate_task_cls=delegate_task_cls,
             delegation_count_key=delegation_count_key,
             active_subsession_key=active_subsession_key,
-            active_subagent_type_key=active_subagent_type_key,
+            active_subagent_name_key=active_subagent_name_key,
             max_subsession_id_key=max_subsession_id_key,
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
         )
 
         state = {**base_flow_state}
@@ -384,7 +451,7 @@ class TestDelegationNodeErrorHandling:
             supervisor_name: {
                 "max_subsession_id": 2,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 2,  # Already at max
             }
         }
@@ -409,10 +476,11 @@ class TestDelegationNodeErrorHandling:
         base_flow_state,
         delegation_count_key,
         active_subsession_key,
-        active_subagent_type_key,
+        active_subagent_name_key,
         max_subsession_id_key,
         supervisor_history_runtime_key,
         subsession_history_key_factory,
+        subsession_goal_key_factory,
     ):
         """Test that None max_delegations imposes no delegation limit."""
         node = DelegationNode(
@@ -421,10 +489,11 @@ class TestDelegationNodeErrorHandling:
             delegate_task_cls=delegate_task_cls,
             delegation_count_key=delegation_count_key,
             active_subsession_key=active_subsession_key,
-            active_subagent_type_key=active_subagent_type_key,
+            active_subagent_name_key=active_subagent_name_key,
             max_subsession_id_key=max_subsession_id_key,
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
         )
 
         # Set delegation_count to a very high value — should not trigger any limit
@@ -433,7 +502,7 @@ class TestDelegationNodeErrorHandling:
             supervisor_name: {
                 "max_subsession_id": 0,
                 "active_subsession": None,
-                "active_subagent_type": None,
+                "active_subagent_name": None,
                 "delegation_count": 9999,
             }
         }
@@ -445,20 +514,18 @@ class TestDelegationNodeErrorHandling:
 
         # Verify delegation actually happened by asserting on the success-path outputs.
         # The context must reflect the incremented delegation_count, the newly assigned
-        # active_subagent_type, and the new subsession ID — none of which are set when
+        # active_subagent_name, and the new subsession ID — none of which are set when
         # the node returns an error ToolMessage instead of delegating.
         ctx = result[FlowStateKeys.CONTEXT][supervisor_name]
         assert ctx["delegation_count"] == 10000  # 9999 + 1
-        assert ctx["active_subagent_type"] == developer_name
+        assert ctx["active_subagent_name"] == developer_name
         assert ctx["active_subsession"] == 1
         assert ctx["max_subsession_id"] == 1
 
-        # The new subsession history must be seeded with the delegation prompt.
-        session_key = f"{supervisor_name}__{developer_name}__1"
-        session_history = result[FlowStateKeys.CONVERSATION_HISTORY][session_key]
-        assert len(session_history) == 1
-        assert isinstance(session_history[0], HumanMessage)
-        assert session_history[0].content == "Implement the feature"
+        delegation_goal = subsession_goal_key_factory(
+            developer_name, 1
+        ).value_from_state(result)
+        assert delegation_goal == "Implement the feature"
 
     @pytest.mark.asyncio
     async def test_no_conversation_history_raises(
@@ -515,12 +582,12 @@ class TestDelegationNodeErrorHandling:
         tool_call_1 = {
             "id": delegate_tool_call_id,
             "name": DelegateTask.tool_title,
-            "args": {"subagent_type": developer_name, "prompt": "Task A"},
+            "args": {"subagent_name": developer_name, "prompt": "Task A"},
         }
         tool_call_2 = {
             "id": "second_call_id",
             "name": DelegateTask.tool_title,
-            "args": {"subagent_type": developer_name, "prompt": "Task B"},
+            "args": {"subagent_name": developer_name, "prompt": "Task B"},
         }
         ai_msg = Mock(spec=AIMessage)
         ai_msg.tool_calls = [tool_call_1, tool_call_2]
@@ -552,7 +619,7 @@ class TestDelegationNodeErrorHandling:
         delegate_call = {
             "id": delegate_tool_call_id,
             "name": DelegateTask.tool_title,
-            "args": {"subagent_type": developer_name, "prompt": "Task A"},
+            "args": {"subagent_name": developer_name, "prompt": "Task A"},
         }
         other_call = {
             "id": "other_call_id",
@@ -577,19 +644,19 @@ class TestDelegationNodeErrorHandling:
         assert all("mixed" in tm.content for tm in tool_messages)
 
     @pytest.mark.asyncio
-    async def test_invalid_subagent_type_returns_error(
+    async def test_invalid_subagent_name_returns_error(
         self,
         delegation_node,
         supervisor_flow_state,
         supervisor_name,
         delegate_tool_call_id,
     ):
-        """Test that an invalid subagent_type is caught by Pydantic validation."""
+        """Test that an invalid subagent_name is caught by Pydantic validation."""
         tool_call = {
             "id": delegate_tool_call_id,
             "name": DelegateTask.tool_title,
             "args": {
-                "subagent_type": "nonexistent",
+                "subagent_name": "nonexistent",
                 "subsession_id": None,
                 "prompt": "Do work",
             },
@@ -602,7 +669,7 @@ class TestDelegationNodeErrorHandling:
 
         result = await delegation_node.run(state)
 
-        # Pydantic enum validation rejects invalid subagent_type,
+        # Pydantic enum validation rejects invalid subagent_name,
         # caught by the try/except and returned as error ToolMessage
         history = result[FlowStateKeys.CONVERSATION_HISTORY][supervisor_name]
         assert isinstance(history[-1], ToolMessage)

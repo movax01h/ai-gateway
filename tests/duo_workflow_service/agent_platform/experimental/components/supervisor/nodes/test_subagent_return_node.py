@@ -23,12 +23,12 @@ def final_answer_runtime_key_fixture(supervisor_name):
         active_session = (
             state.get("context", {}).get(supervisor_name, {}).get("active_subsession")
         )
-        active_type = (
+        active_name = (
             state.get("context", {})
             .get(supervisor_name, {})
-            .get("active_subagent_type")
+            .get("active_subagent_name")
         )
-        if active_session is None or active_type is None:
+        if active_session is None or active_name is None:
             return IOKey(
                 target="context",
                 subkeys=[supervisor_name, "UNKNOWN", "UNKNOWN", "final_answer"],
@@ -36,7 +36,7 @@ def final_answer_runtime_key_fixture(supervisor_name):
             )
         return IOKey(
             target="context",
-            subkeys=[supervisor_name, active_type, str(active_session), "final_answer"],
+            subkeys=[supervisor_name, active_name, str(active_session), "final_answer"],
             optional=True,
         )
 
@@ -48,7 +48,7 @@ def return_node_fixture(
     supervisor_name,
     delegate_task_cls,
     active_subsession_key,
-    active_subagent_type_key,
+    active_subagent_name_key,
     supervisor_history_runtime_key,
     final_answer_runtime_key,
 ):
@@ -57,7 +57,7 @@ def return_node_fixture(
         name=f"{supervisor_name}#subagent_return",
         delegate_task_cls=delegate_task_cls,
         active_subsession_key=active_subsession_key,
-        active_subagent_type_key=active_subagent_type_key,
+        active_subagent_name_key=active_subagent_name_key,
         final_answer_key=final_answer_runtime_key,
         supervisor_history_key=supervisor_history_runtime_key,
     )
@@ -74,7 +74,7 @@ def _state_with_delegate_history(
         supervisor_name: {
             "max_subsession_id": 1,
             "active_subsession": 1,
-            "active_subagent_type": "developer",
+            "active_subagent_name": "developer",
             "delegation_count": 1,
             **(extra_context or {}),
         }
@@ -101,7 +101,7 @@ class TestSubagentReturnNodeRun:
         tool_msg = supervisor_history[-1]
         assert isinstance(tool_msg, ToolMessage)
         assert "<delegation_result>" in tool_msg.content
-        assert f"<subagent_type>{developer_name}</subagent_type>" in tool_msg.content
+        assert f"<subagent_name>{developer_name}</subagent_name>" in tool_msg.content
         assert "<subsession_id>1</subsession_id>" in tool_msg.content
         assert "<status>completed</status>" in tool_msg.content
         assert "<result>" in tool_msg.content
@@ -120,7 +120,7 @@ class TestSubagentReturnNodeRun:
 
         ctx = result[FlowStateKeys.CONTEXT][supervisor_name]
         assert ctx["active_subsession"] is None
-        assert ctx["active_subagent_type"] is None
+        assert ctx["active_subagent_name"] is None
 
     @pytest.mark.asyncio
     async def test_tool_call_id_matches_delegate_call(
@@ -161,7 +161,7 @@ class TestSubagentReturnNodeRun:
         state["context"] = {
             supervisor_name: {
                 "active_subsession": 1,
-                "active_subagent_type": developer_name,
+                "active_subagent_name": developer_name,
                 developer_name: {"1": {"final_answer": "Done"}},
             }
         }
@@ -200,7 +200,7 @@ class TestSubagentReturnNodeRun:
         """Missing active session raises ValueError before any history lookup."""
         state = {**base_flow_state}
         state["context"] = {
-            supervisor_name: {"active_subsession": None, "active_subagent_type": None}
+            supervisor_name: {"active_subsession": None, "active_subagent_name": None}
         }
 
         with pytest.raises(ValueError, match="No active subsession found"):
@@ -215,7 +215,7 @@ class TestSubagentReturnNodeRun:
         state["context"] = {
             supervisor_name: {
                 "active_subsession": 1,
-                "active_subagent_type": developer_name,
+                "active_subagent_name": developer_name,
             }
         }
         state["conversation_history"] = {supervisor_name: []}
@@ -241,7 +241,7 @@ class TestSubagentReturnNodeRun:
         state["context"] = {
             supervisor_name: {
                 "active_subsession": 1,
-                "active_subagent_type": developer_name,
+                "active_subagent_name": developer_name,
             }
         }
         state["conversation_history"] = {supervisor_name: [ai_msg]}
@@ -269,7 +269,7 @@ class TestSubagentReturnNodeRun:
         state["context"] = {
             supervisor_name: {
                 "active_subsession": 1,
-                "active_subagent_type": developer_name,
+                "active_subagent_name": developer_name,
             }
         }
         state["conversation_history"] = {supervisor_name: [ai_msg]}
@@ -297,7 +297,7 @@ class TestSubagentReturnNodeRun:
         state["context"] = {
             supervisor_name: {
                 "active_subsession": 1,
-                "active_subagent_type": developer_name,
+                "active_subagent_name": developer_name,
             }
         }
         state["conversation_history"] = {supervisor_name: [ai_msg]}

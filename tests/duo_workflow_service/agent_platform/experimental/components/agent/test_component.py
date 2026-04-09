@@ -959,17 +959,61 @@ class TestAgentComponentBindToSupervisor:
         # Create mock RuntimeIOKey instances
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
 
         # Bind to supervisor
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
+            goal_key=mock_goal_key,
         )
 
         # Keys should now be set to the provided values
         assert component._conversation_history_key is mock_history_key
         assert component._output_key is mock_output_key
         assert component._is_bound_to_supervisor
+        # goal_key should be appended to inputs so AgentNode receives it transparently
+        assert mock_goal_key in component.inputs
+
+    def test_bind_to_supervisor_removes_existing_goal_input_and_appends_new_one(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that bind_to_supervisor removes any pre-existing goal input before appending the new one."""
+        existing_goal_key = IOKey(target="context", subkeys=["goal"])
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            description="Test agent for supervisor",
+        )
+        component.inputs = [existing_goal_key]
+
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        new_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+
+        component.bind_to_supervisor(
+            conversation_history_key=mock_history_key,
+            output_key=mock_output_key,
+            goal_key=new_goal_key,
+        )
+
+        # The old goal key should have been removed and replaced by the new one
+        assert existing_goal_key not in component.inputs
+        assert new_goal_key in component.inputs
 
     def test_bind_to_supervisor_requires_description(
         self,
@@ -997,11 +1041,13 @@ class TestAgentComponentBindToSupervisor:
 
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
 
         with pytest.raises(ValueError, match="must have a description"):
             component.bind_to_supervisor(
                 conversation_history_key=mock_history_key,
                 output_key=mock_output_key,
+                goal_key=mock_goal_key,
             )
 
     def test_outputs_returns_empty_when_bound(
@@ -1034,9 +1080,11 @@ class TestAgentComponentBindToSupervisor:
         # Bind to supervisor
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
+            goal_key=mock_goal_key,
         )
 
         # After binding, outputs should be empty

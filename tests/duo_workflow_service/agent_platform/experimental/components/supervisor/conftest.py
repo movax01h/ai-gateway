@@ -150,7 +150,7 @@ def delegate_tool_call_fixture(delegate_tool_call_id, developer_name):
         "id": delegate_tool_call_id,
         "name": DelegateTask.tool_title,
         "args": {
-            "subagent_type": developer_name,
+            "subagent_name": developer_name,
             "subsession_id": None,
             "prompt": "Implement the feature",
         },
@@ -164,7 +164,7 @@ def delegate_tool_call_resume_fixture(delegate_tool_call_id, developer_name):
         "id": delegate_tool_call_id,
         "name": DelegateTask.tool_title,
         "args": {
-            "subagent_type": developer_name,
+            "subagent_name": developer_name,
             "subsession_id": 1,
             "prompt": "Fix the bug in the implementation",
         },
@@ -256,7 +256,7 @@ def supervisor_flow_state_fixture(supervisor_name, base_flow_state):
         supervisor_name: {
             "max_subsession_id": 0,
             "active_subsession": None,
-            "active_subagent_type": None,
+            "active_subagent_name": None,
             "delegation_count": 0,
         }
     }
@@ -274,7 +274,7 @@ def supervisor_state_with_active_subsession_fixture(
         supervisor_name: {
             "max_subsession_id": 1,
             "active_subsession": 1,
-            "active_subagent_type": developer_name,
+            "active_subagent_name": developer_name,
             "delegation_count": 1,
         }
     }
@@ -298,7 +298,7 @@ def supervisor_state_with_completed_subsession_fixture(
         supervisor_name: {
             "max_subsession_id": 1,
             "active_subsession": 1,
-            "active_subagent_type": developer_name,
+            "active_subagent_name": developer_name,
             "delegation_count": 1,
             developer_name: {
                 "1": {"final_answer": "Implementation complete. Created feature X."}
@@ -335,12 +335,12 @@ def active_subsession_key_fixture(supervisor_name):
     )
 
 
-@pytest.fixture(name="active_subagent_type_key")
-def active_subagent_type_key_fixture(supervisor_name):
-    """Fixture for active_subagent_type IOKey."""
+@pytest.fixture(name="active_subagent_name_key")
+def active_subagent_name_key_fixture(supervisor_name):
+    """Fixture for active_subagent_name IOKey."""
     return IOKey(
         target="context",
-        subkeys=[supervisor_name, "active_subagent_type"],
+        subkeys=[supervisor_name, "active_subagent_name"],
         optional=True,
     )
 
@@ -386,6 +386,17 @@ def subsession_history_key_factory_fixture(supervisor_name):
     def factory(subagent_type: str, subsession_id: int) -> IOKey:
         key = f"{supervisor_name}__{subagent_type}__{subsession_id}"
         return IOKey(target="conversation_history", subkeys=[key], optional=True)
+
+    return factory
+
+
+@pytest.fixture(name="subsession_goal_key_factory")
+def subsession_goal_key_factory_fixture(supervisor_name):
+    """Fixture for subsession goal key factory (subagent_type, subsession_id) -> IOKey."""
+
+    def factory(subagent_type: str, subsession_id: int) -> IOKey:
+        key = f"{supervisor_name}__{subagent_type}__{subsession_id}"
+        return IOKey(target="context", subkeys=[key, "goal"], optional=True)
 
     return factory
 
