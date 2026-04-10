@@ -20,6 +20,9 @@ gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default
 language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
     "language_server_version", default=None
 )
+is_gitlab_team_member: ContextVar[Optional[bool]] = ContextVar(
+    "is_gitlab_team_member", default=None
+)
 
 # client_capabilities is used to make backwards compatible changes to our
 # communication protocol. This is needed usually when we're adding new
@@ -66,11 +69,19 @@ def _gitlab_realm_label() -> str:
     return "unknown"
 
 
+def _is_gitlab_team_member_label() -> str:
+    value = is_gitlab_team_member.get()
+    if value is None:
+        return "unknown"
+    return "yes" if value else "no"
+
+
 _METADATA_LABEL_GETTERS = {
     "lsp_version": _language_server_version_label,
     "gitlab_version": _gitlab_version_label,
     "client_type": _client_type_label,
     "gitlab_realm": _gitlab_realm_label,
+    "is_gitlab_team_member": _is_gitlab_team_member_label,
 }
 
 METADATA_LABELS = list(_METADATA_LABEL_GETTERS.keys())

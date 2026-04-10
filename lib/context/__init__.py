@@ -30,6 +30,7 @@ from lib.context.request_metadata import (
     extract_finish_reason,
     gitlab_realm,
     gitlab_version,
+    is_gitlab_team_member,
     language_server_version,
 )
 
@@ -39,6 +40,7 @@ __all__ = [
     "client_type",
     "gitlab_realm",
     "gitlab_version",
+    "is_gitlab_team_member",
     "language_server_version",
     "METADATA_LABELS",
     "build_metadata_labels",

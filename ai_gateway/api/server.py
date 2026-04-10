@@ -28,6 +28,7 @@ from ai_gateway.api.middleware import (
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
+    RequestMetadataMiddleware,
 )
 from ai_gateway.api.middleware.self_hosted_logging import (
     EnabledInstanceVerboseAiLogsHeaderPlugin,
@@ -162,6 +163,7 @@ def create_fast_api_server(config: Config):
                 bypass_auth_with_header=config.auth.bypass_external_with_header,
                 skip_endpoints=_SKIP_ENDPOINTS,
             ),
+            Middleware(RequestMetadataMiddleware),
             Middleware(
                 FeatureFlagMiddleware,
                 disallowed_flags=config.feature_flags.disallowed_flags,

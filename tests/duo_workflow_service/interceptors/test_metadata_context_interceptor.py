@@ -95,6 +95,56 @@ async def test_gitlab_realm_header(interceptor_setup):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "header_name,header_value,expected",
+    [
+        ("x-gitlab-is-team-member", "true", True),
+        ("x-gitlab-is-team-member", "false", False),
+        ("x-gitlab-is-team-member", "True", True),
+        ("x-gitlab-is-a-gitlab-member", "true", True),
+        ("x-gitlab-is-a-gitlab-member", "false", False),
+    ],
+)
+async def test_is_gitlab_team_member_header(
+    interceptor_setup, header_name, header_value, expected
+):
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            (header_name, header_value),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.is_gitlab_team_member"
+    ) as mock_team_member:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_team_member.set.assert_called_once_with(expected)
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_is_gitlab_team_member_both_headers_conflicting(interceptor_setup):
+    """Test that x-gitlab-is-a-gitlab-member takes precedence over x-gitlab-is-team-member."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-is-a-gitlab-member", "true"),
+            ("x-gitlab-is-team-member", "false"),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.is_gitlab_team_member"
+    ) as mock_team_member:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_team_member.set.assert_called_once_with(True)
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
 async def test_gitlab_version_header(interceptor_setup):
     """Test that GitLab version header is properly set."""
     interceptor, handler_call_details, continuation = interceptor_setup(
@@ -200,6 +250,7 @@ async def test_all_headers_together(interceptor_setup):
             ("x-gitlab-enabled-instance-verbose-ai-logs", "true"),
             ("x-gitlab-model-prompt-cache-enabled", "false"),
             ("x-gitlab-enabled-mcp-server-tools", "postgres,context7"),
+            ("x-gitlab-is-team-member", "true"),
         ]
     )
 
@@ -225,6 +276,9 @@ async def test_all_headers_together(interceptor_setup):
         patch(
             "duo_workflow_service.interceptors.metadata_context_interceptor.set_prompt_caching_enabled_to_current_request"
         ) as mock_prompt_caching,
+        patch(
+            "duo_workflow_service.interceptors.metadata_context_interceptor.is_gitlab_team_member"
+        ) as mock_team_member,
     ):
         mock_lsp_instance = MagicMock()
         mock_lsp_class.from_string.return_value = mock_lsp_instance
@@ -238,6 +292,7 @@ async def test_all_headers_together(interceptor_setup):
         mock_lsp_version.set.assert_called_once_with(mock_lsp_instance)
         mock_verbose_logs.set.assert_called_once_with(True)
         mock_prompt_caching.assert_called_once_with("false")
+        mock_team_member.set.assert_called_once_with(True)
         assert current_mcp_server_tools_context.get() == {
             "postgres",
             "context7",
@@ -274,6 +329,9 @@ async def test_missing_headers(interceptor_setup):
         patch(
             "duo_workflow_service.interceptors.metadata_context_interceptor.set_prompt_caching_enabled_to_current_request"
         ) as mock_prompt_caching,
+        patch(
+            "duo_workflow_service.interceptors.metadata_context_interceptor.is_gitlab_team_member"
+        ) as mock_team_member,
     ):
         result = await interceptor.intercept_service(continuation, handler_call_details)
 
@@ -282,6 +340,7 @@ async def test_missing_headers(interceptor_setup):
         mock_gitlab_realm.set.assert_not_called()
         mock_gitlab_version.set.assert_not_called()
         mock_lsp_version.set.assert_not_called()
+        mock_team_member.set.assert_called_once_with(None)
         # Verbose logs is always set (defaults to False)
         mock_verbose_logs.set.assert_called_once_with(False)
         # Prompt caching is always called (with None)

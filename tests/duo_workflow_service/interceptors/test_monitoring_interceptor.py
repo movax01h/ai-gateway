@@ -80,6 +80,7 @@ async def test_interceptor_methods(
             "lsp_version": "unknown",
             "flow_type": "unknown",
             "gitlab_realm": "unknown",
+            "is_gitlab_team_member": "unknown",
         },
     )
 
@@ -195,6 +196,7 @@ async def test_streaming_interceptor_methods(
             "lsp_version": "unknown",
             "gitlab_realm": "unknown",
             "flow_type": "chat",
+            "is_gitlab_team_member": "unknown",
         },
     )
 
@@ -246,6 +248,7 @@ async def test_interceptor_handles_exception():
             "lsp_version": "unknown",
             "gitlab_realm": "unknown",
             "flow_type": "unknown",
+            "is_gitlab_team_member": "unknown",
         },
     )
 
@@ -296,6 +299,7 @@ async def test_interceptor_stream_handles_exception():
             "lsp_version": "unknown",
             "gitlab_realm": "unknown",
             "flow_type": "unknown",
+            "is_gitlab_team_member": "unknown",
         },
     )
 
