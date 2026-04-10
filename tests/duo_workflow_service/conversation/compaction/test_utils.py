@@ -1,8 +1,16 @@
+# pylint: disable=too-many-lines
 """Tests for conversation compaction utility functions."""
 
 from unittest.mock import patch
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+import pytest
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
@@ -10,6 +18,10 @@ from duo_workflow_service.conversation.compaction import (
     is_turn_complete,
     resolve_recent_messages_internal,
     slice_for_summarization,
+)
+from duo_workflow_service.conversation.compaction.utils import (
+    _format_tool_calls_as_text,
+    strip_tool_metadata_for_litellm,
 )
 
 
@@ -827,3 +839,252 @@ class TestSliceForSummarizationWithTokenBudget:
             AIMessage(content="response three"),
         ]
         mock_estimate.assert_called()
+
+
+class TestFormatToolCallsAsText:
+    """Test suite for _format_tool_calls_as_text function."""
+
+    @pytest.mark.parametrize(
+        "tool_calls, expected_fragments",
+        [
+            pytest.param(
+                [{"name": "read_file", "args": {"path": "/foo/bar.py"}}],
+                ["[Called tool 'read_file'", '"/foo/bar.py"'],
+                id="single_call",
+            ),
+            pytest.param(
+                [
+                    {"name": "read_file", "args": {"path": "/foo"}},
+                    {
+                        "name": "write_file",
+                        "args": {"path": "/bar", "content": "hello"},
+                    },
+                ],
+                ["[Called tool 'read_file'", "[Called tool 'write_file'"],
+                id="multiple_calls",
+            ),
+            pytest.param(
+                [{"name": "list_files", "args": {}}],
+                ["[Called tool 'list_files'", "{}"],
+                id="empty_args",
+            ),
+            pytest.param(
+                [{}],
+                ["[Called tool 'unknown'"],
+                id="missing_fields",
+            ),
+        ],
+    )
+    def test_format_tool_calls_as_text(self, tool_calls, expected_fragments):
+        result = _format_tool_calls_as_text(tool_calls)
+        for fragment in expected_fragments:
+            assert fragment in result
+
+
+class TestStripToolMetadataForLitellm:
+    """Test suite for strip_tool_metadata_for_litellm function."""
+
+    @pytest.mark.parametrize(
+        "messages, checks",
+        [
+            pytest.param(
+                [
+                    AIMessage(
+                        content="Let me check.",
+                        tool_calls=[
+                            {
+                                "id": "c1",
+                                "name": "read_file",
+                                "args": {"path": "/foo"},
+                            }
+                        ],
+                    ),
+                    ToolMessage(
+                        content="file data",
+                        tool_call_id="c1",
+                        name="read_file",
+                    ),
+                    HumanMessage(content="Thanks!"),
+                ],
+                [
+                    lambda r: isinstance(r[0], AIMessage),
+                    lambda r: "Let me check." in r[0].content,
+                    lambda r: "[Called tool 'read_file'" in r[0].content,
+                    lambda r: not r[0].tool_calls,
+                    lambda r: isinstance(r[1], HumanMessage),
+                    lambda r: "read_file" in r[1].content
+                    and "file data" in r[1].content,
+                    lambda r: r[2].content == "Thanks!",
+                ],
+                id="text_plus_tool_calls",
+            ),
+            pytest.param(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "id": "c1",
+                                "name": "search",
+                                "args": {"query": "hello"},
+                            }
+                        ],
+                    ),
+                ],
+                [
+                    lambda r: isinstance(r[0], AIMessage),
+                    lambda r: "[Called tool 'search'" in r[0].content,
+                    lambda r: "hello" in r[0].content,
+                    lambda r: not r[0].tool_calls,
+                ],
+                id="tool_only_no_text",
+            ),
+            pytest.param(
+                [
+                    AIMessage(
+                        content="Do several things.",
+                        tool_calls=[
+                            {
+                                "id": "c1",
+                                "name": "read_file",
+                                "args": {"path": "/a"},
+                            },
+                            {
+                                "id": "c2",
+                                "name": "write_file",
+                                "args": {"path": "/b", "content": "x"},
+                            },
+                        ],
+                    ),
+                    ToolMessage(
+                        content="contents of a",
+                        tool_call_id="c1",
+                        name="read_file",
+                    ),
+                    ToolMessage(
+                        content="wrote to b",
+                        tool_call_id="c2",
+                        name="write_file",
+                    ),
+                ],
+                [
+                    lambda r: "[Called tool 'read_file'" in r[0].content,
+                    lambda r: "[Called tool 'write_file'" in r[0].content,
+                    lambda r: isinstance(r[1], HumanMessage)
+                    and "read_file" in r[1].content,
+                    lambda r: isinstance(r[2], HumanMessage)
+                    and "write_file" in r[2].content,
+                ],
+                id="multiple_tool_calls_one_message",
+            ),
+            pytest.param(
+                [ToolMessage(content="some result", tool_call_id="c1")],
+                [
+                    lambda r: isinstance(r[0], HumanMessage),
+                    lambda r: "unknown" in r[0].content,
+                    lambda r: "some result" in r[0].content,
+                ],
+                id="tool_message_without_name",
+            ),
+            pytest.param(
+                [
+                    HumanMessage(content="Hello"),
+                    AIMessage(content="Hi there!"),
+                    SystemMessage(content="Be helpful"),
+                ],
+                [
+                    lambda r: r[0].content == "Hello",
+                    lambda r: r[1].content == "Hi there!",
+                    lambda r: r[2].content == "Be helpful",
+                ],
+                id="regular_messages_passthrough",
+            ),
+            pytest.param(
+                [],
+                [lambda r: r == []],
+                id="empty_messages",
+            ),
+        ],
+    )
+    def test_strip_tool_metadata_for_litellm(self, messages, checks):
+        result = strip_tool_metadata_for_litellm(messages)
+        for check in checks:
+            assert check(result)
+
+    def test_strip_tool_metadata_list_content_single_text_plus_tool_use(self):
+        """AIMessage with list content [text, tool_use] simplifies to string with tool calls as text."""
+        messages = [
+            AIMessage(
+                content=[
+                    {"type": "text", "text": "I'll read the file."},
+                    {
+                        "type": "tool_use",
+                        "id": "c1",
+                        "name": "read_file",
+                        "input": {"path": "/foo"},
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "id": "c1",
+                        "name": "read_file",
+                        "args": {"path": "/foo"},
+                    }
+                ],
+            ),
+        ]
+        cleaned = strip_tool_metadata_for_litellm(messages)
+        content = cleaned[0].content
+        # Single text block + tool_use → simplified to string after filtering
+        assert isinstance(content, str)
+        assert "I'll read the file." in content
+        assert "[Called tool 'read_file'" in content
+        assert not cleaned[0].tool_calls
+
+    def test_strip_tool_metadata_list_content_multiple_text_plus_tool_use(
+        self,
+    ):
+        """AIMessage with list content [text, text, tool_use] keeps list form."""
+        messages = [
+            AIMessage(
+                content=[
+                    {"type": "text", "text": "First part."},
+                    {"type": "text", "text": "Second part."},
+                    {
+                        "type": "tool_use",
+                        "id": "c1",
+                        "name": "read_file",
+                        "input": {"path": "/foo"},
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "id": "c1",
+                        "name": "read_file",
+                        "args": {"path": "/foo"},
+                    }
+                ],
+            ),
+        ]
+        cleaned = strip_tool_metadata_for_litellm(messages)
+        content = cleaned[0].content
+        # Multiple text blocks remain as list
+        assert isinstance(content, list)
+        text_parts = [
+            b for b in content if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        assert any("First part." in b.get("text", "") for b in text_parts)
+        assert any("Second part." in b.get("text", "") for b in text_parts)
+        assert any("[Called tool 'read_file'" in b.get("text", "") for b in text_parts)
+        assert not any(
+            b.get("type") == "tool_use" for b in content if isinstance(b, dict)
+        )
+        assert not cleaned[0].tool_calls
+
+    def test_strip_tool_metadata_ai_message_without_tool_calls_unchanged(
+        self,
+    ):
+        """AIMessage with no tool_calls is passed through as the same object."""
+        msg = AIMessage(content="Just a normal response.")
+        cleaned = strip_tool_metadata_for_litellm([msg])
+        assert cleaned[0] is msg

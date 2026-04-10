@@ -6,6 +6,7 @@ from langgraph.constants import TAG_NOSTREAM
 from structlog import get_logger
 
 from ai_gateway.prompts.typing import Model
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from duo_workflow_service.conversation.compaction.schema import (
     CompactionConfig,
     CompactionResult,
@@ -13,10 +14,17 @@ from duo_workflow_service.conversation.compaction.schema import (
 from duo_workflow_service.conversation.compaction.token_estimator import (
     CompactionTokenEstimator,
 )
-from duo_workflow_service.conversation.compaction.utils import slice_for_summarization
+from duo_workflow_service.conversation.compaction.utils import (
+    slice_for_summarization,
+    strip_tool_metadata_for_litellm,
+)
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 
 log = get_logger("compactor")
+
+COMPACTION_CONTINUE_MESSAGE = (
+    "Continue working on the task based on the conversation above."
+)
 
 
 class ConversationCompactor:
@@ -114,6 +122,17 @@ class ConversationCompactor:
 
         compacted_messages = slices.leading_context + [summary] + slices.recent_to_keep
 
+        if isinstance(compacted_messages[-1], AIMessage):
+            # Vertex AI / Gemini requires conversations to end with a user
+            # message (strict role alternation: user <-> model). After
+            # compaction, the message list may end with an AIMessage (summary
+            # or recent agent turn), which the Gemini API rejects with HTTP
+            # 400. Append a synthetic HumanMessage to satisfy this constraint.
+            # Note: ToolMessages are not affected -- the Gemini API converts
+            # them to role-less ContentType objects that don't participate in
+            # role alternation.
+            compacted_messages.append(HumanMessage(content=COMPACTION_CONTINUE_MESSAGE))
+
         compacted_tokens = self._calculate_compacted_tokens(original_tokens, summary)
 
         log.info(
@@ -144,6 +163,11 @@ class ConversationCompactor:
         # TODO: migrate to prompt registry needed in
         # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2014
         log.info("Start compaction summarization llm call.")
+        # Workaround for LiteLLM bug https://github.com/BerriAI/litellm/issues/24712
+        # Only needed for LiteLLM-backed providers (e.g., Vertex AI).
+        # Remove this workaround once the upstream bug is fixed.
+        if isinstance(self._llm, ChatLiteLLM):
+            messages = strip_tool_metadata_for_litellm(messages)
         result = await self._llm.ainvoke(
             [
                 SystemMessage(content=self._config.summarizer_system_prompt),

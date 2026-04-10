@@ -353,3 +353,4 @@ class Config(BaseSettings):
 
 def setup_litellm(config: Config):
     litellm.vertex_project = config.google_cloud_platform.project
+    litellm.vertex_location = "global"
