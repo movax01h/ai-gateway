@@ -1001,8 +1001,6 @@ async def test_agent_run_with_preapproved_tools(workflow_with_project):
 @pytest.mark.asyncio
 async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project):
     """Test that preapproved_tools are updated in state when resuming."""
-    # Enable tool approval for session (required for preapproved_tools to be returned)
-    workflow_with_project._workflow_metadata["tool_approval_for_session_enabled"] = True
     # Set up workflow with new preapproved tools (simulating a new startRequest)
     workflow_with_project._preapproved_tools = [
         "tool_1",
