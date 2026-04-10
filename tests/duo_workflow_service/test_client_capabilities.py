@@ -23,11 +23,13 @@ def gl_version_unsupported_fixture():
 def test_is_client_capable_in_supported_gitlab_version(
     gl_version_supported,
 ):  # pylint: disable=unused-argument
-    """Test that is_client_capable returns True when the capability is in the set."""
+    """Test that is_client_capable returns True only when all capabilities are declared."""
     client_capabilities.set({"feature_a", "feature_b"})
-    assert is_client_capable("feature_a") is True
-    assert is_client_capable("feature_b") is True
-    assert is_client_capable("feature_c") is False
+    assert is_client_capable(frozenset({"feature_a"})) is True
+    assert is_client_capable(frozenset({"feature_b"})) is True
+    assert is_client_capable(frozenset({"feature_a", "feature_b"})) is True
+    assert is_client_capable(frozenset({"feature_c"})) is False
+    assert is_client_capable(frozenset({"feature_a", "feature_c"})) is False
 
 
 def test_is_client_capable_in_unsupported_gitlab_version(
@@ -35,6 +37,6 @@ def test_is_client_capable_in_unsupported_gitlab_version(
 ):  # pylint: disable=unused-argument
     """Test that is_client_capable returns False when the GitLab version is below 18.7.0."""
     client_capabilities.set({"feature_a", "feature_b"})
-    assert is_client_capable("feature_a") is False
-    assert is_client_capable("feature_b") is False
-    assert is_client_capable("feature_c") is False
+    assert is_client_capable(frozenset({"feature_a"})) is False
+    assert is_client_capable(frozenset({"feature_b"})) is False
+    assert is_client_capable(frozenset({"feature_c"})) is False

@@ -98,6 +98,7 @@ message TrackLlmCallForSelfHosted {
 
 message RunShellCommand {
     string command = 1;
+    optional int64 timeout = 2;
 }
 
 message RunCommandAction {
@@ -106,6 +107,7 @@ message RunCommandAction {
     string program = 3;
     repeated string arguments = 4;
     repeated string flags = 5;
+    optional int64 timeout = 6;
 }
 
 message ReadFile {

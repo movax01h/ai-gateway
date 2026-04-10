@@ -84,8 +84,9 @@ class DuoBaseTool(BaseTool):
     # Tool class that this tool supersedes (if any)
     supersedes: ClassVar[Optional[Type["DuoBaseTool"]]] = None
 
-    # Client capability required to use this tool (if any)
-    required_capability: ClassVar[Optional[str]] = None
+    # Client capabilities required to use this tool (if any).
+    # All capabilities in the frozenset must be declared by the client.
+    required_capability: ClassVar[frozenset[str]] = frozenset()
 
     # Semantic version of the tool. Tools with version < 1.0.0 are experimental
     # and not exposed via the ListTools API.

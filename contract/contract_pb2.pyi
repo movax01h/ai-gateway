@@ -149,20 +149,24 @@ class TrackLlmCallForSelfHosted(_message.Message):
     def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
 
 class RunShellCommand(_message.Message):
-    __slots__ = ("command",)
+    __slots__ = ("command", "timeout")
     COMMAND_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
     command: str
-    def __init__(self, command: _Optional[str] = ...) -> None: ...
+    timeout: int
+    def __init__(self, command: _Optional[str] = ..., timeout: _Optional[int] = ...) -> None: ...
 
 class RunCommandAction(_message.Message):
-    __slots__ = ("program", "arguments", "flags")
+    __slots__ = ("program", "arguments", "flags", "timeout")
     PROGRAM_FIELD_NUMBER: _ClassVar[int]
     ARGUMENTS_FIELD_NUMBER: _ClassVar[int]
     FLAGS_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
     program: str
     arguments: _containers.RepeatedScalarFieldContainer[str]
     flags: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, program: _Optional[str] = ..., arguments: _Optional[_Iterable[str]] = ..., flags: _Optional[_Iterable[str]] = ...) -> None: ...
+    timeout: int
+    def __init__(self, program: _Optional[str] = ..., arguments: _Optional[_Iterable[str]] = ..., flags: _Optional[_Iterable[str]] = ..., timeout: _Optional[int] = ...) -> None: ...
 
 class ReadFile(_message.Message):
     __slots__ = ("filepath", "limit", "offset")

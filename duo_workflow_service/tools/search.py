@@ -451,12 +451,8 @@ class AdvanceBlobSearch(GitLabSearchBase):
     )
     args_schema: Type[BaseModel] = AdvanceBlobSearchInput
 
-    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = (
-        BlobSearch  # Declares it supersedes BlobSearch
-    )
-    required_capability: ClassVar[str] = (
-        "advanced_search"  # Client capability required to use this tool
-    )
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = BlobSearch
+    required_capability: ClassVar[frozenset[str]] = frozenset({"advanced_search"})
 
     def _filter_blob_results(self, results: list) -> list:
         """Filter blob search results using FileExclusionPolicy."""

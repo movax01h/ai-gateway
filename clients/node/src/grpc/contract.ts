@@ -119,12 +119,14 @@ export interface TrackLlmCallForSelfHosted {
 
 export interface RunShellCommand {
   command: string;
+  timeout?: number | undefined;
 }
 
 export interface RunCommandAction {
   program: string;
   arguments: string[];
   flags: string[];
+  timeout?: number | undefined;
 }
 
 export interface ReadFile {
@@ -1657,13 +1659,16 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
 };
 
 function createBaseRunShellCommand(): RunShellCommand {
-  return { command: "" };
+  return { command: "", timeout: undefined };
 }
 
 export const RunShellCommand: MessageFns<RunShellCommand> = {
   encode(message: RunShellCommand, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.command !== "") {
       writer.uint32(10).string(message.command);
+    }
+    if (message.timeout !== undefined) {
+      writer.uint32(16).int64(message.timeout);
     }
     return writer;
   },
@@ -1683,6 +1688,14 @@ export const RunShellCommand: MessageFns<RunShellCommand> = {
           message.command = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.timeout = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1693,13 +1706,19 @@ export const RunShellCommand: MessageFns<RunShellCommand> = {
   },
 
   fromJSON(object: any): RunShellCommand {
-    return { command: isSet(object.command) ? globalThis.String(object.command) : "" };
+    return {
+      command: isSet(object.command) ? globalThis.String(object.command) : "",
+      timeout: isSet(object.timeout) ? globalThis.Number(object.timeout) : undefined,
+    };
   },
 
   toJSON(message: RunShellCommand): unknown {
     const obj: any = {};
     if (message.command !== "") {
       obj.command = message.command;
+    }
+    if (message.timeout !== undefined) {
+      obj.timeout = Math.round(message.timeout);
     }
     return obj;
   },
@@ -1710,12 +1729,13 @@ export const RunShellCommand: MessageFns<RunShellCommand> = {
   fromPartial<I extends Exact<DeepPartial<RunShellCommand>, I>>(object: I): RunShellCommand {
     const message = createBaseRunShellCommand();
     message.command = object.command ?? "";
+    message.timeout = object.timeout ?? undefined;
     return message;
   },
 };
 
 function createBaseRunCommandAction(): RunCommandAction {
-  return { program: "", arguments: [], flags: [] };
+  return { program: "", arguments: [], flags: [], timeout: undefined };
 }
 
 export const RunCommandAction: MessageFns<RunCommandAction> = {
@@ -1728,6 +1748,9 @@ export const RunCommandAction: MessageFns<RunCommandAction> = {
     }
     for (const v of message.flags) {
       writer.uint32(42).string(v!);
+    }
+    if (message.timeout !== undefined) {
+      writer.uint32(48).int64(message.timeout);
     }
     return writer;
   },
@@ -1763,6 +1786,14 @@ export const RunCommandAction: MessageFns<RunCommandAction> = {
           message.flags.push(reader.string());
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.timeout = longToNumber(reader.int64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1779,6 +1810,7 @@ export const RunCommandAction: MessageFns<RunCommandAction> = {
         ? object.arguments.map((e: any) => globalThis.String(e))
         : [],
       flags: globalThis.Array.isArray(object?.flags) ? object.flags.map((e: any) => globalThis.String(e)) : [],
+      timeout: isSet(object.timeout) ? globalThis.Number(object.timeout) : undefined,
     };
   },
 
@@ -1793,6 +1825,9 @@ export const RunCommandAction: MessageFns<RunCommandAction> = {
     if (message.flags?.length) {
       obj.flags = message.flags;
     }
+    if (message.timeout !== undefined) {
+      obj.timeout = Math.round(message.timeout);
+    }
     return obj;
   },
 
@@ -1804,6 +1839,7 @@ export const RunCommandAction: MessageFns<RunCommandAction> = {
     message.program = object.program ?? "";
     message.arguments = object.arguments?.map((e) => e) || [];
     message.flags = object.flags?.map((e) => e) || [];
+    message.timeout = object.timeout ?? undefined;
     return message;
   },
 };
