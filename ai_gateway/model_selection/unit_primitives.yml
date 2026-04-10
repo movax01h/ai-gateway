@@ -179,10 +179,10 @@ configurable_unit_primitives:
   - feature_setting: "duo_agent_platform"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: claude_sonnet_4_6
+    default_model: claude_sonnet_4_6_vertex
     models_for_size_preference:
-      small: claude_haiku_4_5_20251001
-      large: claude_sonnet_4_6
+      small: claude_haiku_4_5_20251001_vertex
+      large: claude_sonnet_4_6_vertex
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
@@ -194,6 +194,7 @@ configurable_unit_primitives:
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
       - "claude_haiku_4_5_20251001"
+      - "claude_haiku_4_5_20251001_vertex"
       - "claude_haiku_4_5_20251001_bedrock"
       - "claude_opus_4_5_20251101"
       - "claude_opus_4_5_20251101_vertex"
