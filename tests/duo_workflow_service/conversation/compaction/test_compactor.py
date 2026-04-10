@@ -1,14 +1,18 @@
 """Tests for ConversationCompactor class."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     CompactionTokenEstimator,
     create_conversation_compactor,
+)
+from duo_workflow_service.conversation.compaction.compactor import (
+    COMPACTION_CONTINUE_MESSAGE,
 )
 
 DEFAULT_MAX_RECENT_MESSAGES = 10
@@ -375,6 +379,16 @@ class TestConversationCompactorCompact:
         assert len(result.messages) < len(messages)
         mock_llm.ainvoke.assert_called_once()
 
+        # Verify the compaction summary AIMessage exists
+        # (second message, after leading HumanMessage context)
+        assert isinstance(result.messages[1], AIMessage)
+        assert result.messages[1].content == "Summary of conversation"
+
+        # After compaction, last message should be synthetic HumanMessage
+        # because the original conversation ends with AIMessage
+        assert isinstance(result.messages[-1], HumanMessage)
+        assert result.messages[-1].content == COMPACTION_CONTINUE_MESSAGE
+
     @pytest.mark.asyncio
     @patch.object(CompactionTokenEstimator, "estimate_complete_history")
     async def test_compact_llm_failure(self, mock_estimate, mock_get_max_context):
@@ -473,3 +487,110 @@ class TestConversationCompactorCompact:
         assert result.was_compacted is True
         assert result.tokens_before > 0
         assert result.messages_summarized > 0
+
+    @pytest.mark.asyncio
+    @patch.object(CompactionTokenEstimator, "estimate_complete_history")
+    async def test_compact_does_not_append_human_message_when_last_is_human(
+        self, mock_estimate, mock_get_max_context
+    ):
+        """Should not append extra HumanMessage when compacted messages already end with one."""
+        mock_get_max_context.return_value = 400_000
+        mock_estimate.return_value = int(0.8 * 400_000)
+
+        summary_message = AIMessage(
+            content="Summary",
+            usage_metadata={
+                "input_tokens": 1000,
+                "output_tokens": 200,
+                "total_tokens": 1200,
+            },
+        )
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.return_value = summary_message
+
+        compactor = create_conversation_compactor(
+            llm_model=mock_llm, config=CompactionConfig()
+        )
+
+        # Conversation ending with HumanMessage
+        messages = [
+            HumanMessage(content="Initial query"),
+            AIMessage(content="Response 1"),
+        ]
+        for i in range(15):
+            messages.append(HumanMessage(content=f"Follow-up {i}"))
+            messages.append(AIMessage(content=f"Response {i}"))
+        messages.append(HumanMessage(content="Final question"))
+
+        result = await compactor.compact(messages)
+
+        assert result.was_compacted is True
+
+        # Verify the compaction summary AIMessage exists
+        # (second message, after leading HumanMessage context)
+        assert isinstance(result.messages[1], AIMessage)
+        assert result.messages[1].content == "Summary"
+
+        # Last message should be the user's actual message, not the synthetic one
+        assert isinstance(result.messages[-1], HumanMessage)
+        assert result.messages[-1].content != COMPACTION_CONTINUE_MESSAGE
+
+
+_TOOL_MESSAGES = [
+    AIMessage(
+        content="I'll check.",
+        tool_calls=[{"id": "c1", "name": "read_file", "args": {"path": "/foo"}}],
+    ),
+    ToolMessage(content="file data", tool_call_id="c1", name="read_file"),
+]
+
+
+class TestInvokeSummarizerToolMetadataStripping:
+    """Tests for _invoke_summarizer tool metadata handling."""
+
+    def _create_compactor(self, mock_llm):
+        """Helper to create compactor with the given mock LLM."""
+        return create_conversation_compactor(
+            llm_model=mock_llm,
+            config=CompactionConfig(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_invoke_summarizer_strips_tool_metadata_for_litellm(self):
+        """When self._llm is ChatLiteLLM, tool metadata is stripped before invocation."""
+        mock_llm = MagicMock(spec=ChatLiteLLM)
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Summary."))
+        compactor = self._create_compactor(mock_llm)
+
+        await compactor._invoke_summarizer(list(_TOOL_MESSAGES))
+
+        call_args = mock_llm.ainvoke.call_args[0][0]
+        for msg in call_args:
+            if isinstance(msg, AIMessage):
+                assert not msg.tool_calls
+            assert not isinstance(msg, ToolMessage)
+
+        # Verify tool call context is preserved as human-readable text
+        inner_msgs = call_args[1:-1]  # strip system/user prompt wrappers
+        all_content = " ".join(
+            m.content if isinstance(m.content, str) else str(m.content)
+            for m in inner_msgs
+        )
+        assert "[Called tool 'read_file'" in all_content
+        assert "[Tool result for 'read_file']" in all_content
+
+    @pytest.mark.asyncio
+    async def test_invoke_summarizer_does_not_strip_for_non_litellm(self):
+        """When self._llm is NOT ChatLiteLLM, messages are passed through unchanged."""
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Summary."))
+        compactor = self._create_compactor(mock_llm)
+
+        await compactor._invoke_summarizer(list(_TOOL_MESSAGES))
+
+        call_args = mock_llm.ainvoke.call_args[0][0]
+        # The original tool-bearing messages should be present (sandwiched
+        # between the system and user prompts)
+        inner_msgs = call_args[1:-1]  # strip system/user prompt wrappers
+        assert any(isinstance(m, AIMessage) and m.tool_calls for m in inner_msgs)
+        assert any(isinstance(m, ToolMessage) for m in inner_msgs)

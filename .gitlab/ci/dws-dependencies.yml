@@ -23,3 +23,4 @@
     - ai_gateway/searches/*.py
     - ai_gateway/searches/typing.py
     - ai_gateway/structured_logging.py
+    - ai_gateway/vendor/langchain_litellm/litellm.py
