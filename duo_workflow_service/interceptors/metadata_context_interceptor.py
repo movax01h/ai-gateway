@@ -1,13 +1,19 @@
 import json
 import time
+from collections.abc import Awaitable, Callable
+from typing import Optional
 
 import grpc
 import structlog
 from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_HEADER
 
 from ai_gateway import Config
+from duo_workflow_service.interceptors import (
+    X_GITLAB_IS_A_GITLAB_MEMBER,
+    X_GITLAB_IS_GITLAB_MEMBER,
+)
 from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
-from lib.context import client_type, gitlab_realm, gitlab_version
+from lib.context import client_type, gitlab_realm, gitlab_version, is_gitlab_team_member
 from lib.context import language_server_version as language_server_version_context
 from lib.events.contextvar import (
     X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
@@ -55,9 +61,11 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
 
     async def intercept_service(
         self,
-        continuation,
-        handler_call_details,
-    ):
+        continuation: Callable[
+            [grpc.HandlerCallDetails], Awaitable[grpc.RpcMethodHandler]
+        ],
+        handler_call_details: grpc.HandlerCallDetails,
+    ) -> Optional[grpc.RpcMethodHandler]:
         """Intercept incoming requests to propagate metadata to context."""
         metadata = dict(handler_call_details.invocation_metadata)
 
@@ -74,6 +82,15 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         # GitLab version
         if value := metadata.get(X_GITLAB_VERSION_HEADER.lower()):
             gitlab_version.set(value)
+
+        # GitLab team member
+        team_member_value: str | None = metadata.get(
+            X_GITLAB_IS_A_GITLAB_MEMBER
+        ) or metadata.get(X_GITLAB_IS_GITLAB_MEMBER)
+        if team_member_value is not None:
+            is_gitlab_team_member.set(team_member_value.lower() == "true")
+        else:
+            is_gitlab_team_member.set(None)
 
         # Language server version
         if value := metadata.get(self.X_GITLAB_LANGUAGE_SERVER_VERSION):

@@ -32,6 +32,7 @@ DEFAULT_ARGS = {
     "gitlab_version": "unknown",
     "client_type": "unknown",
     "gitlab_realm": "unknown",
+    "is_gitlab_team_member": "unknown",
     "finish_reason": "unknown",
 }
 

@@ -9,6 +9,7 @@ from lib.context.request_metadata import (
     client_type,
     gitlab_realm,
     gitlab_version,
+    is_gitlab_team_member,
     language_server_version,
 )
 from lib.language_server import LanguageServerVersion
@@ -18,7 +19,13 @@ class TestMetadataLabels(unittest.TestCase):
     """Tests for METADATA_LABELS constant."""
 
     def test_metadata_labels_contains_expected_keys(self):
-        expected_keys = ["lsp_version", "gitlab_version", "client_type", "gitlab_realm"]
+        expected_keys = [
+            "lsp_version",
+            "gitlab_version",
+            "client_type",
+            "gitlab_realm",
+            "is_gitlab_team_member",
+        ]
         self.assertEqual(METADATA_LABELS, expected_keys)
 
     def test_metadata_labels_is_list(self):
@@ -34,6 +41,7 @@ class TestBuildMetadataLabels(unittest.TestCase):
         gitlab_realm.set(None)
         gitlab_version.set(None)
         language_server_version.set(None)
+        is_gitlab_team_member.set(None)
 
     def tearDown(self):
         # Clean up after each test
@@ -41,6 +49,7 @@ class TestBuildMetadataLabels(unittest.TestCase):
         gitlab_realm.set(None)
         gitlab_version.set(None)
         language_server_version.set(None)
+        is_gitlab_team_member.set(None)
 
     def test_build_metadata_labels_with_defaults(self):
         labels = build_metadata_labels()
@@ -48,6 +57,7 @@ class TestBuildMetadataLabels(unittest.TestCase):
         self.assertEqual(labels["gitlab_version"], "unknown")
         self.assertEqual(labels["client_type"], "unknown")
         self.assertEqual(labels["gitlab_realm"], "unknown")
+        self.assertEqual(labels["is_gitlab_team_member"], "unknown")
 
     def test_build_metadata_labels_with_client_type(self):
         client_type.set("vscode")
@@ -74,11 +84,22 @@ class TestBuildMetadataLabels(unittest.TestCase):
         labels = build_metadata_labels()
         self.assertEqual(labels["lsp_version"], "8.22.0")
 
+    def test_build_metadata_labels_with_is_gitlab_team_member_true(self):
+        is_gitlab_team_member.set(True)
+        labels = build_metadata_labels()
+        self.assertEqual(labels["is_gitlab_team_member"], "yes")
+
+    def test_build_metadata_labels_with_is_gitlab_team_member_false(self):
+        is_gitlab_team_member.set(False)
+        labels = build_metadata_labels()
+        self.assertEqual(labels["is_gitlab_team_member"], "no")
+
     def test_build_metadata_labels_with_all_values(self):
         client_type.set("node-grpc")
         gitlab_realm.set("self-managed")
         gitlab_version.set("17.5.0")
         language_server_version.set(LanguageServerVersion.from_string("8.30.0"))
+        is_gitlab_team_member.set(True)
 
         labels = build_metadata_labels()
 
@@ -86,6 +107,7 @@ class TestBuildMetadataLabels(unittest.TestCase):
         self.assertEqual(labels["gitlab_realm"], "self-managed")
         self.assertEqual(labels["gitlab_version"], "17.5.0")
         self.assertEqual(labels["lsp_version"], "8.30.0")
+        self.assertEqual(labels["is_gitlab_team_member"], "yes")
 
 
 class TestLLMFinishReason(unittest.TestCase):
@@ -154,6 +176,7 @@ class TestContextVariables(unittest.TestCase):
         gitlab_realm.set(None)
         gitlab_version.set(None)
         language_server_version.set(None)
+        is_gitlab_team_member.set(None)
 
     def tearDown(self):
         # Clean up after each test
@@ -161,6 +184,7 @@ class TestContextVariables(unittest.TestCase):
         gitlab_realm.set(None)
         gitlab_version.set(None)
         language_server_version.set(None)
+        is_gitlab_team_member.set(None)
 
     def test_client_type_default(self):
         self.assertIsNone(client_type.get())
@@ -190,3 +214,14 @@ class TestContextVariables(unittest.TestCase):
         lsp_version = LanguageServerVersion.from_string("8.22.0")
         language_server_version.set(lsp_version)
         self.assertEqual(language_server_version.get(), lsp_version)
+
+    def test_is_gitlab_team_member_default(self):
+        self.assertIsNone(is_gitlab_team_member.get())
+
+    def test_is_gitlab_team_member_set_and_get(self):
+        is_gitlab_team_member.set(True)
+        self.assertEqual(is_gitlab_team_member.get(), True)
+
+    def test_is_gitlab_team_member_set_false(self):
+        is_gitlab_team_member.set(False)
+        self.assertEqual(is_gitlab_team_member.get(), False)
