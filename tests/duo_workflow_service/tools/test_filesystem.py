@@ -443,7 +443,7 @@ class TestReadFileChunked:
         assert ReadFileChunked.supersedes is ReadFile
 
     def test_required_capability(self):
-        assert ReadFileChunked.required_capability == "read_file_chunked"
+        assert ReadFileChunked.required_capability == frozenset({"read_file_chunked"})
 
     def test_shares_tool_name_with_read_file(self):
         assert ReadFileChunked.model_fields["name"].default == "read_file"

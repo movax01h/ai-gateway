@@ -1030,7 +1030,7 @@ class TestAdvanceBlobSearch:
 
     def test_required_capability(self):
         """Test that AdvanceBlobSearch requires advanced_search capability."""
-        assert AdvanceBlobSearch.required_capability == "advanced_search"
+        assert AdvanceBlobSearch.required_capability == frozenset({"advanced_search"})
 
 
 class TestValidateAndNormalizeApiUrl:

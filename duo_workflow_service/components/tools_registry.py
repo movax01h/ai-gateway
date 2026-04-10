@@ -73,9 +73,11 @@ NO_OP_TOOLS: list[Type[BaseModel]] = [
 ]
 
 # These tools require specific client capabilities to function properly.
-# They are only enabled when the required capability is present.
+# They are only enabled when all capabilities in their required_capability frozenset are present.
 _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
+    tools.RunCommandWithTimeout,
     tools.ShellCommand,
+    tools.ShellCommandWithTimeout,
     tools.AdvanceBlobSearch,
     tools.ReadFileChunked,
 ]
@@ -292,9 +294,10 @@ class ToolsRegistry:
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)
 
-        # Add capability-dependent tools if condition is met
+        # Add capability-dependent tools if condition is met.
+        # Each tool's required_capability frozenset encodes all capabilities needed,
+        # so is_client_capable alone resolves to the correct supersession tool.
         for tool_cls in _CAPABILITY_DEPENDENT_TOOLS:
-            # Access required_capability as a class variable (ClassVar)
             required_capability = getattr(tool_cls, "required_capability", None)
             if not required_capability:
                 error_msg = (
@@ -304,21 +307,24 @@ class ToolsRegistry:
                 )
                 raise RuntimeError(error_msg)
 
+            # Skip tool if client capability check fails
+            if not is_client_capable(required_capability):
+                continue
+
             # Don't add capability dependent tool if it supersedes another tool
-            # and agent privilege for the superseded tool is missing
+            # and the superseded tool is not currently enabled
             supersedes = getattr(tool_cls, "supersedes", None)
             if (
-                supersedes
+                supersedes is not None
                 and supersedes.model_fields["name"].default not in self._enabled_tools
             ):
                 continue
 
-            if is_client_capable(required_capability):
-                # replace the superseded tool to supersedes' tool instance
-                # pre-approval status will not be changed
-                self._enabled_tools[tool_cls.model_fields["name"].default] = tool_cls(
-                    metadata=tool_metadata
-                )
+            # replace the superseded tool with this tool instance
+            # pre-approval status will not be changed
+            self._enabled_tools[tool_cls.model_fields["name"].default] = tool_cls(
+                metadata=tool_metadata
+            )
 
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)

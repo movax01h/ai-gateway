@@ -5,7 +5,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from contract import contract_pb2
-from duo_workflow_service.tools.command import RunCommand, RunCommandInput
+from duo_workflow_service.tools.command import (
+    _DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    RunCommand,
+    RunCommandInput,
+    RunCommandWithTimeout,
+    RunCommandWithTimeoutInput,
+    ShellCommand,
+    ShellCommandWithTimeout,
+    ShellCommandWithTimeoutInput,
+)
 
 
 @pytest.mark.asyncio
@@ -133,3 +142,147 @@ def test_run_command_format_display_message():
 
     expected_message = "Run command: ls -l -a /home Exit [...]"
     assert message == expected_message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("program", "args", "timeout", "expected_timeout"),
+    [
+        ("npm", "install", 300, 300),
+        ("docker", "build .", 600, 600),
+        (
+            "ls",
+            "-la",
+            _DEFAULT_COMMAND_TIMEOUT_SECONDS,
+            _DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        ),
+    ],
+)
+async def test_run_command_with_timeout(
+    program: str,
+    args: str,
+    timeout: int,
+    expected_timeout: int,
+    mock_success_client_event,
+):
+    mock_outbox = MagicMock()
+    mock_outbox.put_action_and_wait_for_response = AsyncMock(
+        return_value=mock_success_client_event
+    )
+
+    metadata = {"outbox": mock_outbox}
+
+    tool = RunCommandWithTimeout(name="run_command", description="Run a shell command")
+    tool.metadata = metadata
+
+    response = await tool._arun(program=program, args=args, timeout=timeout)
+
+    assert response == "done"
+
+    mock_outbox.put_action_and_wait_for_response.assert_called_once()
+    action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
+    assert action.runCommand.program == program
+    assert action.runCommand.timeout == expected_timeout
+
+
+def test_run_command_with_timeout_supersedes_run_command():
+    assert RunCommandWithTimeout.supersedes is RunCommand
+    assert RunCommandWithTimeout.required_capability == frozenset({"command_timeout"})
+
+
+def test_run_command_with_timeout_format_display_message():
+    tool = RunCommandWithTimeout(description="Run a shell command")
+    input_data = RunCommandWithTimeoutInput(program="npm", args="install", timeout=300)
+    message = tool.format_display_message(input_data)
+    assert message == "Run command: npm install"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "timeout", "expected_timeout"),
+    [
+        ("npm install", 300, 300),
+        ("docker build .", 600, 600),
+        ("ls -la", _DEFAULT_COMMAND_TIMEOUT_SECONDS, _DEFAULT_COMMAND_TIMEOUT_SECONDS),
+    ],
+)
+async def test_shell_command_with_timeout(
+    command: str,
+    timeout: int,
+    expected_timeout: int,
+    mock_success_client_event,
+):
+    mock_outbox = MagicMock()
+    mock_outbox.put_action_and_wait_for_response = AsyncMock(
+        return_value=mock_success_client_event
+    )
+
+    tool = ShellCommandWithTimeout(
+        name="run_command", description="Run a shell command"
+    )
+    tool.metadata = {"outbox": mock_outbox}
+
+    response = await tool._arun(command=command, timeout=timeout)
+
+    assert response == "done"
+
+    mock_outbox.put_action_and_wait_for_response.assert_called_once()
+    action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
+    assert action.runShellCommand.command == command
+    assert action.runShellCommand.timeout == expected_timeout
+
+
+def test_shell_command_with_timeout_supersedes_shell_command():
+    assert ShellCommandWithTimeout.supersedes is ShellCommand
+    assert ShellCommandWithTimeout.required_capability == frozenset(
+        {"shell_command", "command_timeout"}
+    )
+
+
+def test_shell_command_with_timeout_format_display_message():
+    tool = ShellCommandWithTimeout(description="Run a shell command")
+    input_data = ShellCommandWithTimeoutInput(command="npm install", timeout=300)
+    message = tool.format_display_message(input_data)
+    assert message == "Run shell command: npm install"
+
+
+@pytest.mark.asyncio
+@mock.patch("duo_workflow_service.tools.command._execute_action")
+async def test_run_command_with_timeout_uses_default_when_not_provided(
+    execute_action_mock,
+):
+    """Test that RunCommandWithTimeout uses default timeout when LLM doesn't provide one."""
+    execute_action_mock.return_value = "done"
+
+    tool = RunCommandWithTimeout(name="run_command", description="Run a shell command")
+    tool.metadata = {"outbox": None}
+
+    # Call without timeout parameter (simulating LLM not providing it)
+    await tool._arun(program="ls", args="-la")
+
+    execute_action_mock.assert_called_once()
+    action = execute_action_mock.call_args[0][1]
+    assert action.runCommand.HasField("timeout")
+    assert action.runCommand.timeout == _DEFAULT_COMMAND_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+@mock.patch("duo_workflow_service.tools.command._execute_action")
+async def test_shell_command_with_timeout_uses_default_when_not_provided(
+    execute_action_mock,
+):
+    """Test that ShellCommandWithTimeout uses default timeout when LLM doesn't provide one."""
+    execute_action_mock.return_value = "done"
+
+    tool = ShellCommandWithTimeout(
+        name="run_command", description="Run a shell command"
+    )
+    tool.metadata = {"outbox": None}
+
+    # Call without timeout parameter (simulating LLM not providing it)
+    await tool._arun(command="ls -la")
+
+    execute_action_mock.assert_called_once()
+    action = execute_action_mock.call_args[0][1]
+    assert action.runShellCommand.HasField("timeout")
+    assert action.runShellCommand.timeout == _DEFAULT_COMMAND_TIMEOUT_SECONDS

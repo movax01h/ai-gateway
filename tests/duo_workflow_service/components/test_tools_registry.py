@@ -1004,6 +1004,29 @@ class TestCapabilityDependentTools:
                     tool_metadata=tool_metadata,
                 )
 
+    def test_capability_dependent_tool_empty_required_capability_raises_error(
+        self, tool_metadata
+    ):
+        """Test that empty required_capability frozenset raises RuntimeError."""
+        mock_tool_cls = MagicMock(spec=BaseTool)
+        mock_tool_cls.__name__ = "MockTool"
+        mock_tool_cls.required_capability = frozenset()
+
+        with patch(
+            "duo_workflow_service.components.tools_registry._CAPABILITY_DEPENDENT_TOOLS",
+            [mock_tool_cls],
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="Tool MockTool is in _CAPABILITY_DEPENDENT_TOOLS but does not define 'required_capability'",
+            ):
+                ToolsRegistry(
+                    enabled_tools=[],
+                    preapproved_tools=[],
+                    tool_call_approvals={},
+                    tool_metadata=tool_metadata,
+                )
+
     @patch("duo_workflow_service.components.tools_registry.is_client_capable")
     def test_capability_dependent_tool_inherits_preapproval(
         self, mock_is_client_capable, tool_metadata

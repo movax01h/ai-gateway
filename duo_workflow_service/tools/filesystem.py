@@ -164,7 +164,7 @@ class ReadFileChunked(DuoBaseTool):
     args_schema: Type[BaseModel] = ReadFileChunkedInput
     handle_tool_error: bool = True
     supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = ReadFile
-    required_capability: ClassVar[str] = "read_file_chunked"
+    required_capability: ClassVar[frozenset[str]] = frozenset({"read_file_chunked"})
 
     async def _execute(
         self,
