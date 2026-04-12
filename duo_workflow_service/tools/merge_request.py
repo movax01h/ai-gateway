@@ -2,6 +2,7 @@ import json
 from typing import Any, Optional, Type
 
 import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -646,6 +647,200 @@ class ListMergeRequest(DuoBaseTool):
         if args.url:
             return f"List merge requests in {args.url} {filter_text}"
         return f"List merge requests in project {args.project_id} {filter_text}"
+
+
+class CreateMergeRequestDiffNoteInput(MergeRequestResourceInput):
+    """Input schema for posting an inline diff note on a merge request."""
+
+    body: str = Field(
+        description="The content of the inline diff note. Supports GitLab markdown, "
+        "including multi-line suggestion blocks using ```suggestion:-0+0 syntax."
+    )
+    old_path: str = Field(
+        description="The file path before the change (same as new_path for non-renamed files)."
+    )
+    new_path: str = Field(
+        description="The file path after the change (same as old_path for non-renamed files)."
+    )
+    old_line: Optional[int] = Field(
+        default=None,
+        description="Line number in the old version of the file. "
+        "Required for comments on deleted or unchanged lines. "
+        "Do not set for comments on added lines.",
+    )
+    new_line: Optional[int] = Field(
+        default=None,
+        description="Line number in the new version of the file. "
+        "Required for comments on added or unchanged lines. "
+        "Do not set for comments on deleted lines.",
+    )
+
+
+class CreateMergeRequestDiffNote(DuoBaseTool):
+    """Post an inline note on a specific line in a merge request diff.
+
+    This tool creates a discussion thread positioned on a specific line in the MR diff, enabling inline code suggestions
+    without depending on Duo Code Review. It uses the standard GitLab Discussions API.
+    """
+
+    name: str = "create_merge_request_diff_note"
+    description: str = f"""Post an inline note on a specific line in a merge request diff.
+
+This creates a discussion thread positioned on a diff line, useful for posting
+code suggestions directly in the MR diff view. The note body supports GitLab
+markdown including suggestion blocks.
+
+To post a code suggestion, use this markdown syntax in the body:
+```suggestion:-0+0
+corrected line content
+```
+
+The position is determined by old_line and new_line:
+- For added lines (green in diff): set new_line only
+- For deleted lines (red in diff): set old_line only
+- For unchanged/context lines: set both old_line and new_line
+
+The tool automatically fetches the required diff refs (base_sha, head_sha, start_sha)
+from the merge request.
+
+{MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
+
+For example:
+- Post a suggestion on an added line:
+    create_merge_request_diff_note(
+        project_id=13, merge_request_iid=9,
+        body="```suggestion:-0+0\ncorrected code\n```",
+        old_path="src/main.py", new_path="src/main.py",
+        new_line=42
+    )
+"""
+    args_schema: Type[BaseModel] = CreateMergeRequestDiffNoteInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
+
+    async def _execute(
+        self, body: str, old_path: str, new_path: str, **kwargs: Any
+    ) -> str:
+        url = kwargs.pop("url", None)
+        project_id = kwargs.pop("project_id", None)
+        merge_request_iid = kwargs.pop("merge_request_iid", None)
+        old_line = kwargs.pop("old_line", None)
+        new_line = kwargs.pop("new_line", None)
+
+        validation_result = self._validate_merge_request_url(
+            url, project_id, merge_request_iid
+        )
+
+        if validation_result.errors:
+            return json.dumps({"error": "; ".join(validation_result.errors)})
+
+        if not validation_result.project_id or not validation_result.merge_request_iid:
+            return json.dumps(
+                {"error": "Missing required identifiers after validation"}
+            )
+
+        if old_line is None and new_line is None:
+            return json.dumps(
+                {"error": "At least one of old_line or new_line must be provided."}
+            )
+
+        try:
+            diff_refs = await self._fetch_diff_refs(
+                validation_result.project_id, validation_result.merge_request_iid
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+        position: dict[str, Any] = {
+            "position_type": "text",
+            "base_sha": diff_refs["base_sha"],
+            "head_sha": diff_refs["head_sha"],
+            "start_sha": diff_refs["start_sha"],
+            "old_path": old_path,
+            "new_path": new_path,
+        }
+
+        if old_line is not None:
+            position["old_line"] = old_line
+        if new_line is not None:
+            position["new_line"] = new_line
+
+        payload: dict[str, Any] = {
+            "body": body,
+            "position": position,
+        }
+
+        try:
+            path = (
+                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+                f"{validation_result.merge_request_iid}/discussions"
+            )
+            response = await self.gitlab_client.apost(
+                path=path,
+                body=json.dumps(payload),
+            )
+
+            response = self._process_http_response(identifier=path, response=response)
+
+            return json.dumps({"created_diff_note": response})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    async def _fetch_diff_refs(
+        self, project_id: str, merge_request_iid: int
+    ) -> dict[str, str]:
+        """Fetch base_sha, head_sha, and start_sha from the merge request."""
+        path = (
+            f"{MERGE_REQUESTS_API_PATH.format(project_id=project_id)}/"
+            f"{merge_request_iid}"
+        )
+        response = await self.gitlab_client.aget(path=path, parse_json=False)
+
+        if not response.is_success():
+            log.error(
+                "Failed to fetch merge request: status_code=%s, response=%s",
+                response.status_code,
+                response.body,
+            )
+            raise ToolException(
+                f"Failed to fetch merge request diff refs (status_code={response.status_code})"
+            )
+
+        mr_data = json.loads(response.body)
+        diff_refs = mr_data.get("diff_refs")
+
+        if not diff_refs:
+            log.error(
+                "diff_refs not available on merge request: project_id=%s, merge_request_iid=%s",
+                project_id,
+                merge_request_iid,
+            )
+            raise ToolException("diff_refs not available on merge request")
+
+        return {
+            "base_sha": diff_refs["base_sha"],
+            "head_sha": diff_refs["head_sha"],
+            "start_sha": diff_refs["start_sha"],
+        }
+
+    def format_display_message(
+        self,
+        args: CreateMergeRequestDiffNoteInput,
+        _tool_response: Any = None,
+    ) -> str:
+        line_info = (
+            f"new_line={args.new_line}"
+            if args.new_line
+            else f"old_line={args.old_line}"
+        )
+        if args.url:
+            return (
+                f"Add inline diff note to {args.new_path}:{line_info} "
+                f"in merge request {args.url}"
+            )
+        return (
+            f"Add inline diff note to {args.new_path}:{line_info} "
+            f"in merge request !{args.merge_request_iid} in project {args.project_id}"
+        )
 
 
 class UpdateMergeRequest(DuoBaseTool):

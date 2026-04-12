@@ -104,15 +104,9 @@ Set the decision field based on these criteria:
     </response_reason>
   </possible_response>
   <possible_response>
-    <decision>create_fix_on_new_mr</decision>
+    <decision>create_plan</decision>
     <response_reason>
-      Set decision to 'create_fix_on_new_mr' when you are confident you can create a fix and NO merge_request_url is present.
-    </response_reason>
-  </possible_response>
-  <possible_response>
-    <decision>create_fix_on_existing_mr</decision>
-    <response_reason>
-      Set decision to 'create_fix_on_existing_mr' when you are confident you can create a fix AND a merge_request_url is present.
+      Set decision to 'create_plan' when you are confident you can create a fix.
     </response_reason>
   </possible_response>
 </possible_responses>
