@@ -1,0 +1,14 @@
+name: fix_pipeline_next_decide_fix_prompt
+model:
+  params:
+    max_tokens: 32_768
+    max_retries: 3
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_next_decide_fix/system/1.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_next_decide_fix/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 60

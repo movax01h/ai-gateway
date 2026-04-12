@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "fix_pipeline_next_decide_fix_response",
+    "description": "Response schema for the fix_pipeline_next_decide_fix agent that decides whether to add a comment, add code suggestions or push changes.",
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "description": "Use 'create_fix_on_existing_mr' when a merge request URL is provided and all files to modify are in the MR diff. Use 'create_fix_on_new_mr' when no merge request URL is provided. Use 'add_comment' when a merge request URL is provided but some files to modify are not in the MR diff.",
+            "enum": ["add_comment", "create_fix_on_existing_mr", "create_fix_on_new_mr"],
+            "examples": ["add_comment", "create_fix_on_existing_mr", "create_fix_on_new_mr"]
+        }
+    },
+    "required": ["decision"]
+}
