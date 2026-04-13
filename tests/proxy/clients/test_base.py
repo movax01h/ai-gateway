@@ -74,6 +74,8 @@ async def test_valid_proxy_request(
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
                     "agent_name": None,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
                 }
             ],
         ),
@@ -90,6 +92,8 @@ async def test_valid_proxy_request(
                     "prompt_tokens": 8,
                     "completion_tokens": 2,
                     "agent_name": None,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
                 }
             ],
         ),

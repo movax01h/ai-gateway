@@ -133,6 +133,8 @@ class TestWatchContainer:
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
                 "agent_name": None,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
             },
             {
                 "token_count": 15,
@@ -142,6 +144,8 @@ class TestWatchContainer:
                 "prompt_tokens": 5,
                 "completion_tokens": 10,
                 "agent_name": None,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
             },
             {
                 "token_count": 3,
@@ -151,6 +155,8 @@ class TestWatchContainer:
                 "prompt_tokens": 1,
                 "completion_tokens": 2,
                 "agent_name": None,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
             },
         ]
 
@@ -161,6 +167,9 @@ class TestWatchContainer:
     def test_register_token_usage_track_usage(
         self, container, unit_primitive, internal_event_client
     ):
+
+        init_llm_operations()
+
         with capture_logs() as cap_logs:
             container.register_token_usage(
                 "test_model",
@@ -191,6 +200,20 @@ class TestWatchContainer:
             "ephemeral_5m_input_tokens": 6,
             "ephemeral_1h_input_tokens": 7,
         }
+
+        assert llm_operations.get() == [
+            {
+                "token_count": 3,
+                "model_id": "test_model",
+                "model_engine": "test_provider",
+                "model_provider": "test_provider",
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "agent_name": None,
+                "cache_read_tokens": 4,
+                "cache_write_tokens": 5,
+            }
+        ]
 
         internal_event_client.track_event.assert_called_once_with(
             f"token_usage_{unit_primitive}",
@@ -245,6 +268,8 @@ class TestWatchContainer:
                     "prompt_tokens": 10,
                     "completion_tokens": 15,
                     "agent_name": None,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
                 }
             ]
 
@@ -273,6 +298,8 @@ class TestWatchContainer:
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
                 "agent_name": "planning_agent",
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
             }
         ]
 

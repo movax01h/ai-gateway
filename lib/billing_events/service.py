@@ -32,6 +32,8 @@ class LLMOperation(BaseModel):
         prompt_tokens: Number of tokens in the prompt
         completion_tokens: Number of tokens in the completion
         agent_name: Name of the agent that triggered this operation, if any
+        cache_read_tokens: Number of (read) tokens in the cache
+        cache_write_tokens: Number of (write) tokens in the cache
     """
 
     token_count: int
@@ -41,6 +43,8 @@ class LLMOperation(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     agent_name: str | None = None
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 class SelfHostedLLMOperations:
