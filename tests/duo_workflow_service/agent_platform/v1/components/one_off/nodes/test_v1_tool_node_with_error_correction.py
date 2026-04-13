@@ -8,6 +8,9 @@ import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
 from pydantic_core import ValidationError
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_with_error_correction import (
     ATTEMPTS_REMAINING_SENTINEL,
     MAX_ATTEMPTS_SENTINEL,
@@ -50,7 +53,14 @@ def mock_logger_fixture():
 @pytest.fixture(name="mock_tool_monitoring")
 def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
-    with patch(f"{V1_MODULE}.duo_workflow_metrics") as mock_metrics:
+
+    with (
+        patch(f"{V1_MODULE}.duo_workflow_metrics") as mock_metrics,
+        patch(
+            "duo_workflow_service.agent_platform.utils.tool_event_tracker.duo_workflow_metrics",
+            mock_metrics,
+        ),
+    ):
         mock_context_manager = Mock()
         mock_context_manager.__enter__ = Mock(return_value=mock_context_manager)
         mock_context_manager.__exit__ = Mock(return_value=None)
@@ -104,28 +114,31 @@ def tool_node_with_error_correction_fixture(
     flow_type,
     ui_history_one_off,
     mock_internal_event_client,
-    mock_tool_monitoring,
-    mock_prompt_security,
-    mock_logger,
     tool_calls_key,
     tool_responses_key,
     execution_result_key,
     conversation_history_key,
+    mock_tool_monitoring,
+    mock_prompt_security,
+    mock_logger,
 ):
     """Fixture for ToolNodeWithErrorCorrection instance."""
+    tracker = ToolEventTracker(
+        flow_id=flow_id,
+        flow_type=flow_type,
+        internal_event_client=mock_internal_event_client,
+    )
     return ToolNodeWithErrorCorrection(
         name="test_tool_node",
         component_name=component_name,
         toolset=mock_toolset,
-        flow_id=flow_id,
-        flow_type=flow_type,
-        internal_event_client=mock_internal_event_client,
         ui_history=ui_history_one_off,
         max_correction_attempts=3,
         tool_calls_key=tool_calls_key,
         tool_responses_key=tool_responses_key,
         execution_result_key=execution_result_key,
         conversation_history_key=conversation_history_key,
+        tracker=tracker,
     )
 
 
@@ -153,7 +166,7 @@ class TestToolNodeWithErrorCorrectionInitialization:
         """Test initialization with all parameters."""
         assert tool_node_with_error_correction.name == "test_tool_node"
         assert tool_node_with_error_correction._component_name == component_name
-        assert tool_node_with_error_correction._flow_id == flow_id
+        assert tool_node_with_error_correction._tracker._flow_id == flow_id
         assert tool_node_with_error_correction.max_correction_attempts == 3
 
     def test_initialization_with_defaults(
@@ -166,15 +179,18 @@ class TestToolNodeWithErrorCorrectionInitialization:
         mock_internal_event_client,
         conversation_history_key,
     ):
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
         tool_node = ToolNodeWithErrorCorrection(
             name="test_tool_node",
             component_name=component_name,
             toolset=mock_toolset,
-            flow_id=flow_id,
-            flow_type=flow_type,
-            internal_event_client=mock_internal_event_client,
             ui_history=ui_history_one_off,
             conversation_history_key=conversation_history_key,
+            tracker=tracker,
             # Omitting: max_correction_attempts, tool_calls_key, tool_responses_key, execution_result_key
         )
 
@@ -196,7 +212,6 @@ class TestToolNodeWithErrorCorrectionRun:
         component_name,
         mock_tool,
         mock_tool_call,
-        mock_tool_monitoring,
         mock_prompt_security,
         ui_history_one_off,
     ):
@@ -242,10 +257,6 @@ class TestToolNodeWithErrorCorrectionRun:
         self,
         tool_node_with_error_correction,
         flow_state_with_tool_calls_one_off,
-        component_name,
-        mock_tool,
-        tool_calls_key,
-        tool_responses_key,
     ):
         """Test run method stores tool calls and responses using IOKeys."""
         result = await tool_node_with_error_correction.run(
@@ -296,9 +307,7 @@ class TestToolNodeWithErrorCorrectionRun:
         self,
         tool_node_with_error_correction,
         flow_state_with_tool_calls_one_off,
-        component_name,
         mock_tool,
-        mock_tool_call,
         ui_history_one_off,
         mock_prompt_security,
         mock_internal_event_client,
@@ -329,7 +338,6 @@ class TestToolNodeWithErrorCorrectionRun:
         self,
         tool_node_with_error_correction,
         flow_state_with_tool_calls_one_off,
-        component_name,
         mock_tool,
         mock_internal_event_client,
     ):
@@ -742,9 +750,7 @@ class TestToolNodeWithErrorCorrectionContextTracking:
         flow_type,
         ui_history_one_off,
         mock_internal_event_client,
-        mock_tool_monitoring,
         mock_prompt_security,
-        mock_logger,
         tool_calls_key,
         tool_responses_key,
         conversation_history_key,
@@ -753,20 +759,22 @@ class TestToolNodeWithErrorCorrectionContextTracking:
         execution_result_key = IOKey(
             target="context", subkeys=[component_name, "execution_result"]
         )
-
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
         tool_node = ToolNodeWithErrorCorrection(
             name="test_tool_node",
             component_name=component_name,
             toolset=mock_toolset,
-            flow_id=flow_id,
-            flow_type=flow_type,
-            internal_event_client=mock_internal_event_client,
             ui_history=ui_history_one_off,
             max_correction_attempts=3,
             tool_calls_key=tool_calls_key,
             tool_responses_key=tool_responses_key,
             execution_result_key=execution_result_key,
             conversation_history_key=conversation_history_key,
+            tracker=tracker,
         )
 
         # Create state with correction_attempts at max-1
@@ -834,7 +842,6 @@ class TestToolNodeWithErrorCorrectionSecurity:
         tool_node_with_error_correction,
         flow_state_with_tool_calls_one_off,
         component_name,
-        mock_tool,
         mock_logger,
     ):
         """Test run handles SecurityException during response sanitization."""
@@ -899,7 +906,7 @@ class TestToolNodeWithErrorCorrectionMonitoring:
         # Verify monitoring was called
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
             tool_name=mock_tool.name,
-            flow_type=tool_node_with_error_correction._flow_type.value,
+            flow_type=tool_node_with_error_correction._tracker._flow_type.value,
         )
 
     def test_record_metric_for_tool_failure(
@@ -912,13 +919,13 @@ class TestToolNodeWithErrorCorrectionMonitoring:
             property="test_tool", error_type="TypeError"
         )
 
-        tool_node_with_error_correction._record_metric(
+        tool_node_with_error_correction._tracker._record_metric(
             EventEnum.WORKFLOW_TOOL_FAILURE, additional_props
         )
 
         # Verify metrics were recorded
         mock_tool_monitoring.count_agent_platform_tool_failure.assert_called_once_with(
-            flow_type=tool_node_with_error_correction._flow_type.value,
+            flow_type=tool_node_with_error_correction._tracker._flow_type.value,
             tool_name="test_tool",
             failure_reason="TypeError",
         )

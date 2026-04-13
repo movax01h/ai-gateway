@@ -524,14 +524,15 @@ class TestDeterministicStepComponentAttachNodes:
         # Verify DeterministicStepNode creation
         mock_deterministic_step_node_cls.assert_called_once()
         node_call_kwargs = mock_deterministic_step_node_cls.call_args[1]
+        tracker = node_call_kwargs["tracker"]
 
         assert node_call_kwargs["name"] == f"{component_name}#deterministic_step"
         assert node_call_kwargs["tool_name"] == tool_name
         assert node_call_kwargs["inputs"] == inputs
-        assert node_call_kwargs["flow_id"] == flow_id
-        assert node_call_kwargs["flow_type"] == flow_type
+        assert tracker._flow_id == flow_id
+        assert tracker._flow_type == flow_type
         assert (
-            node_call_kwargs["internal_event_client"]
+            tracker._internal_event_client
             == deterministic_step_component.internal_event_client
         )
         assert "validated_tool" in node_call_kwargs

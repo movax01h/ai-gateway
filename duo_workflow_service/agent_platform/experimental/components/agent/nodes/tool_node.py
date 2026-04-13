@@ -14,15 +14,15 @@ from duo_workflow_service.agent_platform.experimental.state import (
 )
 from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
-from lib.context import client_capabilities
-from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
-from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["ToolNode"]
 
@@ -44,9 +44,6 @@ class ToolNode:
         conversation_history_key: ``RuntimeIOKey`` that resolves the
             conversation-history ``IOKey`` at runtime.
         toolset: Collection of tools available for execution.
-        flow_id: Identifier of the current flow execution.
-        flow_type: Reporting context for internal events and metrics.
-        internal_event_client: Client for tracking internal telemetry events.
         ui_history: UI log history writer for tool execution events.
     """
 
@@ -55,20 +52,16 @@ class ToolNode:
         *,
         name: str,
         toolset: Toolset,
-        flow_id: str,
-        flow_type: GLReportingEventContext,
-        internal_event_client: InternalEventsClient,
         ui_history: UIHistory[UILogWriterAgentTools, UILogEventsAgent],
         conversation_history_key: RuntimeIOKey,
+        tracker: ToolEventTracker,
     ):
         self.name = name
         self._toolset = toolset
-        self._flow_id = flow_id
-        self._flow_type = flow_type
-        self._internal_event_client = internal_event_client
         self._logger = structlog.stdlib.get_logger("agent_platform")
         self._ui_history = ui_history
         self._conversation_history_key = conversation_history_key
+        self._tracker = tracker
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -124,11 +117,11 @@ class ToolNode:
     ) -> str:
         try:
             with duo_workflow_metrics.time_tool_call(
-                tool_name=tool.name, flow_type=self._flow_type.value
+                tool_name=tool.name, flow_type=self._tracker._flow_type.value
             ):
                 tool_call_result = await tool.ainvoke(tool_call_args)
 
-            self._track_internal_event(
+            self._tracker.track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
                 tool_name=tool.name,
             )
@@ -151,11 +144,17 @@ class ToolNode:
             )
 
             if isinstance(e, TypeError):
-                err_format = self._format_type_error_response(tool=tool, error=e)
+                err_format = self._tracker.handle_type_error_response(
+                    tool=tool, error=e
+                )
             elif isinstance(e, ValidationError):
-                err_format = self._format_validation_error(tool_name=tool.name, error=e)
+                err_format = self._tracker.handle_validation_error(
+                    tool_name=tool.name, error=e
+                )
             else:
-                err_format = self._format_execution_error(tool_name=tool.name, error=e)
+                err_format = self._tracker.handle_execution_error(
+                    tool_name=tool.name, error=e
+                )
 
             return err_format
 
@@ -183,97 +182,3 @@ class ToolNode:
                     event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
                 )
             return error_message
-
-    def _track_internal_event(
-        self,
-        event_name: EventEnum,
-        tool_name,
-        extra=None,
-    ):
-        # Add client capabilities to additional properties
-        extra = {
-            **(extra or {}),
-            "client_capabilities": list(client_capabilities.get()),
-        }
-        additional_properties = InternalEventAdditionalProperties(
-            label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
-            property=tool_name,
-            value=self._flow_id,
-            **extra,
-        )
-        self._record_metric(
-            event_name=event_name,
-            additional_properties=additional_properties,
-        )
-        self._internal_event_client.track_event(
-            event_name=event_name.value,
-            additional_properties=additional_properties,
-            category=self._flow_type.value,
-        )
-
-    def _format_type_error_response(self, tool: BaseTool, error: TypeError) -> str:
-        if tool.args_schema:
-            schema = f"The schema is: {tool.args_schema.model_json_schema()}"  # type: ignore[union-attr]
-        else:
-            schema = "The tool does not accept any argument"
-
-        response = (
-            f"Tool {tool.name} execution failed due to wrong arguments."
-            f" You must adhere to the tool args schema! {schema}"
-        )
-
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool.name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-
-        return response
-
-    def _format_validation_error(
-        self,
-        tool_name: str,
-        error: ValidationError,
-    ) -> str:
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-        return f"Tool {tool_name} raised validation error {str(error)}"
-
-    def _format_execution_error(
-        self,
-        tool_name: str,
-        error: Exception,
-    ) -> str:
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-
-        return f"Tool runtime exception due to {str(error)} {getattr(error, "response", None)}"
-
-    def _record_metric(
-        self,
-        event_name: EventEnum,
-        additional_properties: InternalEventAdditionalProperties,
-    ) -> None:
-        if event_name == EventEnum.WORKFLOW_TOOL_FAILURE:
-            tool_name = additional_properties.property or "unknown"
-            failure_reason = additional_properties.extra.get("error_type", "unknown")
-            duo_workflow_metrics.count_agent_platform_tool_failure(
-                flow_type=self._flow_type.value,
-                tool_name=tool_name,
-                failure_reason=failure_reason,
-            )

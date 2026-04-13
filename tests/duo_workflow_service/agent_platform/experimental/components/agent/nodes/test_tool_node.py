@@ -13,6 +13,9 @@ from duo_workflow_service.agent_platform.experimental.components.agent.ui_log im
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
 from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from tests.duo_workflow_service.agent_platform.experimental.components.agent.conftest import (
@@ -44,9 +47,15 @@ def mock_logger_fixture():
 @pytest.fixture(name="mock_tool_monitoring")
 def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
-    with patch(
-        "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.duo_workflow_metrics"
-    ) as mock_metrics:
+    with (
+        patch(
+            "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.duo_workflow_metrics"
+        ) as mock_metrics,
+        patch(
+            "duo_workflow_service.agent_platform.utils.tool_event_tracker.duo_workflow_metrics",
+            mock_metrics,
+        ),
+    ):
         mock_context_manager = Mock()
         mock_context_manager.__enter__ = Mock(return_value=mock_context_manager)
         mock_context_manager.__exit__ = Mock(return_value=None)
@@ -67,16 +76,19 @@ def tool_node_fixture(
     mock_logger,
 ):
     """Fixture for ToolNode instance."""
+    tracker = ToolEventTracker(
+        flow_id=flow_id,
+        flow_type=flow_type,
+        internal_event_client=mock_internal_event_client,
+    )
     return ToolNode(
         name="test_tool_node",
         conversation_history_key=RuntimeIOKey(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         toolset=mock_toolset,
-        flow_id=flow_id,
-        flow_type=flow_type,
-        internal_event_client=mock_internal_event_client,
         ui_history=ui_history,
+        tracker=tracker,
     )
 
 
@@ -149,8 +161,6 @@ class TestToolNode:
         component_name,
         mock_ai_message_with_multiple_tool_calls,
         mock_toolset,
-        mock_tool_monitoring,
-        mock_prompt_security,
     ):
         """Test successful run with multiple tool calls."""
         # Set up toolset to return different tools
@@ -431,9 +441,6 @@ class TestToolNode:
         base_flow_state,
         component_name,
         mock_tool,
-        mock_toolset,
-        mock_tool_monitoring,
-        mock_prompt_security,
     ):
         """Test run with tool call that has no args."""
         # Create tool call without args
@@ -469,7 +476,6 @@ class TestToolNodeSecurity:
         tool_node,
         flow_state_with_tool_calls,
         component_name,
-        mock_tool,
         mock_logger,
     ):
         """Test run handles SecurityException during response sanitization."""
@@ -508,7 +514,6 @@ class TestToolNodeSecurity:
         flow_state_with_tool_calls,
         component_name,
         mock_tool,
-        mock_tool_call,
     ):
         """Test run with successful security sanitization."""
         with patch(
@@ -579,9 +584,7 @@ class TestToolNodeEventTracking:
         self,
         tool_node,
         flow_state_with_tool_calls,
-        mock_tool,
         mock_internal_event_client,
-        flow_id,
     ):
         """Test run method tracks success event."""
         await tool_node.run(flow_state_with_tool_calls)

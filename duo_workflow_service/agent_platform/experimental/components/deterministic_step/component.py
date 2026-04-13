@@ -22,6 +22,9 @@ from duo_workflow_service.agent_platform.experimental.components.deterministic_s
 )
 from duo_workflow_service.agent_platform.experimental.state import IOKey, IOKeyTemplate
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     extract_configured_params,
     select_validated_tool,
@@ -109,13 +112,15 @@ class DeterministicStepComponent(BaseComponent):
 
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
         node = DeterministicStepNode(
             name=self.__entry_hook__(),
             tool_name=self.tool_name,
             inputs=self.inputs,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
             ui_history=UIHistory(
                 events=self.ui_log_events, writer_class=UILogWriterDeterministicStep
             ),
@@ -129,6 +134,7 @@ class DeterministicStepComponent(BaseComponent):
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),
             validated_tool=self.validated_tool,
+            tracker=tracker,
         )
 
         graph.add_node(self.__entry_hook__(), node.run)

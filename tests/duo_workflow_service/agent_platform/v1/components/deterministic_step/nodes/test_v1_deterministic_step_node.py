@@ -5,6 +5,9 @@ import pytest
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.nodes.deterministic_step_node import (
     DeterministicStepNode,
 )
@@ -41,10 +44,15 @@ def mock_logger_fixture():
 @pytest.fixture(name="mock_tool_monitoring")
 def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
-    with patch(
-        "duo_workflow_service.agent_platform.v1.components."
-        "deterministic_step.nodes.deterministic_step_node.duo_workflow_metrics"
-    ) as mock_metrics:
+    with (
+        patch(
+            "duo_workflow_service.agent_platform.v1.components.deterministic_step.nodes.deterministic_step_node.duo_workflow_metrics"
+        ) as mock_metrics,
+        patch(
+            "duo_workflow_service.agent_platform.utils.tool_event_tracker.duo_workflow_metrics",
+            mock_metrics,
+        ),
+    ):
         mock_context_manager = Mock()
         mock_context_manager.__enter__ = Mock(return_value=mock_context_manager)
         mock_context_manager.__exit__ = Mock(return_value=None)
@@ -142,24 +150,23 @@ def deterministic_step_node_fixture(
     tool_responses_key,
     tool_error_key,
     execution_result_key,
-    mock_tool_monitoring,
-    mock_prompt_security,
-    mock_logger,
-    mock_get_vars_from_state,
 ):
     """Fixture for DeterministicStepNode instance."""
+    tracker = ToolEventTracker(
+        flow_id=flow_id,
+        flow_type=flow_type,
+        internal_event_client=mock_internal_event_client,
+    )
     return DeterministicStepNode(
         name="test_node",
         tool_name="test_tool",
         inputs=inputs,
-        flow_id=flow_id,
-        flow_type=flow_type,
-        internal_event_client=mock_internal_event_client,
         ui_history=ui_history,
         tool_responses_key=tool_responses_key,
         tool_error_key=tool_error_key,
         execution_result_key=execution_result_key,
         validated_tool=mock_tool,
+        tracker=tracker,
     )
 
 
@@ -335,10 +342,8 @@ class TestDeterministicStepNode:
         workflow_state,
         mock_tool,
         mock_internal_event_client,
-        ui_history,
         mock_tool_monitoring,
         flow_type,
-        mock_get_vars_from_state,
     ):
         """Test run handles generic exceptions during tool execution."""
         # Configure tool to raise generic exception
@@ -403,7 +408,6 @@ class TestDeterministicStepNodeEdgeCases:
         deterministic_step_node,
         workflow_state,
         mock_tool,
-        mock_get_vars_from_state,
     ):
         """Test TypeError formatting when tool has no args_schema."""
         # Configure tool with no schema
@@ -422,7 +426,6 @@ class TestDeterministicStepNodeEdgeCases:
         deterministic_step_node,
         workflow_state,
         ui_history,
-        mock_get_vars_from_state,
     ):
         """Test that UI history state updates are properly merged."""
         # Configure ui_history to return state updates
@@ -455,7 +458,6 @@ class TestDeterministicStepNodeEdgeCases:
         deterministic_step_node,
         workflow_state,
         mock_tool,
-        mock_get_vars_from_state,
         mock_prompt_security,
         tool_response,
         sanitized_response,

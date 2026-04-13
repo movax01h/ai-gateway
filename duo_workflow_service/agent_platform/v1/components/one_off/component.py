@@ -9,6 +9,9 @@ from pydantic import Field, model_validator
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
@@ -186,13 +189,15 @@ class OneOffComponent(BaseComponent):
         )
 
         # Use enhanced tool node with error correction
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
         tool_node = ToolNodeWithErrorCorrection(
             name=f"{self.name}#tools",
             component_name=self.name,
             toolset=self.toolset,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
             max_correction_attempts=self.max_correction_attempts,
             ui_history=UIHistory(
                 events=self.ui_log_events,
@@ -210,6 +215,7 @@ class OneOffComponent(BaseComponent):
             conversation_history_key=self._conversation_history_key.to_iokey(
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),
+            tracker=tracker,
         )
 
         # Node 1: Agent Node
