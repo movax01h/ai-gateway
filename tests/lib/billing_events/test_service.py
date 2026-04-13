@@ -88,6 +88,8 @@ class TestBillingEventService:
                         "prompt_tokens": 100,
                         "completion_tokens": 50,
                         "agent_name": None,
+                        "cache_read_tokens": 0,
+                        "cache_write_tokens": 0,
                     }
                 ],
             },
@@ -294,3 +296,32 @@ class TestBillingEventService:
         mock_get_llm_operations.assert_not_called()
         metadata = get_call_metadata(billing_client)
         assert metadata["llm_operations"][0]["model_id"] == "claude-3-5-sonnet"
+
+    def test_track_billing_with_cache_tokens(
+        self, billing_service, billing_client, user, gl_context
+    ):
+        """Test cache token fields are included in billing metadata."""
+        op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=150,
+            prompt_tokens=100,
+            completion_tokens=50,
+            cache_read_tokens=30,
+            cache_write_tokens=20,
+        )
+
+        billing_service.track_billing(
+            workflow_id="workflow-cache",
+            user=user,
+            gl_context=gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[op],
+        )
+
+        metadata = get_call_metadata(billing_client)
+        assert metadata["llm_operations"][0]["cache_read_tokens"] == 30
+        assert metadata["llm_operations"][0]["cache_write_tokens"] == 20

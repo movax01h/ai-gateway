@@ -305,14 +305,21 @@ class ModelRequestInstrumentator:
         async def afinish(self):
             self.finish()
 
+        def _get_cache_tokens(self, usage: UsageMetadata):
+
+            input_token_details = usage.get("input_token_details", {})
+            cache_creation = input_token_details.get("cache_creation", 0)
+            cache_read = input_token_details.get("cache_read", 0)
+
+            return cache_read, cache_creation
+
         def _track_usage(
             self, model: str, usage: UsageMetadata, internal_event_extra: dict[str, Any]
         ):
             # Access langchain usage_metadata for optional cache
             # specific token details
             input_token_details = usage.get("input_token_details", {})
-            cache_creation = input_token_details.get("cache_creation", 0)
-            cache_read = input_token_details.get("cache_read", 0)
+            cache_read, cache_creation = self._get_cache_tokens(usage)
 
             # Optional event tracking for TTL prompt caching
             ephemeral_5m_input_tokens = input_token_details.get(
@@ -365,6 +372,8 @@ class ModelRequestInstrumentator:
             if current_llm_operations is None:
                 return
 
+            cache_read_tokens, cache_write_tokens = self._get_cache_tokens(usage)
+
             current_llm_operations.append(
                 {
                     "token_count": usage["total_tokens"],
@@ -374,6 +383,8 @@ class ModelRequestInstrumentator:
                     "prompt_tokens": usage["input_tokens"],
                     "completion_tokens": usage["output_tokens"],
                     "agent_name": agent_name,
+                    "cache_read_tokens": cache_read_tokens,
+                    "cache_write_tokens": cache_write_tokens,
                 }
             )
 
