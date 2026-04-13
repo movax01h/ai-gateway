@@ -312,10 +312,16 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         "approval_decision,expected_event_type,expected_message",
         [
             (UserDecision.APPROVE, FlowEventType.APPROVE, None),
-            (UserDecision.REJECT, FlowEventType.REJECT, "test goal for rejection"),
+            (UserDecision.REJECT, FlowEventType.MODIFY, "test goal for rejection"),
+            (UserDecision.REJECT, FlowEventType.REJECT, None),
             (None, FlowEventType.RESPONSE, "test goal for response"),
         ],
-        ids=["approve_decision", "reject_decision", "user_response"],
+        ids=[
+            "approve_decision",
+            "reject_decision_with_message",
+            "reject_decision_without_message",
+            "user_response",
+        ],
     )
     async def test_resume_command_with_approval_decision(
         self,
