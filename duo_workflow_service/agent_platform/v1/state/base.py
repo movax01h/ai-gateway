@@ -39,9 +39,10 @@ __all__ = [
 
 
 class FlowEventType(StrEnum):
-    RESPONSE = "response"
-    APPROVE = "approve"
-    REJECT = "reject"
+    RESPONSE = "response"  # Agent sends response via NewCheckpoint protobuf message
+    APPROVE = "approve"  # User approval via Approval.Approved protobuf message
+    REJECT = "reject"  # User rejection via Approval.Rejected without message field
+    MODIFY = "modify"  # User rejection via Approval.Rejected with message field
 
 
 class FlowEvent(TypedDict):

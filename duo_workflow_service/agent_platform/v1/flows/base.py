@@ -187,7 +187,7 @@ class Flow(AbstractWorkflow):
 
     def _resume_command(self, goal: str) -> Command:
         event = FlowEvent(event_type=FlowEventType.RESPONSE, message=goal)
-        if not self._approval:
+        if not self._approval or self._approval.WhichOneof("user_decision") is None:
             # Handle case where approval is None
             return Command(resume=event)
 
@@ -195,10 +195,15 @@ class Flow(AbstractWorkflow):
             case UserDecision.APPROVE:
                 event = FlowEvent(event_type=FlowEventType.APPROVE)
             case UserDecision.REJECT:
-                event = FlowEvent(
-                    event_type=FlowEventType.REJECT,
-                    message=self._approval.rejection.message,
-                )
+                if self._approval.rejection.message:
+                    event = FlowEvent(
+                        event_type=FlowEventType.MODIFY,
+                        message=self._approval.rejection.message,
+                    )
+                else:
+                    event = FlowEvent(
+                        event_type=FlowEventType.REJECT,
+                    )
             case _:
                 # This should never happen according to contract.proto
                 raise ValueError(
