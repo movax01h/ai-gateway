@@ -105,7 +105,8 @@ configurable_unit_primitives:
   - feature_setting: "duo_chat"
     unit_primitives:
       - "duo_chat"
-    default_model: "mistral"
+    default_models:
+      - "mistral"
     selectable_models:
       - "mistral"
 """,
@@ -1651,26 +1652,30 @@ configurable_unit_primitives:
   - feature_setting: "setting_a"
     unit_primitives:
       - "duo_chat"
-    default_model: "model_a"
+    default_models:
+      - "model_a"
     selectable_models:
       - "model_a"
       - "model_c"
   - feature_setting: "b"
     unit_primitives:
       - "code_suggestions"
-    default_model: "model_b"
+    default_models:
+      - "model_b"
     selectable_models:
       - "model_b"
   - feature_setting: "c"
     unit_primitives:
       - "complete_code"
-    default_model: "model_b"
+    default_models:
+      - "model_b"
     selectable_models:
       - "model_b"
   - feature_setting: "embeddings_code"
     unit_primitives:
       - "generate_embeddings_codebase"
-    default_model: "text_embedding_005_vertex"
+    default_models:
+      - "text_embedding_005_vertex"
     selectable_models:
       - "text_embedding_005_vertex"
 """,

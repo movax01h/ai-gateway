@@ -41,6 +41,8 @@ def mock_fs_fixture(fs: FakeFilesystem):
                 gitlab_identifier: gitlab-model-2
                 model_class_provider: anthropic
                 max_context_tokens: 200000
+                cost_indicator: "$"
+                description: "Model two description."
                 params:
                   model: provider-model-2
               - name: Embedding Model
@@ -63,10 +65,20 @@ def mock_fs_fixture(fs: FakeFilesystem):
                 unit_primitives:
                   - "ask_commit"
                   - "ask_epic"
-                default_model: "gitlab-model-1"
+                default_models:
+                  - "gitlab-model-1"
                 selectable_models:
                   - "gitlab-model-1"
                 beta_models:
+                  - "gitlab-model-2"
+              - feature_setting: "multiple_defaults"
+                unit_primitives:
+                  - "duo_chat"
+                default_models:
+                  - "gitlab-model-1"
+                  - "gitlab-model-2"
+                selectable_models:
+                  - "gitlab-model-1"
                   - "gitlab-model-2"
             """
         ),
@@ -95,6 +107,8 @@ def test_load_llm_definitions(selection_config):
             name="Model Two",
             gitlab_identifier="gitlab-model-2",
             max_context_tokens=200000,
+            cost_indicator="$",
+            description="Model two description.",
             params={"model": "provider-model-2"},
         ),
         "gitlab-embedding-model": EmbeddingLiteLLMDefinition(
@@ -114,11 +128,18 @@ def test_get_unit_primitive_config(selection_config):
                 GitLabUnitPrimitive.ASK_COMMIT,
                 GitLabUnitPrimitive.ASK_EPIC,
             ],
-            default_model="gitlab-model-1",
+            default_models=["gitlab-model-1"],
             selectable_models=["gitlab-model-1"],
             beta_models=["gitlab-model-2"],
             dev=None,
-        )
+        ),
+        UnitPrimitiveConfig(
+            feature_setting="multiple_defaults",
+            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+            default_models=["gitlab-model-1", "gitlab-model-2"],
+            selectable_models=["gitlab-model-1", "gitlab-model-2"],
+            beta_models=[],
+        ),
     ]
 
 
@@ -130,11 +151,18 @@ def test_get_unit_primitive_config_map(selection_config):
                 GitLabUnitPrimitive.ASK_COMMIT,
                 GitLabUnitPrimitive.ASK_EPIC,
             ],
-            default_model="gitlab-model-1",
+            default_models=["gitlab-model-1"],
             selectable_models=["gitlab-model-1"],
             beta_models=["gitlab-model-2"],
             dev=None,
-        )
+        ),
+        "multiple_defaults": UnitPrimitiveConfig(
+            feature_setting="multiple_defaults",
+            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+            default_models=["gitlab-model-1", "gitlab-model-2"],
+            selectable_models=["gitlab-model-1", "gitlab-model-2"],
+            beta_models=[],
+        ),
     }
 
 
@@ -216,6 +244,22 @@ def test_get_model_for_feature(selection_config):
     )
 
 
+def test_get_model_for_feature_with_multiple_defaults(selection_config):
+    with patch("random.choice", return_value="gitlab-model-2") as mock_random_choice:
+        assert selection_config.get_model_for_feature(
+            "multiple_defaults"
+        ) == ChatAnthropicDefinition(
+            name="Model Two",
+            gitlab_identifier="gitlab-model-2",
+            max_context_tokens=200000,
+            cost_indicator="$",
+            description="Model two description.",
+            params={"model": "provider-model-2"},
+        )
+
+        mock_random_choice.assert_called_once_with(["gitlab-model-1", "gitlab-model-2"])
+
+
 def test_get_model_for_feature_no_feature(selection_config):
     with pytest.raises(ValueError, match="Invalid feature setting: random-feature"):
         selection_config.get_model_for_feature("random-feature")
@@ -240,7 +284,8 @@ def test_validate_with_error(fs: FakeFilesystem):
               - feature_setting: "test_config"
                 unit_primitives:
                   - "ask_commit"
-                default_model: "non_existent_model"
+                default_models:
+                  - "non_existent_model"
                 selectable_models:
                   - "model_1"
                   - "another_non_existent_model"
@@ -324,14 +369,25 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
               - feature_setting: "test_config"
                 unit_primitives:
                   - "ask_commit"
-                default_model: "model_1"
+                default_models:
+                  - "model_1"
                 selectable_models:
                   - "model_2"
                   - "model_3"
+              - feature_setting: "config_with_multiple_defaults"
+                unit_primitives:
+                  - "generate_code"
+                default_models:
+                  - "model_1"
+                  - "model_2"
+                  - "model_3"
+                selectable_models:
+                  - "model_1"
               - feature_setting: "another_config"
                 unit_primitives:
                   - "generate_code"
-                default_model: "model_2"
+                default_models:
+                  - "model_2"
                 selectable_models:
                   - "model_1"
                   - "model_3"
@@ -347,6 +403,8 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
     expected_error = (
         "Default models must be included in selectable_models:\n"
         "  - Feature 'test_config' has default model 'model_1' that is not in selectable_models.\n"
+        "  - Feature 'config_with_multiple_defaults' has default model 'model_2' that is not in selectable_models.\n"
+        "  - Feature 'config_with_multiple_defaults' has default model 'model_3' that is not in selectable_models.\n"
         "  - Feature 'another_config' has default model 'model_2' that is not in selectable_models."
     )
     assert error_message == expected_error
@@ -483,11 +541,11 @@ def test_fireworks_models_have_max_retries_10():
 
 
 def test_get_model_for_feature_with_size_preference_config(selection_config):
-    """get_model_for_feature should use default_model when models_for_size_preference is set."""
+    """get_model_for_feature should use default_models when models_for_size_preference is set."""
     models_config = UnitPrimitiveConfig(
         feature_setting="test_config",
         unit_primitives=[],
-        default_model="gitlab-model-2",
+        default_models=["gitlab-model-2"],
         models_for_size_preference={
             "small": "gitlab-model-1",
             "large": "gitlab-model-2",
@@ -543,7 +601,8 @@ def test_validate_with_size_preference_field(fs: FakeFilesystem):
               - feature_setting: "test_model_size"
                 unit_primitives:
                   - "ask_commit"
-                default_model: "large-model"
+                default_models:
+                  - "large-model"
                 models_for_size_preference:
                   small: "small-model"
                   large: "large-model"
@@ -588,7 +647,8 @@ def test_validate_with_invalid_size_preference_field(fs: FakeFilesystem):
               - feature_setting: "test_model_size"
                 unit_primitives:
                   - "ask_commit"
-                default_model: "large-model"
+                default_models:
+                  - "large-model"
                 models_for_size_preference:
                   small: "non-existent-small"
                   large: "large-model"
@@ -666,7 +726,8 @@ def test_validate_size_preference_without_selectable_models_passes(
               - feature_setting: "test_model_size"
                 unit_primitives:
                   - "ask_commit"
-                default_model: "large-model"
+                default_models:
+                  - "large-model"
                 models_for_size_preference:
                   small: "small-model"
                   large: "large-model"
@@ -697,7 +758,8 @@ def test_validate_size_preference_models_not_required_in_selectable(
               - feature_setting: "test_model_size"
                 unit_primitives:
                   - "ask_commit"
-                default_model: "large-model"
+                default_models:
+                  - "large-model"
                 models_for_size_preference:
                   small: "small-model"
                 selectable_models:

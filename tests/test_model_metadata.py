@@ -90,7 +90,7 @@ def get_llm_definitions(mock_models):
         "duo_chat": UnitPrimitiveConfig(
             feature_setting="duo_chat",
             unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-            default_model="gitlab_model1",
+            default_models=["gitlab_model1"],
         ),
     }
 
@@ -660,7 +660,7 @@ class TestCreateModelMetadataBySize:
             "duo_chat": UnitPrimitiveConfig(
                 feature_setting="duo_chat",
                 unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-                default_model="gitlab_model1",
+                default_models=["gitlab_model1"],
                 models_for_size_preference={
                     "small": "gitlab_model2",
                     "large": "gitlab_model1",
@@ -669,7 +669,7 @@ class TestCreateModelMetadataBySize:
             "no_size_feature": UnitPrimitiveConfig(
                 feature_setting="no_size_feature",
                 unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-                default_model="gitlab_model1",
+                default_models=["gitlab_model1"],
             ),
         }
         with patch.multiple(

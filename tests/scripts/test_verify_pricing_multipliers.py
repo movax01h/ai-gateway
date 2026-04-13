@@ -73,7 +73,7 @@ class TestGetSelectableModels:
 
         mock_up_config = MagicMock()
         mock_up_config.feature_setting = "duo_chat"
-        mock_up_config.default_model = "claude_sonnet_vertex"
+        mock_up_config.default_models = ["claude_sonnet_vertex"]
         mock_up_config.selectable_models = []
         mock_up_config.dev = None
 
@@ -102,7 +102,7 @@ class TestGetSelectableModels:
 
         mock_up_config = MagicMock()
         mock_up_config.feature_setting = "duo_chat"
-        mock_up_config.default_model = "experimental_id"
+        mock_up_config.default_models = ["experimental_id"]
         mock_up_config.selectable_models = []
         mock_up_config.dev = mock_dev
 
@@ -128,13 +128,13 @@ class TestGetSelectableModels:
 
         mock_code_completions_config = MagicMock()
         mock_code_completions_config.feature_setting = "code_completions"
-        mock_code_completions_config.default_model = "codestral_id"
+        mock_code_completions_config.default_models = ["codestral_id"]
         mock_code_completions_config.selectable_models = []
         mock_code_completions_config.dev = None
 
         mock_duo_chat_config = MagicMock()
         mock_duo_chat_config.feature_setting = "duo_chat"
-        mock_duo_chat_config.default_model = "claude_id"
+        mock_duo_chat_config.default_models = ["claude_id"]
         mock_duo_chat_config.selectable_models = []
         mock_duo_chat_config.dev = None
 

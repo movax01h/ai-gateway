@@ -102,7 +102,7 @@ def get_selectable_models() -> dict[str, str]:
         if up_config.feature_setting in ("code_completions", "embeddings_code"):
             continue
 
-        selectable_gitlab_ids.add(up_config.default_model)
+        selectable_gitlab_ids.update(up_config.default_models)
         selectable_gitlab_ids.update(up_config.selectable_models)
         if up_config.dev:
             selectable_gitlab_ids.update(up_config.dev.selectable_models)

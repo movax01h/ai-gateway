@@ -1,3 +1,4 @@
+import random
 from itertools import chain
 from pathlib import Path
 from typing import Annotated, Iterable, Literal, Optional
@@ -115,7 +116,7 @@ LLMDefinition = Annotated[
 class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
-    default_model: str
+    default_models: list[str] = Field(min_length=1)
     models_for_size_preference: dict[Literal["small", "large"], str] = Field(
         default_factory=dict
     )
@@ -180,7 +181,7 @@ class ModelSelectionConfig:
         errors: set[str] = set()
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
-                [unit_primitive_config.default_model],
+                unit_primitive_config.default_models,
                 unit_primitive_config.models_for_size_preference.values(),
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
@@ -202,9 +203,10 @@ class ModelSelectionConfig:
     ) -> list[str]:
         errors = [
             f"Feature '{upc.feature_setting}' has default model "
-            f"'{upc.default_model}' that is not in selectable_models."
+            f"'{default_model}' that is not in selectable_models."
             for upc in unit_primitive_configs
-            if upc.selectable_models and upc.default_model not in upc.selectable_models
+            for default_model in upc.default_models
+            if upc.selectable_models and default_model not in upc.selectable_models
         ]
         if errors:
             return [
@@ -304,7 +306,7 @@ class ModelSelectionConfig:
         if feature_setting := self.get_unit_primitive_config_map().get(
             feature_setting_name, None
         ):
-            return self.get_model(feature_setting.default_model)
+            return self.get_model(random.choice(feature_setting.default_models))
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
 
