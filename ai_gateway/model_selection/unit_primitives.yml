@@ -309,8 +309,3 @@ configurable_unit_primitives:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
-    dev:
-      selectable_models:
-        - "gpt_5_2"
-      group_ids:
-        - 9970
