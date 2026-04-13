@@ -22,7 +22,8 @@ class _GetModelResponseModel(BaseModel):
 
 class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
-    default_model: str
+    default_model: str  # deprecated, maintained for backward compatibility
+    default_models: list[str]
     models_for_size_preference: dict[Literal["small", "large"], str]
     selectable_models: list[str]
     beta_models: list[str]
@@ -42,6 +43,12 @@ class _GetModelResponse(BaseModel):
 )
 async def get_models():
     selection_config = ModelSelectionConfig()
+    unit_primitives = []
+
+    for primitive in selection_config.get_unit_primitive_config():
+        values = primitive.model_dump()
+        values["default_model"] = values["default_models"][0]
+        unit_primitives.append(_GetModelResponseUnitPrimitive(**values))
 
     response = _GetModelResponse(
         models=[
@@ -55,10 +62,7 @@ async def get_models():
             )
             for definition in selection_config.get_llm_definitions().values()
         ],
-        unit_primitives=[
-            _GetModelResponseUnitPrimitive(**primitive.model_dump())
-            for primitive in selection_config.get_unit_primitive_config()
-        ],
+        unit_primitives=unit_primitives,
     )
 
     return JSONResponse(content=response.model_dump(mode="json"))

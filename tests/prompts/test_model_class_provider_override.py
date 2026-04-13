@@ -56,7 +56,8 @@ configurable_unit_primitives:
         feature_setting: "workflow"
         unit_primitives:
             - "duo_workflow_execute_workflow"
-        default_model: "gpt_5"
+        default_models:
+            - "gpt_5"
         selectable_models:
             - "gpt_5"
 """,

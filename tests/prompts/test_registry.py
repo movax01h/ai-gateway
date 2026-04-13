@@ -168,31 +168,36 @@ configurable_unit_primitives:
   - feature_setting: "test"
     unit_primitives:
       - "duo_chat"
-    default_model: "test"
+    default_models:
+      - "test"
     selectable_models:
       - "test"
   - feature_setting: "duo_chat"
     unit_primitives:
       - "duo_chat"
-    default_model: "haiku"
+    default_models:
+      - "haiku"
     selectable_models:
       - "haiku"
   - feature_setting: "empty_prompt"
     unit_primitives:
       - "duo_chat"
-    default_model: "test"
+    default_models:
+      - "test"
     selectable_models:
       - "test"
   - feature_setting: "no_up"
     unit_primitives:
       - "duo_chat"
-    default_model: "test"
+    default_models:
+      - "test"
     selectable_models:
       - "test"
   - feature_setting: "duo_agent_platform"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: "test"
+    default_models:
+      - "test"
     selectable_models:
       - "test"
 """,

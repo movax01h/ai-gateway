@@ -772,20 +772,19 @@ class BasePromptRegistry(ABC):
         models_visited = set()
 
         for unit_primitive_config in model_selection_config.get_unit_primitive_config():
-            model = unit_primitive_config.default_model
+            for model in unit_primitive_config.default_models:
+                if model in models_visited:
+                    continue
 
-            if model in models_visited:
-                continue
+                models_visited.add(model)
 
-            models_visited.add(model)
+                if model in self.validations or (
+                    unit_primitive
+                    and unit_primitive not in unit_primitive_config.unit_primitives
+                ):
+                    continue
 
-            if model in self.validations or (
-                unit_primitive
-                and unit_primitive not in unit_primitive_config.unit_primitives
-            ):
-                continue
-
-            tasks.append(self.validate_model(model))
+                tasks.append(self.validate_model(model))
 
         with tracing_context(enabled=False):
             await asyncio.gather(*tasks)

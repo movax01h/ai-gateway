@@ -62,7 +62,7 @@ def mock_model_config_fixture():
                     GitLabUnitPrimitive.ASK_ISSUE,
                     GitLabUnitPrimitive.ASK_EPIC,
                 ],
-                default_model="model1",
+                default_models=["model1", "model2"],
                 selectable_models=["model1", "model2"],
                 beta_models=[],
             ),
@@ -71,7 +71,7 @@ def mock_model_config_fixture():
                 unit_primitives=[
                     GitLabUnitPrimitive.DUO_CHAT,
                 ],
-                default_model="model2",
+                default_models=["model2"],
                 selectable_models=["model2"],
                 beta_models=["model1"],
             ),
@@ -80,7 +80,7 @@ def mock_model_config_fixture():
                 unit_primitives=[
                     GitLabUnitPrimitive.DUO_CHAT,
                 ],
-                default_model="model3",
+                default_models=["model3"],
                 selectable_models=["model3"],
                 beta_models=[],
             ),
@@ -125,6 +125,7 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "feature_setting": "config1",
         "unit_primitives": ["ask_issue", "ask_epic"],
         "default_model": "model1",
+        "default_models": ["model1", "model2"],
         "selectable_models": ["model1", "model2"],
         "beta_models": [],
     }
@@ -137,6 +138,7 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "feature_setting": "config2",
         "unit_primitives": ["duo_chat"],
         "default_model": "model2",
+        "default_models": ["model2"],
         "selectable_models": ["model2"],
         "beta_models": ["model1"],
     }
@@ -149,6 +151,7 @@ def test_get_models_returns_correct_data(mock_model_config, client):
         "feature_setting": "config3",
         "unit_primitives": ["duo_chat"],
         "default_model": "model3",
+        "default_models": ["model3"],
         "selectable_models": ["model3"],
         "beta_models": [],
     }
