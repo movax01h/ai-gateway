@@ -131,3 +131,18 @@ async def test_validate_project_id():
     )
     assert project_id == "1"
     assert not errors
+
+
+@pytest.mark.asyncio
+async def test_ci_linter_exception_propagates():
+    """Test that exceptions from CiLinter._execute propagate rather than being swallowed."""
+    error_message = "Connection error"
+    gitlab_client_mock = AsyncMock()
+    gitlab_client_mock.apost.side_effect = Exception(error_message)
+
+    tool = CiLinter(metadata={"gitlab_client": gitlab_client_mock})
+
+    yaml_content = "image: ruby:2.6\ntest_job:\n  script: echo 'test'"
+
+    with pytest.raises(Exception, match=error_message):
+        await tool.arun({"project_id": 42, "content": yaml_content})

@@ -2,6 +2,7 @@ import json
 from typing import Any, Type
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
@@ -52,27 +53,24 @@ class CreateBranch(DuoBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         params = {
             "branch": branch,
             "ref": ref,
         }
 
-        try:
-            response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{project_id}/repository/branches",
-                body=json.dumps(params),
-            )
+        response = await self.gitlab_client.apost(
+            path=f"/api/v4/projects/{project_id}/repository/branches",
+            body=json.dumps(params),
+        )
 
-            self._process_http_response(
-                identifier=f"/api/v4/projects/{project_id}/repository/branches",
-                response=response,
-            )
+        self._process_http_response(
+            identifier=f"/api/v4/projects/{project_id}/repository/branches",
+            response=response,
+        )
 
-            return json.dumps({"status": "success", "branch": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"status": "success", "branch": response.body})
 
     def format_display_message(
         self, args: CreateBranchInput, _tool_response: Any = None

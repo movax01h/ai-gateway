@@ -1,13 +1,14 @@
 import json
-import logging
 from typing import Any, Dict, Optional, Tuple, Type
 
+import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class BaseAuditEventsInput(BaseModel):
@@ -94,22 +95,11 @@ class BaseAuditEventsTool(DuoBaseTool):
                 parse_json=True,
             )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
-
-            if isinstance(response.body, dict) and (
-                "message" in response.body or "error" in response.body
-            ):
-                error_msg = response.body.get(
-                    "message", response.body.get("error", "Unknown error")
-                )
-                return [], {"error": error_msg}
-
-            audit_events = response.body
+            audit_events = self._process_http_response(
+                identifier="audit events",
+                response=response,
+                logger=logger,
+            )
             all_audit_events.extend(audit_events)
 
             # Get total pages from headers if available
@@ -153,10 +143,6 @@ class BaseAuditEventsTool(DuoBaseTool):
             }
         )
 
-    def _format_error(self, error: str) -> str:
-        """Format error responses consistently."""
-        return json.dumps({"error": error})
-
     async def _execute_audit_query(self, api_path: str, **kwargs: Any) -> str:
         """Common execution logic for audit event queries.
 
@@ -180,9 +166,6 @@ class BaseAuditEventsTool(DuoBaseTool):
             per_page=per_page,
             initial_page=page,
         )
-
-        if "error" in pagination:
-            return self._format_error(pagination["error"])
 
         return self._format_response(audit_events, pagination)
 
@@ -209,7 +192,7 @@ class ListInstanceAuditEvents(BaseAuditEventsTool):
     async def _execute(self, **kwargs: Any) -> str:
         # Validate entity_id requires entity_type
         if kwargs.get("entity_id") and not kwargs.get("entity_type"):
-            return self._format_error("entity_id requires entity_type to be specified")
+            raise ToolException("entity_id requires entity_type to be specified")
 
         return await self._execute_audit_query(
             api_path="/api/v4/audit_events", **kwargs
@@ -252,7 +235,7 @@ class ListGroupAuditEvents(BaseAuditEventsTool):
 
         # Validate group identification
         if not group_id and not group_path:
-            return self._format_error("Either group_id or group_path must be provided")
+            raise ToolException("Either group_id or group_path must be provided")
 
         # Use group_id if provided, otherwise use group_path
         group_identifier = group_id if group_id else group_path
@@ -304,7 +287,7 @@ class ListProjectAuditEvents(BaseAuditEventsTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return self._format_error("; ".join(errors))
+            raise ToolException("; ".join(errors))
 
         kwargs.pop("url", None)
         kwargs.pop("project_id", None)

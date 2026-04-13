@@ -82,20 +82,11 @@ class GitLabSearchBase(DuoBaseTool):
 
     async def _perform_search(self, id: str, params: dict, search_type: str) -> str:
         url = f"/api/v4/{search_type}/{id}/search"
-        try:
-            response = await self.gitlab_client.aget(path=url, params=params)
+        response = await self.gitlab_client.aget(path=url, params=params)
 
-            if not response.is_success():
-                log.error(
-                    "Search request failed with status %s: %s",
-                    response.status_code,
-                    response.body,
-                )
-                return json.dumps({"error": str(response.body)})
+        body = self._process_http_response("search", response, log)
 
-            return json.dumps({"search_results": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"search_results": body})
 
     def format_display_message(
         self, args: BaseSearchInput, _tool_response: Any = None
@@ -398,17 +389,10 @@ class BlobSearch(GitLabSearchBase):
             path=url, params=params, parse_json=True
         )
 
-        if not response.is_success():
-            log.error(
-                "Blob search request failed",
-                status_code=response.status_code,
-                error=response.body,
-            )
-            raise ToolException(
-                f"Blob search failed with status code: {response.status_code} and body {response.body}"
-            )
+        body = self._process_http_response("Blob search", response, log)
+
         # Filter blob results using FileExclusionPolicy
-        filtered_response = self._filter_blob_results(response.body)
+        filtered_response = self._filter_blob_results(body)
         return json.dumps({"search_results": filtered_response})
 
 
@@ -521,17 +505,10 @@ class AdvanceBlobSearch(GitLabSearchBase):
             path=api_url, params=params, parse_json=True
         )
 
-        if not response.is_success():
-            log.error(
-                "Advance Blob search request failed",
-                status_code=response.status_code,
-                error=response.body,
-            )
-            raise ToolException(
-                f"Advance Blob search request failed with status {response.status_code}: {response.body}"
-            )
+        body = self._process_http_response("advance blob search", response, log)
+
         # Filter blob results using FileExclusionPolicy
-        filtered_response = self._filter_blob_results(response.body)
+        filtered_response = self._filter_blob_results(body)
         return json.dumps({"search_results": filtered_response})
 
 

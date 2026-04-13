@@ -251,22 +251,19 @@ class ListSecurityFindings(DuoBaseTool):
             )
 
             if "errors" in response:
-                return {"error": "GraphQL errors", "errors": response["errors"]}
+                raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
 
             project_data = response.get("data", {}).get("project")
             if not project_data:
-                return {
-                    "error": "Project not found or access denied",
-                    "project": project_path,
-                }
+                raise ToolException(
+                    f"Project not found or access denied: {project_path}"
+                )
 
             pipeline_data = project_data.get("pipeline")
             if not pipeline_data:
-                return {
-                    "error": "Pipeline not found",
-                    "pipeline_id": pipeline_id,
-                    "project": project_path,
-                }
+                raise ToolException(
+                    f"Pipeline not found: {pipeline_id} in project {project_path}"
+                )
 
             if pipeline_info is None:
                 pipeline_info = self._extract_pipeline_info(pipeline_data)
@@ -310,9 +307,6 @@ class ListSecurityFindings(DuoBaseTool):
                 scanner,
                 state,
             )
-
-            if "error" in result:
-                return json.dumps(result)
 
             findings = result["findings"]
             pipeline_info = result["pipeline_info"]

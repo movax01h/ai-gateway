@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import UpdateWorkItem, UpdateWorkItemInput
 from duo_workflow_service.tools.work_items.base_tool import (
@@ -213,28 +214,32 @@ async def test_update_work_item_graphql_error(
     tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
     gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
 
-    result = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=42,
-        title="Trigger error",
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            title="Trigger error",
+        )
 
-    assert json.loads(result)["error"] == graphql_response["errors"]
+    assert "Invalid field" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_update_work_item_validation_error(gitlab_client_mock, metadata):
+    # Return empty nodes list to trigger "Work item not found" error
+    graphql_response = {"project": {"workItems": {"nodes": []}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
     tool = UpdateWorkItem(description="update", metadata=metadata)
-    tool._resolve_work_item_data = AsyncMock(return_value="Invalid reference")
 
-    result = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=42,
-        title="Bad",
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            title="Bad",
+        )
 
-    assert json.loads(result)["error"] == "Invalid reference"
-    gitlab_client_mock.graphql.assert_not_called()
+    assert "Work item" in str(exc_info.value) and "not found" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -245,32 +250,33 @@ async def test_update_work_item_exception(
     tool = UpdateWorkItem(description="update", metadata=metadata)
     tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
 
-    response = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=42,
-        title="Trigger exception",
-    )
+    with pytest.raises(Exception, match="Network error"):
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            title="Trigger exception",
+        )
 
-    expected = json.dumps({"error": "Network error"})
-    assert response == expected
     gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_update_work_item_invalid_work_item(gitlab_client_mock, metadata):
+    # Return empty nodes list to trigger "Work item not found" error
+    graphql_response = {"project": {"workItems": {"nodes": []}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
     tool = UpdateWorkItem(description="update work item", metadata=metadata)
-    tool._resolve_work_item_data = AsyncMock(return_value="Work item not found")
 
-    response = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=999,
-        title="This update will fail",
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=999,
+            title="This update will fail",
+        )
 
-    expected_response = json.dumps({"error": "Work item not found"})
-    assert response == expected_response
-
-    gitlab_client_mock.graphql.assert_not_called()
+    assert "Work item" in str(exc_info.value) and "not found" in str(exc_info.value)
+    gitlab_client_mock.graphql.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -23,14 +23,7 @@ class GetProject(DuoBaseTool):
             parse_json=False,
         )
 
-        if not response.is_success():
-            log.error(
-                "Get project request failed with status %s: %s",
-                response.status_code,
-                response.body,
-            )
-
-        return response.body
+        return self._process_http_response("Get project", response, log)
 
     def format_display_message(
         self, args: GetProjectInput, _tool_response: Any = None

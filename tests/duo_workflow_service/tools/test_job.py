@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.job import GetLogsFromJob, GetLogsFromJobInput
@@ -184,11 +185,9 @@ async def test_get_job_logs_with_url_error(
 ):
     tool = GetLogsFromJob(metadata=metadata)
 
-    response = await tool._arun(url=url, project_id=project_id, job_id=job_id)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(url=url, project_id=project_id, job_id=job_id)
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -224,12 +223,13 @@ async def test_validate_job_url_missing_params(
 ):
     tool = GetLogsFromJob(metadata=metadata)
 
-    response = await tool._arun(project_id=project_id, job_id=job_id)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id=project_id, job_id=job_id)
 
-    assert "error" in response_json
+    error_message = str(exc_info.value)
     for error in expected_errors:
-        assert error in response_json["error"]
+        assert error in error_message
+
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -239,11 +239,8 @@ async def test_get_job_logs_api_exception(gitlab_client_mock, metadata):
 
     tool = GetLogsFromJob(metadata=metadata)
 
-    response = await tool._arun(project_id="1", job_id="123")
-    response_json = json.loads(response)
-
-    assert "error" in response_json
-    assert "API error" in response_json["error"]
+    with pytest.raises(Exception, match="API error"):
+        await tool._arun(project_id="1", job_id="123")
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/jobs/123/trace",

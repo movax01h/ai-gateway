@@ -82,6 +82,7 @@ async def test_get_current_user_with_missing_fields():
 
 @pytest.mark.asyncio
 async def test_get_current_user_api_error():
+    """Test that exceptions from GetCurrentUser._execute propagate rather than being swallowed."""
     gitlab_client_mock = AsyncMock()
     gitlab_client_mock.aget.side_effect = Exception("API connection failed")
 
@@ -91,12 +92,8 @@ async def test_get_current_user_api_error():
 
     tool = GetCurrentUser(metadata=metadata)
 
-    response = await tool.arun({})
-
-    parsed_response = json.loads(response)
-    assert "error" in parsed_response
-    assert parsed_response["error"] == "API connection failed"
-    assert "user" not in parsed_response
+    with pytest.raises(Exception, match="API connection failed"):
+        await tool.arun({})
 
 
 def test_get_current_user_format_display_message():

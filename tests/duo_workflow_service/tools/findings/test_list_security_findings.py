@@ -223,46 +223,38 @@ class TestListSecurityFindings:
         assert second_call_body["variables"]["after"] == "cursor123"
 
     async def test_arun_project_not_found(self, gitlab_client_mock, metadata):
-        """Test error handling when the project is not found."""
+        """Test error handling when the project is not found raises ToolException."""
         gitlab_client_mock.apost = AsyncMock(return_value={"data": {"project": None}})
         tool = ListSecurityFindings(metadata=metadata)
-        response_str = await tool.arun(
-            {"project_full_path": "non/existent", "pipeline_id": "273"}
-        )
-        response = json.loads(response_str)
-        assert "error" in response
-        assert "Project not found or access denied" in response["error"]
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(project_full_path="non/existent", pipeline_id="273")
+        assert "Project not found or access denied" in str(exc_info.value)
 
     async def test_arun_pipeline_not_found(self, gitlab_client_mock, metadata):
-        """Test error handling when the pipeline is not found."""
+        """Test error handling when the pipeline is not found raises ToolException."""
         gitlab_client_mock.apost = AsyncMock(
             return_value={"data": {"project": {"pipeline": None}}}
         )
         tool = ListSecurityFindings(metadata=metadata)
-        response_str = await tool.arun(
-            {"project_full_path": "gitlab-duo/myproject", "pipeline_id": "999"}
-        )
-        response = json.loads(response_str)
-        assert "error" in response
-        assert "Pipeline not found" in response["error"]
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(
+                project_full_path="gitlab-duo/myproject", pipeline_id="999"
+            )
+        assert "Pipeline not found" in str(exc_info.value)
 
     async def test_arun_graphql_errors(self, gitlab_client_mock, metadata):
-        """Test handling of GraphQL errors in response."""
+        """Test handling of GraphQL errors in response raises ToolException."""
         mock_response = {
             "errors": [{"message": "Field 'securityReportFindings' doesn't exist"}]
         }
         gitlab_client_mock.apost = AsyncMock(return_value=mock_response)
         tool = ListSecurityFindings(metadata=metadata)
-        response_str = await tool.arun(
-            {
-                "project_full_path": "gitlab-duo/myproject",
-                "pipeline_id": "123",
-            }
-        )
-        response = json.loads(response_str)
-        assert "error" in response
-        assert response["error"] == "GraphQL errors"
-        assert "errors" in response
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(
+                project_full_path="gitlab-duo/myproject",
+                pipeline_id="123",
+            )
+        assert "GraphQL errors" in str(exc_info.value)
 
     async def test_arun_exception(self, gitlab_client_mock, metadata):
         """Test handling of generic exceptions."""

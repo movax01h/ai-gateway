@@ -1,7 +1,7 @@
 import json
-import logging
 from typing import Any, List, Optional, Tuple, Type
 
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -12,8 +12,6 @@ from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
-
-logger = logging.getLogger(__name__)
 
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
@@ -148,23 +146,20 @@ For example:
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         data = {"title": title, **{k: v for k, v in kwargs.items() if v is not None}}
 
-        try:
-            response: object = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{project_id}/issues",
-                body=json.dumps(data),
-            )
+        response: object = await self.gitlab_client.apost(
+            path=f"/api/v4/projects/{project_id}/issues",
+            body=json.dumps(data),
+        )
 
-            response = self._process_http_response(
-                identifier=f"/api/v4/projects/{project_id}/issues", response=response
-            )
+        response = self._process_http_response(
+            identifier=f"/api/v4/projects/{project_id}/issues", response=response
+        )
 
-            return json.dumps({"created_issue": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"created_issue": response})
 
     def format_display_message(
         self, args: CreateIssueInput, _tool_response: Any = None
@@ -279,27 +274,21 @@ class ListIssues(IssueBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         params = {k: v for k, v in kwargs.items() if v is not None}
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/issues",
-                params=params,
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/issues",
+            params=params,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        issues = self._process_http_response(
+            f"list issues in project {project_id}", response
+        )
 
-            return json.dumps({"issues": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"issues": issues})
 
     def format_display_message(
         self, args: ListIssuesInput, _tool_response: Any = None
@@ -333,24 +322,18 @@ class GetIssue(IssueBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        issue = self._process_http_response(
+            f"get issue {issue_iid} from project {project_id}", response
+        )
 
-            return json.dumps({"issue": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"issue": issue})
 
     def format_display_message(
         self, args: IssueResourceInput, _tool_response: Any = None
@@ -430,26 +413,20 @@ class UpdateIssue(IssueBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         data = {k: v for k, v in kwargs.items() if v is not None}
 
-        try:
-            response = await self.gitlab_client.aput(
-                path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
-                body=json.dumps(data),
-            )
+        response = await self.gitlab_client.aput(
+            path=f"/api/v4/projects/{project_id}/issues/{issue_iid}",
+            body=json.dumps(data),
+        )
 
-            if not response.is_success():
-                return json.dumps(
-                    {
-                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
-                    }
-                )
+        updated_issue = self._process_http_response(
+            f"update issue {issue_iid} in project {project_id}", response
+        )
 
-            return json.dumps({"updated_issue": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"updated_issue": updated_issue})
 
     def format_display_message(
         self, args: UpdateIssueInput, _tool_response: Any = None
@@ -501,38 +478,35 @@ The body parameter is always required.
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            discussion_id = None
-            if note_id is not None and project_id and issue_iid:
-                discussion_result = await self._get_discussion_id_from_note_rest(
-                    project_id,
-                    "issues",
-                    issue_iid,
-                    note_id,
-                )
-                discussion_id = discussion_result.get("discussionId")
-
-            base_path = f"/api/v4/projects/{project_id}/issues/{issue_iid}"
-            if discussion_id:
-                path = f"{base_path}/discussions/{discussion_id}/notes"
-            else:
-                path = f"{base_path}/notes"
-
-            response = await self.gitlab_client.apost(
-                path=path,
-                body=json.dumps({"body": body}),
+        discussion_id = None
+        if note_id is not None and project_id and issue_iid:
+            discussion_result = await self._get_discussion_id_from_note_rest(
+                project_id,
+                "issues",
+                issue_iid,
+                note_id,
             )
+            discussion_id = discussion_result.get("discussionId")
 
-            response = self._process_http_response(
-                identifier=path,
-                response=response,
-            )
+        base_path = f"/api/v4/projects/{project_id}/issues/{issue_iid}"
+        if discussion_id:
+            path = f"{base_path}/discussions/{discussion_id}/notes"
+        else:
+            path = f"{base_path}/notes"
 
-            return json.dumps({"status": "success", "body": body, "response": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        response = await self.gitlab_client.apost(
+            path=path,
+            body=json.dumps({"body": body}),
+        )
+
+        response = self._process_http_response(
+            identifier=path,
+            response=response,
+        )
+
+        return json.dumps({"status": "success", "body": body, "response": response})
 
     def format_display_message(
         self, args: CreateIssueNoteInput, _tool_response: Any = None
@@ -582,27 +556,22 @@ class ListIssueNotes(IssueBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         params = {k: v for k, v in kwargs.items() if v is not None}
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
-                params=params,
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes",
+            params=params,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        notes = self._process_http_response(
+            f"list notes for issue {issue_iid} in project {project_id}",
+            response,
+        )
 
-            return json.dumps({"notes": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"notes": notes})
 
     def format_display_message(
         self, args: ListIssueNotesInput, _tool_response: Any = None
@@ -642,24 +611,19 @@ class GetIssueNote(IssueBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes/{note_id}",
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/issues/{issue_iid}/notes/{note_id}",
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        note = self._process_http_response(
+            f"get note {note_id} from issue {issue_iid} in project {project_id}",
+            response,
+        )
 
-            return json.dumps({"note": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"note": note})
 
     def format_display_message(
         self, args: GetIssueNoteInput, _tool_response: Any = None

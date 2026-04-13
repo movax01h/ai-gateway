@@ -1,7 +1,8 @@
 import json
-import logging
 from typing import Any, List, NamedTuple, Optional, Type, Union
 
+import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -13,7 +14,7 @@ from duo_workflow_service.tools.duo_base_tool import (
 )
 from duo_workflow_service.tools.queries.epics import GET_EPIC_NOTES_QUERY
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 # editorconfig-checker-disable
 GROUP_IDENTIFICATION_DESCRIPTION = """To identify the group you must provide either:
@@ -214,24 +215,21 @@ class CreateEpic(EpicBaseTool):
         validation_result = self._validate_group_url(url, group_id)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         data = {"title": title, **{k: v for k, v in kwargs.items() if v is not None}}
 
-        try:
-            response = await self.gitlab_client.apost(
-                path=f"/api/v4/groups/{validation_result.group_id}/epics",
-                body=json.dumps(data),
-            )
+        response = await self.gitlab_client.apost(
+            path=f"/api/v4/groups/{validation_result.group_id}/epics",
+            body=json.dumps(data),
+        )
 
-            response = self._process_http_response(
-                identifier=f"/api/v4/groups/{validation_result.group_id}/epics",
-                response=response,
-            )
+        response = self._process_http_response(
+            identifier=f"/api/v4/groups/{validation_result.group_id}/epics",
+            response=response,
+        )
 
-            return json.dumps({"created_epic": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"created_epic": response})
 
     def format_display_message(
         self, args: WriteEpicInput, _tool_response: Any = None
@@ -343,7 +341,7 @@ class ListEpics(EpicBaseTool):
         validation_result = self._validate_group_url(url, group_id)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         negate = kwargs.pop("negate", None)
         params = {k: v for k, v in kwargs.items() if v is not None}
@@ -351,23 +349,17 @@ class ListEpics(EpicBaseTool):
         if negate:
             params |= {"not": negate}
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/groups/{validation_result.group_id}/epics",
-                params=params,
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/groups/{validation_result.group_id}/epics",
+            params=params,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        epics = self._process_http_response(
+            f"list epics for group {validation_result.group_id}", response, logger
+        )
 
-            return json.dumps({"epics": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"epics": epics})
 
     def format_display_message(
         self, args: ListEpicsInput, _tool_response: Any = None
@@ -402,24 +394,20 @@ class GetEpic(EpicBaseTool):
         validation_result = self._validate_epic_url(url, group_id, epic_iid)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        epic = self._process_http_response(
+            f"get epic {validation_result.epic_iid} from group {validation_result.group_id}",
+            response,
+            logger,
+        )
 
-            return json.dumps({"epic": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"epic": epic})
 
     def format_display_message(
         self, args: EpicResourceInput, _tool_response: Any = None
@@ -466,26 +454,22 @@ For example:
         validation_result = self._validate_epic_url(url, group_id, epic_iid)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         data = {k: v for k, v in kwargs.items() if v is not None}
 
-        try:
-            response = await self.gitlab_client.aput(
-                path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
-                body=json.dumps(data),
-            )
+        response = await self.gitlab_client.aput(
+            path=f"/api/v4/groups/{validation_result.group_id}/epics/{validation_result.epic_iid}",
+            body=json.dumps(data),
+        )
 
-            if not response.is_success():
-                return json.dumps(
-                    {
-                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
-                    }
-                )
+        updated_epic = self._process_http_response(
+            f"update epic {validation_result.epic_iid} in group {validation_result.group_id}",
+            response,
+            logger,
+        )
 
-            return json.dumps({"updated_epic": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"updated_epic": updated_epic})
 
     def format_display_message(
         self, args: UpdateEpicInput, _tool_response: Any = None
@@ -535,33 +519,28 @@ class ListEpicNotes(EpicBaseTool):
         validation_result = self._validate_epic_url(url, group_id, epic_iid)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
         if validation_result.group_id is None or validation_result.epic_iid is None:
-            return json.dumps({"error": "Missing group_id or epic_iid"})
+            raise ToolException("Missing group_id or epic_iid")
 
         variables = {
             "fullPath": validation_result.group_id,
             "epicIid": str(validation_result.epic_iid),
         }
 
-        try:
-            response = await self.gitlab_client.graphql(GET_EPIC_NOTES_QUERY, variables)
-            widgets = (
-                response.get("namespace", {}).get("workItem", {}).get("widgets", [])
-            )
-            if not widgets:
-                return json.dumps({"error": "No widgets found in the response."})
+        response = await self.gitlab_client.graphql(GET_EPIC_NOTES_QUERY, variables)
+        widgets = response.get("namespace", {}).get("workItem", {}).get("widgets", [])
+        if not widgets:
+            raise ToolException("No widgets found in the response.")
 
-            notes = []
+        notes = []
 
-            for widget in widgets:
-                if "notes" in widget:
-                    notes_nodes = widget.get("notes", {}).get("nodes", [])
-                    notes.extend(notes_nodes)
+        for widget in widgets:
+            if "notes" in widget:
+                notes_nodes = widget.get("notes", {}).get("nodes", [])
+                notes.extend(notes_nodes)
 
-            return json.dumps({"notes": notes}, indent=2)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"notes": notes}, indent=2)
 
     def format_display_message(
         self, args: ListEpicNotesInput, _tool_response: Any = None

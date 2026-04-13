@@ -1,5 +1,4 @@
 import json
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -85,10 +84,8 @@ class TestDocumentationSearch:
         with patch.object(
             tool, "_fetch_documentation", side_effect=Exception(error_msg)
         ):
-            response = await tool._arun(search="test query")
-
-        expected_response = json.dumps({"error": error_msg})
-        assert response == expected_response
+            with pytest.raises(Exception, match=error_msg):
+                await tool._arun(search="test query")
 
 
 def test_format_display_message():
@@ -380,7 +377,7 @@ class TestDocumentationSearchWithSqliteSearch:
 
     @pytest.mark.asyncio
     async def test_arun_with_sqlite_search_error(self):
-        """Test _arun handles errors from SqliteSearch gracefully."""
+        """Test _arun propagates errors from SqliteSearch rather than swallowing them."""
         error_msg = "Database connection failed"
 
         mock_sqlite_search = AsyncMock(spec=SqliteSearch)
@@ -398,13 +395,11 @@ class TestDocumentationSearchWithSqliteSearch:
 
         tool = DocumentationSearch()
         with patch.object(tool, "_fetch_documentation", side_effect=mock_fetch_doc):
-            response = await tool._arun(search="query")
+            with pytest.raises(Exception, match=error_msg):
+                await tool._arun(search="query")
 
         # Assert search_with_retry was called before error occurred
         mock_sqlite_search.search_with_retry.assert_called_once()
-
-        expected_response = json.dumps({"error": error_msg})
-        assert response == expected_response
 
     @pytest.mark.asyncio
     async def test_fetch_documentation_sqlite_search_parameters(self):

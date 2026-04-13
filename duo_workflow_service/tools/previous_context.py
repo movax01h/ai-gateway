@@ -2,6 +2,7 @@ import json
 from typing import Any, Optional, Type
 
 import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.entities.state import Context, WorkflowContext
@@ -33,35 +34,22 @@ class GetSessionContext(DuoBaseTool):
     args_schema: Type[BaseModel] = GetSessionContextInput
 
     async def _execute(self, previous_session_id: int, **_kwargs: Any) -> str:
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",
-                parse_json=True,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",
+            parse_json=True,
+        )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to fetch checkpoints: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
+        checkpoints = self._process_http_response("fetch checkpoints", response, log)
+        if not checkpoints or len(checkpoints) == 0:
+            raise ToolException("Unable to find checkpoint for this session")
+
+        return json.dumps(
+            {
+                "context": self._format_checkpoint_context(
+                    checkpoints[0], previous_session_id
                 )
-                return json.dumps({"error": "API Error"})
-
-            checkpoints = response.body
-            if not checkpoints or len(checkpoints) == 0:
-                return json.dumps(
-                    {"error": "Unable to find checkpoint for this session"}
-                )
-
-            return json.dumps(
-                {
-                    "context": self._format_checkpoint_context(
-                        checkpoints[0], previous_session_id
-                    )
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+            }
+        )
 
     def format_display_message(
         self, args: GetSessionContextInput, _tool_response: Any = None

@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import CreateWorkItem, CreateWorkItemInput
 from duo_workflow_service.tools.work_items.base_tool import (
@@ -280,16 +281,14 @@ async def test_create_work_item_with_error_response(
     resolved_parent = ResolvedParent(type="group", full_path="namespace/group")
     tool._validate_parent_url = AsyncMock(return_value=resolved_parent)
 
-    response = await tool._arun(
-        group_id="namespace/group",
-        title="",  # Empty title to trigger error
-        type_name="Issue",
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            group_id="namespace/group",
+            title="",  # Empty title to trigger error
+            type_name="Issue",
+        )
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "details" in response_json
-    assert response_json["details"]["work_item_errors"] == ["Title cannot be blank"]
+    assert "Title cannot be blank" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -304,15 +303,14 @@ async def test_create_work_item_invalid_type(
     resolved_parent = ResolvedParent(type="group", full_path="namespace/group")
     tool._validate_parent_url = AsyncMock(return_value=resolved_parent)
 
-    response = await tool._arun(
-        group_id="namespace/group",
-        title="New Work Item",
-        type_name="invalid_type",  # Type that doesn't exist
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            group_id="namespace/group",
+            title="New Work Item",
+            type_name="invalid_type",  # Type that doesn't exist
+        )
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "Unknown work item type: 'invalid_type'" in response_json["error"]
+    assert "Unknown work item type: 'invalid_type'" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -327,17 +325,16 @@ async def test_create_epic_in_project_error(
     resolved_parent = ResolvedParent(type="project", full_path="namespace/project")
     tool._validate_parent_url = AsyncMock(return_value=resolved_parent)
 
-    response = await tool._arun(
-        project_id="namespace/project",
-        title="New Epic",
-        type_name="Epic",  # Epics can only be created in groups
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id="namespace/project",
+            title="New Epic",
+            type_name="Epic",  # Epics can only be created in groups
+        )
 
-    response_json = json.loads(response)
-    assert "error" in response_json
     assert (
         "Work item type 'Epic' cannot be created in a project – only in groups."
-        in response_json["error"]
+        in str(exc_info.value)
     )
 
 

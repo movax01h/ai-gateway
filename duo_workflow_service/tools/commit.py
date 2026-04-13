@@ -1,10 +1,10 @@
 import base64
 import json
-import logging
 from datetime import datetime, timezone
 from typing import Any, List, NamedTuple, Optional, Type, cast
 from urllib.parse import quote
 
+import structlog
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,7 @@ from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
@@ -103,17 +103,9 @@ class CommitBaseTool(DuoBaseTool):
         """Fetch default branch name for a project."""
         response = await self.gitlab_client.aget(f"/api/v4/projects/{project_id}")
 
-        if not response.is_success():
-            logger.error(
-                "API error - Status: %s, Body: %s",
-                response.status_code,
-                response.body,
-            )
-            raise ToolException(
-                f"GitLab API error in _get_default_branch: {response.status_code}"
-            )
+        body = self._process_http_response("get default branch", response, logger)
 
-        return response.body.get("default_branch")
+        return body.get("default_branch")
 
     async def _get_file_content(self, project_id: str, ref: str, file_path: str) -> str:
         """Fetch file content from GitLab and decode it."""
@@ -123,17 +115,9 @@ class CommitBaseTool(DuoBaseTool):
             params={"ref": ref},
         )
 
-        if not response.is_success():
-            logger.error(
-                "API error - Status: %s, Body: %s",
-                response.status_code,
-                response.body,
-            )
-            raise ToolException(
-                f"GitLab API error while fetching {file_path}: {response.status_code}"
-            )
+        body = self._process_http_response("get file content", response, logger)
 
-        return base64.b64decode(response.body["content"]).decode("utf-8")
+        return base64.b64decode(body["content"]).decode("utf-8")
 
     async def _prepare_actions_data(
         self,
@@ -306,27 +290,19 @@ class ListCommits(CommitBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         params = {k: v for k, v in kwargs.items() if v is not None}
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/repository/commits",
-                params=params,
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/repository/commits",
+            params=params,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        body = self._process_http_response("list commits", response, logger)
 
-            return json.dumps({"commits": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"commits": body})
 
     def format_display_message(
         self, args: ListCommitsInput, _tool_response: Any = None
@@ -345,7 +321,6 @@ class GetCommitInput(CommitResourceInput):
 
 class GetCommit(CommitBaseTool):
     name: str = "get_commit"
-    # pylint: disable=line-too-long
     description: str = f"""Get a single commit from a GitLab project repository.
 
 {COMMIT_IDENTIFICATION_DESCRIPTION}
@@ -367,29 +342,21 @@ For example:
         validation_result = self._validate_commit_url(url, project_id, commit_sha)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         params = {}
         if stats is not None:
             params["stats"] = str(stats).lower()
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/repository/commits/{validation_result.commit_sha}",
-                params=params,
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{validation_result.project_id}/repository/commits/{validation_result.commit_sha}",
+            params=params,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        body = self._process_http_response("get commit", response, logger)
 
-            return json.dumps({"commit": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"commit": body})
 
     def format_display_message(
         self, args: GetCommitInput, _tool_response: Any = None
@@ -423,38 +390,29 @@ class GetCommitDiff(CommitBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/diff",
-                parse_json=False,
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/diff",
+            parse_json=False,
+        )
+
+        body = self._process_http_response("get commit diff", response, logger)
+
+        # Parse the response and apply diff exclusion policy
+        diff_data = json.loads(body)
+        diff_policy = DiffExclusionPolicy(self.project)
+        filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
+
+        result: dict[str, Any] = {"diff": filtered_diff}
+
+        if len(excluded_files) > 0:
+            result["excluded_files"] = excluded_files
+            result["excluded_reason"] = (
+                DiffExclusionPolicy.format_llm_exclusion_message(excluded_files)
             )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
-
-            # Parse the response and apply diff exclusion policy
-            diff_data = json.loads(response.body)
-            diff_policy = DiffExclusionPolicy(self.project)
-            filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
-
-            result: dict[str, Any] = {"diff": filtered_diff}
-
-            if len(excluded_files) > 0:
-                result["excluded_files"] = excluded_files
-                result["excluded_reason"] = (
-                    DiffExclusionPolicy.format_llm_exclusion_message(excluded_files)
-                )
-
-            return json.dumps(result)
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps(result)
 
     def format_display_message(
         self, args: CommitResourceInput, tool_response: Any = None
@@ -495,24 +453,16 @@ class GetCommitComments(CommitBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/comments",
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/repository/commits/{commit_sha}/comments",
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                logger.error(
-                    "API error - Status: %s, Body: %s",
-                    response.status_code,
-                    response.body,
-                )
+        body = self._process_http_response("get commit comments", response, logger)
 
-            return json.dumps({"comments": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"comments": body})
 
     def format_display_message(
         self, args: CommitResourceInput, _tool_response: Any = None
@@ -660,7 +610,7 @@ class CreateCommit(CommitBaseTool):
         project_id = cast(str, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         auto_branch = None
         start_branch = kwargs.get("start_branch")

@@ -2,13 +2,14 @@ import base64
 import fnmatch
 import html
 import json
-import logging
 import re
 import secrets
 from typing import Any, Dict, List, Optional, Type
 from urllib.parse import quote
 
+import structlog
 import yaml
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -17,7 +18,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 from duo_workflow_service.tools.tool_output_manager import TruncationConfig
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class PostDuoCodeReviewInput(BaseModel):
@@ -47,13 +48,8 @@ class PostDuoCodeReview(DuoBaseTool):
         self, project_id: int, merge_request_iid: int, review_output: str, **kwargs: Any
     ) -> str:
         """Execute the tool to post the code review."""
-        try:
-            response = await self._post_review(
-                project_id, merge_request_iid, review_output
-            )
-            return self._format_response(response, merge_request_iid)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        response = await self._post_review(project_id, merge_request_iid, review_output)
+        return self._format_response(response, merge_request_iid)
 
     async def _post_review(
         self, project_id: int, merge_request_iid: int, review_output: str
@@ -81,7 +77,7 @@ class PostDuoCodeReview(DuoBaseTool):
                     "message": f"Review posted to MR !{merge_request_iid}",
                 }
             )
-        return json.dumps({"error": f"Failed to post review: {response}"})
+        raise ToolException(f"Failed to post review: {response}")
 
     def format_display_message(
         self, args: PostDuoCodeReviewInput, _tool_response: Any = None
@@ -146,20 +142,15 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         )
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
-        try:
-            only_diffs = kwargs.get("only_diffs", False)
-            lightweight = kwargs.get("lightweight", False)
-            context = await self._build_context(
-                validation_result, only_diffs, lightweight
-            )
+        only_diffs = kwargs.get("only_diffs", False)
+        lightweight = kwargs.get("lightweight", False)
+        context = await self._build_context(validation_result, only_diffs, lightweight)
 
-            if lightweight:
-                return self._format_lightweight_output(context)
-            return self._format_output(context)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        if lightweight:
+            return self._format_lightweight_output(context)
+        return self._format_output(context)
 
     async def _build_context(
         self, validation_result, only_diffs: bool = False, lightweight: bool = False
@@ -224,12 +215,10 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         )
         response = await self.gitlab_client.aget(path, parse_json=False)
 
-        if not response.is_success():
-            logger.error(
-                "API error - Status: %s, Body: %s", response.status_code, response.body
-            )
-
-        return json.loads(response.body)
+        body = self._process_http_response(
+            "fetch merge request metadata", response, logger
+        )
+        return json.loads(body)
 
     async def _fetch_mr_diffs(self, validation_result) -> List[Dict[str, Any]]:
         """Fetch merge request diffs."""
@@ -239,12 +228,10 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         )
         response = await self.gitlab_client.aget(path, parse_json=False)
 
-        if not response.is_success():
-            logger.error(
-                "API error - Status: %s, Body: %s", response.status_code, response.body
-            )
-
-        return json.loads(response.body)
+        body = self._process_http_response(
+            "fetch merge request diffs", response, logger
+        )
+        return json.loads(body)
 
     async def _fetch_original_files(
         self, project_id: int, branch: str, file_paths: List[str]
@@ -286,12 +273,10 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             path, params={"ref": branch}, parse_json=False
         )
 
-        if not response.is_success():
-            logger.error(
-                "API error - Status: %s, Body: %s", response.status_code, response.body
-            )
-
-        file_data = json.loads(response.body)
+        body = self._process_http_response(
+            f"fetch file content for {file_path}", response, logger
+        )
+        file_data = json.loads(body)
         return base64.b64decode(file_data["content"]).decode("utf-8")
 
     def _process_filtered_diffs(

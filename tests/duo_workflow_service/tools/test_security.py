@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from langchain_core.tools import ToolException
 from packaging.version import InvalidVersion
 from pydantic import ValidationError
 
@@ -221,7 +222,7 @@ class TestListVulnerabilities:
         )
 
         tool = ListVulnerabilities(metadata=metadata)
-        response = await tool.arun(
+        await tool.arun(
             {
                 "project_full_path": "namespace/project",
                 "severity": [
@@ -253,7 +254,7 @@ class TestListVulnerabilities:
         )
 
         tool = ListVulnerabilities(metadata=metadata)
-        response = await tool.arun(
+        await tool.arun(
             {
                 "project_full_path": "namespace/project",
                 "report_type": [
@@ -421,34 +422,28 @@ class TestListVulnerabilities:
         gitlab_client_mock.apost = AsyncMock(return_value={"data": {"project": None}})
 
         tool = ListVulnerabilities(metadata=metadata)
-        response = await tool.arun({"project_full_path": "nonexistent/project"})
-        result = json.loads(response)
+        with pytest.raises(ToolException) as exc_info:
+            await tool.arun({"project_full_path": "nonexistent/project"})
 
-        assert "error" in result
-        assert "Project not found or access denied" in result["error"]
-        assert result["project_path"] == "nonexistent/project"
+        assert "Project not found or access denied: nonexistent/project" in str(
+            exc_info.value
+        )
 
     async def test_api_error(self, gitlab_client_mock, metadata):
         """Test handling of API errors."""
         gitlab_client_mock.apost = AsyncMock(side_effect=Exception("Network error"))
 
         tool = ListVulnerabilities(metadata=metadata)
-        response = await tool.arun({"project_full_path": "namespace/project"})
-        result = json.loads(response)
-
-        assert "error" in result
-        assert "An error occurred while listing vulnerabilities" in result["error"]
-        assert result["error_type"] == "Exception"
+        with pytest.raises(Exception, match="Network error"):
+            await tool.arun({"project_full_path": "namespace/project"})
 
     async def test_invalid_response_structure(self, gitlab_client_mock, metadata):
         """Test handling of invalid API response structure."""
         gitlab_client_mock.apost = AsyncMock(return_value={"invalid": "response"})
 
         tool = ListVulnerabilities(metadata=metadata)
-        response = await tool.arun({"project_full_path": "namespace/project"})
-        result = json.loads(response)
-
-        assert "error" in result
+        with pytest.raises(ToolException, match="Invalid GraphQL response"):
+            await tool.arun({"project_full_path": "namespace/project"})
 
     async def test_null_nodes_in_response(self, gitlab_client_mock, metadata):
         """Test handling when nodes is null in response."""
@@ -655,7 +650,7 @@ async def test_dismiss_vulnerability_with_numeric_id(gitlab_client_mock, metadat
         "dismissal_reason": "ACCEPTABLE_RISK",
     }
 
-    response = await tool.arun(input_data)
+    await tool.arun(input_data)
 
     # Should automatically add the GraphQL prefix
     gitlab_client_mock.apost.assert_called_once()
@@ -676,12 +671,11 @@ async def test_dismiss_vulnerability_invalid_dismissal_reason(
         "dismissal_reason": "INVALID_REASON",
     }
 
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Invalid dismissal reason" in error_response["error"]
-    assert "INVALID_REASON" in error_response["error"]
+    assert "Invalid dismissal reason" in str(exc_info.value)
+    assert "INVALID_REASON" in str(exc_info.value)
 
     gitlab_client_mock.apost.assert_not_called()
 
@@ -696,11 +690,10 @@ async def test_dismiss_vulnerability_comment_too_long(gitlab_client_mock, metada
         "dismissal_reason": "FALSE_POSITIVE",
     }
 
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Comment must be 50,000 characters or less" in error_response["error"]
+    assert "Comment must be 50,000 characters or less" in str(exc_info.value)
 
     gitlab_client_mock.apost.assert_not_called()
 
@@ -726,11 +719,12 @@ async def test_dismiss_vulnerability_with_api_errors(gitlab_client_mock, metadat
         "dismissal_reason": "FALSE_POSITIVE",
     }
 
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Vulnerability not found; Access denied" in error_response["error"]
+    assert "Mutation errors:" in str(exc_info.value)
+    assert "Vulnerability not found" in str(exc_info.value)
+    assert "Access denied" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -966,11 +960,12 @@ async def test_link_vulnerability_to_issue_with_api_errors(
         "vulnerability_ids": ["gid://gitlab/Vulnerability/999"],
     }
 
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Issue not found; Vulnerability not found" in error_response["error"]
+    assert "Mutation errors:" in str(exc_info.value)
+    assert "Issue not found" in str(exc_info.value)
+    assert "Vulnerability not found" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1252,11 +1247,11 @@ async def test_confirm_vulnerability_with_graphql_errors(gitlab_client_mock, met
 
     tool = ConfirmVulnerability(metadata=metadata)
 
-    response = await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/999"})
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/999"})
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "GraphQL errors: ['Vulnerability not found']" in error_response["error"]
+    assert "GraphQL errors:" in str(exc_info.value)
+    assert "Vulnerability not found" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1265,11 +1260,8 @@ async def test_confirm_vulnerability_exception(gitlab_client_mock, metadata):
 
     tool = ConfirmVulnerability(metadata=metadata)
 
-    response = await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
-
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "API Error" in error_response["error"]
+    with pytest.raises(Exception, match="API Error"):
+        await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
 
 
 @pytest.mark.asyncio
@@ -1287,11 +1279,10 @@ async def test_confirm_vulnerability_with_long_comment_error(
         "comment": long_comment,
     }
 
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Comment must be 50,000 characters or less" in error_response["error"]
+    assert "Comment must be 50,000 characters or less" in str(exc_info.value)
 
     # Verify that no API call was made due to validation error
     gitlab_client_mock.apost.assert_not_called()
@@ -1396,11 +1387,8 @@ async def test_revert_to_detected_vulnerability_exception(gitlab_client_mock, me
 
     tool = RevertToDetectedVulnerability(metadata=metadata)
 
-    response = await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
-
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "API Error" in error_response["error"]
+    with pytest.raises(Exception, match="API Error"):
+        await tool.arun({"vulnerability_id": "gid://gitlab/Vulnerability/123"})
 
 
 @pytest.mark.parametrize(
@@ -1552,12 +1540,12 @@ async def test_create_vulnerability_issue_project_not_found(
     gitlab_client_mock.apost = AsyncMock(return_value={"data": {"project": None}})
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Project not found or access denied" in error_response["error"]
-    assert error_response["project_path"] == "nonexistent/project"
+    assert "Project not found or access denied: nonexistent/project" in str(
+        exc_info.value
+    )
     assert gitlab_client_mock.apost.call_count == 1
 
 
@@ -1583,13 +1571,13 @@ async def test_create_vulnerability_issue_with_mutation_errors(
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
     test_input = {**input_data, "vulnerability_ids": ["gid://gitlab/Vulnerability/999"]}
-    response = await tool.arun(test_input)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert (
-        "Vulnerability not found; Insufficient permissions" in error_response["error"]
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(test_input)
+
+    assert "Mutation errors:" in str(exc_info.value)
+    assert "Vulnerability not found" in str(exc_info.value)
+    assert "Insufficient permissions" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1613,12 +1601,12 @@ async def test_create_vulnerability_issue_invalid_project_response(
     gitlab_client_mock.apost = AsyncMock(return_value=None)
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Invalid GraphQL response" in error_response["error"]
-    assert error_response["project_path"] == "gitlab-duo/test"
+    assert "Invalid GraphQL response for project: gitlab-duo/test" in str(
+        exc_info.value
+    )
 
 
 @pytest.mark.asyncio
@@ -1628,12 +1616,12 @@ async def test_create_vulnerability_issue_project_response_missing_data(
     gitlab_client_mock.apost = AsyncMock(return_value={"errors": ["Some error"]})
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
-    response = await tool.arun(input_data)
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Invalid GraphQL response" in error_response["error"]
-    assert error_response["project_path"] == "gitlab-duo/test"
+    assert "Invalid GraphQL response for project: gitlab-duo/test" in str(
+        exc_info.value
+    )
 
 
 @pytest.mark.asyncio
@@ -1645,11 +1633,11 @@ async def test_create_vulnerability_issue_invalid_mutation_response(
     )
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
-    response = await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Invalid GraphQL response" in error_response["error"]
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
+
+    assert "Invalid GraphQL response" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1661,11 +1649,11 @@ async def test_create_vulnerability_issue_mutation_response_missing_data(
     )
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
-    response = await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Invalid GraphQL response" in error_response["error"]
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
+
+    assert "Invalid GraphQL response" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1677,11 +1665,11 @@ async def test_create_vulnerability_issue_mutation_response_missing_key(
     )
 
     tool = CreateVulnerabilityIssue(metadata=metadata)
-    response = await tool.arun(input_data)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Invalid GraphQL response" in error_response["error"]
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
+
+    assert "Invalid GraphQL response" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -1860,14 +1848,12 @@ async def test_link_vulnerability_to_merge_request_with_api_errors(
             "merge_request_id": "gid://gitlab/MergeRequest/999",
         }
 
-        response = await tool.arun(test_input_data)
+        with pytest.raises(ToolException) as exc_info:
+            await tool.arun(test_input_data)
 
-        error_response = json.loads(response)
-        assert "error" in error_response
-        assert (
-            "Vulnerability not found; Merge request not found"
-            in error_response["error"]
-        )
+        assert "Mutation errors:" in str(exc_info.value)
+        assert "Vulnerability not found" in str(exc_info.value)
+        assert "Merge request not found" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1895,11 +1881,9 @@ async def test_link_vulnerability_to_merge_request_unexpected_response_structure
             "merge_request_id": "gid://gitlab/MergeRequest/456",
         }
 
-        response = await tool.arun(test_input_data)
-        error_response = json.loads(response)
-        assert "error" in error_response
-        assert "Unexpected response structure" in error_response["error"]
-        assert "response" in error_response
+        # Now expects KeyError to propagate instead of returning JSON error
+        with pytest.raises(KeyError, match="vulnerabilityLinkMergeRequest"):
+            await tool.arun(test_input_data)
 
 
 @pytest.mark.parametrize(

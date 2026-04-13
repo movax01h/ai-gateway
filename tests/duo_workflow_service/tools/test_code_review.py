@@ -178,14 +178,14 @@ async def test_post_duo_code_review(gitlab_client_mock, metadata):
 
 @pytest.mark.asyncio
 async def test_post_duo_code_review_exception(gitlab_client_mock, metadata):
+    """Test that exceptions from PostDuoCodeReview._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
     tool = PostDuoCodeReview(metadata=metadata)
-    response = await tool._arun(
-        project_id=123, merge_request_iid=45, review_output="<review>test</review>"
-    )
-    expected_response = json.dumps({"error": error_message})
-    assert response == expected_response
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(
+            project_id=123, merge_request_iid=45, review_output="<review>test</review>"
+        )
 
 
 @pytest.mark.parametrize(
@@ -855,22 +855,23 @@ def test_build_review_context_format_display_message(input_data, expected_messag
 
 @pytest.mark.asyncio
 async def test_build_review_context_validation_error(gitlab_client_mock, metadata):
+    """Test that validation errors raise ToolException instead of returning error JSON."""
+    from langchain_core.tools import ToolException
+
     tool = BuildReviewMergeRequestContext(metadata=metadata)
-    response = await tool._arun()
-    result = json.loads(response)
-    assert "error" in result
+    with pytest.raises(ToolException):
+        await tool._arun()
     gitlab_client_mock.aget.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_build_review_context_exception(gitlab_client_mock, metadata):
+    """Test that exceptions from BuildReviewMergeRequestContext._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.aget = AsyncMock(side_effect=Exception(error_message))
     tool = BuildReviewMergeRequestContext(metadata=metadata)
-    response = await tool._arun(project_id="test", merge_request_iid=123)
-    result = json.loads(response)
-    assert "error" in result
-    assert error_message in result["error"]
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(project_id="test", merge_request_iid=123)
 
 
 @pytest.mark.asyncio

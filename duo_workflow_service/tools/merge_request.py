@@ -2,6 +2,7 @@ import json
 from typing import Any, Optional, Type
 
 import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -113,7 +114,7 @@ class CreateMergeRequest(DuoBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
         data = {
             "source_branch": source_branch,
             "target_branch": target_branch,
@@ -136,21 +137,18 @@ class CreateMergeRequest(DuoBaseTool):
             }
         )
 
-        try:
-            path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)
-            response = await self.gitlab_client.apost(
-                path=path,
-                body=json.dumps(data),
-            )
+        path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)
+        response = await self.gitlab_client.apost(
+            path=path,
+            body=json.dumps(data),
+        )
 
-            response = self._process_http_response(
-                identifier=path,
-                response=response,
-            )
+        response = self._process_http_response(
+            identifier=path,
+            response=response,
+        )
 
-            return json.dumps({"created_merge_request": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"created_merge_request": response})
 
     def format_display_message(
         self, args: CreateMergeRequestInput, _tool_response: Any = None
@@ -187,28 +185,22 @@ class GetMergeRequest(DuoBaseTool):
         )
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
-        try:
-            path = (
-                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
-                f"{validation_result.merge_request_iid}"
-            )
-            response = await self.gitlab_client.aget(
-                path=path,
-                parse_json=False,
-            )
+        path = (
+            f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+            f"{validation_result.merge_request_iid}"
+        )
+        response = await self.gitlab_client.aget(
+            path=path,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to fetch merge request: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
+        merge_request = self._process_http_response(
+            "fetch merge request", response, log
+        )
 
-            return json.dumps({"merge_request": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"merge_request": merge_request})
 
     def format_display_message(
         self, args: MergeRequestResourceInput, _tool_response: Any = None
@@ -244,41 +236,33 @@ class ListMergeRequestDiffs(DuoBaseTool):
         )
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
-        try:
-            path = (
-                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
-                f"{validation_result.merge_request_iid}/diffs"
+        path = (
+            f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+            f"{validation_result.merge_request_iid}/diffs"
+        )
+        response = await self.gitlab_client.aget(
+            path=path,
+            parse_json=False,
+        )
+
+        body = self._process_http_response("fetch merge request diffs", response, log)
+
+        # Parse the response and apply diff exclusion policy
+        diff_data = json.loads(body)
+        diff_policy = DiffExclusionPolicy(self.project)
+        filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
+
+        result: dict[str, Any] = {"diffs": filtered_diff}
+
+        if len(excluded_files) > 0:
+            result["excluded_files"] = excluded_files
+            result["excluded_reason"] = (
+                DiffExclusionPolicy.format_llm_exclusion_message(excluded_files)
             )
-            response = await self.gitlab_client.aget(
-                path=path,
-                parse_json=False,
-            )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to fetch merge request diffs: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
-
-            # Parse the response and apply diff exclusion policy
-            diff_data = json.loads(response.body)
-            diff_policy = DiffExclusionPolicy(self.project)
-            filtered_diff, excluded_files = diff_policy.filter_allowed_diffs(diff_data)
-
-            result: dict[str, Any] = {"diffs": filtered_diff}
-
-            if len(excluded_files) > 0:
-                result["excluded_files"] = excluded_files
-                result["excluded_reason"] = (
-                    DiffExclusionPolicy.format_llm_exclusion_message(excluded_files)
-                )
-
-            return json.dumps(result)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps(result)
 
     def format_display_message(
         self, args: MergeRequestResourceInput, tool_response: Any = None
@@ -347,12 +331,10 @@ The body parameter is always required.
         )
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         if not validation_result.project_id or not validation_result.merge_request_iid:
-            return json.dumps(
-                {"error": "Missing required identifiers after validation"}
-            )
+            raise ToolException("Missing required identifiers after validation")
 
         discussion_id = None
         if note_id is not None:
@@ -377,17 +359,14 @@ The body parameter is always required.
         if internal:
             payload["internal"] = True
 
-        try:
-            response = await self.gitlab_client.apost(
-                path=path,
-                body=json.dumps(payload),
-            )
+        response = await self.gitlab_client.apost(
+            path=path,
+            body=json.dumps(payload),
+        )
 
-            response = self._process_http_response(identifier=path, response=response)
+        response = self._process_http_response(identifier=path, response=response)
 
-            return json.dumps({"created_merge_request_note": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"created_merge_request_note": response})
 
     def format_display_message(
         self, args: CreateMergeRequestNoteInput, _tool_response: Any = None
@@ -421,18 +400,14 @@ class ListAllMergeRequestNotes(DuoBaseTool):
         )
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
-        try:
-            path = (
-                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
-                f"{validation_result.merge_request_iid}/notes"
-            )
-            notes = await self._paginate_get(path)
-            return json.dumps({"notes": notes})
-        except Exception as e:
-            log.error("Failed to fetch merge request notes: %s", e)
-            return json.dumps({"error": str(e)})
+        path = (
+            f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+            f"{validation_result.merge_request_iid}/notes"
+        )
+        notes = await self._paginate_get(path)
+        return json.dumps({"notes": notes})
 
     def format_display_message(
         self, args: MergeRequestResourceInput, _tool_response: Any = None
@@ -574,7 +549,7 @@ class ListMergeRequest(DuoBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         # Build query parameters
         params = {}
@@ -597,24 +572,18 @@ class ListMergeRequest(DuoBaseTool):
             if param in kwargs and kwargs.get(param) is not None:
                 params[param] = kwargs[param]
 
-        try:
-            path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)
-            response = await self.gitlab_client.aget(
-                path=path,
-                params=params,
-                parse_json=False,
-            )
+        path = MERGE_REQUESTS_API_PATH.format(project_id=project_id)
+        response = await self.gitlab_client.aget(
+            path=path,
+            params=params,
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to list merge requests: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
+        merge_requests = self._process_http_response(
+            "list merge requests", response, log
+        )
 
-            return json.dumps({"merge_requests": response.body})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"merge_requests": merge_requests})
 
     def format_display_message(
         self, args: ListMergeRequestInput, _tool_response: Any = None
@@ -676,28 +645,25 @@ For example:
         )
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         data = {k: v for k, v in kwargs.items() if v is not None}
 
-        try:
-            path = (
-                f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
-                f"{validation_result.merge_request_iid}"
-            )
-            response = await self.gitlab_client.aput(
-                path=path,
-                body=json.dumps(data),
-            )
+        path = (
+            f"{MERGE_REQUESTS_API_PATH.format(project_id=validation_result.project_id)}/"
+            f"{validation_result.merge_request_iid}"
+        )
+        response = await self.gitlab_client.aput(
+            path=path,
+            body=json.dumps(data),
+        )
 
-            response = self._process_http_response(
-                identifier=path,
-                response=response,
-            )
+        response = self._process_http_response(
+            identifier=path,
+            response=response,
+        )
 
-            return json.dumps({"updated_merge_request": response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"updated_merge_request": response})
 
     def format_display_message(
         self, args: UpdateMergeRequestInput, _tool_response: Any = None

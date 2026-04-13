@@ -4,6 +4,7 @@ from typing import Any, List, Optional, Tuple, Type
 from urllib.parse import quote
 
 import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -113,44 +114,31 @@ class GetRepositoryFile(RepositoryFileBaseTool):
         )
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            if file_path is None:
-                return json.dumps({"error": "Missing file_path"})
+        if file_path is None:
+            raise ToolException("Missing file_path")
 
-            # Check file exclusion policy if project is available
-            policy = FileExclusionPolicy(self.project)
-            if file_path and not policy.is_allowed(file_path):
-                return json.dumps(
-                    {
-                        "error": FileExclusionPolicy.format_llm_exclusion_message(
-                            [file_path]
-                        )
-                    }
-                )
-
-            encoded_file_path = quote(file_path, safe="")
-
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
-                params={"ref": ref},
-                parse_json=True,
+        # Check file exclusion policy if project is available
+        policy = FileExclusionPolicy(self.project)
+        if file_path and not policy.is_allowed(file_path):
+            raise ToolException(
+                FileExclusionPolicy.format_llm_exclusion_message([file_path])
             )
 
-            if not response.is_success():
-                log.error(
-                    "Get repository file request failed with status %s: %s",
-                    response.status_code,
-                    response.body,
-                )
-                return json.dumps({"error": response.body})
+        encoded_file_path = quote(file_path, safe="")
 
-            content = base64.b64decode(response.body["content"]).decode("utf-8")
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/repository/files/{encoded_file_path}",
+            params={"ref": ref},
+            parse_json=True,
+        )
 
-            return json.dumps({"content": content})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        body = self._process_http_response("Get repository file", response, log)
+
+        content = base64.b64decode(body["content"]).decode("utf-8")
+
+        return json.dumps({"content": content})
 
     def format_display_message(
         self, args: RepositoryFileResourceInput, _tool_response: Any = None
@@ -222,7 +210,7 @@ class ListRepositoryTree(DuoBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
         params = {}
         optional_params = ["path", "ref", "page", "per_page"]
@@ -234,39 +222,38 @@ class ListRepositoryTree(DuoBaseTool):
         if recursive is not None:
             params["recursive"] = str(recursive).lower()
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{project_id}/repository/tree",
-                params=params,
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/repository/tree",
+            params=params,
+        )
+
+        if not response.is_success():
+            log.error(
+                "List repository tree request failed with status %s: %s",
+                response.status_code,
+                response.body,
+            )
+            raise ToolException(
+                f"List repository tree request failed with status {response.status_code}: {response.body}"
             )
 
-            if not response.is_success():
-                log.error(
-                    "List repository tree request failed with status %s: %s",
-                    response.status_code,
-                    response.body,
-                )
-                return json.dumps(response.body)
+        # Filter results based on file exclusion policy
+        policy = FileExclusionPolicy(self.project)
 
-            # Filter results based on file exclusion policy
-            policy = FileExclusionPolicy(self.project)
+        # Extract file paths from the response objects
+        file_paths: List[str] = [
+            item.get("path", "")
+            for item in response.body
+            if isinstance(item.get("path"), str)
+        ]
+        allowed_paths, _excluded_paths = policy.filter_allowed(file_paths)
 
-            # Extract file paths from the response objects
-            file_paths: List[str] = [
-                item.get("path", "")
-                for item in response.body
-                if isinstance(item.get("path"), str)
-            ]
-            allowed_paths, _excluded_paths = policy.filter_allowed(file_paths)
+        # Filter the original response to only include allowed items
+        filtered_response = [
+            item for item in response.body if item.get("path") in allowed_paths
+        ]
 
-            # Filter the original response to only include allowed items
-            filtered_response = [
-                item for item in response.body if item.get("path") in allowed_paths
-            ]
-
-            return json.dumps({"tree": filtered_response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"tree": filtered_response})
 
     def format_display_message(
         self, args: RepositoryTreeResourceInput, _tool_response: Any = None
