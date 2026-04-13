@@ -1,10 +1,13 @@
-from typing import Any, Optional, Type
+from typing import Any, ClassVar, Optional, Type
 
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.ascp.queries import LIST_ASCP_SCANS_QUERY
 from duo_workflow_service.tools.ascp.types import ScanTypeLiteral
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
+    DuoBaseTool,
+)
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
@@ -57,6 +60,8 @@ class ListAscpScans(DuoBaseTool):
     Success when errors is empty and response.scans / response.page_info are set; on error,
     errors is non-empty and response contains raw_response (raw GraphQL payload) when available.
     """
+
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
 
     name: str = "ascp_list_scans"
     description: str = """

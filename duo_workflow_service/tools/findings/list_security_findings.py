@@ -1,12 +1,15 @@
 import json
 from collections import Counter
 from enum import StrEnum
-from typing import Any, Optional, Type
+from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.findings.queries.security_findings import (
     LIST_SECURITY_FINDINGS_QUERY,
 )
@@ -87,6 +90,7 @@ class ListSecurityFindingsInput(BaseModel):
 class ListSecurityFindings(DuoBaseTool):
     """Tool for listing security findings from a specific pipeline scan."""
 
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "list_security_findings"
     description: str = """List ephemeral security findings from a specific GitLab pipeline security scan.
 

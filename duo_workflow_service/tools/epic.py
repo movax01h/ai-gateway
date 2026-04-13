@@ -1,5 +1,5 @@
 import json
-from typing import Any, List, NamedTuple, Optional, Type, Union
+from typing import Any, ClassVar, List, NamedTuple, Optional, Type, Union
 
 import structlog
 from langchain_core.tools import ToolException
@@ -44,6 +44,8 @@ class EpicURLValidationResult(NamedTuple):
 
 
 class EpicBaseTool(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = "EPICS"
+
     def _validate_group_url(
         self, url: Optional[str], group_id: Optional[int | str]
     ) -> GroupURLValidationResult:

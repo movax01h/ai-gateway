@@ -1,10 +1,13 @@
 import json
-from typing import Any, Type, Union
+from typing import Any, ClassVar, Type, Union
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.findings.queries.security_findings import (
     GET_SECURITY_FINDING_DETAILS_QUERY,
 )
@@ -39,6 +42,7 @@ class GetSecurityFindingDetailsInput(BaseModel):
 class GetSecurityFindingDetails(DuoBaseTool):
     """Tool for fetching detailed information about a specific security finding from a pipeline scan."""
 
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "get_security_finding_details"
     description: str = """
     Use this tool to get details for a specific security finding identified by its UUID and pipeline ID.

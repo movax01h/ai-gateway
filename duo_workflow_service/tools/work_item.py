@@ -289,6 +289,14 @@ class WorkItemResourceInput(ParentResourceInput):
         default=None,
         description="The internal ID of the work item. Required if URL is not provided.",
     )
+    types: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "The expected work item type, used for checking required tier plan. "
+            "Must be one of: "
+            + ", ".join(sorted(type.upper().replace(" ", "_") for type in ALL_TYPES))
+        ),
+    )
 
 
 class GetWorkItem(WorkItemBaseTool):

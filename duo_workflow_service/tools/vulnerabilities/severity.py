@@ -5,7 +5,10 @@ from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
+    DuoBaseTool,
+)
 
 PROJECT_IDENTIFICATION_DESCRIPTION = """The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project')."""
 
@@ -27,6 +30,7 @@ class UpdateVulnerabilitySeverityInput(BaseModel):
 
 
 class UpdateVulnerabilitySeverity(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     VALID_SEVERITIES: ClassVar[set[str]] = {
         "CRITICAL",
         "HIGH",

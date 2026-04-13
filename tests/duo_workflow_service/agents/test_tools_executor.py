@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Type, cast
@@ -28,6 +29,7 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.security.prompt_scanner import DetectionType, ScanResult
 from duo_workflow_service.security.scanner_factory import PromptInjectionDetectedError
@@ -1775,3 +1777,53 @@ async def test_tool_info_args_enriched_with_project_name(
     )
 
     assert tool_log["tool_info"]["args"]["project_name"] == "my-project"
+
+
+@pytest.mark.asyncio
+async def test_handle_tier_access_denied(all_tools, toolset, workflow_state, flow_type):
+    tier_tool = mock_tool(
+        name="list_vulnerabilities",
+        side_effect=TierAccessDeniedException(
+            required_plan="ultimate", feature="security_dashboard"
+        ),
+    )
+    all_tools["list_vulnerabilities"] = tier_tool
+    toolset = Toolset(pre_approved=set(), all_tools=all_tools)
+    executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+    )
+
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "listing vulnerabilities"}],
+            tool_calls=[
+                {
+                    "id": "call-tier-1",
+                    "name": "list_vulnerabilities",
+                    "args": {"project_full_path": "ns/project"},
+                }
+            ],
+            id="ai-msg-tier",
+        )
+    ]
+
+    result = await executor.run(workflow_state)
+
+    tool_msg = result[0]["conversation_history"]["planner"][0]
+    response_data = json.loads(tool_msg.content)
+    assert response_data["error"] == "tier_access_denied"
+    assert response_data["required_plan"] == "ultimate"
+    assert (
+        response_data["link_url"] == "https://docs.gitlab.com/user/duo_agent_platform/"
+    )
+
+    update = cast(Command, result[-1]).update
+    ui_chat_logs = update["ui_chat_log"]
+    tool_log = next(
+        log for log in ui_chat_logs if log.get("message_type") == MessageTypeEnum.TOOL
+    )
+    assert tool_log["status"] == ToolStatus.FAILURE
+    assert "Ultimate" in tool_log["content"]

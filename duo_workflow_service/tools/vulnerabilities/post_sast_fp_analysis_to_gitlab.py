@@ -1,10 +1,13 @@
 import json
-from typing import Any, Type
+from typing import Any, ClassVar, Type
 
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
-from duo_workflow_service.tools import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
+    DuoBaseTool,
+)
 
 
 class PostSastFpAnalysisToGitlabInput(BaseModel):
@@ -22,6 +25,7 @@ class PostSastFpAnalysisToGitlabInput(BaseModel):
 
 
 class PostSastFpAnalysisToGitlab(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "post_sast_fp_analysis_to_gitlab"
     description: str = """Post SAST False Positive detection analysis results to GitLab via API.
     This tool posts the false positive analysis for a specific vulnerability using GitLab's API.
