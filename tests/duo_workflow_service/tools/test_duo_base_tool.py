@@ -1,11 +1,12 @@
 import json
-from typing import Any, Type
+from typing import Any, ClassVar, Optional, Type
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
@@ -581,6 +582,228 @@ async def test_get_discussion_id_from_note_rest_api_exception(
             resource_iid=42,
             note_id=1,
         )
+
+
+class TierGatedTool(DuoBaseTool):
+    name: str = "tier_gated_tool"
+    description: str = "Tool that requires a licensed feature"
+    tier_check_licensed_feature: ClassVar[str] = "SECURITY_DASHBOARD"
+    args_schema: Type[BaseModel] = BaseModel
+
+    async def _execute(self, **kwargs):
+        return "[]"
+
+
+@pytest.fixture(name="tier_tool")
+def tier_tool_fixture(gitlab_client_mock):
+    return TierGatedTool(metadata={"gitlab_client": gitlab_client_mock})
+
+
+def _graphql_response(available: bool, required_plan: Optional[str] = None):
+    return GitLabHttpResponse(
+        200,
+        {
+            "data": {
+                "project": {
+                    "licensedFeatureAvailability": {
+                        "available": available,
+                        "requiredPlan": required_plan,
+                    }
+                }
+            }
+        },
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.duo_base_tool.supports_licensed_feature_availability",
+    return_value=True,
+)
+async def test_check_tier_access_raises_when_unavailable(
+    _, tier_tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=_graphql_response(available=False, required_plan="ultimate")
+    )
+
+    with pytest.raises(TierAccessDeniedException) as exc_info:
+        await tier_tool._check_tier_access(
+            "SECURITY_DASHBOARD",
+            {"project_full_path": "my-group/my-project"},
+        )
+
+    assert exc_info.value.required_plan == "ultimate"
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.duo_base_tool.supports_licensed_feature_availability",
+    return_value=True,
+)
+async def test_check_tier_access_passes_when_available(
+    _, tier_tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(return_value=_graphql_response(available=True))
+
+    await tier_tool._check_tier_access(
+        "SECURITY_DASHBOARD",
+        {"project_full_path": "my-group/my-project"},
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.duo_base_tool.supports_licensed_feature_availability",
+    return_value=False,
+)
+async def test_check_tier_access_skipped_on_old_gitlab(
+    _, tier_tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock()
+
+    await tier_tool._arun(project_full_path="my-group/my-project")
+
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.duo_base_tool.supports_licensed_feature_availability",
+    return_value=True,
+)
+async def test_check_tier_access_swallows_graphql_errors(
+    _, tier_tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(side_effect=Exception("network error"))
+
+    await tier_tool._check_tier_access(
+        "SECURITY_DASHBOARD",
+        {"project_full_path": "my-group/my-project"},
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.duo_base_tool.supports_licensed_feature_availability",
+    return_value=True,
+)
+async def test_check_tier_access_uses_namespace_scope_for_groups(
+    _, tier_tool, gitlab_client_mock
+):
+    ns_response = GitLabHttpResponse(
+        200,
+        {
+            "data": {
+                "namespace": {
+                    "licensedFeatureAvailability": {
+                        "available": False,
+                        "requiredPlan": "premium",
+                    }
+                }
+            }
+        },
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=ns_response)
+
+    with pytest.raises(TierAccessDeniedException) as exc_info:
+        await tier_tool._check_tier_access(
+            "EPICS",
+            {"group_id": "my-group"},
+        )
+
+    assert exc_info.value.required_plan == "premium"
+    call_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert (
+        "namespace(fullPath:" in call_body["query"] or "namespace" in call_body["query"]
+    )
+
+
+@pytest.mark.parametrize(
+    "result,expected",
+    [
+        (json.dumps({"error": "forbidden"}), True),
+        (json.dumps([]), True),
+        (json.dumps({"items": []}), True),
+        (json.dumps({"items": [1, 2]}), False),
+        (json.dumps({"count": 5}), False),
+        ("not json", False),
+        (42, False),
+    ],
+)
+def test_is_empty_or_error_response(result, expected):
+    assert DuoBaseTool._is_empty_or_error_response(result) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs,metadata,expected",
+    [
+        ({"project_full_path": "ns/project"}, {}, ("ns/project", "project")),
+        ({"unrelated": "value"}, {}, None),
+        (
+            {"unrelated": "value"},
+            {
+                "project": {
+                    "id": 42,
+                    "web_url": "http://gdk.test:3000/free-group/test-project",
+                }
+            },
+            ("free-group/test-project", "project"),
+        ),
+    ],
+)
+async def test_get_resource_path(kwargs, metadata, expected):
+    tool = DummyTool(metadata=metadata)
+    result = await tool._get_resource_path(kwargs)
+    assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_get_resource_path_from_group_id(gitlab_client_mock):
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = {"full_path": "my-group"}
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = DummyTool(metadata={"gitlab_client": gitlab_client_mock})
+    result = await tool._get_resource_path({"group_id": "123"})
+
+    assert result == ("my-group", "namespace")
+
+
+@pytest.mark.asyncio
+async def test_resolve_identifier_to_path_non_numeric():
+    tool = DummyTool(metadata={})
+    path = await tool._resolve_identifier_to_path("ns%2Fproject", "project")
+    assert path == "ns/project"
+
+
+@pytest.mark.asyncio
+async def test_resolve_identifier_to_path_numeric(gitlab_client_mock):
+    mock_response = Mock()
+    mock_response.is_success.return_value = True
+    mock_response.body = {"path_with_namespace": "resolved/project"}
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = DummyTool(metadata={"gitlab_client": gitlab_client_mock})
+    path = await tool._resolve_identifier_to_path("42", "project")
+
+    assert path == "resolved/project"
+    gitlab_client_mock.aget.assert_called_once_with("/api/v4/projects/42")
+
+
+@pytest.mark.asyncio
+async def test_resolve_identifier_to_path_api_failure(gitlab_client_mock):
+    mock_response = Mock()
+    mock_response.is_success.return_value = False
+    mock_response.status_code = 404
+    mock_response.body = "Not found"
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = DummyTool(metadata={"gitlab_client": gitlab_client_mock})
+    with pytest.raises(ToolException):
+        await tool._resolve_identifier_to_path("999", "project")
 
 
 class ToolOptionsTestTool(DuoBaseTool):

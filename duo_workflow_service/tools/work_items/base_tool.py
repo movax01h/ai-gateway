@@ -12,6 +12,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    override,
 )
 
 import structlog
@@ -66,6 +67,15 @@ class HealthStatus(str, Enum):
 
 
 DateString = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]
+
+
+# Mapping from work item type to licensed feature enum value for tier checks.
+# Values must match GitlabSubscriptions::LicensedFeatureEnum GraphQL enum.
+_TYPE_TO_FEATURE = {
+    "EPIC": "EPICS",
+    "OBJECTIVE": "OKRS",
+    "KEY_RESULT": "OKRS",
+}
 
 
 class WorkItemBaseTool(DuoBaseTool):
@@ -129,36 +139,8 @@ class WorkItemBaseTool(DuoBaseTool):
         parent_type: Literal["group", "project"],
         identifier: Union[int, str],
     ) -> ResolvedParent:
-        identifier_str = str(identifier)
-
-        if identifier_str.isdigit():
-            endpoint = "projects" if parent_type == "project" else "groups"
-            data = await self.gitlab_client.aget(f"/api/v4/{endpoint}/{identifier_str}")
-
-            if not data.is_success():
-                log.error(
-                    "Resolve parent path request failed with status %s: %s",
-                    data.status_code,
-                    data.body,
-                )
-                raise ToolException(
-                    f"Failed to resolve {parent_type} from ID '{identifier_str}': {data.body}"
-                )
-
-            full_path = data.body.get(
-                "path_with_namespace" if parent_type == "project" else "full_path"
-            )
-            if not full_path:
-                raise ToolException(
-                    f"Could not resolve {parent_type} full path from ID '{identifier_str}'"
-                )
-        else:
-            full_path = identifier_str
-
-        return ResolvedParent(
-            type=parent_type,
-            full_path=self._decode_path(full_path),
-        )
+        full_path = await self._resolve_identifier_to_path(str(identifier), parent_type)
+        return ResolvedParent(type=parent_type, full_path=full_path)
 
     @staticmethod
     def _decode_path(path: str) -> str:
@@ -581,3 +563,23 @@ class WorkItemBaseTool(DuoBaseTool):
         work_items = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
 
         return work_items[0] if work_items else None
+
+    @override
+    def _get_required_feature_for_tier_check(
+        self, kwargs: Dict[str, Any]
+    ) -> Optional[str]:
+        """Return the feature name if all requested types map to a single licensed feature."""
+        types = kwargs.get("types")
+        if not types:
+            type_name = kwargs.get("type_name")
+            types = [type_name] if type_name else None
+        if not types:
+            return None
+
+        normalized = {t.upper().replace(" ", "_") for t in types}
+        features = {_TYPE_TO_FEATURE[t] for t in normalized if t in _TYPE_TO_FEATURE}
+
+        if len(features) == 1:
+            return features.pop()
+
+        return None

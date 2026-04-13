@@ -13,6 +13,7 @@ HIERARCHY_WIDGET_VERSION = Version("18.7.0")
 NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION = Version("18.9.0")
 BASE_DISCUSSION_ID_FIELD_VERSION = Version("18.9.0")
 DEVELOPMENT_WIDGET_VERSION = Version("18.9.0")
+LICENSED_FEATURE_AVAILABILITY_VERSION = Version("18.11.0")
 DEFAULT_FALLBACK_VERSION = Version("18.6.0")
 
 
@@ -98,3 +99,8 @@ def get_query_variables_for_version(*requested_keys: str) -> dict:
             filtered_variables[key] = all_variables[key]
 
     return filtered_variables
+
+
+def supports_licensed_feature_availability() -> bool:
+    """Check if the GitLab instance exposes the licensedFeatureAvailability GraphQL field."""
+    return get_gitlab_version() >= LICENSED_FEATURE_AVAILABILITY_VERSION

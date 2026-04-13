@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional, Tuple, Type
+from typing import Any, ClassVar, Dict, Optional, Tuple, Type
 
 import structlog
 from langchain_core.tools import ToolException
@@ -68,6 +68,8 @@ class ListProjectAuditEventsInput(ProjectResourceInput, BaseAuditEventsInput):
 
 class BaseAuditEventsTool(DuoBaseTool):
     """Base class for audit events tools with shared pagination logic."""
+
+    tier_check_licensed_feature: ClassVar[str] = "AUDIT_EVENTS"
 
     async def _fetch_paginated_audit_events(
         self,

@@ -1,4 +1,5 @@
 import copy
+import json
 import re
 import textwrap
 from datetime import datetime, timezone
@@ -25,10 +26,15 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
 )
+from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
-from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
+from duo_workflow_service.tools import (
+    RunCommand,
+    Toolset,
+    format_tool_display_message,
+)
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import client_capabilities, extract_finish_reason
@@ -42,6 +48,8 @@ MALFORMED_TOOL_CALL_ERROR_TEMPLATE = (
     "{tool_name} tool. Try again, or rephrase your request. If the problem "
     "persists, start a new chat, and/or select a different model for your request."
 )
+
+TIER_ACCESS_DENIED_LEARN_MORE_URL = "https://docs.gitlab.com/user/duo_agent_platform/"
 
 _HIDDEN_TOOLS = ["get_plan"]
 
@@ -367,6 +375,11 @@ class ToolsExecutor:
                 tool_call, error, chat_logs, project_name
             )
 
+        except TierAccessDeniedException as error:
+            return self._handle_tier_access_denied(
+                tool_call, error, chat_logs, project_name
+            )
+
         except ToolException as error:
             return self._handle_tool_error(tool_call, error, chat_logs, project_name)
 
@@ -494,6 +507,49 @@ class ToolsExecutor:
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message=error_message,
+            project_name=project_name,
+        )
+
+        return {
+            "response": tool_response,
+            "chat_logs": chat_logs,
+        }
+
+    def _handle_tier_access_denied(
+        self,
+        tool_call: ToolCall,
+        error: TierAccessDeniedException,
+        chat_logs: List[UiChatLog],
+        project_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        log_exception(error, extra={"context": "Tier access denied"})
+
+        required_plan = error.required_plan
+        tier_message = str(error)
+
+        tool_response = json.dumps(
+            {
+                "error": "tier_access_denied",
+                "required_plan": required_plan,
+                "message": tier_message,
+                "link_url": TIER_ACCESS_DENIED_LEARN_MORE_URL,
+            }
+        )
+
+        self._track_internal_event(
+            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
+            tool_name=tool_call["name"],
+            extra={
+                "error": tier_message,
+                "error_type": type(error).__name__,
+            },
+        )
+
+        self._add_tool_ui_chat_log(
+            tool_call=tool_call,
+            status=ToolStatus.FAILURE,
+            ui_chat_logs=chat_logs,
+            error_message=tier_message,
             project_name=project_name,
         )
 

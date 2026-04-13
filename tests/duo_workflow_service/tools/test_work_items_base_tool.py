@@ -1,6 +1,16 @@
+from typing import Any
+
 import pytest
 
 from duo_workflow_service.tools.work_items.base_tool import WorkItemBaseTool
+
+
+class ConcreteWorkItemTool(WorkItemBaseTool):
+    name: str = "test_tool"
+    description: str = "test"
+
+    async def _execute(self, *args: Any, **kwargs: Any) -> Any:
+        return ""
 
 
 class TestBuildHierarchyWidget:
@@ -145,3 +155,45 @@ class TestBuildHierarchyWidget:
 
         assert result == {"parentId": "gid://gitlab/WorkItem/123"}
         assert warnings == []
+
+
+class TestGetRequiredFeatureForTierCheck:
+    """Test the _get_required_feature_for_tier_check override in WorkItemBaseTool."""
+
+    @pytest.fixture
+    def tool(self):
+        return ConcreteWorkItemTool(
+            metadata={"gitlab_client": None, "gitlab_host": "gitlab.com"},
+        )
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            ({"types": ["EPIC"]}, "EPICS"),
+            ({"types": ["OBJECTIVE"]}, "OKRS"),
+            ({"types": ["KEY_RESULT"]}, "OKRS"),
+            ({"types": ["OBJECTIVE", "KEY_RESULT"]}, "OKRS"),
+            ({"types": ["EPIC", "OBJECTIVE"]}, None),
+            ({"types": ["ISSUE"]}, None),
+            ({"types": []}, None),
+            ({}, None),
+            ({"type_name": "Epic"}, "EPICS"),
+            ({"type_name": None}, None),
+            ({"types": ["epic"]}, "EPICS"),
+        ],
+        ids=[
+            "epic",
+            "objective",
+            "key_result",
+            "mixed_okr_types",
+            "mixed_features",
+            "unmapped_issue",
+            "empty_types",
+            "no_kwargs",
+            "type_name_epic",
+            "type_name_none",
+            "lowercase_epic",
+        ],
+    )
+    def test_returns_expected_feature(self, tool, kwargs, expected):
+        assert tool._get_required_feature_for_tier_check(kwargs) == expected

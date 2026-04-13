@@ -1,14 +1,17 @@
 import json
 from collections import Counter
 from enum import StrEnum
-from typing import Any, Optional, Type
+from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field, field_validator
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.vulnerabilities.queries.vulnerabilities import (
     LIST_VULNERABILITIES_QUERY,
 )
@@ -117,6 +120,7 @@ class ListVulnerabilitiesInput(BaseModel):
 class ListVulnerabilities(DuoBaseTool):
     """Tool for listing persisted project vulnerabilities."""
 
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "list_vulnerabilities"
     description: str = f"""List persisted vulnerabilities for an entire project from its main Vulnerability Report.
 
@@ -281,6 +285,7 @@ class DismissVulnerabilityInput(BaseModel):
 
 
 class DismissVulnerability(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "dismiss_vulnerability"
     description: str = f"""Dismiss a security vulnerability in a GitLab project using GraphQL.
 
@@ -389,6 +394,7 @@ class CreateVulnerabilityIssueInput(BaseModel):
 
 
 class CreateVulnerabilityIssue(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "create_vulnerability_issue"
     description: str = f"""Create a GitLab issue linked to security vulnerabilities in a GitLab project using GraphQL.
 
@@ -503,6 +509,7 @@ class LinkVulnerabilityToIssueInput(BaseModel):
 
 
 class LinkVulnerabilityToIssue(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "link_vulnerability_to_issue"
     description: str = f"""Link a GitLab issue to security vulnerabilities in a GitLab project using GraphQL.
 
@@ -602,6 +609,7 @@ class LinkVulnerabilityToMergeRequestInput(BaseModel):
 
 
 class LinkVulnerabilityToMergeRequest(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "link_vulnerability_to_merge_request"
     description: str = f"""Link a security vulnerability to a merge request in a GitLab project using GraphQL.
 
@@ -714,6 +722,7 @@ class ConfirmVulnerabilityInput(BaseModel):
 
 
 class ConfirmVulnerability(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "confirm_vulnerability"
     description: str = """Confirm a security vulnerability in a GitLab project.
 
@@ -793,6 +802,7 @@ class RevertToDetectedVulnerabilityInput(BaseModel):
 
 
 class RevertToDetectedVulnerability(DuoBaseTool):
+    tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD
     name: str = "revert_to_detected_vulnerability"
     description: str = """Revert a vulnerability's state back to 'detected' status in GitLab using GraphQL.
 
