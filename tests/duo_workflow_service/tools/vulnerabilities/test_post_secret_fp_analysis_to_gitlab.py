@@ -2,7 +2,9 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain.tools import ToolException
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitlab import (
     PostSecretFpAnalysisToGitlab,
     PostSecretFpAnalysisToGitlabInput,
@@ -23,18 +25,17 @@ def metadata(gitlab_client_mock):
 
 @pytest.fixture
 def success_response_mock():
-    response = Mock()
-    response.is_success.return_value = True
-    response.status_code = 200
-    response.body = {
-        "id": 123,
-        "vulnerability_id": 567,
-        "flag_type": "ai_detection",
-        "confidence_score": 85.0,
-        "description": "This appears to be a false positive because it's test data.",
-        "created_at": "2023-10-01T12:00:00Z",
-    }
-    return response
+    return GitLabHttpResponse(
+        status_code=200,
+        body={
+            "id": 123,
+            "vulnerability_id": 567,
+            "flag_type": "ai_detection",
+            "confidence_score": 85.0,
+            "description": "This appears to be a false positive because it's test data.",
+            "created_at": "2023-10-01T12:00:00Z",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -133,10 +134,10 @@ async def test_post_secret_fp_analysis_with_max_likelihood(
 async def test_post_secret_fp_analysis_api_error_with_status(
     gitlab_client_mock, metadata
 ):
-    error_response = Mock()
-    error_response.is_success.return_value = False
-    error_response.status_code = 404
-    error_response.body = {"message": "Vulnerability not found"}
+    error_response = GitLabHttpResponse(
+        status_code=404,
+        body={"message": "Vulnerability not found"},
+    )
 
     gitlab_client_mock.apost = AsyncMock(return_value=error_response)
 
@@ -148,11 +149,11 @@ async def test_post_secret_fp_analysis_api_error_with_status(
         "explanation": "Analysis for non-existent vulnerability.",
     }
 
-    response = await tool.arun(input_data)
+    # Should raise ToolException instead of returning error JSON
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
 
-    error_response_data = json.loads(response)
-    assert "error" in error_response_data
-    assert "Unexpected status code: 404" in error_response_data["error"]
+    assert "HTTP 404" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -167,13 +168,8 @@ async def test_post_secret_fp_analysis_exception(gitlab_client_mock, metadata):
         "explanation": "This appears to be a false positive.",
     }
 
-    response = await tool.arun(input_data)
-
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Failed to post secret false positive analysis" in error_response["error"]
-    assert "vulnerability 567" in error_response["error"]
-    assert "Network Error" in error_response["error"]
+    with pytest.raises(Exception, match="Network Error"):
+        await tool.arun(input_data)
 
 
 @pytest.mark.asyncio

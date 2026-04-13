@@ -628,14 +628,12 @@ class TestBlobSearchFileExclusion:
                     ref="main",
                 )
 
-        assert "404" in str(exc_info.value)
-        assert "404 Project Not Found" in str(exc_info.value)
+        assert "HTTP 404" in str(exc_info.value)
 
         assert len(captured_logs) == 1
         log_entry = captured_logs[0]
         assert log_entry["event"] == "Blob search request failed"
         assert log_entry["status_code"] == 404
-        assert log_entry["error"] == {"message": "404 Project Not Found"}
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/999/search",
@@ -935,16 +933,7 @@ class TestAdvanceBlobSearch:
                     api_url="/api/v4/projects/123/search",
                 )
 
-        assert "500" in str(exc_info.value)
-        assert "Internal Server Error" in str(exc_info.value)
-
-        assert len(captured_logs) == 1
-        error_log = [
-            log
-            for log in captured_logs
-            if log["event"] == "Advance Blob search request failed"
-        ][0]
-        assert error_log["status_code"] == 500
+        assert "HTTP 500" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_url_encoded_project_path(

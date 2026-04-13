@@ -146,14 +146,14 @@ class TestGitLabApiGet:
         gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
         # Execute tool
-        result = await gitlab_api_get_tool._execute(
-            endpoint="/api/v4/projects/13/merge_requests/999"
-        )
+        with pytest.raises(ToolException) as exc_info:
+            await gitlab_api_get_tool._execute(
+                endpoint="/api/v4/projects/13/merge_requests/999"
+            )
 
         # Verify
-        result_json = json.loads(result)
-        assert "error" in result_json
-        assert result_json["status_code"] == 404
+        assert "HTTP 404" in str(exc_info.value)
+        assert "Not found" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_get_exception_handling(
@@ -163,15 +163,11 @@ class TestGitLabApiGet:
         # Mock exception
         gitlab_client_mock.aget = AsyncMock(side_effect=Exception("Connection error"))
 
-        # Execute tool
-        result = await gitlab_api_get_tool._execute(
-            endpoint="/api/v4/projects/13/merge_requests/42"
-        )
-
-        # Verify
-        result_json = json.loads(result)
-        assert "error" in result_json
-        assert "Connection error" in result_json["details"]
+        # Execute tool - exceptions are not caught, they propagate
+        with pytest.raises(Exception, match="Connection error"):
+            await gitlab_api_get_tool._execute(
+                endpoint="/api/v4/projects/13/merge_requests/42"
+            )
 
     @pytest.mark.asyncio
     async def test_get_response_includes_pagination_metadata(
@@ -657,14 +653,12 @@ class TestGitLabGraphQL:
     @pytest.mark.asyncio
     async def test_graphql_invalid_query_rejected(self, gitlab_graphql_tool):
         """Test that invalid GraphQL queries are rejected."""
-        # Execute tool with malformed query
+        # Execute tool with malformed query - parsing exceptions propagate
         invalid_query = "this is not valid GraphQL { syntax"
-        result = await gitlab_graphql_tool._execute(query=invalid_query)
 
-        # Verify it's rejected
-        result_json = json.loads(result)
-        assert "error" in result_json
-        assert "Invalid GraphQL query" in result_json["error"]
+        # The graphql parser will raise an exception for invalid syntax
+        with pytest.raises(Exception):
+            await gitlab_graphql_tool._execute(query=invalid_query)
 
     @pytest.mark.asyncio
     async def test_graphql_error_in_response(
@@ -705,12 +699,12 @@ class TestGitLabGraphQL:
 
         # Execute tool
         query = "query { currentUser { username } }"
-        result = await gitlab_graphql_tool._execute(query=query)
+        with pytest.raises(ToolException) as exc_info:
+            await gitlab_graphql_tool._execute(query=query)
 
         # Verify
-        result_json = json.loads(result)
-        assert "error" in result_json
-        assert result_json["status_code"] == 500
+        assert "HTTP 500" in str(exc_info.value)
+        assert "Internal server error" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_graphql_exception_handling(
@@ -720,14 +714,10 @@ class TestGitLabGraphQL:
         # Mock exception
         gitlab_client_mock.apost = AsyncMock(side_effect=Exception("Network error"))
 
-        # Execute tool
+        # Execute tool - exceptions are not caught, they propagate
         query = "query { currentUser { username } }"
-        result = await gitlab_graphql_tool._execute(query=query)
-
-        # Verify
-        result_json = json.loads(result)
-        assert "error" in result_json
-        assert "Network error" in result_json["details"]
+        with pytest.raises(Exception, match="Network error"):
+            await gitlab_graphql_tool._execute(query=query)
 
     def test_format_display_message_with_variables(self, gitlab_graphql_tool):
         """Test display message formatting with variables."""

@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.previous_context import (
@@ -90,12 +91,11 @@ class TestGetSessionContext:
         )
         gitlab_client.aget.return_value = mock_response
 
-        result = await get_last_checkpoint_tool._arun(previous_session_id=123)
+        # Should raise ToolException instead of returning error JSON
+        with pytest.raises(ToolException) as exc_info:
+            await get_last_checkpoint_tool._arun(previous_session_id=123)
 
-        # Verify the error message
-        parsed_result = json.loads(result)
-        assert "error" in parsed_result
-        assert parsed_result["error"] == "Unable to find checkpoint for this session"
+        assert "Unable to find checkpoint for this session" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_arun_api_error(self, get_last_checkpoint_tool, gitlab_client):
@@ -105,12 +105,11 @@ class TestGetSessionContext:
         )
         gitlab_client.aget.return_value = mock_response
 
-        result = await get_last_checkpoint_tool._arun(previous_session_id=123)
+        # Should raise ToolException instead of returning error JSON
+        with pytest.raises(ToolException) as exc_info:
+            await get_last_checkpoint_tool._arun(previous_session_id=123)
 
-        # Verify the error message
-        parsed_result = json.loads(result)
-        assert "error" in parsed_result
-        assert parsed_result["error"] == "API Error"
+        assert "HTTP 404" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_format_checkpoint_context_no_checkpoint_data(
@@ -184,3 +183,13 @@ class TestGetSessionContext:
             match="Unable to parse context from last checkpoint for this session",
         ):
             get_last_checkpoint_tool._format_checkpoint_context(bad_checkpoint, 123)
+
+    @pytest.mark.asyncio
+    async def test_arun_exception_propagates(
+        self, get_last_checkpoint_tool, gitlab_client
+    ):
+        """Test that exceptions from the API propagate instead of being swallowed."""
+        gitlab_client.aget.side_effect = Exception("Connection error")
+
+        with pytest.raises(Exception, match="Connection error"):
+            await get_last_checkpoint_tool._arun(previous_session_id=123)

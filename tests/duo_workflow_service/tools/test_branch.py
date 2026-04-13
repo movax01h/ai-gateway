@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools.base import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
@@ -138,7 +139,7 @@ async def test_create_branch_with_commit_sha(gitlab_client_mock, metadata, branc
 
 @pytest.mark.asyncio
 async def test_create_branch_error(gitlab_client_mock, metadata):
-    """Test error handling when branch creation fails."""
+    """Test that HTTP error responses from branch creation raise an exception."""
     error_response = create_http_response(
         {"message": "Branch already exists"}, status_code=400
     )
@@ -146,11 +147,8 @@ async def test_create_branch_error(gitlab_client_mock, metadata):
 
     tool = CreateBranch(description="Create branch", metadata=metadata)
 
-    response = await tool._arun(project_id=24, branch="existing-branch", ref="main")
-
-    response_data = json.loads(response)
-    assert "error" in response_data
-    assert "HTTP 400" in response_data["error"]
+    with pytest.raises(ToolException, match="HTTP 400"):
+        await tool._arun(project_id=24, branch="existing-branch", ref="main")
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/24/repository/branches",
@@ -164,11 +162,10 @@ async def test_create_branch_validation_errors(metadata):
     tool = CreateBranch(description="Create branch", metadata=metadata)
 
     # Test missing project_id and URL
-    response = await tool._arun(branch="feature-branch", ref="main")
-
-    response_data = json.loads(response)
-    assert "error" in response_data
-    assert "'project_id' must be provided when 'url' is not" in response_data["error"]
+    with pytest.raises(
+        ToolException, match="'project_id' must be provided when 'url' is not"
+    ):
+        await tool._arun(branch="feature-branch", ref="main")
 
 
 @pytest.mark.asyncio
@@ -176,16 +173,13 @@ async def test_create_branch_url_mismatch(gitlab_client_mock, metadata):
     """Test error when URL and project_id don't match."""
     tool = CreateBranch(description="Create branch", metadata=metadata)
 
-    response = await tool._arun(
-        url="https://gitlab.com/namespace/project",
-        project_id="different/project",
-        branch="feature-branch",
-        ref="main",
-    )
-
-    response_data = json.loads(response)
-    assert "error" in response_data
-    assert "Project ID mismatch" in response_data["error"]
+    with pytest.raises(ToolException, match="Project ID mismatch"):
+        await tool._arun(
+            url="https://gitlab.com/namespace/project",
+            project_id="different/project",
+            branch="feature-branch",
+            ref="main",
+        )
 
     gitlab_client_mock.apost.assert_not_called()
 
@@ -195,15 +189,12 @@ async def test_create_branch_invalid_url(gitlab_client_mock, metadata):
     """Test error handling for invalid URL."""
     tool = CreateBranch(description="Create branch", metadata=metadata)
 
-    response = await tool._arun(
-        url="https://example.com/not-gitlab",
-        branch="feature-branch",
-        ref="main",
-    )
-
-    response_data = json.loads(response)
-    assert "error" in response_data
-    assert "Failed to parse URL" in response_data["error"]
+    with pytest.raises(ToolException, match="Failed to parse URL"):
+        await tool._arun(
+            url="https://example.com/not-gitlab",
+            branch="feature-branch",
+            ref="main",
+        )
 
     gitlab_client_mock.apost.assert_not_called()
 
@@ -242,17 +233,14 @@ def test_format_display_message(input_data, expected_message):
 
 @pytest.mark.asyncio
 async def test_create_branch_exception(gitlab_client_mock, metadata):
-    """Test exception handling in CreateBranch._execute method."""
+    """Test that exceptions from CreateBranch._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
 
     tool = CreateBranch(description="Create branch", metadata=metadata)
 
-    response = await tool._arun(project_id=24, branch="feature-branch", ref="main")
-
-    response_data = json.loads(response)
-    assert "error" in response_data
-    assert error_message in response_data["error"]
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(project_id=24, branch="feature-branch", ref="main")
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/24/repository/branches",

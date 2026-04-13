@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools.base import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.issue import (
@@ -155,19 +156,14 @@ async def tool_url_success_response(
 async def assert_tool_url_error(
     tool, url, project_id, issue_iid, error_contains, gitlab_client_mock, **kwargs
 ):
-    response = await tool._arun(
-        url=url, project_id=project_id, issue_iid=issue_iid, **kwargs
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url=url, project_id=project_id, issue_iid=issue_iid, **kwargs)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    assert error_contains in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
     gitlab_client_mock.apost.assert_not_called()
     gitlab_client_mock.aput.assert_not_called()
-
-    return response
 
 
 @pytest.mark.asyncio
@@ -638,11 +634,10 @@ async def test_get_issue_validation(kwargs, expected_error, issue_tool_setup):
 
     tool = GetIssue(description="get issue description", metadata=metadata)
 
-    response = await tool._arun(**kwargs)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(**kwargs)
 
-    assert "error" in response_json
-    assert expected_error in response_json["error"]
+    assert expected_error in str(exc_info.value)
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -805,11 +800,10 @@ async def test_tool_validation_error(metadata, tool_class, input_data, error_pat
         description=f"{tool_class.__name__.lower()} description", metadata=metadata
     )
 
-    response = await tool._arun(**input_data)
-    error_response = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(**input_data)
 
-    assert "error" in error_response
-    assert error_pattern in error_response["error"]
+    assert error_pattern in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -863,7 +857,7 @@ async def test_api_errors(
     gitlab_client_mock,
     metadata,
 ):
-    """Test API error handling for all tools."""
+    """Test that exceptions propagate rather than being swallowed by tools."""
     # Set up the mock to raise an exception
     getattr(gitlab_client_mock, method_name).side_effect = Exception(error_message)
 
@@ -871,11 +865,8 @@ async def test_api_errors(
         description=f"{tool_class.__name__.lower()} description", metadata=metadata
     )
 
-    response = await tool._arun(**required_params)
-
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_message in error_response["error"]
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(**required_params)
 
 
 @pytest.mark.asyncio
@@ -1089,7 +1080,7 @@ async def test_update_issue_with_epic_id(gitlab_client_mock, metadata):
 
 @pytest.mark.asyncio
 async def test_update_issue_http_error_status_code(gitlab_client_mock, metadata):
-    """Test that HTTP error status codes are properly handled with detailed error messages."""
+    """Test that HTTP error status codes raise ToolException."""
     gitlab_client_mock.aput = AsyncMock(
         return_value=GitLabHttpResponse(
             status_code=404,
@@ -1100,12 +1091,12 @@ async def test_update_issue_http_error_status_code(gitlab_client_mock, metadata)
 
     tool = UpdateIssue(description="update issue description", metadata=metadata)
 
-    response = await tool._arun(project_id=1, issue_iid=999, title="Updated Issue")
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id=1, issue_iid=999, title="Updated Issue")
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "Unexpected status code: 404" in response_json["error"]
-    assert "body: {'message': '404 Issue Not Found'}" in response_json["error"]
+    assert "Request failed (update issue 999 in project 1): HTTP 404" in str(
+        exc_info.value
+    )
 
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/projects/1/issues/999",
@@ -1257,7 +1248,7 @@ async def test_create_issue_note_with_note_id_reply(issue_tool_setup):
 
 @pytest.mark.asyncio
 async def test_create_issue_note_with_note_id_not_found(issue_tool_setup):
-    """Test that note_id resolution returns error when note is not found."""
+    """Test that note_id resolution raises ToolException when note is not found."""
     gitlab_client_mock, metadata = issue_tool_setup
 
     discussions_response = GitLabHttpResponse(
@@ -1273,16 +1264,15 @@ async def test_create_issue_note_with_note_id_not_found(issue_tool_setup):
         description="create issue note description", metadata=metadata
     )
 
-    response = await tool._arun(
-        project_id=1,
-        issue_iid=123,
-        body="This is a reply",
-        note_id=999,
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id=1,
+            issue_iid=123,
+            body="This is a reply",
+            note_id=999,
+        )
 
-    parsed = json.loads(response)
-    assert "error" in parsed
-    assert "999" in parsed["error"]
+    assert "999" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

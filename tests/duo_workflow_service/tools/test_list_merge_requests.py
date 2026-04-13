@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
@@ -166,26 +167,24 @@ async def test_list_merge_request_with_url_error(
 ):
     tool = ListMergeRequest(metadata=metadata)
 
-    response = await tool._arun(url=url, project_id=project_id)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url=url, project_id=project_id)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    assert error_contains in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_list_merge_request_exception(gitlab_client_mock, metadata):
+    """Test that exceptions from ListMergeRequest._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.aget = AsyncMock(side_effect=Exception(error_message))
 
     tool = ListMergeRequest(metadata=metadata)
 
-    response = await tool._arun(project_id=1)
-
-    expected_response = json.dumps({"error": error_message})
-    assert response == expected_response
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(project_id=1)
 
 
 @pytest.mark.parametrize(

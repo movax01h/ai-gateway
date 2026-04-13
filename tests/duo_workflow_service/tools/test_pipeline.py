@@ -76,6 +76,7 @@ async def test_get_pipeline_failing_jobs(gitlab_client_mock, metadata):
 async def test_get_pipeline_failing_jobs_merge_request_not_found(
     gitlab_client_mock, metadata
 ):
+    """Test that HTTP 404 errors raise ToolException."""
     mock_response = GitLabHttpResponse(
         status_code=404,
         body={"status": 404},
@@ -84,11 +85,11 @@ async def test_get_pipeline_failing_jobs_merge_request_not_found(
 
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    response = await tool.arun({"project_id": "1", "merge_request_iid": "1"})
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id="1", merge_request_iid="1")
 
-    assert "error" in response_json
-    assert "Merge request with iid 1 not found" in response_json["error"]
+    assert "fetch merge request" in str(exc_info.value)
+    assert "404" in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/1"
@@ -99,6 +100,7 @@ async def test_get_pipeline_failing_jobs_merge_request_not_found(
 async def test_get_pipeline_failing_jobs_pipelines_not_found(
     gitlab_client_mock, metadata
 ):
+    """Test that missing pipelines raise ToolException."""
     responses = [
         GitLabHttpResponse(status_code=200, body={"id": 1, "title": "Merge Request 1"}),
         GitLabHttpResponse(status_code=200, body=[]),
@@ -107,11 +109,10 @@ async def test_get_pipeline_failing_jobs_pipelines_not_found(
 
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    response = await tool.arun({"project_id": "1", "merge_request_iid": "1"})
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id="1", merge_request_iid="1")
 
-    assert "error" in response_json
-    assert "No pipelines found for merge request iid 1" in response_json["error"]
+    assert "No pipelines found for merge request iid 1" in str(exc_info.value)
 
     assert gitlab_client_mock.aget.call_args_list == [
         call(path="/api/v4/projects/1/merge_requests/1"),
@@ -211,15 +212,15 @@ async def test_get_pipeline_failing_jobs_with_url_success(
 async def test_get_pipeline_failing_jobs_with_url_error(
     url, project_id, merge_request_iid, error_contains, gitlab_client_mock, metadata
 ):
+    """Test that URL validation errors raise ToolException."""
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    response = await tool._arun(
-        url=url, project_id=project_id, merge_request_iid=merge_request_iid
-    )
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            url=url, project_id=project_id, merge_request_iid=merge_request_iid
+        )
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
+    assert error_contains in str(exc_info.value)
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -274,16 +275,14 @@ def test_get_pipeline_failing_jobs_format_display_message(input_data, expected_m
 async def test_validate_merge_request_url_missing_params(
     project_id, merge_request_iid, expected_errors, gitlab_client_mock, metadata
 ):
+    """Test that validation errors for missing parameters raise ToolException."""
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    response = await tool._arun(
-        project_id=project_id, merge_request_iid=merge_request_iid
-    )
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id=project_id, merge_request_iid=merge_request_iid)
 
-    assert "error" in response_json
     for error in expected_errors:
-        assert error in response_json["error"]
+        assert error in str(exc_info.value)
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -402,6 +401,7 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_success(
 async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
     gitlab_client_mock, metadata
 ):
+    """Test that pipelines with no failed jobs raise ToolException."""
     jobs_response = [
         {"id": 101, "name": "job1", "status": "success"},
         {"id": 102, "name": "job2", "status": "success"},
@@ -415,12 +415,10 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
 
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    response = await tool._arun(
-        url="https://gitlab.com/namespace/project/-/pipelines/123"
-    )
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
 
-    assert response_json == {"error": "No Failing Jobs Found."}
+    assert "No Failing Jobs Found" in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs?per_page=100&page=1",
@@ -474,13 +472,13 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_jobs_not_found(
 async def test_get_pipeline_failing_jobs_with_invalid_pipeline_url(
     url, error_contains, gitlab_client_mock, metadata
 ):
+    """Test that invalid pipeline URLs raise ToolException."""
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    response = await tool._arun(url=url)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url=url)
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
+    assert error_contains in str(exc_info.value)
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -759,7 +757,7 @@ async def test_get_downstream_pipelines_success(gitlab_client_mock, metadata):
 async def test_get_downstream_pipelines_invalid_downstream_url(
     gitlab_client_mock, metadata
 ):
-    """Test unsuccessful retrieval of invalid downstream pipeline url."""
+    """Test unsuccessful retrieval of invalid downstream pipeline url raises ToolException."""
     bridges_response = [
         {
             "id": 1001,
@@ -778,14 +776,11 @@ async def test_get_downstream_pipelines_invalid_downstream_url(
 
     tool = GetDownstreamPipelines(metadata=metadata)
 
-    response = await tool._arun(
-        url="https://gitlab.com/namespace/project/-/pipelines/123"
-    )
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
 
-    assert response_json == {
-        "error": "Failed to parse URL: Could not parse pipeline URL: https://gitlab.com/"
-    }
+    assert "Failed to parse URL" in str(exc_info.value)
+    assert "https://gitlab.com/" in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
@@ -863,14 +858,13 @@ async def test_get_downstream_pipelines_no_downstream_pipelines(
 
 @pytest.mark.asyncio
 async def test_get_downstream_pipelines_invalid_url(gitlab_client_mock, metadata):
-    """Test with invalid pipeline URL."""
+    """Test with invalid pipeline URL raises ToolException."""
     tool = GetDownstreamPipelines(metadata=metadata)
 
-    response = await tool._arun(url="https://gitlab.com/namespace/project")
-    response_json = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project")
 
-    assert "error" in response_json
-    assert "Failed to parse URL" in response_json["error"]
+    assert "Failed to parse URL" in str(exc_info.value)
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -1027,7 +1021,7 @@ async def test_get_downstream_pipelines_invalid_response_format(
 async def test_get_downstream_pipelines_with_malformed_url(
     gitlab_client_mock, metadata
 ):
-    """Test with various malformed URLs."""
+    """Test with various malformed URLs raise ToolException."""
     tool = GetDownstreamPipelines(metadata=metadata)
 
     malformed_urls = [
@@ -1038,9 +1032,8 @@ async def test_get_downstream_pipelines_with_malformed_url(
     ]
 
     for url in malformed_urls:
-        response = await tool._arun(url=url)
-        response_json = json.loads(response)
-        assert "error" in response_json
-        assert "Failed to parse URL" in response_json["error"]
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(url=url)
+        assert "Failed to parse URL" in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()

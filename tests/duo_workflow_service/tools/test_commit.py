@@ -126,10 +126,8 @@ async def test_get_commit_error(gitlab_client_mock, metadata):
 
     tool = GetCommit(description="get commit description", metadata=metadata)
 
-    response = await tool._arun(project_id=24, commit_sha="nonexistent")
-
-    expected_response = json.dumps({"error": "Commit not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Commit not found"):
+        await tool._arun(project_id=24, commit_sha="nonexistent")
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent",
@@ -269,11 +267,9 @@ async def test_get_commit_with_url_error(
 ):
     tool = GetCommit(description="get commit description", metadata=metadata)
 
-    response = await tool._arun(url=url, project_id=project_id, commit_sha=commit_sha)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(url=url, project_id=project_id, commit_sha=commit_sha)
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -506,10 +502,8 @@ async def test_list_commits_error(gitlab_client_mock, metadata):
 
     tool = ListCommits(description="list commits description", metadata=metadata)
 
-    response = await tool._arun(project_id=999)
-
-    expected_response = json.dumps({"error": "Project not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Project not found"):
+        await tool._arun(project_id=999)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/999/repository/commits",
@@ -579,10 +573,8 @@ async def test_get_commit_diff_error(gitlab_client_mock, metadata):
 
     tool = GetCommitDiff(description="Read commit diff", metadata=metadata)
 
-    response = await tool._arun(project_id=24, commit_sha="nonexistent")
-
-    expected_response = json.dumps({"error": "Commit not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Commit not found"):
+        await tool._arun(project_id=24, commit_sha="nonexistent")
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent/diff",
@@ -731,10 +723,8 @@ async def test_get_commit_comments_error(gitlab_client_mock, metadata):
 
     tool = GetCommitComments(description="Read commit comments", metadata=metadata)
 
-    response = await tool._arun(project_id=24, commit_sha="nonexistent")
-
-    expected_response = json.dumps({"error": "Commit not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Commit not found"):
+        await tool._arun(project_id=24, commit_sha="nonexistent")
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/24/repository/commits/nonexistent/comments",
@@ -950,18 +940,15 @@ async def test_create_commit_with_url_error(
         ),
     ]
 
-    response = await tool._arun(
-        url=url,
-        project_id=project_id,
-        branch="main",
-        commit_message="Test commit message",
-        actions=actions,
-    )
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(
+            url=url,
+            project_id=project_id,
+            branch="main",
+            commit_message="Test commit message",
+            actions=actions,
+        )
 
-    response_json = json.loads(response)
-
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.apost.assert_not_called()
 
 
@@ -1211,10 +1198,10 @@ async def test_create_commit_with_partial_edit_not_found(
 
     # Verify it fetched branch info and file content
     gitlab_client_mock.aget.assert_any_call(
-        f"/api/v4/projects/24/repository/branches/main",
+        "/api/v4/projects/24/repository/branches/main",
     )
     gitlab_client_mock.aget.assert_any_call(
-        f"/api/v4/projects/24/repository/files/README.md",
+        "/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
     )
 
@@ -1251,10 +1238,10 @@ async def test_create_commit_with_partial_edit_error(gitlab_client_mock, metadat
         )
 
     gitlab_client_mock.aget.assert_any_call(
-        f"/api/v4/projects/24/repository/branches/main",
+        "/api/v4/projects/24/repository/branches/main",
     )
     gitlab_client_mock.aget.assert_any_call(
-        f"/api/v4/projects/24/repository/files/README.md",
+        "/api/v4/projects/24/repository/files/README.md",
         params={"ref": "main"},
     )
 
@@ -1672,7 +1659,8 @@ async def test_get_file_content_failure_logs_and_raises(gitlab_client_mock, meta
     with pytest.raises(ToolException) as exc_info:
         await tool._get_file_content(project_id="24", ref="main", file_path="README.md")
 
-    assert "GitLab API error while fetching README.md" in str(exc_info.value)
+    assert "HTTP 404" in str(exc_info.value)
+    assert "File not found" in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_awaited_once_with(
         "/api/v4/projects/24/repository/files/README.md",

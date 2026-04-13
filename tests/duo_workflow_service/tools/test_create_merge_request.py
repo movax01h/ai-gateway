@@ -2,13 +2,13 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools.base import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.merge_request import (
     CreateMergeRequest,
     CreateMergeRequestInput,
-    MergeRequestResourceInput,
 )
 
 
@@ -86,13 +86,15 @@ async def assert_tool_url_error(
     gitlab_client_mock,
     **kwargs,
 ):
-    response = await tool._arun(
-        url=url, project_id=project_id, merge_request_iid=merge_request_iid, **kwargs
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            url=url,
+            project_id=project_id,
+            merge_request_iid=merge_request_iid,
+            **kwargs,
+        )
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    assert error_contains in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
     gitlab_client_mock.apost.assert_not_called()
@@ -373,6 +375,7 @@ async def test_create_merge_request_minimal_params(gitlab_client_mock, metadata)
 
 @pytest.mark.asyncio
 async def test_create_merge_request_with_server_error(gitlab_client_mock, metadata):
+    """Test that HTTP error responses raise ToolException rather than returning error JSON."""
     mock_response = GitLabHttpResponse(
         status_code=409,
         body={"status": 409, "message": "Duplicate request"},
@@ -388,17 +391,17 @@ async def test_create_merge_request_with_server_error(gitlab_client_mock, metada
         "title": "New Feature",
     }
 
-    response = await tool.arun(input_data)
-
     expected_data = {
         "source_branch": "feature",
         "target_branch": "main",
         "title": "New Feature",
     }
 
-    response_json = json.loads(response)
-    assert "HTTP 409" in response_json["error"]
-    assert "{'status': 409, 'message': 'Duplicate request'}" in response_json["error"]
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(**input_data)
+
+    assert "HTTP 409" in str(exc_info.value)
+    assert "Duplicate request" in str(exc_info.value)
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests",
@@ -408,18 +411,16 @@ async def test_create_merge_request_with_server_error(gitlab_client_mock, metada
 
 @pytest.mark.asyncio
 async def test_create_merge_request_exception(gitlab_client_mock, metadata):
-    """Test exception handling in CreateMergeRequest._arun method."""
+    """Test that exceptions from CreateMergeRequest._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
 
     tool = CreateMergeRequest(metadata=metadata)
 
-    response = await tool._arun(
-        project_id=1, source_branch="feature", target_branch="main", title="Test MR"
-    )
-
-    expected_response = json.dumps({"error": error_message})
-    assert response == expected_response
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(
+            project_id=1, source_branch="feature", target_branch="main", title="Test MR"
+        )
 
 
 @pytest.mark.parametrize(

@@ -43,33 +43,23 @@ class PostSecretFpAnalysisToGitlab(DuoBaseTool):
             "origin": "ai_secret_detection_fp_detection",  # Additional property for secret detection
         }
 
-        try:
-            response = await self.gitlab_client.apost(
-                path=f"/api/v4/vulnerabilities/{vulnerability_id}/flags/ai_detection",
-                body=json.dumps(data),
-            )
+        response = await self.gitlab_client.apost(
+            path=f"/api/v4/vulnerabilities/{vulnerability_id}/flags/ai_detection",
+            body=json.dumps(data),
+        )
 
-            if not response.is_success():
-                return json.dumps(
-                    {
-                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
-                    }
-                )
+        body = self._process_http_response(
+            "Post secret false positive analysis", response
+        )
 
-            return json.dumps(
-                {
-                    "status": "success",
-                    "vulnerability_id": vulnerability_id,
-                    "false_positive_likelihood": false_positive_likelihood,
-                    "response": response.body,
-                }
-            )
-        except Exception as e:
-            return json.dumps(
-                {
-                    "error": f"Failed to post secret false positive analysis for vulnerability {vulnerability_id}: {str(e)}"
-                }
-            )
+        return json.dumps(
+            {
+                "status": "success",
+                "vulnerability_id": vulnerability_id,
+                "false_positive_likelihood": false_positive_likelihood,
+                "response": body,
+            }
+        )
 
     def format_display_message(
         self, args: PostSecretFpAnalysisToGitlabInput, _tool_response: Any = None

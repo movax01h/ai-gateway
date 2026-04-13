@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.audit_events import (
@@ -197,13 +198,13 @@ async def test_list_instance_audit_events_with_filters(
 async def test_list_instance_audit_events_entity_id_without_type(
     gitlab_client_mock, metadata
 ):
+    """Test that validation error for entity_id without entity_type raises ToolException."""
     tool = ListInstanceAuditEvents(metadata=metadata)
 
-    response = await tool.arun({"entity_id": 6})
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(entity_id=6)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "entity_id requires entity_type to be specified" in error_response["error"]
+    assert "entity_id requires entity_type to be specified" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -253,6 +254,7 @@ async def test_list_instance_audit_events_exception(gitlab_client_mock, metadata
 async def test_list_instance_audit_events_api_error_response(
     gitlab_client_mock, metadata
 ):
+    """Test that API errors raise ToolException."""
     mock_response = GitLabHttpResponse(
         status_code=401,
         body={"message": "401 Unauthorized"},
@@ -261,17 +263,17 @@ async def test_list_instance_audit_events_api_error_response(
 
     tool = ListInstanceAuditEvents(metadata=metadata)
 
-    response = await tool.arun({})
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun()
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "401 Unauthorized" in error_response["error"]
+    assert "401 Unauthorized" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_list_instance_audit_events_api_error_key_response(
     gitlab_client_mock, metadata
 ):
+    """Test that API errors with 'error' key raise ToolException."""
     mock_response = GitLabHttpResponse(
         status_code=403,
         body={"error": "Access denied"},
@@ -280,11 +282,10 @@ async def test_list_instance_audit_events_api_error_key_response(
 
     tool = ListInstanceAuditEvents(metadata=metadata)
 
-    response = await tool.arun({})
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun()
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Access denied" in error_response["error"]
+    assert "Access denied" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -388,13 +389,13 @@ async def test_list_group_audit_events_with_path(
 
 @pytest.mark.asyncio
 async def test_list_group_audit_events_no_identifier(gitlab_client_mock, metadata):
+    """Test that missing group identifier raises ToolException."""
     tool = ListGroupAuditEvents(metadata=metadata)
 
-    response = await tool.arun({})
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun()
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "Either group_id or group_path must be provided" in error_response["error"]
+    assert "Either group_id or group_path must be provided" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -443,6 +444,7 @@ async def test_list_group_audit_events_exception(gitlab_client_mock, metadata):
 
 @pytest.mark.asyncio
 async def test_list_group_audit_events_api_error_response(gitlab_client_mock, metadata):
+    """Test that API errors for group audit events raise ToolException."""
     mock_response = GitLabHttpResponse(
         status_code=403,
         body={"message": "403 Forbidden"},
@@ -451,11 +453,10 @@ async def test_list_group_audit_events_api_error_response(gitlab_client_mock, me
 
     tool = ListGroupAuditEvents(metadata=metadata)
 
-    response = await tool.arun({"group_id": 60})
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(group_id=60)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "403 Forbidden" in error_response["error"]
+    assert "403 Forbidden" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -596,13 +597,13 @@ async def test_list_project_audit_events_with_url_success(
 async def test_list_project_audit_events_with_url_error(
     url, project_id, error_contains, gitlab_client_mock, metadata
 ):
+    """Test that URL validation errors raise ToolException."""
     tool = ListProjectAuditEvents(metadata=metadata)
 
-    response = await tool._arun(url=url, project_id=project_id)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url=url, project_id=project_id)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    assert error_contains in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
 
@@ -655,6 +656,7 @@ async def test_list_project_audit_events_exception(gitlab_client_mock, metadata)
 async def test_list_project_audit_events_api_error_response(
     gitlab_client_mock, metadata
 ):
+    """Test that API errors for project audit events raise ToolException."""
     mock_response = GitLabHttpResponse(
         status_code=404,
         body={"message": "404 Not Found"},
@@ -663,11 +665,10 @@ async def test_list_project_audit_events_api_error_response(
 
     tool = ListProjectAuditEvents(metadata=metadata)
 
-    response = await tool.arun({"project_id": 7})
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id=7)
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert "404 Not Found" in error_response["error"]
+    assert "404 Not Found" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

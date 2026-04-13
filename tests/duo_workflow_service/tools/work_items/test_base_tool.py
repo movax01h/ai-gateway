@@ -5,6 +5,7 @@
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import GetWorkItem, UpdateWorkItem
 from duo_workflow_service.tools.work_items.base_tool import (
@@ -83,21 +84,21 @@ async def test_validate_parent_url_with_project_url(metadata):
 @pytest.mark.asyncio
 async def test_validate_parent_url_with_invalid_url(metadata):
     tool = GetWorkItem(description="test tool", metadata=metadata)
-    result = await tool._validate_parent_url(
-        url="https://example.com/not-gitlab",
-        group_id=None,
-        project_id=None,
-    )
-    assert isinstance(result, str)
-    assert "Failed to parse parent work item URL" in result
+    with pytest.raises(ToolException) as exc_info:
+        await tool._validate_parent_url(
+            url="https://example.com/not-gitlab",
+            group_id=None,
+            project_id=None,
+        )
+    assert "Failed to parse parent work item URL" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_validate_parent_url_with_no_params(metadata):
     tool = GetWorkItem(description="test tool", metadata=metadata)
-    result = await tool._validate_parent_url(url=None, group_id=None, project_id=None)
-    assert isinstance(result, str)
-    assert "Must provide either URL, group_id, or project_id" in result
+    with pytest.raises(ToolException) as exc_info:
+        await tool._validate_parent_url(url=None, group_id=None, project_id=None)
+    assert "Must provide either URL, group_id, or project_id" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -165,27 +166,27 @@ async def test_validate_work_item_url_with_project_url(metadata):
 @pytest.mark.asyncio
 async def test_validate_work_item_url_with_no_iid(metadata):
     tool = GetWorkItem(description="test tool", metadata=metadata)
-    result = await tool._validate_work_item_url(
-        url=None,
-        group_id="namespace/group",
-        project_id=None,
-        work_item_iid=None,
-    )
-    assert isinstance(result, str)
-    assert "Must provide work_item_iid if no URL is given" in result
+    with pytest.raises(ToolException) as exc_info:
+        await tool._validate_work_item_url(
+            url=None,
+            group_id="namespace/group",
+            project_id=None,
+            work_item_iid=None,
+        )
+    assert "Must provide work_item_iid if no URL is given" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_validate_work_item_url_with_invalid_url_without_work_item_iid(metadata):
     tool = GetWorkItem(description="test tool", metadata=metadata)
-    result = await tool._validate_work_item_url(
-        url="https://example.com/namespace/project/-/work_items/42",
-        group_id=None,
-        project_id=None,
-        work_item_iid=None,
-    )
-    assert isinstance(result, str)
-    assert "Failed to parse work item URL" in result
+    with pytest.raises(ToolException) as exc_info:
+        await tool._validate_work_item_url(
+            url="https://example.com/namespace/project/-/work_items/42",
+            group_id=None,
+            project_id=None,
+            work_item_iid=None,
+        )
+    assert "Failed to parse work item URL" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

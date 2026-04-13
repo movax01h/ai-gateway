@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools.base import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
@@ -116,13 +117,15 @@ async def assert_tool_url_error(
     gitlab_client_mock,
     **kwargs,
 ):
-    response = await tool._arun(
-        url=url, project_id=project_id, merge_request_iid=merge_request_iid, **kwargs
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            url=url,
+            project_id=project_id,
+            merge_request_iid=merge_request_iid,
+            **kwargs,
+        )
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    assert error_contains in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
     gitlab_client_mock.apost.assert_not_called()
@@ -282,7 +285,7 @@ async def test_update_merge_request_with_labels(gitlab_client_mock, metadata):
 async def test_update_merge_request_http_error_status_code(
     gitlab_client_mock, metadata
 ):
-    """Test that HTTP error status codes are properly handled with detailed error messages."""
+    """Test that HTTP error status codes raise ToolException rather than returning error JSON."""
     gitlab_client_mock.aput = AsyncMock(
         return_value=GitLabHttpResponse(
             status_code=404,
@@ -293,12 +296,11 @@ async def test_update_merge_request_http_error_status_code(
 
     tool = UpdateMergeRequest(metadata=metadata)
 
-    response = await tool._arun(project_id=1, merge_request_iid=999, title="Updated MR")
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id=1, merge_request_iid=999, title="Updated MR")
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "HTTP 404" in response_json["error"]
-    assert "{'message': '404 Merge Request Not Found'}" in response_json["error"]
+    assert "HTTP 404" in str(exc_info.value)
+    assert "404 Merge Request Not Found" in str(exc_info.value)
 
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/projects/1/merge_requests/999",
@@ -308,16 +310,14 @@ async def test_update_merge_request_http_error_status_code(
 
 @pytest.mark.asyncio
 async def test_update_merge_request_exception(gitlab_client_mock, metadata):
-    """Test exception handling in UpdateMergeRequest._arun method."""
+    """Test that exceptions from UpdateMergeRequest._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.aput = AsyncMock(side_effect=Exception(error_message))
 
     tool = UpdateMergeRequest(metadata=metadata)
 
-    response = await tool._arun(project_id=1, merge_request_iid=123, title="Updated MR")
-
-    expected_response = json.dumps({"error": error_message})
-    assert response == expected_response
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(project_id=1, merge_request_iid=123, title="Updated MR")
 
 
 @pytest.mark.parametrize(

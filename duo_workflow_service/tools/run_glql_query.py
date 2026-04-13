@@ -71,7 +71,6 @@ class RunGLQLQuery(DuoBaseTool):
     For pagination, use the 'after' parameter with the endCursor from previous response.
     """
     args_schema: Type[BaseModel] = GLQLQueryInput
-    handle_tool_error: bool = True
 
     async def _execute(self, glql_yaml: str, after: str | None = None) -> str:
         """Execute a GLQL query and return the results.
@@ -101,27 +100,17 @@ class RunGLQLQuery(DuoBaseTool):
                 }
             )
 
-        try:
-            request_body = {"glql_yaml": glql_yaml}
-            if after:
-                request_body["after"] = after
+        request_body = {"glql_yaml": glql_yaml}
+        if after:
+            request_body["after"] = after
 
-            response = await self.gitlab_client.apost(
-                path="/api/v4/glql",
-                body=json.dumps(request_body),
-            )
+        response = await self.gitlab_client.apost(
+            path="/api/v4/glql",
+            body=json.dumps(request_body),
+        )
 
-            if not response.is_success():
-                return json.dumps(
-                    {
-                        "error": f"GLQL API response status {response.status_code}: {response.body}"
-                    }
-                )
-
-            return json.dumps(response.body)
-
-        except ValueError as e:
-            return json.dumps({"error": str(e)})
+        body = self._process_http_response("GLQL API request", response)
+        return json.dumps(body)
 
     def format_display_message(
         self, args: GLQLQueryInput, _tool_response: Any = None

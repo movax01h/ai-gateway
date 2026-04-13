@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import ListWorkItems, ListWorkItemsInput
 from duo_workflow_service.tools.work_items.base_tool import ResolvedParent
@@ -136,13 +137,12 @@ async def test_list_work_items_with_project_url(
 async def test_list_work_items_with_invalid_url(gitlab_client_mock, metadata):
     tool = ListWorkItems(description="list work items", metadata=metadata)
 
-    response = await tool._arun(url="https://example.com/not-gitlab")
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://example.com/not-gitlab")
 
-    response_json = json.loads(response)
-    assert "error" in response_json
     assert (
         "Failed to parse parent work item URL: URL netloc 'example.com' does not match gitlab_host 'gitlab.com'"
-        in response_json["error"]
+        in str(exc_info.value)
     )
     gitlab_client_mock.graphql.assert_not_called()
 
@@ -321,10 +321,8 @@ async def test_list_work_items_with_graphql_error(gitlab_client_mock, metadata):
 
     tool = ListWorkItems(description="list work items", metadata=metadata)
 
-    response = await tool._arun(group_id="namespace/group")
-
-    expected_response = json.dumps({"error": "GraphQL error"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="GraphQL error"):
+        await tool._arun(group_id="namespace/group")
 
     gitlab_client_mock.graphql.assert_called_once()
 
@@ -337,6 +335,9 @@ async def test_list_work_items_calls_version_compatibility(
     metadata,
 ):
     mock_get_query_variables.return_value = {"includeHierarchyWidget": True}
+    graphql_response = {"project": {"workItems": {"nodes": []}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
     tool = ListWorkItems(description="list work items", metadata=metadata)
 
     await tool._arun(project_id="namespace/project")

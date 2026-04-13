@@ -2,6 +2,7 @@ import json
 from enum import Enum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Type, Union
 
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field, StringConstraints
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
@@ -215,8 +216,6 @@ class ListWorkItems(WorkItemBaseTool):
         types = kwargs.pop("types", None)
 
         resolved = await self._validate_parent_url(url, group_id, project_id)
-        if isinstance(resolved, str):
-            return json.dumps({"error": resolved})
 
         query, root_key = self._LIST_WORK_ITEMS_QUERIES[resolved.type]
 
@@ -260,23 +259,19 @@ class ListWorkItems(WorkItemBaseTool):
             get_query_variables_for_version("includeHierarchyWidget")
         )
 
-        try:
-            response = await self.gitlab_client.graphql(query, query_variables)
+        response = await self.gitlab_client.graphql(query, query_variables)
 
-            if root_key not in response:
-                return json.dumps({"error": f"No {root_key} found in response"})
+        if root_key not in response:
+            raise ToolException(f"No {root_key} found in response")
 
-            work_items_data = response[root_key].get("workItems", {})
-            result = {
-                "work_items": work_items_data.get("nodes", []),
-                "page_info": work_items_data.get("pageInfo", {}),
-            }
-            if warnings:
-                result["warnings"] = warnings
-            return json.dumps(result)
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        work_items_data = response[root_key].get("workItems", {})
+        result = {
+            "work_items": work_items_data.get("nodes", []),
+            "page_info": work_items_data.get("pageInfo", {}),
+        }
+        if warnings:
+            result["warnings"] = warnings
+        return json.dumps(result)
 
     def format_display_message(
         self, args: ListWorkItemsInput, _tool_response: Any = None
@@ -322,19 +317,12 @@ class GetWorkItem(WorkItemBaseTool):
             work_item_iid=kwargs.get("work_item_iid"),
         )
 
-        if isinstance(resolved, str):
-            return json.dumps({"error": resolved})
+        work_item = await self._get_work_item_data(resolved)
 
-        try:
-            if (work_item := await self._get_work_item_data(resolved)) is None:
-                return json.dumps({"error": "Work item not found"})
+        if work_item is None:
+            raise ToolException("Work item not found")
 
-            if work_item.get("error"):
-                return json.dumps(work_item)
-
-            return json.dumps({"work_item": work_item})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"work_item": work_item})
 
     def format_display_message(
         self, args: WorkItemResourceInput, _tool_response: Any = None
@@ -386,9 +374,6 @@ class GetWorkItemNotes(WorkItemBaseTool):
             url, group_id, project_id, work_item_iid
         )
 
-        if isinstance(resolved, str):
-            return json.dumps({"error": resolved})
-
         query, root_key = self._GET_WORK_ITEM_NOTES_QUERIES[resolved.parent.type]
 
         query_variables = {
@@ -399,22 +384,19 @@ class GetWorkItemNotes(WorkItemBaseTool):
             ),
         }
 
-        try:
-            response = await self.gitlab_client.graphql(query, query_variables)
-            nodes = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
+        response = await self.gitlab_client.graphql(query, query_variables)
+        nodes = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
 
-            if not nodes:
-                return json.dumps({"error": "No work item found."})
+        if not nodes:
+            raise ToolException("No work item found.")
 
-            widgets = nodes[0].get("widgets", [])
-            for widget in widgets:
-                if "notes" in widget:
-                    notes = widget.get("notes", {}).get("nodes", [])
-                    return json.dumps({"notes": notes}, indent=2)
+        widgets = nodes[0].get("widgets", [])
+        for widget in widgets:
+            if "notes" in widget:
+                notes = widget.get("notes", {}).get("nodes", [])
+                return json.dumps({"notes": notes}, indent=2)
 
-            return json.dumps({"notes": []})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"notes": []})
 
     def format_display_message(
         self, args: GetWorkItemNotesInput, _tool_response: Any = None
@@ -493,8 +475,6 @@ class CreateWorkItem(WorkItemBaseTool):
         project_id = kwargs.pop("project_id", None)
 
         resolved = await self._validate_parent_url(url, group_id, project_id)
-        if isinstance(resolved, str):
-            return json.dumps({"error": resolved})
 
         return await self._create_work_item(resolved, type_name, kwargs)
 
@@ -579,9 +559,6 @@ class UpdateWorkItem(WorkItemBaseTool):
             work_item_iid=kwargs.get("work_item_iid"),
         )
 
-        if isinstance(resolved, str):
-            return json.dumps({"error": resolved})
-
         return await self._update_work_item(resolved, kwargs)
 
     def format_display_message(
@@ -650,59 +627,43 @@ class CreateWorkItemNote(WorkItemBaseTool):
             url, group_id, project_id, work_item_iid
         )
 
-        if isinstance(resolved, str):
-            return json.dumps({"error": resolved})
+        result = await self._get_work_item_id(resolved)
 
-        try:
-            if "error" in (result := await self._get_work_item_id(resolved)):
-                return json.dumps(result)
+        discussion_id = None
+        if note_id is not None:
+            discussion_result = await self._get_discussion_id_from_note(note_id)
+            discussion_id = discussion_result.get("replyId")
 
-            discussion_id = None
-            if note_id is not None:
-                discussion_result = await self._get_discussion_id_from_note(note_id)
-                if "error" in discussion_result:
-                    return json.dumps(discussion_result)
-                discussion_id = discussion_result.get("replyId")
+        note_input = {"noteableId": result["id"], "body": body}
 
-            note_input = {"noteableId": result["id"], "body": body}
+        if internal is not None:
+            note_input["internal"] = internal
 
-            if internal is not None:
-                note_input["internal"] = internal
+        if discussion_id is not None:
+            note_input["discussionId"] = discussion_id
 
-            if discussion_id is not None:
-                note_input["discussionId"] = discussion_id
+        note_response = await self.gitlab_client.graphql(
+            CREATE_NOTE_MUTATION, {"input": note_input}
+        )
 
-            note_response = await self.gitlab_client.graphql(
-                CREATE_NOTE_MUTATION, {"input": note_input}
-            )
-
-            return self._process_note_response(note_response)
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return self._process_note_response(note_response)
 
     async def _get_work_item_id(self, resolved: ResolvedWorkItem) -> dict:
         """Get work item ID from resolved work item."""
-        try:
-            work_item = await self._get_work_item_data(resolved)
-            if isinstance(work_item, dict) and "error" in work_item:
-                return work_item
+        work_item = await self._get_work_item_data(resolved)
 
-            if not work_item:
-                return {"error": "Work item not found"}
-            if not work_item.get("id"):
-                return {"error": "Work item exists but has no ID field"}
+        if not work_item:
+            raise ToolException("Work item not found")
+        if not work_item.get("id"):
+            raise ToolException("Work item exists but has no ID field")
 
-            return {"id": work_item["id"]}
-
-        except Exception as e:
-            return {"error": f"Failed to get work item ID: {str(e)}"}
+        return {"id": work_item["id"]}
 
     def _process_note_response(self, note_response: dict) -> str:
         """Process the GraphQL response from creating a note."""
         # Top-level GraphQL errors (e.g., auth, syntax, variables)
         if top_errors := note_response.get("errors"):
-            return json.dumps({"error": top_errors})
+            raise ToolException(f"GraphQL errors: {json.dumps(top_errors)}")
 
         create_note = note_response.get("createNote", {})
         created_note = create_note.get("note", {})
@@ -710,14 +671,8 @@ class CreateWorkItemNote(WorkItemBaseTool):
 
         # Application-level errors (mutation ran but failed validation)
         if note_errors or not created_note.get("id"):
-            return json.dumps(
-                {
-                    "error": "Failed to create note",
-                    "details": {
-                        "graphql_errors": top_errors,
-                        "note_errors": note_errors,
-                    },
-                }
+            raise ToolException(
+                f"Failed to create note. GraphQL errors: {top_errors}, Note errors: {note_errors}"
             )
 
         return json.dumps(
@@ -743,28 +698,22 @@ class CreateWorkItemNote(WorkItemBaseTool):
         note_gid = f"gid://gitlab/Note/{note_id}"
         variables = {"id": note_gid}
 
-        try:
-            response = await self.gitlab_client.graphql(
-                GET_NOTE_QUERY,
-                variables,
+        response = await self.gitlab_client.graphql(
+            GET_NOTE_QUERY,
+            variables,
+        )
+
+        if "errors" in response:
+            raise ToolException(f"GraphQL error: {response['errors']}")
+
+        note = response.get("note")
+        if not note:
+            raise ToolException(f"No note found for ID {note_id}.")
+
+        discussion = note.get("discussion")
+        if not discussion:
+            raise ToolException(
+                f"Note {note_id} exists but is not part of a discussion."
             )
 
-            if "errors" in response:
-                return {"error": f"GraphQL error: {response['errors']}"}
-
-            note = response.get("note")
-            if not note:
-                return {"error": f"No note found for ID {note_id}."}
-
-            discussion = note.get("discussion")
-            if not discussion:
-                return {
-                    "error": (f"Note {note_id} exists but is not part of a discussion.")
-                }
-
-            return {"replyId": discussion.get("replyId")}
-
-        except Exception as e:
-            return {
-                "error": f"Failed to resolve discussion for note {note_id}: {str(e)}"
-            }
+        return {"replyId": discussion.get("replyId")}

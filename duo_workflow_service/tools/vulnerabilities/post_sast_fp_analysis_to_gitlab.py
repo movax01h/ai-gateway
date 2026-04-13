@@ -43,33 +43,23 @@ class PostSastFpAnalysisToGitlab(DuoBaseTool):
             "description": explanation,
         }
 
-        try:
-            response = await self.gitlab_client.apost(
-                path=f"/api/v4/vulnerabilities/{vulnerability_id}/flags/ai_detection",
-                body=json.dumps(data),
-            )
+        response = await self.gitlab_client.apost(
+            path=f"/api/v4/vulnerabilities/{vulnerability_id}/flags/ai_detection",
+            body=json.dumps(data),
+        )
 
-            if not response.is_success():
-                return json.dumps(
-                    {
-                        "error": f"Unexpected status code: {response.status_code} body: {response.body}"
-                    }
-                )
+        body = self._process_http_response(
+            "Post SAST false positive analysis", response
+        )
 
-            return json.dumps(
-                {
-                    "status": "success",
-                    "vulnerability_id": vulnerability_id,
-                    "false_positive_likelihood": false_positive_likelihood,
-                    "response": response.body,
-                }
-            )
-        except Exception as e:
-            return json.dumps(
-                {
-                    "error": f"Failed to post SAST false positive analysis for vulnerability {vulnerability_id}: {str(e)}"
-                }
-            )
+        return json.dumps(
+            {
+                "status": "success",
+                "vulnerability_id": vulnerability_id,
+                "false_positive_likelihood": false_positive_likelihood,
+                "response": body,
+            }
+        )
 
     def format_display_message(
         self, args: PostSastFpAnalysisToGitlabInput, _tool_response: Any = None

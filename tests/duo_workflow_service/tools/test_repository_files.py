@@ -1,8 +1,9 @@
 import base64
 import json
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
@@ -191,29 +192,6 @@ async def test_get_file_success(
             "Failed to parse URL",
         ),
         (
-            {"project_id": "3", "ref": "master", "file_path": "README.md"},
-            {"mock_type": "api_error", "mock_value": Exception("API error")},
-            "API error",
-        ),
-        (
-            {
-                "project_id": "gitlab-org/gitlab",
-                "ref": "master",
-                "file_path": "image.png",
-            },
-            {
-                "mock_type": "binary_content",
-                "mock_value": json.dumps(
-                    {
-                        "content": base64.b64encode(
-                            b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"
-                        ).decode("latin-1")
-                    }
-                ),
-            },
-            "'utf-8' codec can't decode byte 0x89 in position 0: invalid start byte",
-        ),
-        (
             {"url": "https://gitlab.com/namespace/project"},
             {
                 "mock_type": "validate_error",
@@ -224,8 +202,6 @@ async def test_get_file_success(
     ],
     ids=[
         "URL parsing error",
-        "API error",
-        "Binary file detection",
         "Missing file path",
     ],
 )
@@ -237,22 +213,37 @@ async def test_get_file_errors(
         tool._validate_repository_file_url = (
             lambda url, project_id, ref, file_path: mock_setup["mock_value"]
         )
-    elif mock_setup["mock_type"] == "api_error":
-        gitlab_client_mock.aget.side_effect = mock_setup["mock_value"]
-    elif mock_setup["mock_type"] == "binary_content":
-        content_dict = json.loads(mock_setup["mock_value"])
-        mock_response = GitLabHttpResponse(
-            status_code=200,
-            body=content_dict,
-            headers={"content-type": "application/json"},
+
+    with pytest.raises(ToolException, match=expected_error_contains):
+        await tool._arun(**input_params)
+
+
+@pytest.mark.asyncio
+async def test_get_file_api_exception_propagates(tool, gitlab_client_mock):
+    """Test that API exceptions propagate instead of being swallowed."""
+    gitlab_client_mock.aget.side_effect = Exception("API error")
+
+    with pytest.raises(Exception, match="API error"):
+        await tool._arun(project_id="3", ref="master", file_path="README.md")
+
+
+@pytest.mark.asyncio
+async def test_get_file_binary_content_exception_propagates(tool, gitlab_client_mock):
+    """Test that binary content decode errors propagate instead of being swallowed."""
+    binary_content = base64.b64encode(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR").decode(
+        "latin-1"
+    )
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"content": binary_content},
+        headers={"content-type": "application/json"},
+    )
+    gitlab_client_mock.aget.return_value = mock_response
+
+    with pytest.raises(UnicodeDecodeError):
+        await tool._arun(
+            project_id="gitlab-org/gitlab", ref="master", file_path="image.png"
         )
-        gitlab_client_mock.aget.return_value = mock_response
-
-    result = await tool._arun(**input_params)
-    error_response = json.loads(result)
-
-    assert "error" in error_response
-    assert expected_error_contains in error_response["error"]
 
 
 @pytest.mark.parametrize(
@@ -440,22 +431,10 @@ async def test_list_repository_tree_success(
             },
             "'project_id' must be provided when 'url' is not",
         ),
-        (
-            {"project_id": 1},
-            {"mock_type": "api_error", "mock_value": Exception("Repository not found")},
-            "Repository not found",
-        ),
-        (
-            {"project_id": 2},
-            {"mock_type": "api_error", "mock_value": Exception("Permission denied")},
-            "Permission denied",
-        ),
     ],
     ids=[
         "URL parsing error",
         "Missing project_id",
-        "Repository not found",
-        "Permission denied",
     ],
 )
 @pytest.mark.asyncio
@@ -466,14 +445,20 @@ async def test_list_repository_tree_errors(
         tree_tool._validate_project_url = lambda url, project_id: mock_setup[
             "mock_value"
         ]
-    elif mock_setup["mock_type"] == "api_error":
-        gitlab_client_mock.aget.side_effect = mock_setup["mock_value"]
 
-    result = await tree_tool._arun(**input_params)
-    error_response = json.loads(result)
+    with pytest.raises(ToolException, match=expected_error_contains):
+        await tree_tool._arun(**input_params)
 
-    assert "error" in error_response
-    assert expected_error_contains in error_response["error"]
+
+@pytest.mark.asyncio
+async def test_list_repository_tree_api_exception_propagates(
+    tree_tool, gitlab_client_mock
+):
+    """Test that API exceptions propagate instead of being swallowed."""
+    gitlab_client_mock.aget.side_effect = Exception("Repository not found")
+
+    with pytest.raises(Exception, match="Repository not found"):
+        await tree_tool._arun(project_id=1)
 
 
 @pytest.mark.parametrize(
@@ -790,12 +775,11 @@ class TestGetRepositoryFileWithExclusion:
             "file_path": "debug.log",  # This should be blocked by *.log rule
         }
 
-        result = await tool._arun(**input_params)
-        response = json.loads(result)
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(**input_params)
 
-        assert "error" in response
-        assert "Files excluded due to policy" in response["error"]
-        assert "debug.log" in response["error"]
+        assert "Files excluded due to policy" in str(exc_info.value)
+        assert "debug.log" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_get_file_allowed_by_policy(
@@ -918,14 +902,14 @@ class TestGetRepositoryFileWithExclusion:
             "file_path": file_path,
         }
 
-        result = await tool._arun(**input_params)
-        response = json.loads(result)
-
         if should_be_blocked:
-            assert "error" in response
-            assert "Files excluded due to policy" in response["error"]
+            with pytest.raises(ToolException) as exc_info:
+                await tool._arun(**input_params)
+            assert "Files excluded due to policy" in str(exc_info.value)
             gitlab_client_mock.aget.assert_not_called()
         else:
+            result = await tool._arun(**input_params)
+            response = json.loads(result)
             assert "content" in response
             assert response["content"] == "file content"
             gitlab_client_mock.aget.assert_called_once()

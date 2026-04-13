@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.vulnerabilities.severity import (
     UpdateVulnerabilitySeverity,
@@ -248,3 +249,65 @@ def test_comment_validation(comment, should_fail, tool):
             tool.validate_inputs(["id"], "HIGH", comment)
     else:
         tool.validate_inputs(["id"], "HIGH", comment)
+
+
+@pytest.mark.asyncio
+async def test_update_vulnerability_severity_graphql_errors(
+    gitlab_client_mock, metadata
+):
+    """Test that GraphQL errors raise ToolException."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "errors": [
+                {
+                    "message": "GraphQL validation error",
+                    "locations": [{"line": 1, "column": 1}],
+                }
+            ]
+        }
+    )
+
+    tool = UpdateVulnerabilitySeverity(metadata=metadata)
+
+    input_data = {
+        "vulnerability_ids": ["gid://gitlab/Vulnerability/540"],
+        "severity": "CRITICAL",
+        "comment": "Test comment",
+    }
+
+    # Should raise ToolException instead of returning error JSON
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
+
+    assert "GraphQL errors:" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_update_vulnerability_severity_mutation_errors(
+    gitlab_client_mock, metadata
+):
+    """Test that mutation errors raise ToolException."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value={
+            "data": {
+                "vulnerabilitiesSeverityOverride": {
+                    "errors": ["Mutation failed: Invalid severity"],
+                    "vulnerabilities": [],
+                }
+            }
+        }
+    )
+
+    tool = UpdateVulnerabilitySeverity(metadata=metadata)
+
+    input_data = {
+        "vulnerability_ids": ["gid://gitlab/Vulnerability/540"],
+        "severity": "CRITICAL",
+        "comment": "Test comment",
+    }
+
+    # Should raise ToolException instead of returning error JSON
+    with pytest.raises(ToolException) as exc_info:
+        await tool.arun(input_data)
+
+    assert "Mutation errors:" in str(exc_info.value)

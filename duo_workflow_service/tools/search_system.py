@@ -1,6 +1,7 @@
 import json
 from typing import Any, Optional, Type
 
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
@@ -125,52 +126,42 @@ class ExtractLinesFromText(DuoBaseTool):
         start_line = kwargs.pop("start_line")
         end_line = kwargs.pop("end_line", None)
 
-        try:
-            lines = content.split("\n")
-            total_lines = len(lines)
+        lines = content.split("\n")
+        total_lines = len(lines)
 
-            if start_line < 1 or start_line > total_lines:
-                return json.dumps(
-                    {
-                        "error": f"start_line {start_line} is out of range. Content has {total_lines} lines."
-                    }
-                )
-
-            # If end_line is not provided, just return the start_line
-            if end_line is None:
-                result_lines = [lines[start_line - 1]]
-            else:
-                if end_line < 1 or end_line > total_lines:
-                    return json.dumps(
-                        {
-                            "error": f"end_line {end_line} is out of range. Content has {total_lines} lines."
-                        }
-                    )
-
-                if end_line < start_line:
-                    return json.dumps(
-                        {
-                            "error": f"end_line {end_line} cannot be less than start_line {start_line}."
-                        }
-                    )
-
-                result_lines = lines[start_line - 1 : end_line]
-
-            result_lines = [line.rstrip() for line in result_lines]
-
-            extracted_snippet = "\n".join(result_lines)
-
-            return json.dumps(
-                {
-                    "lines": extracted_snippet,
-                    "start_line": start_line,
-                    "end_line": end_line if end_line else start_line,
-                    "total_lines_extracted": len(result_lines),
-                }
+        if start_line < 1 or start_line > total_lines:
+            raise ToolException(
+                f"start_line {start_line} is out of range. Content has {total_lines} lines."
             )
 
-        except Exception as e:
-            return json.dumps({"error": f"Failed to extract lines: {str(e)}"})
+        # If end_line is not provided, just return the start_line
+        if end_line is None:
+            result_lines = [lines[start_line - 1]]
+        else:
+            if end_line < 1 or end_line > total_lines:
+                raise ToolException(
+                    f"end_line {end_line} is out of range. Content has {total_lines} lines."
+                )
+
+            if end_line < start_line:
+                raise ToolException(
+                    f"end_line {end_line} cannot be less than start_line {start_line}."
+                )
+
+            result_lines = lines[start_line - 1 : end_line]
+
+        result_lines = [line.rstrip() for line in result_lines]
+
+        extracted_snippet = "\n".join(result_lines)
+
+        return json.dumps(
+            {
+                "lines": extracted_snippet,
+                "start_line": start_line,
+                "end_line": end_line if end_line else start_line,
+                "total_lines_extracted": len(result_lines),
+            }
+        )
 
     def format_display_message(
         self, args: ExtractLinesFromTextInput, _tool_response: Any = None

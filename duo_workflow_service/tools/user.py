@@ -27,28 +27,18 @@ class GetCurrentUser(DuoBaseTool):
     args_schema: Type[BaseModel] = GetCurrentUserInput
 
     async def _execute(self) -> str:
-        try:
-            response = await self.gitlab_client.aget(
-                path="/api/v4/user", parse_json=True
-            )
+        response = await self.gitlab_client.aget(path="/api/v4/user", parse_json=True)
 
-            if not response.is_success():
-                log.error(
-                    "Get current user request failed with status %s: %s",
-                    response.status_code,
-                    response.body,
-                )
+        body = self._process_http_response("Get current user", response, log)
 
-            formatted_response = {
-                "user_id": response.body.get("id"),
-                "user_name": response.body.get("username"),
-                "job_title": response.body.get("job_title"),
-                "preferred_language": response.body.get("preferred_language"),
-            }
+        formatted_response = {
+            "user_id": body.get("id"),
+            "user_name": body.get("username"),
+            "job_title": body.get("job_title"),
+            "preferred_language": body.get("preferred_language"),
+        }
 
-            return json.dumps({"user": formatted_response})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"user": formatted_response})
 
     def format_display_message(
         self, args: GetCurrentUserInput, _tool_response: Any = None

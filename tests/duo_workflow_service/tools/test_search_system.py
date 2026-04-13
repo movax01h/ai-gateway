@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from contract import contract_pb2
 from duo_workflow_service.tools.search_system import (
@@ -321,11 +322,10 @@ class TestExtractLinesFromText:
         """Test error handling for invalid inputs."""
         extract_lines_from_text_tool = self._setup_extract_lines_from_text_tool()
 
-        result = await extract_lines_from_text_tool._arun(**params)
+        with pytest.raises(ToolException) as exc_info:
+            await extract_lines_from_text_tool._arun(**params)
 
-        result_dict = json.loads(result)
-        assert "error" in result_dict
-        assert result_dict["error"] == expected_error
+        assert str(exc_info.value) == expected_error
 
 
 def test_extract_lines_from_text_format_display_message():

@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from langchain.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.run_glql_query import GLQLQueryInput, RunGLQLQuery
@@ -94,16 +95,15 @@ query: type = Issue
 async def test_api_error_returns_error_response(
     glql_tool, mock_gitlab_client, mock_version_18_6
 ):
-    """Test that API errors are properly captured and returned."""
+    """Test that API errors raise ToolException."""
     mock_gitlab_client.apost.return_value = GitLabHttpResponse(
         status_code=500, body={"message": "Internal server error"}
     )
 
-    response = await glql_tool.arun({"glql_yaml": "```glql\nquery: type = Issue\n```"})
-    parsed = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await glql_tool.arun({"glql_yaml": "```glql\nquery: type = Issue\n```"})
 
-    assert "error" in parsed
-    assert "500" in parsed["error"]
+    assert "HTTP 500" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -180,21 +180,20 @@ async def test_version_check(version, should_succeed, glql_tool, mock_gitlab_cli
 async def test_invalid_query_format_handled_by_api(
     glql_tool, mock_gitlab_client, mock_version_18_6, invalid_query, api_error_message
 ):
-    """Test that invalid query formats are sent to API and API errors are returned."""
+    """Test that invalid query formats are sent to API and API errors raise ToolException."""
     # Mock API returning validation error
     mock_gitlab_client.apost.return_value = GitLabHttpResponse(
         status_code=400, body={"error": api_error_message}
     )
 
-    response = await glql_tool.arun({"glql_yaml": invalid_query})
-    parsed = json.loads(response)
+    with pytest.raises(ToolException) as exc_info:
+        await glql_tool.arun({"glql_yaml": invalid_query})
 
     # Verify the query was sent to the API
     mock_gitlab_client.apost.assert_called_once()
 
-    # Verify error response is returned
-    assert "error" in parsed
-    assert "400" in parsed["error"]
+    # Verify error exception contains status code
+    assert "HTTP 400" in str(exc_info.value)
 
 
 def test_format_display_message():

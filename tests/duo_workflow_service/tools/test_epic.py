@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.epic import (
@@ -69,10 +70,8 @@ async def test_get_epic_error(gitlab_client_mock, metadata):
 
     tool = GetEpic(description="get epic description", metadata=metadata)
 
-    response = await tool._arun(group_id=1, epic_iid=999)
-
-    expected_response = json.dumps({"error": "Epic not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Epic not found"):
+        await tool._arun(group_id=1, epic_iid=999)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/1/epics/999", parse_json=False
@@ -117,10 +116,8 @@ async def test_get_epic_with_string_group_id_error(gitlab_client_mock, metadata)
 
     tool = GetEpic(description="get epic description", metadata=metadata)
 
-    response = await tool._arun(group_id="nonexistent%2Fgroup", epic_iid=5)
-
-    expected_response = json.dumps({"error": "Group not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Group not found"):
+        await tool._arun(group_id="nonexistent%2Fgroup", epic_iid=5)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/nonexistent%2Fgroup/epics/5",
@@ -323,11 +320,9 @@ async def test_get_epic_with_url_error(
 ):
     tool = GetEpic(description="get epic description", metadata=metadata)
 
-    response = await tool._arun(url=url, group_id=group_id, epic_iid=epic_iid)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(url=url, group_id=group_id, epic_iid=epic_iid)
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -405,10 +400,8 @@ async def test_list_epics_error(gitlab_client_mock, metadata):
 
     tool = ListEpics(description="list epics description", metadata=metadata)
 
-    response = await tool._arun(group_id=999)
-
-    expected_response = json.dumps({"error": "Group not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Group not found"):
+        await tool._arun(group_id=999)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/999/epics",
@@ -566,11 +559,9 @@ async def test_list_epics_with_url_error(
 ):
     tool = ListEpics(description="list epics description", metadata=metadata)
 
-    response = await tool._arun(url=url, group_id=group_id)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(url=url, group_id=group_id)
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.aget.assert_not_called()
 
 
@@ -638,10 +629,8 @@ async def test_create_epic_error(gitlab_client_mock, metadata):
 
     tool = CreateEpic(description="create epic description", metadata=metadata)
 
-    response = await tool._arun(group_id=999, title="Test Epic")
-
-    expected_response = json.dumps({"error": "Group not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Group not found"):
+        await tool._arun(group_id=999, title="Test Epic")
 
     gitlab_client_mock.apost.assert_called_once_with(
         path="/api/v4/groups/999/epics",
@@ -785,15 +774,13 @@ async def test_create_epic_with_url_error(
 ):
     tool = CreateEpic(description="create epic description", metadata=metadata)
 
-    response = await tool._arun(
-        url=url,
-        group_id=group_id,
-        title="Test Epic",
-    )
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(
+            url=url,
+            group_id=group_id,
+            title="Test Epic",
+        )
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.apost.assert_not_called()
 
 
@@ -868,10 +855,8 @@ async def test_update_epic_error(gitlab_client_mock, metadata):
 
     tool = UpdateEpic(description="update epic description", metadata=metadata)
 
-    response = await tool._arun(group_id=1, epic_iid=999, title="Updated Epic")
-
-    expected_response = json.dumps({"error": "Epic not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Epic not found"):
+        await tool._arun(group_id=1, epic_iid=999, title="Updated Epic")
 
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/groups/1/epics/999",
@@ -881,7 +866,7 @@ async def test_update_epic_error(gitlab_client_mock, metadata):
 
 @pytest.mark.asyncio
 async def test_update_epic_http_error_status_code(gitlab_client_mock, metadata):
-    """Test that HTTP error status codes are properly handled with detailed error messages."""
+    """Test that HTTP error status codes raise ToolException with detailed error messages."""
     gitlab_client_mock.aput = AsyncMock(
         return_value=GitLabHttpResponse(
             status_code=404,
@@ -892,12 +877,11 @@ async def test_update_epic_http_error_status_code(gitlab_client_mock, metadata):
 
     tool = UpdateEpic(description="update epic description", metadata=metadata)
 
-    response = await tool._arun(group_id=1, epic_iid=999, title="Updated Epic")
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(group_id=1, epic_iid=999, title="Updated Epic")
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "Unexpected status code: 404" in response_json["error"]
-    assert "body: {'message': '404 Epic Not Found'}" in response_json["error"]
+    assert "HTTP 404" in str(exc_info.value)
+    assert "Epic Not Found" in str(exc_info.value)
 
     gitlab_client_mock.aput.assert_called_once_with(
         path="/api/v4/groups/1/epics/999",
@@ -1062,16 +1046,14 @@ async def test_update_epic_with_url_error(
 ):
     tool = UpdateEpic(description="update epic description", metadata=metadata)
 
-    response = await tool._arun(
-        url=url,
-        group_id=group_id,
-        epic_iid=epic_iid,
-        title="Updated Epic",
-    )
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match=error_contains):
+        await tool._arun(
+            url=url,
+            group_id=group_id,
+            epic_iid=epic_iid,
+            title="Updated Epic",
+        )
 
-    assert "error" in response_json
-    assert error_contains in response_json["error"]
     gitlab_client_mock.aput.assert_not_called()
 
 
@@ -1153,10 +1135,8 @@ async def test_list_epic_notes_error(gitlab_client_mock, metadata):
 
     tool = ListEpicNotes(description="list epic notes description", metadata=metadata)
 
-    response = await tool._arun(group_id="namespace%2Fgroup", epic_iid=999)
-
-    expected_response = json.dumps({"error": "Epic not found"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="Epic not found"):
+        await tool._arun(group_id="namespace%2Fgroup", epic_iid=999)
 
     gitlab_client_mock.graphql.assert_called_once()
     call_args = gitlab_client_mock.graphql.call_args
@@ -1237,11 +1217,9 @@ async def test_list_epic_notes_with_url_error(gitlab_client_mock, metadata):
 
     tool = ListEpicNotes(description="list epic notes description", metadata=metadata)
 
-    response = await tool._arun(url=url)
-    response_json = json.loads(response)
+    with pytest.raises(ToolException, match="Failed to parse URL"):
+        await tool._arun(url=url)
 
-    assert "error" in response_json
-    assert "Failed to parse URL" in response_json["error"]
     gitlab_client_mock.graphql.assert_not_called()
 
 

@@ -183,85 +183,33 @@ class GitLabApiGet(DuoBaseTool):
         # Construct full path
         full_path = f"{endpoint}{query_string}"
 
-        try:
-            log.info("Making generic GitLab API GET request", extra={"path": full_path})
+        log.info("Making generic GitLab API GET request", extra={"path": full_path})
 
-            response = await self.gitlab_client.aget(
-                path=full_path,
-            )
+        response = await self.gitlab_client.aget(
+            path=full_path,
+        )
 
-            if not response.is_success():
-                # Safely handle response body for logging
-                body_preview = None
-                if response.body:
-                    if isinstance(response.body, str):
-                        body_preview = response.body[:500]
-                    else:
-                        body_preview = str(response.body)[:500]
+        body = self._process_http_response("GitLab API GET request", response, log)
 
-                log.warning(
-                    "GitLab API GET request failed",
-                    extra={
-                        "status_code": response.status_code,
-                        "path": full_path,
-                        "response_body": body_preview,
-                    },
-                )
-                return json.dumps(
-                    {
-                        "error": f"API request failed with status {response.status_code}",
-                        "status_code": response.status_code,
-                        "endpoint": endpoint,
-                        "details": (
-                            response.body
-                            if response.body
-                            else "No error details provided"
-                        ),
-                    }
-                )
+        # Parse response body
+        # Response body might already be parsed
+        if isinstance(body, (dict, list)):
+            result = body
+        else:
+            result = json.loads(body)
 
-            # Parse response body
-            try:
-                # Response body might already be parsed
-                if isinstance(response.body, (dict, list)):
-                    result = response.body
-                else:
-                    result = json.loads(response.body)
+        response_payload: dict = {
+            "status": "success",
+            "data": result,
+        }
 
-                response_payload: dict = {
-                    "status": "success",
-                    "data": result,
-                }
+        # Only attach pagination when headers are present to keep single-resource
+        # responses lean and preserve backward compatibility.
+        pagination = self._extract_pagination_headers(response)
+        if pagination:
+            response_payload["pagination"] = pagination
 
-                # Only attach pagination when headers are present to keep single-resource
-                # responses lean and preserve backward compatibility.
-                pagination = self._extract_pagination_headers(response)
-                if pagination:
-                    response_payload["pagination"] = pagination
-
-                return json.dumps(response_payload)
-            except json.JSONDecodeError:
-                # If response is not JSON, return as string
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "data": response.body,
-                    }
-                )
-
-        except Exception as e:
-            log.error(
-                "Exception during GitLab API GET request",
-                extra={"path": full_path, "error": str(e)},
-                exc_info=True,
-            )
-            return json.dumps(
-                {
-                    "error": "Request failed with exception",
-                    "endpoint": endpoint,
-                    "details": str(e),
-                }
-            )
+        return json.dumps(response_payload)
 
     @staticmethod
     def _extract_pagination_headers(response: Any) -> Optional[Dict[str, str]]:
@@ -418,7 +366,7 @@ class GitLabGraphQL(DuoBaseTool):
 
         return False
 
-    async def _execute(  # pylint: disable=too-many-return-statements
+    async def _execute(
         self, query: str, variables: Optional[Dict[str, Any]] = None, **kwargs: Any
     ) -> str:
         """Execute a GraphQL query against the GitLab GraphQL API.
@@ -432,15 +380,7 @@ class GitLabGraphQL(DuoBaseTool):
             JSON string with the GraphQL response or error information
         """
         # Parse the query into an AST. This also rejects malformed input.
-        try:
-            document: DocumentNode = parse_graphql(query)
-        except Exception as e:
-            return json.dumps(
-                {
-                    "error": "Invalid GraphQL query",
-                    "details": f"Failed to parse query: {str(e)}",
-                }
-            )
+        document: DocumentNode = parse_graphql(query)
 
         if self._document_contains_mutation_or_subscription(document):
             return json.dumps(
@@ -466,80 +406,39 @@ class GitLabGraphQL(DuoBaseTool):
         if variables:
             payload["variables"] = variables
 
-        try:
-            log.info(
-                "Making GitLab GraphQL query", extra={"has_variables": bool(variables)}
-            )
+        log.info(
+            "Making GitLab GraphQL query", extra={"has_variables": bool(variables)}
+        )
 
-            response = await self.gitlab_client.apost(
-                path="/api/graphql",
-                body=json.dumps(payload),
-            )
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps(payload),
+        )
 
-            if not response.is_success():
-                log.warning(
-                    "GitLab GraphQL query failed",
-                    extra={
-                        "status_code": response.status_code,
-                        "response_body": response.body[:500] if response.body else None,
-                    },
-                )
-                return json.dumps(
-                    {
-                        "error": f"GraphQL query failed with status {response.status_code}",
-                        "status_code": response.status_code,
-                        "details": (
-                            response.body
-                            if response.body
-                            else "No error details provided"
-                        ),
-                    }
-                )
+        body = self._process_http_response("GitLab GraphQL query", response, log)
 
-            # Parse response body
-            try:
-                if isinstance(response.body, dict):
-                    result = response.body
-                else:
-                    result = json.loads(response.body)
+        # Parse response body
+        if isinstance(body, dict):
+            result = body
+        else:
+            result = json.loads(body)
 
-                # Check for GraphQL errors in the response
-                if "errors" in result and result["errors"]:
-                    return json.dumps(
-                        {
-                            "error": "GraphQL query returned errors",
-                            "graphql_errors": result["errors"],
-                            "data": result.get("data"),
-                        }
-                    )
-
-                return json.dumps(
-                    {
-                        "status": "success",
-                        "data": result.get("data"),
-                    }
-                )
-
-            except json.JSONDecodeError as e:
-                return json.dumps(
-                    {
-                        "error": "Failed to parse GraphQL response",
-                        "details": str(e),
-                    }
-                )
-
-        except Exception as e:
-            log.error(
-                "Exception during GitLab GraphQL query",
-                extra={"error": str(e)},
-                exc_info=True,
-            )
+        # Check for GraphQL errors in the response
+        if "errors" in result and result["errors"]:
             return json.dumps(
                 {
-                    "error": "GraphQL query failed with exception",
-                    "details": str(e),
+                    "error": "GraphQL query returned errors",
+                    "graphql_errors": result["errors"],
+                    "data": result.get("data"),
                 }
             )
+
+        return json.dumps(
+            {
+                "status": "success",
+                "data": result.get("data"),
+            }
+        )
 
     def format_display_message(
         self, args: GitLabGraphQLInput, _tool_response: Any = None

@@ -59,9 +59,7 @@ class GetPipelineFailingJobs(DuoBaseTool):
     """
     args_schema: Type[BaseModel] = GetPipelineFailingJobsInput
 
-    async def _execute(  # pylint: disable=too-many-return-statements
-        self, **kwargs: Any
-    ) -> str:
+    async def _execute(self, **kwargs: Any) -> str:
         url = kwargs.get("url", None)
         project_id = kwargs.get("project_id")
         merge_request_iid = kwargs.get("merge_request_iid", None)
@@ -75,7 +73,7 @@ class GetPipelineFailingJobs(DuoBaseTool):
             validation_result = self._validate_pipeline_url(url)
 
             if validation_result.errors:
-                return json.dumps({"error": "; ".join(validation_result.errors)})
+                raise ToolException("; ".join(validation_result.errors))
 
             pipeline_id = validation_result.pipeline_iid
         else:
@@ -84,50 +82,29 @@ class GetPipelineFailingJobs(DuoBaseTool):
             )
 
             if validation_result.errors:
-                return json.dumps({"error": "; ".join(validation_result.errors)})
+                raise ToolException("; ".join(validation_result.errors))
 
             merge_request_response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}",
             )
 
-            if merge_request_response.status_code == 404:
-                return json.dumps(
-                    {
-                        "error": f"Merge request with iid {validation_result.merge_request_iid} not found"
-                    }
-                )
-
-            if not merge_request_response.is_success():
-                error_str = (
-                    f"Failed to fetch merge request: status_code={merge_request_response.status_code}, "
-                    f"response={merge_request_response.body}"
-                )
-                log.error(error_str)
-                return json.dumps({"error": error_str})
-
-            merge_request = merge_request_response.body
+            merge_request = self._process_http_response(
+                "fetch merge request", merge_request_response, log
+            )
 
             pipelines_response = await self.gitlab_client.aget(
                 path=f"/api/v4/projects/{validation_result.project_id}/merge_requests/"
                 f"{validation_result.merge_request_iid}/pipelines",
             )
 
-            if not pipelines_response.is_success():
-                error_str = (
-                    f"Failed to fetch pipelines: status_code={pipelines_response.status_code}, "
-                    f"response={pipelines_response.body}"
-                )
-                log.error(error_str)
-                return json.dumps({"error": error_str})
-
-            pipelines = pipelines_response.body
+            pipelines = self._process_http_response(
+                "fetch pipelines", pipelines_response, log
+            )
 
             if not isinstance(pipelines, list) or len(pipelines) == 0:
-                return json.dumps(
-                    {
-                        "error": f"No pipelines found for merge request iid {validation_result.merge_request_iid}"
-                    }
+                raise ToolException(
+                    f"No pipelines found for merge request iid {validation_result.merge_request_iid}"
                 )
 
             last_pipeline = pipelines[0]
@@ -140,7 +117,7 @@ class GetPipelineFailingJobs(DuoBaseTool):
             failing_jobs = failing_jobs[:MAX_JOBS_RETURNED]
 
         if len(failing_jobs) == 0:
-            return json.dumps({"error": "No Failing Jobs Found."})
+            raise ToolException("No Failing Jobs Found.")
 
         xml_root = etree.Element("jobs")
         for job in failing_jobs:
@@ -228,7 +205,7 @@ class GetDownstreamPipelines(DuoBaseTool):
         validation_result = self._validate_pipeline_url(url)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
         project_id = validation_result.project_id
         pipeline_iid = validation_result.pipeline_iid
@@ -262,9 +239,7 @@ class GetDownstreamPipelines(DuoBaseTool):
                     downstream_url
                 )
                 if downstream_validation_result.errors:
-                    return json.dumps(
-                        {"error": "; ".join(downstream_validation_result.errors)}
-                    )
+                    raise ToolException("; ".join(downstream_validation_result.errors))
 
                 if downstream_validation_result.project_id == project_id:
                     downstream_pipeline_urls.append({"url": downstream_url})

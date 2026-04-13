@@ -1,15 +1,15 @@
 import json
-import logging
 from typing import Any, Optional, Type
 from urllib.parse import quote
 
+import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 # editorconfig-checker-disable
 WIKI_IDENTIFICATION_DESCRIPTION = """If you encounter a GitLab URL, extract the parameters as follows:
@@ -125,9 +125,9 @@ class GetWikiPage(WikiBaseTool):
 
         if not wiki_response.is_success():
             logger.error(
-                "Wiki page API error - Status: %s, Body: %s",
-                wiki_response.status_code,
-                wiki_response.body,
+                "Wiki page API error",
+                status_code=wiki_response.status_code,
+                body=wiki_response.body,
             )
             raise ToolException(
                 f"Failed to fetch wiki page: HTTP {wiki_response.status_code}. "
@@ -141,7 +141,7 @@ class GetWikiPage(WikiBaseTool):
             try:
                 wiki_page_dict = json.loads(wiki_page)
             except json.JSONDecodeError as e:
-                logger.error("Failed to parse wiki page JSON: %s", str(e))
+                logger.error("Failed to parse wiki page JSON", error=str(e))
                 raise ToolException(
                     f"Failed to parse wiki page response as JSON: {str(e)}"
                 )
@@ -155,8 +155,8 @@ class GetWikiPage(WikiBaseTool):
 
         if not wiki_page_meta_id:
             logger.warning(
-                "Could not extract wiki_page_meta_id from response, cannot fetch notes. Response type: %s",
-                type(wiki_page_dict).__name__,
+                "Could not extract wiki_page_meta_id from response, cannot fetch notes",
+                response_type=type(wiki_page_dict).__name__,
             )
 
         return wiki_page, wiki_page_meta_id
@@ -193,16 +193,18 @@ class GetWikiPage(WikiBaseTool):
 
             if not notes_response.is_success():
                 logger.warning(
-                    "Wiki notes API error - Status: %s, Body: %s",
-                    notes_response.status_code,
-                    notes_response.body,
+                    "Wiki notes API error",
+                    status_code=notes_response.status_code,
+                    body=notes_response.body,
                 )
                 return None, f"Failed to fetch notes: HTTP {notes_response.status_code}"
 
             return notes_response.body, None
 
         except Exception as notes_error:
-            logger.warning("Exception while fetching wiki notes: %s", str(notes_error))
+            logger.warning(
+                "Exception while fetching wiki notes", error=str(notes_error)
+            )
             return None, f"Failed to fetch notes: {str(notes_error)}"
 
     async def _execute(

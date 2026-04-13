@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
@@ -108,13 +109,15 @@ async def assert_tool_url_error(
     gitlab_client_mock,
     **kwargs,
 ):
-    response = await tool._arun(
-        url=url, project_id=project_id, merge_request_iid=merge_request_iid, **kwargs
-    )
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            url=url,
+            project_id=project_id,
+            merge_request_iid=merge_request_iid,
+            **kwargs,
+        )
 
-    error_response = json.loads(response)
-    assert "error" in error_response
-    assert error_contains in error_response["error"]
+    assert error_contains in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
     gitlab_client_mock.apost.assert_not_called()
@@ -480,16 +483,14 @@ async def test_create_merge_request_note_with_internal_false(
 
 @pytest.mark.asyncio
 async def test_create_merge_request_note_exception(gitlab_client_mock, metadata):
-    """Test exception handling in CreateMergeRequestNote._arun method."""
+    """Test that exceptions from CreateMergeRequestNote._execute propagate rather than being swallowed."""
     error_message = "API error"
     gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
 
     tool = CreateMergeRequestNote(metadata=metadata)
 
-    response = await tool._arun(project_id=1, merge_request_iid=123, body="Test note")
-
-    expected_response = json.dumps({"error": error_message})
-    assert response == expected_response
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(project_id=1, merge_request_iid=123, body="Test note")
 
 
 @pytest.mark.parametrize(

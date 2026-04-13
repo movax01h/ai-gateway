@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import (
     CreateWorkItemNote,
@@ -402,15 +403,23 @@ async def test_create_work_item_note_errors(
         gitlab_client_mock.graphql = AsyncMock(side_effect=graphql_responses)
 
     tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
-    response = await tool._arun(**params)
-    response_json = json.loads(response)
 
-    assert "error" in response_json
-    assert expected_error in response_json["error"]
+    # Raw exceptions (like connection errors) are not wrapped in ToolException
+    if graphql_responses and isinstance(graphql_responses[0], Exception):
+        with pytest.raises(Exception, match=expected_error):
+            await tool._arun(**params)
+    else:
+        with pytest.raises(ToolException) as exc_info:
+            await tool._arun(**params)
 
-    if expected_details:
-        assert "details" in response_json
-        assert response_json["details"] == expected_details
+        exception_message = str(exc_info.value)
+        assert expected_error in exception_message
+
+        # Verify details are embedded in the exception message
+        if expected_details:
+            if expected_details.get("note_errors"):
+                for error in expected_details["note_errors"]:
+                    assert error in exception_message
 
     assert gitlab_client_mock.graphql.call_count == expected_call_count
 

@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import GetWorkItem, WorkItemResourceInput
 from duo_workflow_service.tools.work_items.base_tool import (
@@ -138,10 +139,10 @@ async def test_get_work_item_not_found(gitlab_client_mock, metadata):
 
     tool = GetWorkItem(description="get work item", metadata=metadata)
 
-    response = await tool._arun(project_id="namespace/project", work_item_iid=999)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id="namespace/project", work_item_iid=999)
 
-    expected_response = json.dumps({"error": "Work item not found"})
-    assert response == expected_response
+    assert "Work item not found" in str(exc_info.value)
 
     gitlab_client_mock.graphql.assert_called_once()
 
@@ -152,10 +153,8 @@ async def test_get_work_item_with_graphql_error(gitlab_client_mock, metadata):
 
     tool = GetWorkItem(description="get work item", metadata=metadata)
 
-    response = await tool._arun(project_id="namespace/project", work_item_iid=42)
-
-    expected_response = json.dumps({"error": "GraphQL error"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="GraphQL error"):
+        await tool._arun(project_id="namespace/project", work_item_iid=42)
 
     gitlab_client_mock.graphql.assert_called_once()
 
@@ -164,13 +163,12 @@ async def test_get_work_item_with_graphql_error(gitlab_client_mock, metadata):
 async def test_get_work_item_with_invalid_url(gitlab_client_mock, metadata):
     tool = GetWorkItem(description="get work item", metadata=metadata)
 
-    response = await tool._arun(url="https://gitlab.com/invalid-url")
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/invalid-url")
 
-    response_json = json.loads(response)
-    assert "error" in response_json
     assert (
         "Failed to parse work item URL: Not a work item URL: https://gitlab.com/invalid-url"
-        in response_json["error"]
+        in str(exc_info.value)
     )
     gitlab_client_mock.graphql.assert_not_called()
 
@@ -179,11 +177,10 @@ async def test_get_work_item_with_invalid_url(gitlab_client_mock, metadata):
 async def test_get_work_item_with_no_iid(gitlab_client_mock, metadata):
     tool = GetWorkItem(description="get work item", metadata=metadata)
 
-    response = await tool._arun(project_id="namespace/project")
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id="namespace/project")
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "Must provide work_item_iid if no URL is given" in response_json["error"]
+    assert "Must provide work_item_iid if no URL is given" in str(exc_info.value)
     gitlab_client_mock.graphql.assert_not_called()
 
 
@@ -194,11 +191,10 @@ async def test_get_work_item_missing_root_key(gitlab_client_mock, metadata):
 
     tool = GetWorkItem(description="get work item", metadata=metadata)
 
-    response = await tool._arun(project_id="namespace/project", work_item_iid=42)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id="namespace/project", work_item_iid=42)
 
-    response_json = json.loads(response)
-    assert "error" in response_json
-    assert "No project found in response" in response_json["error"]
+    assert "No project found in response" in str(exc_info.value)
 
     gitlab_client_mock.graphql.assert_called_once()
 

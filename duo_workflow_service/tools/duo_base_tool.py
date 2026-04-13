@@ -1,6 +1,15 @@
 import json
 from abc import abstractmethod
-from typing import Any, ClassVar, List, NamedTuple, Optional, Type, final, override
+from typing import (
+    Any,
+    ClassVar,
+    List,
+    NamedTuple,
+    Optional,
+    Type,
+    final,
+    override,
+)
 
 import structlog
 from langchain_core.tools import BaseTool, ToolException
@@ -435,11 +444,35 @@ class DuoBaseTool(BaseTool):
             raise ToolException(str(e)) from e
 
     @staticmethod
-    def _process_http_response(identifier: str, response: Any) -> Any:
+    def _process_http_response(
+        identifier: str,
+        response: Any,
+        logger: Optional[structlog.stdlib.BoundLogger] = None,
+    ) -> Any:
+        """Process HTTP response, logging errors and raising on failure.
+
+        Args:
+            identifier: Description of the operation (e.g., "get_user", "/api/v4/projects/1/issues")
+            response: The HTTP response to handle
+            logger: Optional logger instance. If not provided, uses structlog default
+
+        Returns:
+            response.body on success, or response itself if not a GitLabHttpResponse
+
+        Raises:
+            ToolException: If response is not successful (non-2xx status code)
+        """
         if not isinstance(response, GitLabHttpResponse):
             return response
 
-        if response.status_code >= 400:
+        if not response.is_success():
+            if logger:
+                logger.error(
+                    f"{identifier} request failed",
+                    status_code=response.status_code,
+                    response_body=str(response.body)[:300],
+                )
+
             raise ToolException(
                 f"Request failed ({identifier}): HTTP {response.status_code}: {str(response.body)[:300]}"
             )

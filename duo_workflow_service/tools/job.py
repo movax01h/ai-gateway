@@ -3,6 +3,7 @@ from typing import Any, List, NamedTuple, Optional, Type
 from urllib.parse import quote
 
 import structlog
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -125,28 +126,18 @@ class GetLogsFromJob(DuoBaseTool):
         validation_result = self._validate_job_url(url, project_id, job_id)
 
         if validation_result.errors:
-            return json.dumps({"error": "; ".join(validation_result.errors)})
+            raise ToolException("; ".join(validation_result.errors))
 
-        try:
-            response = await self.gitlab_client.aget(
-                path=f"/api/v4/projects/{validation_result.project_id}/jobs/{validation_result.job_id}/trace",
-                parse_json=False,
-            )
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{validation_result.project_id}/jobs/{validation_result.job_id}/trace",
+            parse_json=False,
+        )
 
-            if not response.is_success():
-                log.error(
-                    "Failed to fetch job trace: status_code=%s, response=%s",
-                    response.status_code,
-                    response.body,
-                )
+        trace = self._process_http_response("fetch job trace", response, log)
+        if not trace:
+            return "No job found"
 
-            trace = response.body
-            if not trace:
-                return "No job found"
-
-            return json.dumps({"job_id": validation_result.job_id, "trace": trace})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps({"job_id": validation_result.job_id, "trace": trace})
 
     def format_display_message(
         self, args: GetLogsFromJobInput, _tool_response: Any = None

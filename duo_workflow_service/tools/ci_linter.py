@@ -1,6 +1,7 @@
 import json
 from typing import Any, Optional, Type
 
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
@@ -39,25 +40,22 @@ class CiLinter(DuoBaseTool):
         project_id, errors = self._validate_project_url(url, project_id)
 
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException("; ".join(errors))
 
-        try:
-            body = {"content": content}
-            if ref:
-                body["ref"] = ref
+        body = {"content": content}
+        if ref:
+            body["ref"] = ref
 
-            response = await self.gitlab_client.apost(
-                path=f"/api/v4/projects/{project_id}/ci/lint",
-                body=json.dumps(body),
-            )
+        response = await self.gitlab_client.apost(
+            path=f"/api/v4/projects/{project_id}/ci/lint",
+            body=json.dumps(body),
+        )
 
-            response = self._process_http_response(
-                identifier=f"/api/v4/projects/{project_id}/ci/lint", response=response
-            )
+        response = self._process_http_response(
+            identifier=f"/api/v4/projects/{project_id}/ci/lint", response=response
+        )
 
-            return json.dumps(response)
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps(response)
 
     def format_display_message(
         self, args: CiLinterInput, _tool_response: Any = None

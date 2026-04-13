@@ -1,6 +1,7 @@
 import json
 from typing import Any, ClassVar, List, Type
 
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
@@ -97,10 +98,7 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
         severity = kwargs.pop("severity")
         comment = kwargs.pop("comment")
 
-        try:
-            self.validate_inputs(vulnerability_ids, severity, comment)
-        except ValueError as e:
-            return json.dumps({"error": str(e)})
+        self.validate_inputs(vulnerability_ids, severity, comment)
 
         # editorconfig-checker-disable
         mutation = """
@@ -122,42 +120,36 @@ class UpdateVulnerabilitySeverity(DuoBaseTool):
         """
         # editorconfig-checker-enable
 
-        try:
-            variables = {
-                "vulnerabilityIds": vulnerability_ids,
-                "severity": severity,
-                "comment": comment,
+        variables = {
+            "vulnerabilityIds": vulnerability_ids,
+            "severity": severity,
+            "comment": comment,
+        }
+
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": mutation, "variables": variables}),
+        )
+
+        response = self._process_http_response(
+            identifier="vulnerabilitiesSeverityOverride", response=response
+        )
+
+        if "errors" in response:
+            raise ToolException(f"GraphQL errors: {response['errors']}")
+
+        mutation_result = response["data"]["vulnerabilitiesSeverityOverride"]
+
+        if mutation_result["errors"]:
+            raise ToolException(f"Mutation errors: {mutation_result['errors']}")
+
+        return json.dumps(
+            {
+                "success": True,
+                "updated_vulnerabilities": mutation_result["vulnerabilities"],
+                "message": f"Successfully updated severity to {severity} for {len(mutation_result['vulnerabilities'])} vulnerability(s)",
             }
-
-            response = await self.gitlab_client.apost(
-                path="/api/graphql",
-                body=json.dumps({"query": mutation, "variables": variables}),
-            )
-
-            response = self._process_http_response(
-                identifier="vulnerabilitiesSeverityOverride", response=response
-            )
-
-            if "errors" in response:
-                return json.dumps({"error": f"GraphQL errors: {response['errors']}"})
-
-            mutation_result = response["data"]["vulnerabilitiesSeverityOverride"]
-
-            if mutation_result["errors"]:
-                return json.dumps(
-                    {"error": f"Mutation errors: {mutation_result['errors']}"}
-                )
-
-            return json.dumps(
-                {
-                    "success": True,
-                    "updated_vulnerabilities": mutation_result["vulnerabilities"],
-                    "message": f"Successfully updated severity to {severity} for {len(mutation_result['vulnerabilities'])} vulnerability(s)",
-                }
-            )
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        )
 
     def format_display_message(
         self, args: Any, _tool_response: Any = None

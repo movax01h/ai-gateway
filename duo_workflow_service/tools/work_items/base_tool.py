@@ -15,6 +15,7 @@ from typing import (
 )
 
 import structlog
+from langchain_core.tools import ToolException
 from pydantic import StringConstraints
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
@@ -88,7 +89,7 @@ class WorkItemBaseTool(DuoBaseTool):
         url: Optional[str],
         group_id: Optional[Union[int, str]],
         project_id: Optional[Union[int, str]],
-    ) -> Union[ResolvedParent, str]:
+    ) -> ResolvedParent:
         """Resolve parent information (group or project) from URL or IDs."""
         if url:
             return self._parse_parent_work_item_url(url)
@@ -101,7 +102,7 @@ class WorkItemBaseTool(DuoBaseTool):
                 parent_type="project", identifier=project_id
             )
 
-        return "Must provide either URL, group_id, or project_id"
+        raise ToolException("Must provide either URL, group_id, or project_id")
 
     async def _validate_work_item_url(
         self,
@@ -109,10 +110,10 @@ class WorkItemBaseTool(DuoBaseTool):
         group_id: Optional[Union[int, str]],
         project_id: Optional[Union[int, str]],
         work_item_iid: Optional[int],
-    ) -> Union[ResolvedWorkItem, str]:
+    ) -> ResolvedWorkItem:
         """Resolve work item information from URL or IDs."""
         if not work_item_iid and not url:
-            return "Must provide work_item_iid if no URL is given"
+            raise ToolException("Must provide work_item_iid if no URL is given")
 
         if url:
             return self._parse_work_item_url(url)
@@ -120,8 +121,6 @@ class WorkItemBaseTool(DuoBaseTool):
         parent = await self._validate_parent_url(
             url=None, group_id=group_id, project_id=project_id
         )
-        if isinstance(parent, str):
-            return parent
 
         return ResolvedWorkItem(parent=parent, work_item_iid=work_item_iid)
 
@@ -129,31 +128,30 @@ class WorkItemBaseTool(DuoBaseTool):
         self,
         parent_type: Literal["group", "project"],
         identifier: Union[int, str],
-    ) -> Union[ResolvedParent, str]:
+    ) -> ResolvedParent:
         identifier_str = str(identifier)
 
         if identifier_str.isdigit():
-            try:
-                endpoint = "projects" if parent_type == "project" else "groups"
-                data = await self.gitlab_client.aget(
-                    f"/api/v4/{endpoint}/{identifier_str}"
+            endpoint = "projects" if parent_type == "project" else "groups"
+            data = await self.gitlab_client.aget(f"/api/v4/{endpoint}/{identifier_str}")
+
+            if not data.is_success():
+                log.error(
+                    "Resolve parent path request failed with status %s: %s",
+                    data.status_code,
+                    data.body,
+                )
+                raise ToolException(
+                    f"Failed to resolve {parent_type} from ID '{identifier_str}': {data.body}"
                 )
 
-                if not data.is_success():
-                    log.error(
-                        "Resolve parent path request failed with status %s: %s",
-                        data.status_code,
-                        data.body,
-                    )
-                    return f"Failed to resolve {parent_type} from ID '{identifier_str}': {data.body}"
-
-                full_path = data.body.get(
-                    "path_with_namespace" if parent_type == "project" else "full_path"
+            full_path = data.body.get(
+                "path_with_namespace" if parent_type == "project" else "full_path"
+            )
+            if not full_path:
+                raise ToolException(
+                    f"Could not resolve {parent_type} full path from ID '{identifier_str}'"
                 )
-                if not full_path:
-                    return f"Could not resolve {parent_type} full path from ID '{identifier_str}'"
-            except Exception as e:
-                return f"Failed to resolve {parent_type} from ID '{identifier_str}': {str(e)}"
         else:
             full_path = identifier_str
 
@@ -168,7 +166,7 @@ class WorkItemBaseTool(DuoBaseTool):
 
         return urllib.parse.unquote(path)
 
-    def _parse_parent_work_item_url(self, url: str) -> Union[ResolvedParent, str]:
+    def _parse_parent_work_item_url(self, url: str) -> ResolvedParent:
         """Parse parent work item (by group or project) from URL."""
         try:
             parent_type = GitLabUrlParser.detect_parent_type(url)
@@ -180,14 +178,14 @@ class WorkItemBaseTool(DuoBaseTool):
 
             parsed_url = parser_map.get(parent_type)
             if not parsed_url:
-                return f"Unknown parent type: {parent_type}"
+                raise ToolException(f"Unknown parent type: {parent_type}")
 
             path = parsed_url(url, self.gitlab_host)
             return ResolvedParent(type=parent_type, full_path=self._decode_path(path))
         except GitLabUrlParseError as e:
-            return f"Failed to parse parent work item URL: {e}"
+            raise ToolException(f"Failed to parse parent work item URL: {e}")
 
-    def _parse_work_item_url(self, url: str) -> Union[ResolvedWorkItem, str]:
+    def _parse_work_item_url(self, url: str) -> ResolvedWorkItem:
         """Parse work item from URL."""
         try:
             work_item = GitLabUrlParser.parse_work_item_url(url, self.gitlab_host)
@@ -200,28 +198,25 @@ class WorkItemBaseTool(DuoBaseTool):
                 work_item_iid=work_item.work_item_iid,
             )
         except GitLabUrlParseError as e:
-            return f"Failed to parse work item URL: {e}"
+            raise ToolException(f"Failed to parse work item URL: {e}")
 
-    async def _resolve_work_item_type_id(
-        self, full_path: str, type_name: str
-    ) -> Union[str, dict]:
-        """Returns type ID or error dict."""
+    async def _resolve_work_item_type_id(self, full_path: str, type_name: str) -> str:
+        """Returns type ID or raises ToolException."""
         response = await self.gitlab_client.graphql(
             GET_WORK_ITEM_TYPE_BY_NAME_QUERY, {"fullPath": full_path}
         )
 
         if "errors" in response:
-            return {"error": response["errors"]}
+            raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
 
         types = response.get("namespace", {}).get("workItemTypes", {}).get("nodes", [])
         match = next((t for t in types if t["name"] == type_name), None)
 
         if not match:
             available = [t["name"] for t in types]
-            return {
-                "error": f"Work item type '{type_name}' not found.",
-                "available_types": available,
-            }
+            raise ToolException(
+                f"Work item type '{type_name}' not found. Available types: {', '.join(available)}"
+            )
 
         return match["id"]
 
@@ -414,7 +409,7 @@ class WorkItemBaseTool(DuoBaseTool):
         group_id: Optional[str],
         project_id: Optional[str],
         work_item_iid: Optional[int],
-    ) -> Union[str, ResolvedWorkItem]:
+    ) -> ResolvedWorkItem:
         resolved = await self._validate_work_item_url(
             url=url,
             group_id=group_id,
@@ -422,14 +417,11 @@ class WorkItemBaseTool(DuoBaseTool):
             work_item_iid=work_item_iid,
         )
 
-        if isinstance(resolved, str):
-            return resolved
-
         return await self._fetch_work_item_data(resolved)
 
     async def _fetch_work_item_data(
         self, resolved: ResolvedWorkItem
-    ) -> Union[str, ResolvedWorkItem]:
+    ) -> ResolvedWorkItem:
         query = (
             GET_GROUP_WORK_ITEM_QUERY
             if resolved.parent.type == "group"
@@ -446,22 +438,22 @@ class WorkItemBaseTool(DuoBaseTool):
 
         response = await self.gitlab_client.graphql(query, variables)
         if not isinstance(response, dict):
-            return "GraphQL query returned no response or invalid format"
+            raise ToolException("GraphQL query returned no response or invalid format")
 
         root_key = "namespace" if resolved.parent.type == "group" else "project"
 
         if root_key not in response:
-            return f"No {root_key} found in response"
+            raise ToolException(f"No {root_key} found in response")
 
         work_items = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
         work_item = work_items[0] if work_items else None
 
         if not work_item:
-            return f"Work item {resolved.work_item_iid} not found"
+            raise ToolException(f"Work item {resolved.work_item_iid} not found")
 
         work_item_id = work_item.get("id")
         if not work_item_id:
-            return "Could not find work item ID"
+            raise ToolException("Could not find work item ID")
 
         return ResolvedWorkItem(
             id=work_item_id,
@@ -473,28 +465,21 @@ class WorkItemBaseTool(DuoBaseTool):
     async def _create_work_item(self, resolved, type_name: str, kwargs: dict) -> str:
         if type_name not in ALL_TYPES:
             supported_types = ", ".join(sorted(ALL_TYPES))
-            return json.dumps(
-                {
-                    "error": f"Unknown work item type: '{type_name}'. "
-                    f"Supported types are: {supported_types}."
-                }
+            raise ToolException(
+                f"Unknown work item type: '{type_name}'. "
+                f"Supported types are: {supported_types}."
             )
 
         if resolved.type == "project" and type_name in GROUP_ONLY_TYPES:
-            return json.dumps(
-                {
-                    "error": f"Work item type '{type_name}' cannot be created in a project – only in groups."
-                }
+            raise ToolException(
+                f"Work item type '{type_name}' cannot be created in a project – only in groups."
             )
 
-        try:
-            return await self._execute_create_work_item(
-                namespace_path=resolved.full_path,
-                input_kwargs=kwargs,
-                type_name=type_name,
-            )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return await self._execute_create_work_item(
+            namespace_path=resolved.full_path,
+            input_kwargs=kwargs,
+            type_name=type_name,
+        )
 
     async def _execute_create_work_item(
         self,
@@ -503,8 +488,6 @@ class WorkItemBaseTool(DuoBaseTool):
         type_name: str,
     ) -> str:
         type_id = await self._resolve_work_item_type_id(namespace_path, type_name)
-        if isinstance(type_id, dict):
-            return json.dumps(type_id)
 
         input_fields, warnings = self._build_work_item_input_fields(input_kwargs)
         variables = {
@@ -520,20 +503,15 @@ class WorkItemBaseTool(DuoBaseTool):
         )
 
         if "errors" in response:
-            return json.dumps({"error": response["errors"]})
+            raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
 
         created = response.get("workItemCreate", {}).get("workItem", {})
         errors = response.get("workItemCreate", {}).get("errors", [])
 
         if errors or not created.get("id"):
-            return json.dumps(
-                {
-                    "error": "Failed to create work item.",
-                    "details": {
-                        "graphql_errors": response.get("errors"),
-                        "work_item_errors": errors,
-                    },
-                }
+            raise ToolException(
+                f"Failed to create work item. GraphQL errors: {response.get('errors')}, "
+                f"Work item errors: {errors}"
             )
 
         result = {
@@ -565,24 +543,18 @@ class WorkItemBaseTool(DuoBaseTool):
             }
         }
 
-        try:
-            response = await self.gitlab_client.graphql(
-                UPDATE_WORK_ITEM_MUTATION, variables
-            )
+        response = await self.gitlab_client.graphql(
+            UPDATE_WORK_ITEM_MUTATION, variables
+        )
 
-            if "errors" in response:
-                return json.dumps({"error": response["errors"]})
+        if "errors" in response:
+            raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
 
-            updated = (
-                response.get("data", {}).get("workItemUpdate", {}).get("workItem", {})
-            )
-            result = {"updated_work_item": updated}
-            if warnings:
-                result["warnings"] = warnings
-            return json.dumps(result)
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        updated = response.get("data", {}).get("workItemUpdate", {}).get("workItem", {})
+        result = {"updated_work_item": updated}
+        if warnings:
+            result["warnings"] = warnings
+        return json.dumps(result)
 
     async def _get_work_item_data(
         self, resolved: ResolvedWorkItem
@@ -604,7 +576,7 @@ class WorkItemBaseTool(DuoBaseTool):
         response = await self.gitlab_client.graphql(query, query_variables)
 
         if not response.get(root_key):
-            return {"error": f"No {root_key} found in response"}
+            raise ToolException(f"No {root_key} found in response")
 
         work_items = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
 

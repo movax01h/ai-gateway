@@ -67,11 +67,8 @@ class DocumentationSearch(DuoBaseTool):
     trust_level: ToolTrustLevel = ToolTrustLevel.UNTRUSTED_EXTERNAL
 
     async def _execute(self, search: str) -> str:
-        try:
-            results = await self._fetch_documentation(search)
-            return json.dumps({"search_results": results})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        results = await self._fetch_documentation(search)
+        return json.dumps({"search_results": results})
 
     @inject
     async def _fetch_documentation(

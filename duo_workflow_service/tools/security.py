@@ -3,6 +3,7 @@ from collections import Counter
 from enum import StrEnum
 from typing import Any, Optional, Type
 
+from langchain_core.tools import ToolException
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field, field_validator
 
@@ -162,103 +163,91 @@ class ListVulnerabilities(DuoBaseTool):
 
     async def _execute(self, **kwargs: Any) -> str:
         """Execute the vulnerability listing."""
-        try:
-            project_full_path = kwargs.pop("project_full_path")
-            fetch_all_pages = kwargs.pop("fetch_all_pages", True)
-            per_page = kwargs.pop("per_page", 100)
-            severity = kwargs.pop("severity", None)
-            report_type = kwargs.pop("report_type", None)
+        project_full_path = kwargs.pop("project_full_path")
+        fetch_all_pages = kwargs.pop("fetch_all_pages", True)
+        per_page = kwargs.pop("per_page", 100)
+        severity = kwargs.pop("severity", None)
+        report_type = kwargs.pop("report_type", None)
 
-            all_vulnerabilities: list[dict[str, Any]] = []
-            cursor = None
+        all_vulnerabilities: list[dict[str, Any]] = []
+        cursor = None
 
-            while True:
-                variables = {
-                    "projectFullPath": project_full_path,
-                    "first": per_page,
-                }
+        while True:
+            variables = {
+                "projectFullPath": project_full_path,
+                "first": per_page,
+            }
 
-                if cursor is not None:
-                    variables["after"] = cursor
+            if cursor is not None:
+                variables["after"] = cursor
 
-                if severity:
-                    variables["severity"] = [s.value for s in severity]
+            if severity:
+                variables["severity"] = [s.value for s in severity]
 
-                if report_type:
-                    variables["reportType"] = [rt.value for rt in report_type]
+            if report_type:
+                variables["reportType"] = [rt.value for rt in report_type]
 
-                response = await self.gitlab_client.apost(
-                    path="/api/graphql",
-                    body=json.dumps(
-                        {"query": LIST_VULNERABILITIES_QUERY, "variables": variables}
-                    ),
+            response = await self.gitlab_client.apost(
+                path="/api/graphql",
+                body=json.dumps(
+                    {"query": LIST_VULNERABILITIES_QUERY, "variables": variables}
+                ),
+            )
+
+            response = self._process_http_response(
+                identifier="query", response=response
+            )
+
+            # Parse JSON if response is a string
+            if isinstance(response, str):
+                response = json.loads(response)
+
+            if not response or "data" not in response:
+                raise ToolException("Invalid GraphQL response")
+
+            project_data = response.get("data", {}).get("project")
+            if not project_data:
+                raise ToolException(
+                    f"Project not found or access denied: {project_full_path}"
                 )
 
-                response = self._process_http_response(
-                    identifier="query", response=response
-                )
+            vulnerabilities_data = project_data.get("vulnerabilities", {})
+            vulnerabilities = vulnerabilities_data.get("nodes") or []
 
-                # Parse JSON if response is a string
-                if isinstance(response, str):
-                    response = json.loads(response)
+            all_vulnerabilities.extend(vulnerabilities)
 
-                if not response or "data" not in response:
-                    raise ValueError("Invalid GraphQL response")
+            page_info = vulnerabilities_data.get("pageInfo", {})
+            if not fetch_all_pages or not page_info.get("hasNextPage"):
+                break
 
-                project_data = response.get("data", {}).get("project")
-                if not project_data:
-                    return json.dumps(
-                        {
-                            "error": "Project not found or access denied",
-                            "project_path": project_full_path,
-                        }
-                    )
+            cursor = page_info.get("endCursor")
+            if not cursor:
+                break
 
-                vulnerabilities_data = project_data.get("vulnerabilities", {})
-                vulnerabilities = vulnerabilities_data.get("nodes") or []
+        severity_counts = Counter(
+            vuln.get("severity", "UNKNOWN") for vuln in all_vulnerabilities
+        )
+        report_type_counts = Counter(
+            vuln.get("reportType", "UNKNOWN") for vuln in all_vulnerabilities
+        )
+        state_counts = Counter(
+            vuln.get("state", "UNKNOWN") for vuln in all_vulnerabilities
+        )
 
-                all_vulnerabilities.extend(vulnerabilities)
-
-                page_info = vulnerabilities_data.get("pageInfo", {})
-                if not fetch_all_pages or not page_info.get("hasNextPage"):
-                    break
-
-                cursor = page_info.get("endCursor")
-                if not cursor:
-                    break
-
-            severity_counts = Counter(
-                vuln.get("severity", "UNKNOWN") for vuln in all_vulnerabilities
-            )
-            report_type_counts = Counter(
-                vuln.get("reportType", "UNKNOWN") for vuln in all_vulnerabilities
-            )
-            state_counts = Counter(
-                vuln.get("state", "UNKNOWN") for vuln in all_vulnerabilities
-            )
-
-            return json.dumps(
-                {
-                    "vulnerabilities": all_vulnerabilities,
-                    "summary": {
-                        "total": len(all_vulnerabilities),
-                        "by_severity": dict(severity_counts),
-                        "by_report_type": dict(report_type_counts),
-                        "by_state": dict(state_counts),
-                    },
-                    "pagination": {
-                        "total_items": len(all_vulnerabilities),
-                    },
-                }
-            )
-
-        except Exception as e:
-            return json.dumps(
-                {
-                    "error": "An error occurred while listing vulnerabilities",
-                    "error_type": type(e).__name__,
-                }
-            )
+        return json.dumps(
+            {
+                "vulnerabilities": all_vulnerabilities,
+                "summary": {
+                    "total": len(all_vulnerabilities),
+                    "by_severity": dict(severity_counts),
+                    "by_report_type": dict(report_type_counts),
+                    "by_state": dict(state_counts),
+                },
+                "pagination": {
+                    "total_items": len(all_vulnerabilities),
+                },
+            }
+        )
 
     def format_display_message(
         self, args: ListVulnerabilitiesInput, _tool_response: Any = None
@@ -328,18 +317,14 @@ class DismissVulnerability(DuoBaseTool):
             "NOT_APPLICABLE",
         }
         if dismissal_reason not in valid_dismissal_reasons:
-            return json.dumps(
-                {
-                    "error": f"""
-                        Invalid dismissal reason '{dismissal_reason}'.
-                        Must be one of: {', '.join(valid_dismissal_reasons)}
-                        """
-                }
+            raise ToolException(
+                f"Invalid dismissal reason '{dismissal_reason}'. "
+                f"Must be one of: {', '.join(valid_dismissal_reasons)}"
             )
 
         # Validate comment length
         if len(comment) > 50000:
-            return json.dumps({"error": "Comment must be 50,000 characters or less"})
+            raise ToolException("Comment must be 50,000 characters or less")
 
         # editorconfig-checker-disable
         # Build GraphQL mutation
@@ -382,7 +367,7 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String, $dismissalReason:
 
         errors = response["data"]["vulnerabilityDismiss"]["errors"]
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException(f"Mutation errors: {'; '.join(errors)}")
 
         return json.dumps(
             {"vulnerability": response["data"]["vulnerabilityDismiss"]["vulnerability"]}
@@ -422,7 +407,6 @@ class CreateVulnerabilityIssue(DuoBaseTool):
     args_schema: Type[BaseModel] = CreateVulnerabilityIssueInput
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
-    # pylint: disable-next=too-many-return-statements
     async def _execute(self, **kwargs: Any) -> str:
         project_full_path = kwargs.pop("project_full_path")
         vulnerability_ids = kwargs.pop("vulnerability_ids")
@@ -442,28 +426,19 @@ class CreateVulnerabilityIssue(DuoBaseTool):
             body=json.dumps({"query": project_query, "variables": project_variables}),
         )
 
-        try:
-            project_response = self._process_http_response(
-                identifier="query", response=project_response
-            )
-        except ValueError as e:
-            return json.dumps({"error": str(e)})
+        project_response = self._process_http_response(
+            identifier="query", response=project_response
+        )
 
         if not project_response or "data" not in project_response:
-            return json.dumps(
-                {
-                    "error": "Invalid GraphQL response",
-                    "project_path": project_full_path,
-                }
+            raise ToolException(
+                f"Invalid GraphQL response for project: {project_full_path}"
             )
 
         project_data = project_response.get("data", {}).get("project")
         if not project_data:
-            return json.dumps(
-                {
-                    "error": "Project not found or access denied",
-                    "project_path": project_full_path,
-                }
+            raise ToolException(
+                f"Project not found or access denied: {project_full_path}"
             )
 
         project_id = project_data["id"]
@@ -497,23 +472,18 @@ class CreateVulnerabilityIssue(DuoBaseTool):
             body=json.dumps({"query": mutation, "variables": variables}),
         )
 
-        try:
-            response = self._process_http_response(
-                identifier="mutation", response=response
-            )
-        except ValueError as e:
-            return json.dumps({"error": str(e)})
+        response = self._process_http_response(identifier="mutation", response=response)
 
         if (
             not response
             or "data" not in response
             or "vulnerabilitiesCreateIssue" not in response["data"]
         ):
-            return json.dumps({"error": "Invalid GraphQL response"})
+            raise ToolException("Invalid GraphQL response")
 
         errors = response["data"]["vulnerabilitiesCreateIssue"]["errors"]
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException(f"Mutation errors: {'; '.join(errors)}")
 
         return json.dumps(
             {"issue": response["data"]["vulnerabilitiesCreateIssue"]["issue"]}
@@ -597,16 +567,11 @@ class LinkVulnerabilityToIssue(DuoBaseTool):
             body=json.dumps({"query": mutation, "variables": variables}),
         )
 
-        try:
-            response = self._process_http_response(
-                identifier="mutation", response=response
-            )
-        except ValueError as e:
-            return json.dumps({"error": str(e)})
+        response = self._process_http_response(identifier="mutation", response=response)
 
         errors = response["data"]["vulnerabilityIssueLinkCreate"]["errors"]
         if errors:
-            return json.dumps({"error": "; ".join(errors)})
+            raise ToolException(f"Mutation errors: {'; '.join(errors)}")
 
         return json.dumps(
             {
@@ -719,25 +684,17 @@ class LinkVulnerabilityToMergeRequest(DuoBaseTool):
 
         response = self._process_http_response(identifier="mutation", response=response)
 
-        try:
-            errors = response["data"]["vulnerabilityLinkMergeRequest"]["errors"]
-            if errors:
-                return json.dumps({"error": "; ".join(errors)})
+        errors = response["data"]["vulnerabilityLinkMergeRequest"]["errors"]
+        if errors:
+            raise ToolException(f"Mutation errors: {'; '.join(errors)}")
 
-            return json.dumps(
-                {
-                    "vulnerability": response["data"]["vulnerabilityLinkMergeRequest"][
-                        "vulnerability"
-                    ]
-                }
-            )
-        except KeyError as e:
-            return json.dumps(
-                {
-                    "error": f"Unexpected response structure: {str(e)}",
-                    "response": response,
-                }
-            )
+        return json.dumps(
+            {
+                "vulnerability": response["data"]["vulnerabilityLinkMergeRequest"][
+                    "vulnerability"
+                ]
+            }
+        )
 
     def format_display_message(
         self, args: LinkVulnerabilityToMergeRequestInput, _tool_response: Any = None
@@ -772,7 +729,7 @@ that needs to be addressed.
 
         # Validate comment length
         if comment is not None and len(comment) > 50000:
-            return json.dumps({"error": "Comment must be 50,000 characters or less"})
+            raise ToolException("Comment must be 50,000 characters or less")
 
         # Build GraphQL mutation
         mutation = """
@@ -790,44 +747,34 @@ mutation($vulnerabilityId: VulnerabilityID!, $comment: String) {
 }
 """
 
-        try:
-            # Ensure vulnerability_id has proper GraphQL format
-            if not vulnerability_id.startswith("gid://gitlab/Vulnerability/"):
-                vulnerability_id = f"gid://gitlab/Vulnerability/{vulnerability_id}"
+        # Ensure vulnerability_id has proper GraphQL format
+        if not vulnerability_id.startswith("gid://gitlab/Vulnerability/"):
+            vulnerability_id = f"gid://gitlab/Vulnerability/{vulnerability_id}"
 
-            variables = {
-                "vulnerabilityId": vulnerability_id,
-                "comment": comment,
+        variables = {
+            "vulnerabilityId": vulnerability_id,
+            "comment": comment,
+        }
+
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": mutation, "variables": variables}),
+        )
+
+        response = self._process_http_response(identifier="mutation", response=response)
+
+        mutation_result = response["data"]["vulnerabilityConfirm"]
+
+        if mutation_result["errors"]:
+            raise ToolException(f"GraphQL errors: {mutation_result['errors']}")
+
+        return json.dumps(
+            {
+                "vulnerability": mutation_result["vulnerability"],
+                "success": True,
+                "message": "Vulnerability confirmed successfully",
             }
-
-            response = await self.gitlab_client.apost(
-                path="/api/graphql",
-                body=json.dumps({"query": mutation, "variables": variables}),
-            )
-
-            try:
-                response = self._process_http_response(
-                    identifier="mutation", response=response
-                )
-            except ValueError as e:
-                return json.dumps({"error": str(e)})
-
-            mutation_result = response["data"]["vulnerabilityConfirm"]
-
-            if mutation_result["errors"]:
-                return json.dumps(
-                    {"error": f"GraphQL errors: {mutation_result['errors']}"}
-                )
-
-            return json.dumps(
-                {
-                    "vulnerability": mutation_result["vulnerability"],
-                    "success": True,
-                    "message": "Vulnerability confirmed successfully",
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        )
 
     def format_display_message(
         self, args: ConfirmVulnerabilityInput, _tool_response: Any = None
@@ -892,32 +839,24 @@ class RevertToDetectedVulnerability(DuoBaseTool):
         if comment:
             variables["comment"] = comment
 
-        try:
-            response = await self.gitlab_client.apost(
-                path="/api/graphql",
-                body=json.dumps({"query": mutation, "variables": variables}),
-            )
+        response = await self.gitlab_client.apost(
+            path="/api/graphql",
+            body=json.dumps({"query": mutation, "variables": variables}),
+        )
 
-            try:
-                response = self._process_http_response(
-                    identifier="mutation", response=response
-                )
-            except ValueError as e:
-                return json.dumps({"error": str(e)})
+        response = self._process_http_response(identifier="mutation", response=response)
 
-            mutation_result = response["data"]["vulnerabilityRevertToDetected"]
+        mutation_result = response["data"]["vulnerabilityRevertToDetected"]
 
-            if mutation_result["errors"]:
-                return json.dumps({"error": mutation_result["errors"]})
+        if mutation_result["errors"]:
+            raise ToolException(f"Mutation errors: {mutation_result['errors']}")
 
-            return json.dumps(
-                {
-                    "vulnerability": mutation_result["vulnerability"],
-                    "status": "reverted_to_detected",
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        return json.dumps(
+            {
+                "vulnerability": mutation_result["vulnerability"],
+                "status": "reverted_to_detected",
+            }
+        )
 
     def format_display_message(
         self, args: RevertToDetectedVulnerabilityInput, _tool_response: Any = None

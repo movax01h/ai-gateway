@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.work_item import GetWorkItemNotes, GetWorkItemNotesInput
 from duo_workflow_service.tools.work_items.base_tool import (
@@ -102,12 +103,23 @@ async def test_get_work_item_notes_with_group_id(
 @patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
 async def test_get_work_item_notes_calls_version_compatibility(
     mock_get_query_variables,
+    gitlab_client_mock,
     metadata,
+    work_item_notes,
 ):
-    mock_get_query_variables.return_value = {
+    version_vars = {
         "includeNoteResolvedAndResolvableFields": False,
         "includeDiscussionIdField": True,
     }
+    mock_get_query_variables.return_value = version_vars
+    graphql_response = {
+        "namespace": {
+            "workItems": {
+                "nodes": [{"widgets": [{"notes": {"nodes": work_item_notes}}]}]
+            }
+        }
+    }
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
 
     tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
 
@@ -289,10 +301,9 @@ async def test_get_work_item_notes_not_found(
 
     tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
 
-    response = await tool._arun(project_id="namespace/project", work_item_iid=999)
-
-    expected_response = json.dumps({"error": "No work item found."})
-    assert response == expected_response
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(project_id="namespace/project", work_item_iid=999)
+    assert "No work item found." in str(exc_info.value)
 
     mock_get_query_variables.assert_called_once_with(
         "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
@@ -310,10 +321,8 @@ async def test_get_work_item_notes_with_graphql_error(
 
     tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
 
-    response = await tool._arun(project_id="namespace/project", work_item_iid=42)
-
-    expected_response = json.dumps({"error": "GraphQL error"})
-    assert response == expected_response
+    with pytest.raises(Exception, match="GraphQL error"):
+        await tool._arun(project_id="namespace/project", work_item_iid=42)
 
     mock_get_query_variables.assert_called_once_with(
         "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
@@ -325,13 +334,11 @@ async def test_get_work_item_notes_with_graphql_error(
 async def test_get_work_item_notes_with_invalid_url(gitlab_client_mock, metadata):
     tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
 
-    response = await tool._arun(url="https://gitlab.com/invalid-url")
-
-    response_json = json.loads(response)
-    assert "error" in response_json
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/invalid-url")
     assert (
         "Failed to parse work item URL: Not a work item URL: https://gitlab.com/invalid-url"
-        in response_json["error"]
+        in str(exc_info.value)
     )
     gitlab_client_mock.graphql.assert_not_called()
 
