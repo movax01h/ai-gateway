@@ -45,6 +45,9 @@ from duo_workflow_service.agent_platform.experimental.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
@@ -521,16 +524,19 @@ class SupervisorAgentComponent(AgentComponentBase):
             for e in self.ui_log_events
             if e.name in UILogEventsAgent.__members__
         ]
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
         node_tools = ToolNode(
             name=f"{self.name}#tools",
             conversation_history_key=supervisor_history_key,
             toolset=self.toolset,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
             ui_history=UIHistory(
                 events=tool_events, writer_class=UILogWriterAgentTools
             ),
+            tracker=tracker,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",

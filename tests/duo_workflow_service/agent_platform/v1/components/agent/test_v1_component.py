@@ -339,13 +339,13 @@ class TestAgentComponentAttachNodes:
         # Verify ToolNode creation
         mock_tool_node_cls.assert_called_once()
         tool_call_kwargs = mock_tool_node_cls.call_args[1]
+        tracker = tool_call_kwargs["tracker"]
         assert tool_call_kwargs["name"] == f"{component_name}#tools"
         assert tool_call_kwargs["component_name"] == component_name
         assert tool_call_kwargs["toolset"] == mock_toolset
-        assert tool_call_kwargs["flow_id"] == flow_id
-        assert tool_call_kwargs["flow_type"] == flow_type
-        assert tool_call_kwargs["internal_event_client"] == mock_internal_event_client
-
+        assert tracker._flow_id == flow_id
+        assert tracker._flow_type == flow_type
+        assert tracker._internal_event_client == mock_internal_event_client
         # Tool Node UI logging
         assert "ui_history" in tool_call_kwargs
         assert isinstance(tool_call_kwargs["ui_history"], UIHistory)

@@ -33,6 +33,9 @@ from duo_workflow_service.agent_platform.experimental.state import (
     IOKeyTemplate,
 )
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.state import IOKey
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
@@ -134,18 +137,21 @@ class OneOffComponent(AgentComponentBase):
         )
 
         # Use enhanced tool node with error correction
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
         tool_node = ToolNodeWithErrorCorrection(
             name=f"{self.name}#tools",
             component_name=self.name,
             toolset=self.toolset,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
             max_correction_attempts=self.max_correction_attempts,
             ui_history=UIHistory(
                 events=self.ui_log_events,
                 writer_class=UILogWriterOneOffTools,
             ),
+            tracker=tracker,
             tool_calls_key=self._tool_calls_key.to_iokey(  # type: ignore[arg-type]
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
             ),

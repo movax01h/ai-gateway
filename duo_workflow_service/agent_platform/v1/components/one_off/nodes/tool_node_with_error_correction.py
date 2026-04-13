@@ -7,6 +7,9 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
 from pydantic_core import ValidationError
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
     UILogWriterOneOffTools,
@@ -21,11 +24,8 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
-from lib.context import client_capabilities
-from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
-from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum
 
 # Routing sentinels used by OneOffComponent._tools_router() to determine next step.
 # Defined at module level so they remain accessible even when the class is patched in tests.
@@ -55,22 +55,17 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         name: str,
         component_name: str,
         toolset: Toolset,
-        flow_id: str,
-        flow_type: GLReportingEventContext,
-        internal_event_client: InternalEventsClient,
         ui_history: UIHistory[UILogWriterOneOffTools, UILogEventsOneOff],
         max_correction_attempts: int = 3,
         tool_calls_key: IOKey | None = None,
         tool_responses_key: IOKey | None = None,
         execution_result_key: IOKey | None = None,
         conversation_history_key: IOKey,
+        tracker: ToolEventTracker,
     ):
         self.name = name
         self._component_name = component_name
         self._toolset = toolset
-        self._flow_id = flow_id
-        self._flow_type = flow_type
-        self._internal_event_client = internal_event_client
         self._logger = structlog.stdlib.get_logger("agent_platform")
         self._ui_history = ui_history
         self.max_correction_attempts = max_correction_attempts
@@ -78,6 +73,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         self.tool_responses_key = tool_responses_key
         self.execution_result_key = execution_result_key
         self._conversation_history_key = conversation_history_key
+        self._tracker = tracker
 
     def _handle_empty_toolset(self, conversation_history: list) -> dict[str, Any]:
         """Handle the case when toolset is empty.
@@ -390,11 +386,11 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         """
         try:
             with duo_workflow_metrics.time_tool_call(
-                tool_name=tool.name, flow_type=self._flow_type.value
+                tool_name=tool.name, flow_type=self._tracker._flow_type.value
             ):
                 tool_call_result = await tool.ainvoke(tool_call_args)
 
-            self._track_internal_event(
+            self._tracker.track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
                 tool_name=tool.name,
             )
@@ -416,13 +412,21 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 tool_response=f"{str(e)} {response}" if response else str(e),
             )
             if isinstance(e, ToolException):
-                err_format = self._format_tool_exception(tool_name=tool.name, error=e)
+                err_format = self._tracker.handle_tool_exception(
+                    tool_name=tool.name, error=e
+                )
             elif isinstance(e, TypeError):
-                err_format = self._format_type_error_response(tool=tool, error=e)
+                err_format = self._tracker.handle_type_error_response(
+                    tool=tool, error=e
+                )
             elif isinstance(e, ValidationError):
-                err_format = self._format_validation_error(tool_name=tool.name, error=e)
+                err_format = self._tracker.handle_validation_error(
+                    tool_name=tool.name, error=e
+                )
             else:
-                err_format = self._format_execution_error(tool_name=tool.name, error=e)
+                err_format = self._tracker.handle_execution_error(
+                    tool_name=tool.name, error=e
+                )
 
             return err_format, ToolExecutionStatus.ERROR
 
@@ -451,118 +455,6 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                     event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
                 )
             return error_message
-
-    def _track_internal_event(
-        self,
-        event_name: EventEnum,
-        tool_name,
-        extra=None,
-    ):
-        """Track internal events for monitoring."""
-        # Add client capabilities to additional properties
-        extra = {
-            **(extra or {}),
-            "client_capabilities": list(client_capabilities.get()),
-        }
-
-        additional_properties = InternalEventAdditionalProperties(
-            label=EventLabelEnum.WORKFLOW_TOOL_CALL_LABEL.value,
-            property=tool_name,
-            value=self._flow_id,
-            **extra,
-        )
-        self._record_metric(
-            event_name=event_name,
-            additional_properties=additional_properties,
-        )
-        self._internal_event_client.track_event(
-            event_name=event_name.value,
-            additional_properties=additional_properties,
-            category=self._flow_type.value,
-        )
-
-    def _format_type_error_response(self, tool: BaseTool, error: TypeError) -> str:
-        """Format type error response for LLM."""
-        if tool.args_schema:
-            schema = f"The schema is: {tool.args_schema.model_json_schema()}"  # type: ignore[union-attr]
-        else:
-            schema = "The tool does not accept any argument"
-
-        response = (
-            f"Tool {tool.name} execution failed due to wrong arguments."
-            f" You must adhere to the tool args schema! {schema}"
-        )
-
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool.name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-
-        return response
-
-    def _format_validation_error(
-        self,
-        tool_name: str,
-        error: ValidationError,
-    ) -> str:
-        """Format validation error response for LLM."""
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-        return f"Tool {tool_name} raised validation error {str(error)}"
-
-    def _format_execution_error(
-        self,
-        tool_name: str,
-        error: Exception,
-    ) -> str:
-        """Format execution error response for LLM."""
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-
-        return f"Tool runtime exception due to {str(error)} {getattr(error, "response", None)}"
-
-    def _format_tool_exception(self, tool_name: str, error: ToolException) -> str:
-        """Format tool exception response for LLM."""
-        self._track_internal_event(
-            event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
-            tool_name=tool_name,
-            extra={
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-        )
-        return f"Tool exception occurred due to {str(error)}"
-
-    def _record_metric(
-        self,
-        event_name: EventEnum,
-        additional_properties: InternalEventAdditionalProperties,
-    ) -> None:
-        """Record metrics for tool execution."""
-        if event_name == EventEnum.WORKFLOW_TOOL_FAILURE:
-            tool_name = additional_properties.property or "unknown"
-            failure_reason = additional_properties.extra.get("error_type", "unknown")
-            duo_workflow_metrics.count_agent_platform_tool_failure(
-                flow_type=self._flow_type.value,
-                tool_name=tool_name,
-                failure_reason=failure_reason,
-            )
 
     def _extract_errors_from_responses(
         self, tool_responses: list[ToolMessage]

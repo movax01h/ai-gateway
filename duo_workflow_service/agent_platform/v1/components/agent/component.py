@@ -10,6 +10,9 @@ from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     AgentNode,
     FinalResponseNode,
@@ -295,16 +298,19 @@ class AgentComponent(BaseComponent):
                 else None
             ),
         )
+        tracker = ToolEventTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+        )
         node_tools = ToolNode(
             name=f"{self.name}#tools",
             component_name=self.name,
             toolset=self.toolset,
-            flow_id=self.flow_id,
-            flow_type=self.flow_type,
-            internal_event_client=self.internal_event_client,
             ui_history=UIHistory(
                 events=self.ui_log_events, writer_class=UILogWriterAgentTools
             ),
+            tracker=tracker,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
