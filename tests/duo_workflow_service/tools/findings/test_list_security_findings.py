@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
     ListSecurityFindingsInput,
@@ -295,3 +296,49 @@ class TestListSecurityFindings:
         assert "severity: CRITICAL, HIGH" in msg_with_filters
         assert "type: SAST" in msg_with_filters
         assert "state: DETECTED" in msg_with_filters
+
+    async def test_arun_with_gitlab_http_response(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that the tool correctly handles GitLabHttpResponse objects."""
+        # Create a GitLabHttpResponse object wrapping the response data
+        http_response = GitLabHttpResponse(
+            status_code=200,
+            body=pipeline_findings_response_data,
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.apost = AsyncMock(return_value=http_response)
+        tool = ListSecurityFindings(metadata=metadata)
+        input_data = {
+            "project_full_path": "gitlab-duo/myproject",
+            "pipeline_id": "273",
+        }
+        response_str = await tool.arun(input_data)
+        response = json.loads(response_str)
+
+        assert "error" not in response
+        assert "findings" in response
+        assert len(response["findings"]) == 3
+        assert response["pipeline"]["iid"] == "273"
+
+    async def test_arun_with_gitlab_http_response_errors(
+        self, gitlab_client_mock, metadata
+    ):
+        """Test handling of GraphQL errors in GitLabHttpResponse raises ToolException."""
+        mock_response_data = {
+            "errors": [{"message": "Field 'securityReportFindings' doesn't exist"}]
+        }
+        http_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_response_data,
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.apost = AsyncMock(return_value=http_response)
+        tool = ListSecurityFindings(metadata=metadata)
+        with pytest.raises(ToolException, match="GraphQL errors"):
+            await tool.arun(
+                {
+                    "project_full_path": "gitlab-duo/myproject",
+                    "pipeline_id": "123",
+                }
+            )
