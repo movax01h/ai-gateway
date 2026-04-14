@@ -106,6 +106,8 @@ class GetSecurityFindingDetails(DuoBaseTool):
             ),
         )
 
+        response = self._process_http_response(identifier="query", response=response)
+
         if "errors" in response:
             return json.dumps(
                 {"error": "GraphQL query failed", "errors": response["errors"]}

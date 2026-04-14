@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.findings.get_security_finding_details import (
     GetSecurityFindingDetails,
     GetSecurityFindingDetailsInput,
@@ -241,6 +242,55 @@ class TestGetSecurityFindingDetails:
         error_response = json.loads(response)
         assert "error" in error_response
         assert "Project not found or access denied" in error_response["error"]
+
+    async def test_arun_with_gitlab_http_response(
+        self, gitlab_client_mock, metadata, security_finding_response_data
+    ):
+        """Test that the tool correctly handles GitLabHttpResponse objects."""
+        # Create a GitLabHttpResponse object wrapping the response data
+        http_response = GitLabHttpResponse(
+            status_code=200,
+            body=security_finding_response_data,
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.apost = AsyncMock(return_value=http_response)
+        tool = GetSecurityFindingDetails(metadata=metadata)
+        input_data = {
+            "project_full_path": "gitlab-duo/myproject",
+            "uuid": "1e9a2bf7-0450-5894-8db5-895c98e39deb",
+            "pipeline_id": "273",
+        }
+        response_str = await tool.arun(input_data)
+        response = json.loads(response_str)
+
+        assert "error" not in response
+        assert "finding" in response
+        assert response["finding"]["uuid"] == input_data["uuid"]
+
+    async def test_arun_with_gitlab_http_response_errors(
+        self, gitlab_client_mock, metadata
+    ):
+        """Test handling of GraphQL errors in GitLabHttpResponse."""
+        mock_response_data = {
+            "errors": [{"message": "Field 'securityReportFinding' doesn't exist"}]
+        }
+        http_response = GitLabHttpResponse(
+            status_code=200,
+            body=mock_response_data,
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.apost = AsyncMock(return_value=http_response)
+        tool = GetSecurityFindingDetails(metadata=metadata)
+        response_str = await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "uuid": "some-uuid",
+                "pipeline_id": "123",
+            }
+        )
+        error_response = json.loads(response_str)
+        assert "error" in error_response
+        assert error_response["error"] == "GraphQL query failed"
 
 
 class TestFormatDisplayMessage:

@@ -254,6 +254,10 @@ class ListSecurityFindings(DuoBaseTool):
                 ),
             )
 
+            response = self._process_http_response(
+                identifier="query", response=response
+            )
+
             if "errors" in response:
                 raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
 
