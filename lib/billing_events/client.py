@@ -28,7 +28,7 @@ class BillingEvent(StrEnum):
 class BillingEventsClient:
     """Client to handle billing events using SnowplowClient."""
 
-    BILLING_CONTEXT_SCHEMA = "iglu:com.gitlab/billable_usage/jsonschema/1-0-1"
+    BILLING_CONTEXT_SCHEMA = "iglu:com.gitlab/billable_usage/jsonschema/1-0-2"
 
     def __init__(
         self,
@@ -218,6 +218,7 @@ class BillingEventsClient:
             deployment_type=internal_context.deployment_type,
             assignments=assignments,
             instance_version=internal_context.instance_version,
+            organization_id=internal_context.organization_id,
         )
 
         structured_event = StructuredEvent(
