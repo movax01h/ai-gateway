@@ -117,7 +117,7 @@ optional = true
 
 [tool.poetry.group.test.dependencies]
 pytest = "^9.0.0"
-pytest-cov = "^6.0.0"
+pytest-cov = "^7.0.0"
 pytest-asyncio = "^1.0.0"
 pylint = "^4.0.5"
 astroid = "^4.0.4"
