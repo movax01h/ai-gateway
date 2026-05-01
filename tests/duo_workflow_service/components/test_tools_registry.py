@@ -487,7 +487,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
 @pytest.mark.asyncio
 async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
     workflow_config = {
-        "id": "test_workflow",
+        "workflow_id": "test_workflow",
         "agent_privileges_names": ["run_commands", "use_git", "run_mcp_tools"],
         "gitlab_host": "gitlab.example.com",
     }
@@ -523,7 +523,7 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
 async def test_registry_toolset_with_tool_options(gl_http_client, project_mock):
     """Test that tool_options are passed through to toolset and tools are cloned."""
     workflow_config = {
-        "id": "test_workflow",
+        "workflow_id": "test_workflow",
         "agent_privileges_names": ["read_write_gitlab"],
         "gitlab_host": "gitlab.example.com",
     }
@@ -560,7 +560,7 @@ async def test_registry_toolset_with_tool_options_no_cross_contamination(
 ):
     """Test that tool_options on one toolset don't affect another toolset's tools."""
     workflow_config = {
-        "id": "test_workflow",
+        "workflow_id": "test_workflow",
         "agent_privileges_names": ["read_write_gitlab"],
         "gitlab_host": "gitlab.example.com",
     }
@@ -742,7 +742,7 @@ async def test_registry_configuration_with_preapproved_tools(
     gl_http_client, project_mock
 ):
     workflow_config = {
-        "id": "test_workflow",
+        "workflow_id": "test_workflow",
         "agent_privileges_names": ["read_write_files", "run_commands"],
         "pre_approved_agent_privileges_names": ["read_write_files"],
         "gitlab_host": "gitlab.example.com",

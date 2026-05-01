@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 class ToolMetadata(TypedDict):
+    workflow_id: str
     outbox: Outbox
     gitlab_client: GitlabHttpClient
     gitlab_host: str
@@ -228,6 +229,7 @@ class ToolsRegistry:
             "pre_approved_agent_privileges_names", []
         )
         tool_metadata = ToolMetadata(
+            workflow_id=workflow_config.get("workflow_id", ""),
             outbox=outbox,
             gitlab_client=gl_http_client,
             gitlab_host=workflow_config.get("gitlab_host", ""),

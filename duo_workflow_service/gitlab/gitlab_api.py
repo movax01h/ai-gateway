@@ -40,6 +40,7 @@ class Checkpoint(TypedDict, total=False):
 
 
 class WorkflowConfig(TypedDict):
+    workflow_id: str
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
     tool_call_approvals: dict
@@ -352,6 +353,7 @@ async def fetch_workflow_and_container_data(
         )
 
     workflow_config = WorkflowConfig(
+        workflow_id=workflow_id,
         agent_privileges_names=workflow.get("agentPrivilegesNames", []),
         pre_approved_agent_privileges_names=workflow.get(
             "preApprovedAgentPrivilegesNames", []
@@ -394,6 +396,7 @@ def extract_id_from_global_id(global_id: str):
 
 def empty_workflow_config() -> WorkflowConfig:
     return {
+        "workflow_id": "",
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
         "tool_call_approvals": {},

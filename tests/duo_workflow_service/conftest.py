@@ -60,8 +60,9 @@ def project_mock_fixture():
 
 
 @pytest.fixture(name="tool_metadata", scope="function")
-def tool_metadata_fixture(gl_http_client, project_mock):
+def tool_metadata_fixture(gl_http_client, project_mock, workflow_id):
     return ToolMetadata(
+        workflow_id=workflow_id,
         outbox=MagicMock(spec=Outbox),
         gitlab_client=gl_http_client,
         gitlab_host="gitlab.example.com",
@@ -207,12 +208,14 @@ def first_checkpoint_fixture() -> dict[str, Any] | None:
 
 @pytest.fixture(name="workflow_config")
 def workflow_config_fixture(
+    workflow_id: str,
     agent_privileges_names: list[str],
     allow_agent_to_request_user: bool,
     mcp_enabled: bool,
     first_checkpoint: dict[str, Any],
 ) -> dict[str, Any]:
     return {
+        "workflow_id": workflow_id,
         "project_id": 1,
         "agent_privileges_names": agent_privileges_names,
         "pre_approved_agent_privileges_names": [],

@@ -123,6 +123,7 @@ async def test_fetch_workflow_and_container_data_success():
     assert namespace is None
 
     # Verify workflow config
+    assert workflow_config["workflow_id"] == workflow_id
     assert workflow_config["agent_privileges_names"] == [
         "read_repository",
         "write_repository",
