@@ -11,15 +11,6 @@ from ai_gateway.api.v4 import api_router
 from ai_gateway.api.v4.code.typing import StreamEvent
 from lib.feature_flags.context import current_feature_flag_context
 
-# Pytest runs these imported tests as part of this file.
-from tests.api.v3.test_v3_code import (  # pylint: disable=unused-import  # noqa: F401
-    TestEditorContentCompletion,
-    TestEditorContentGeneration,
-    TestIncomingRequest,
-    TestUnauthorizedIssuer,
-    TestUnauthorizedScopes,
-)
-
 
 @pytest.fixture(autouse=True)
 def reset_sse_starlette_appstatus_event():

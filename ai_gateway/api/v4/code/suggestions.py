@@ -6,13 +6,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
-from ai_gateway.api.v3.code.completions import code_suggestions as v3_code_suggestions
-from ai_gateway.api.v3.code.typing import (
+from ai_gateway.api.v4.code.typing import (
     CodeEditorComponents,
     CompletionRequest,
     ResponseMetadataBase,
-)
-from ai_gateway.api.v4.code.typing import (
     StreamDelta,
     StreamEvent,
     StreamSSEMessage,
@@ -20,6 +17,7 @@ from ai_gateway.api.v4.code.typing import (
 )
 from ai_gateway.async_dependency_resolver import get_config, get_container_application
 from ai_gateway.code_suggestions import CodeSuggestionsChunk
+from ai_gateway.code_suggestions.handler import code_suggestions as _code_suggestions
 from ai_gateway.config import Config
 from ai_gateway.prompts import BasePromptRegistry
 from lib.context import StarletteUser, get_current_user
@@ -101,7 +99,7 @@ async def suggestions(
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
     config: Annotated[Config, Depends(get_config)],
 ):
-    return await v3_code_suggestions(
+    return await _code_suggestions(
         request=request,
         payload=payload,
         current_user=current_user,
