@@ -59,6 +59,11 @@ class DuoWorkflowStub(object):
                 request_serializer=contract_dot_contract__pb2.TrackSelfHostedClientEvent.SerializeToString,
                 response_deserializer=contract_dot_contract__pb2.TrackSelfHostedAction.FromString,
                 _registered_method=True)
+        self.ValidateFlowConfig = channel.unary_unary(
+                '/DuoWorkflow/ValidateFlowConfig',
+                request_serializer=contract_dot_contract__pb2.ValidateFlowConfigRequest.SerializeToString,
+                response_deserializer=contract_dot_contract__pb2.ValidateFlowConfigResponse.FromString,
+                _registered_method=True)
 
 
 class DuoWorkflowServicer(object):
@@ -94,6 +99,12 @@ class DuoWorkflowServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ValidateFlowConfig(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DuoWorkflowServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -121,6 +132,11 @@ def add_DuoWorkflowServicer_to_server(servicer, server):
                     servicer.TrackSelfHostedExecuteWorkflow,
                     request_deserializer=contract_dot_contract__pb2.TrackSelfHostedClientEvent.FromString,
                     response_serializer=contract_dot_contract__pb2.TrackSelfHostedAction.SerializeToString,
+            ),
+            'ValidateFlowConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.ValidateFlowConfig,
+                    request_deserializer=contract_dot_contract__pb2.ValidateFlowConfigRequest.FromString,
+                    response_serializer=contract_dot_contract__pb2.ValidateFlowConfigResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -258,6 +274,33 @@ class DuoWorkflow(object):
             '/DuoWorkflow/TrackSelfHostedExecuteWorkflow',
             contract_dot_contract__pb2.TrackSelfHostedClientEvent.SerializeToString,
             contract_dot_contract__pb2.TrackSelfHostedAction.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ValidateFlowConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/DuoWorkflow/ValidateFlowConfig',
+            contract_dot_contract__pb2.ValidateFlowConfigRequest.SerializeToString,
+            contract_dot_contract__pb2.ValidateFlowConfigResponse.FromString,
             options,
             channel_credentials,
             insecure,

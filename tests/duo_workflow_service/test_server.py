@@ -4,7 +4,7 @@ import json
 import os
 import signal
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterable, List, Optional, cast
+from typing import Any, AsyncIterable, List, Optional, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import grpc
@@ -2148,3 +2148,160 @@ async def test_execute_workflow_value_error_from_resolve_returns_invalid_argumen
         if c[0][0] == grpc.StatusCode.INVALID_ARGUMENT
     ]
     assert len(abort_calls) > 0, "Expected INVALID_ARGUMENT abort"
+
+
+# ---------------------------------------------------------------------------
+# ValidateFlowConfig tests
+# ---------------------------------------------------------------------------
+
+
+def _make_flow_config_struct(
+    version: str = "v1",
+    environment: str = "ambient",
+    entry_point: str = "comp",
+    component_name: str = "comp",
+    component_type: str = "AgentComponent",
+    prompt_id: str = "test_prompt",
+    toolset: Optional[List] = None,
+    inputs: Optional[List] = None,
+    routers: Optional[List] = None,
+    prompts: Optional[List] = None,
+) -> struct_pb2.Struct:
+    """Build a minimal valid flow config as a protobuf Struct."""
+    if toolset is None:
+        toolset = []
+    if inputs is None:
+        inputs = [{"from": "context:goal", "as": "goal"}]
+    if routers is None:
+        routers = [{"from": component_name, "to": "end"}]
+    if prompts is None:
+        prompts = [
+            {
+                "prompt_id": prompt_id,
+                "name": prompt_id,
+                "unit_primitives": ["duo_agent_platform"],
+                "prompt_template": {"system": "Hello {{ goal }}"},
+            }
+        ]
+
+    config_dict: dict[str, Any] = {
+        "version": version,
+        "environment": environment,
+        "flow": {"entry_point": entry_point},
+        "components": [
+            {
+                "name": component_name,
+                "type": component_type,
+                "prompt_id": prompt_id,
+                "toolset": toolset,
+                "inputs": inputs,
+            }
+        ],
+        "routers": routers,
+        "prompts": prompts,
+    }
+
+    struct = struct_pb2.Struct()
+    struct.update(config_dict)
+    return struct
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_valid(mock_flow_validator_cls):
+    """A valid flow config returns valid=True with no errors."""
+    mock_validator = MagicMock()
+    mock_validator.validate_dict = MagicMock()
+    mock_flow_validator_cls.return_value = mock_validator
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(),
+    )
+    response = await service.ValidateFlowConfig(request, mock_context)
+
+    assert isinstance(response, contract_pb2.ValidateFlowConfigResponse)
+    assert response.valid is True
+    assert not response.errors
+    mock_validator.validate_dict.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_invalid_raises_value_error(mock_flow_validator_cls):
+    """A flow config that fails validation returns valid=False with error messages."""
+    mock_validator = MagicMock()
+    mock_validator.validate_dict = MagicMock(
+        side_effect=ValueError("missing input variables: {'goal'}")
+    )
+    mock_flow_validator_cls.return_value = mock_validator
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(inputs=[]),
+    )
+    response = await service.ValidateFlowConfig(request, mock_context)
+
+    assert isinstance(response, contract_pb2.ValidateFlowConfigResponse)
+    assert response.valid is False
+    assert len(response.errors) == 1
+    assert "missing input variables" in response.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_validate_flow_config_missing_flow_config():
+    """A request without flow_config returns valid=False with a descriptive error."""
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+
+    request = contract_pb2.ValidateFlowConfigRequest()
+    response = await service.ValidateFlowConfig(request, mock_context)
+
+    assert response.valid is False
+    assert any("flow_config" in err for err in response.errors)
+
+
+@pytest.mark.asyncio
+async def test_validate_flow_config_missing_version_in_config():
+    """A config without an embedded `version` field returns the validator's error."""
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+
+    config_struct = struct_pb2.Struct()
+    config_struct.update({"environment": "ambient"})
+    request = contract_pb2.ValidateFlowConfigRequest(flow_config=config_struct)
+    response = await service.ValidateFlowConfig(request, mock_context)
+
+    assert response.valid is False
+    assert any(
+        "Missing required field 'version' in flow config" in err
+        for err in response.errors
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_unexpected_exception(mock_flow_validator_cls):
+    """Unexpected exceptions are caught and returned as validation errors."""
+    mock_validator = MagicMock()
+    mock_validator.validate_dict = MagicMock(
+        side_effect=RuntimeError("Something went very wrong")
+    )
+    mock_flow_validator_cls.return_value = mock_validator
+
+    mock_context = MagicMock(spec=grpc.ServicerContext)
+    service = DuoWorkflowService()
+
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(),
+    )
+    response = await service.ValidateFlowConfig(request, mock_context)
+
+    assert response.valid is False
+    assert len(response.errors) == 1
+    assert "RuntimeError" in response.errors[0]
+    assert "Something went very wrong" in response.errors[0]

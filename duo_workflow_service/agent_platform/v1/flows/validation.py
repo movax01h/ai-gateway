@@ -33,12 +33,14 @@ from typing import Any, List, Optional
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
+from pydantic import ValidationError as PydanticValidationError
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
 from duo_workflow_service.agent_platform.v1.flows.base import Flow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.client_capabilities import MIN_CAPABILITIES_VERSION
@@ -248,9 +250,11 @@ class DryRunFlowValidator(Flow):
         prompt-variable validation without touching any real external systems.
 
         Raises:
-            ValueError: If the configuration is invalid (unknown component
-                types, missing entry_point, unresolvable tool names, duplicate
-                component names, routing errors, or prompt-variable mismatches).
+            FlowValidationError: If the configuration is invalid (unknown
+                component types, missing entry_point, unresolvable tool names,
+                duplicate component names, routing errors, or prompt-variable
+                mismatches). The ``errors`` attribute contains a list of
+                human-readable error strings.
         """
         try:
             self._compile(
@@ -258,9 +262,11 @@ class DryRunFlowValidator(Flow):
                 tools_registry=_make_validation_tools_registry(),
                 checkpointer=MemorySaver(),
             )
+        except PydanticValidationError as exc:
+            raise FlowValidationError.from_pydantic(exc) from exc
         except Exception as exc:
-            raise ValueError(
-                f"Flow compilation failed during validation: {exc}"
+            raise FlowValidationError(
+                [f"Flow compilation failed during validation: {exc}"]
             ) from exc
 
     async def _compile_and_run_graph(self, *args: Any, **kwargs: Any) -> None:

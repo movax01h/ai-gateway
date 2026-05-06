@@ -11,6 +11,7 @@ service DuoWorkflow {
     rpc ListTools (ListToolsRequest) returns (ListToolsResponse);
     rpc ListFlows (ListFlowsRequest) returns (ListFlowsResponse);
     rpc TrackSelfHostedExecuteWorkflow (stream TrackSelfHostedClientEvent) returns (stream TrackSelfHostedAction);
+    rpc ValidateFlowConfig (ValidateFlowConfigRequest) returns (ValidateFlowConfigResponse);
 }
 
 message ClientEvent {
@@ -284,4 +285,20 @@ message TrackSelfHostedClientEvent {
 
 message TrackSelfHostedAction {
     string requestID = 1;
+}
+
+message ValidateFlowConfigRequest {
+    // The flow configuration payload as a JSON/YAML-equivalent struct.
+    // Must contain a top-level `version` field identifying the schema
+    // (e.g. "v1" or "experimental").
+    google.protobuf.Struct flow_config = 1 [json_name = "flow_config"];
+    reserved 2;
+    reserved "schema_version";
+}
+
+message ValidateFlowConfigResponse {
+    // Whether the flow configuration is valid.
+    bool valid = 1;
+    // List of validation error messages. Empty when valid is true.
+    repeated string errors = 2;
 }
