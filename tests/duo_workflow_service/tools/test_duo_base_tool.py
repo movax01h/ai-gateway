@@ -139,6 +139,19 @@ def test_gitlab_host_property_when_not_set():
         _ = tool.gitlab_host
 
 
+def test_workflow_id_property_when_set():
+    metadata = {"workflow_id": "abc-123"}
+    tool = DummyTool(metadata=metadata)
+
+    assert tool.workflow_id == "abc-123"
+
+
+def test_workflow_id_property_when_not_set():
+    tool = DummyTool(metadata={})
+
+    assert tool.workflow_id == ""
+
+
 def test_format_tool_display_message_non_duo_base_tool_child():
     mock_tool = MagicMock(spec=BaseTool)
     args = {"test": "value"}

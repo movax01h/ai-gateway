@@ -35,6 +35,7 @@ def project_mock_fixture():
 @pytest.fixture(name="metadata")
 def metadata_fixture(gitlab_client_mock, project_mock):
     return {
+        "workflow_id": "test-workflow-123",
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
         "project": project_mock,
@@ -172,6 +173,7 @@ async def test_post_duo_code_review(gitlab_client_mock, metadata):
                 "project_id": "123",
                 "merge_request_iid": 45,
                 "review_output": "<review>test</review>",
+                "workflow_id": "test-workflow-123",
             }
         ),
         parse_json=False,

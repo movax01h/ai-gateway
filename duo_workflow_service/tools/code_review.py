@@ -59,6 +59,7 @@ class PostDuoCodeReview(DuoBaseTool):
             "project_id": project_id,
             "merge_request_iid": merge_request_iid,
             "review_output": review_output,
+            "workflow_id": self.workflow_id,
         }
         response = await self.gitlab_client.apost(
             path="/api/v4/ai/duo_workflows/code_review/add_comments",

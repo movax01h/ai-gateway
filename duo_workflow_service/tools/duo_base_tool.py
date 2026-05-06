@@ -123,6 +123,10 @@ class DuoBaseTool(BaseTool):
         return host
 
     @property
+    def workflow_id(self) -> str:
+        return (self.metadata and self.metadata.get("workflow_id")) or ""
+
+    @property
     def project(self) -> Project:
         return self.metadata and self.metadata.get("project")  # type: ignore
 
