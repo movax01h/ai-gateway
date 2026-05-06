@@ -199,7 +199,7 @@ models:
       max_tokens: 64_000
 
   - name: "Claude Opus 4.5"
-    provider: "Anthropic"
+    provider: "Vertex"
     gitlab_identifier: "claude_opus_4_5_20251101_vertex"
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
@@ -233,7 +233,7 @@ models:
       max_tokens: 128_000
 
   - name: "Claude Opus 4.6"
-    provider: "Anthropic"
+    provider: "Vertex"
     gitlab_identifier: "claude_opus_4_6_vertex"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
@@ -251,7 +251,7 @@ models:
       vertex_location: global
 
   - name: "Claude Opus 4.7"
-    provider: "Anthropic"
+    provider: "Vertex"
     gitlab_identifier: "claude_opus_4_7_vertex"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
