@@ -27,6 +27,9 @@ mutation createWorkItem($input: WorkItemCreateInput!) {
                 ... on WorkItemWidgetHealthStatus {
                     healthStatus
                 }
+                ... on WorkItemWidgetWeight {
+                    weight
+                }
                 ... on WorkItemWidgetStartAndDueDate {
                     startDate
                     dueDate

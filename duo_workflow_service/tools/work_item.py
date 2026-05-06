@@ -477,6 +477,16 @@ class CreateWorkItemInput(ParentResourceInput):
         default=None,
         description="Health status: 'onTrack', 'needsAttention', 'atRisk'.",
     )
+    weight: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Weight (story points) for the work item. Non-negative integer (0 is a valid weight). "
+        "To clear an existing weight, use clear_weight=True instead.",
+    )
+    clear_weight: Optional[bool] = Field(
+        default=None,
+        description="Set to true to clear the weight on the work item. Takes precedence over 'weight'.",
+    )
     state: Optional[str] = Field(
         default=None, description="Work item state. Use 'opened' or 'closed'."
     )
@@ -548,6 +558,16 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         default=None,
         description="Health status of the work item. Values: 'onTrack', 'needsAttention', 'atRisk'.",
     )
+    weight: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Weight (story points) for the work item. Non-negative integer (0 is a valid weight). "
+        "To clear an existing weight, use clear_weight=True instead.",
+    )
+    clear_weight: Optional[bool] = Field(
+        default=None,
+        description="Set to true to clear the weight on the work item. Takes precedence over 'weight'.",
+    )
     state: Optional[str] = Field(
         default=None,
         description="The state of the work item. Use 'opened' or 'closed'.",
@@ -588,7 +608,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     Supports updating title, description, assignees, labels, state, health status,
-    dates, hierarchy, and to-do items.
+    weight, dates, hierarchy, and to-do items.
 
     For example:
     - update_work_item(group_id='parent/child', work_item_iid=42, title="Updated title")

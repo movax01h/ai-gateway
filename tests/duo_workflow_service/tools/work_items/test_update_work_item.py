@@ -142,6 +142,18 @@ def update_response_fixture_func():
             {"todo_action": "mark_as_done"},
             {"currentUserTodosWidget": {"action": "MARK_AS_DONE"}},
         ),
+        (
+            {"weight": 5},
+            {"weightWidget": {"weight": 5}},
+        ),
+        (
+            {"weight": 0},
+            {"weightWidget": {"weight": 0}},
+        ),
+        (
+            {"clear_weight": True},
+            {"weightWidget": {"weight": None}},
+        ),
     ],
     ids=[
         "title",
@@ -154,6 +166,9 @@ def update_response_fixture_func():
         "todo_add",
         "todo_mark_as_done_with_id",
         "todo_mark_as_done_without_id",
+        "weight_set",
+        "weight_zero_literal",
+        "weight_clear",
     ],
 )
 async def test_update_work_item_variants(
