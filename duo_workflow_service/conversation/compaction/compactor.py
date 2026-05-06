@@ -243,6 +243,13 @@ class ConversationCompactor:
             msg_tokens_before=original_tokens,
             msg_tokens_after=compacted_tokens,
             compaction_ratio=1 - compacted_tokens / original_tokens,
+            compaction_usage_data=summary.usage_metadata,
+            compaction_model_details=summary.response_metadata,
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+            agent_name=self._agent_name,
+            model_name=self._model_name,
+            compaction_config=self._config.model_dump(),
         )
 
         return CompactionResult(
