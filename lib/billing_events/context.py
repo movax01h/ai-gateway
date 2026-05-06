@@ -36,6 +36,7 @@ class BillingEventContext(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     deployment_type: Optional[str] = None
     assignments: Optional[List[str]] = None
+    organization_id: Optional[int] = None
 
 
 class UsageQuotaEventContext(BaseModel):
@@ -75,6 +76,7 @@ class UsageQuotaEventContext(BaseModel):
     feature_qualified_name: Optional[str] = None
     feature_ai_catalog_item: Optional[bool] = None
     model_id: Optional[str] = None
+    organization_id: Optional[int] = None
 
     @classmethod
     def from_internal_event(cls, internal_event_context: EventContext) -> Self:

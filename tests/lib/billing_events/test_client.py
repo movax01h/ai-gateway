@@ -34,6 +34,7 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "seat_ids": ["TODO"],
     "metadata": {},
     "deployment_type": None,
+    "organization_id": None,
 }
 
 
@@ -181,6 +182,7 @@ class TestBillingEventsClient:
             correlation_id="corr-123",
             deployment_type=".com",
             feature_enablement_type="duo_pro",
+            organization_id=kwargs.get("organization_id"),
         )
         current_event_context.set(event_context)
 
@@ -204,6 +206,7 @@ class TestBillingEventsClient:
             "unique_instance_id": "test-instance-uid",
             "deployment_type": ".com",
             "assignments": ["duo_pro"],
+            "organization_id": kwargs.get("organization_id"),
         }
 
         client.track_billing_event(
