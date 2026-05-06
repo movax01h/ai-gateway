@@ -136,6 +136,7 @@ async def test_create_work_item_with_all_supported_widgets(
         due_date="2025-07-10",
         is_fixed=True,
         health_status="onTrack",
+        weight=5,
     )
 
     response_json = json.loads(response)
@@ -158,6 +159,61 @@ async def test_create_work_item_with_all_supported_widgets(
         "isFixed": True,
     }
     assert gql_input["healthStatusWidget"]["healthStatus"] == "onTrack"
+    assert gql_input["weightWidget"] == {"weight": 5}
+
+
+@pytest.mark.asyncio
+async def test_create_work_item_with_weight_zero_is_literal(
+    gitlab_client_mock,
+    metadata,
+    created_work_item_data_fixture,
+    work_item_type_data_fixture,
+):
+    """Weight=0 should be sent as a literal 0, not null."""
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        work_item_type_data_fixture,
+        {"workItemCreate": {"workItem": created_work_item_data_fixture, "errors": []}},
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    await tool._arun(
+        group_id="namespace/group",
+        title="Zero Weight",
+        type_name="Issue",
+        weight=0,
+    )
+
+    gql_input = gitlab_client_mock.graphql.call_args_list[1][0][1]["input"]
+    assert gql_input["weightWidget"] == {"weight": 0}
+
+
+@pytest.mark.asyncio
+async def test_create_work_item_with_clear_weight_sends_null(
+    gitlab_client_mock,
+    metadata,
+    created_work_item_data_fixture,
+    work_item_type_data_fixture,
+):
+    """clear_weight=True should send null to clear the weight on creation."""
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        work_item_type_data_fixture,
+        {"workItemCreate": {"workItem": created_work_item_data_fixture, "errors": []}},
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    await tool._arun(
+        group_id="namespace/group",
+        title="No Weight",
+        type_name="Issue",
+        clear_weight=True,
+    )
+
+    gql_input = gitlab_client_mock.graphql.call_args_list[1][0][1]["input"]
+    assert gql_input["weightWidget"] == {"weight": None}
 
 
 @pytest.mark.asyncio

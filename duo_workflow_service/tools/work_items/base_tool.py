@@ -246,6 +246,11 @@ class WorkItemBaseTool(DuoBaseTool):
 
         warnings: List[str] = []
 
+        weight_widget = WorkItemBaseTool._build_weight_widget(kwargs, warnings)
+
+        if weight_widget is not None:
+            input_data["weightWidget"] = weight_widget
+
         assignees_widget = WorkItemBaseTool._build_assignees_widget(kwargs, warnings)
 
         if assignees_widget:
@@ -267,6 +272,51 @@ class WorkItemBaseTool(DuoBaseTool):
             input_data["currentUserTodosWidget"] = todo_widget
 
         return input_data, warnings
+
+    @staticmethod
+    def _build_weight_widget(
+        kwargs: Dict[str, Any], warnings: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build weightWidget input for work item create/update.
+
+        Args:
+            kwargs: Input parameters that may contain ``weight`` and/or
+                ``clear_weight``.
+            warnings: List to collect validation warnings.
+
+        Returns:
+            Dictionary with ``{"weight": <int|None>}`` or ``None`` if neither
+            ``weight`` nor ``clear_weight`` is provided. ``clear_weight=True``
+            sends ``null`` to clear the value and takes precedence over
+            ``weight``.
+        """
+        clear_weight = kwargs.get("clear_weight")
+        weight = kwargs.get("weight")
+
+        if clear_weight:
+            if weight is not None:
+                warnings.append(
+                    "Both 'weight' and 'clear_weight=True' were provided; "
+                    "clearing the weight and ignoring 'weight'."
+                )
+            return {"weight": None}
+
+        if weight is None:
+            return None
+
+        if not isinstance(weight, int) or isinstance(weight, bool):
+            warnings.append(
+                f"Invalid weight value: {weight!r}. Must be a non-negative integer."
+            )
+            return None
+
+        if weight < 0:
+            warnings.append(
+                f"Invalid weight value: {weight}. Must be a non-negative integer."
+            )
+            return None
+
+        return {"weight": weight}
 
     @staticmethod
     def _build_assignees_widget(
