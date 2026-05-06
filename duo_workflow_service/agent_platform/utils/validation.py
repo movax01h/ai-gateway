@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from typing import Any, Dict
+
 import yaml
 from dependency_injector.wiring import Provide, inject
+from pydantic import ValidationError as PydanticValidationError
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry as LocalPromptRegistry
@@ -20,10 +23,14 @@ from duo_workflow_service.workflows.registry import flow_factory, get_flow_class
 
 # Re-export so existing callers can still import from here.
 __all__ = [
+    "FlowValidationError",
     "FlowValidator",
     "MissingInputVariablesError",
     "ExtraInputVariablesError",
 ]
+
+
+from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
 
 
 class FlowValidator:
@@ -53,25 +60,48 @@ class FlowValidator:
             yaml_content: Raw YAML text of the flow configuration.
 
         Raises:
-            ValueError: On any structural, routing, tool-name, or prompt-variable
-                error found in the config.
+            FlowValidationError: On any validation error, including missing
+                required fields, structural, routing, tool-name, or
+                prompt-variable errors. The ``errors`` attribute contains
+                a list of human-readable error strings.
         """
         yaml_dict = yaml.safe_load(yaml_content)
         if not isinstance(yaml_dict, dict):
-            raise ValueError(
-                f"Flow config must be a YAML mapping, got {type(yaml_dict).__name__}"
+            raise FlowValidationError(
+                [f"Flow config must be a YAML mapping, got {type(yaml_dict).__name__}"]
             )
 
-        version = yaml_dict.get("version")
-        if not version:
-            raise ValueError("Missing required field 'version' in flow config")
+        self.validate_dict(yaml_dict)
 
-        environment = yaml_dict.get("environment")
+    def validate_dict(self, config_dict: Dict[str, Any]) -> None:
+        """Validate a flow configuration dictionary end-to-end.
+
+        Args:
+            config_dict: The flow configuration as a plain Python dict.
+
+        Raises:
+            FlowValidationError: On any validation error, including missing
+                required fields, structural, routing, tool-name, or
+                prompt-variable errors. The ``errors`` attribute contains
+                a list of human-readable error strings.
+        """
+        version = config_dict.get("version")
+        if not version:
+            raise FlowValidationError(
+                ["Missing required field 'version' in flow config"]
+            )
+
+        environment = config_dict.get("environment")
         if not environment:
-            raise ValueError("Missing required field 'environment' in flow config")
+            raise FlowValidationError(
+                ["Missing required field 'environment' in flow config"]
+            )
 
         flow_config_cls, flow_cls = get_flow_classes(version, environment)
-        config = flow_config_cls(**yaml_dict)
+        try:
+            config = flow_config_cls(**config_dict)
+        except PydanticValidationError as exc:
+            raise FlowValidationError.from_pydantic(exc) from exc
 
         # Environment-level checks: component count for chat-partial, prompt
         # security scan, etc.

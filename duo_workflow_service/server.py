@@ -18,6 +18,7 @@ from gitlab_cloud_connector import (
     TokenAuthority,
     data_model,
 )
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
@@ -29,6 +30,8 @@ from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
+from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
+from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import normalize_flow_request
@@ -592,6 +595,44 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             response.configs.append(spec_struct)
 
         return response
+
+    @override
+    async def ValidateFlowConfig(
+        self,
+        request: contract_pb2.ValidateFlowConfigRequest,
+        context: grpc.ServicerContext,
+    ) -> contract_pb2.ValidateFlowConfigResponse:
+        """Validate a flow configuration without executing it.
+
+        Accepts a flow config payload and returns a structured validation result (valid/invalid + list of errors). Uses
+        the existing DryRunFlowValidator to exercise the full compilation path without touching external systems.
+        """
+        log.info("Validating flow config")
+
+        if not request.HasField("flow_config"):
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=["Missing required field: flow_config"],
+            )
+
+        try:
+            # FlowValidator uses @inject in its __init__ to resolve the prompt registry.
+            flow_validator = FlowValidator()
+            flow_validator.validate_dict(MessageToDict(request.flow_config))
+            log.info("Flow config validation succeeded")
+            return contract_pb2.ValidateFlowConfigResponse(valid=True, errors=[])
+        except FlowValidationError as e:
+            log.info("Flow config validation failed", errors=e.errors)
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=e.errors,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            log.error("Unexpected error during flow config validation", error=str(e))
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=[f"Unexpected validation error: {type(e).__name__}: {e}"],
+            )
 
     # Usage check is performed only for Self-Managed instances on GitLab 18.8 or less
     # please see usage_quota interceptor for more details

@@ -443,3 +443,17 @@ class TrackSelfHostedAction(_message.Message):
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     def __init__(self, requestID: _Optional[str] = ...) -> None: ...
+
+class ValidateFlowConfigRequest(_message.Message):
+    __slots__ = ("flow_config",)
+    FLOW_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    flow_config: _struct_pb2.Struct
+    def __init__(self, flow_config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+
+class ValidateFlowConfigResponse(_message.Message):
+    __slots__ = ("valid", "errors")
+    VALID_FIELD_NUMBER: _ClassVar[int]
+    ERRORS_FIELD_NUMBER: _ClassVar[int]
+    valid: bool
+    errors: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, valid: bool = ..., errors: _Optional[_Iterable[str]] = ...) -> None: ...

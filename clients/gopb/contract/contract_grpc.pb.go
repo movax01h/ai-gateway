@@ -24,6 +24,7 @@ const (
 	DuoWorkflow_ListTools_FullMethodName                      = "/DuoWorkflow/ListTools"
 	DuoWorkflow_ListFlows_FullMethodName                      = "/DuoWorkflow/ListFlows"
 	DuoWorkflow_TrackSelfHostedExecuteWorkflow_FullMethodName = "/DuoWorkflow/TrackSelfHostedExecuteWorkflow"
+	DuoWorkflow_ValidateFlowConfig_FullMethodName             = "/DuoWorkflow/ValidateFlowConfig"
 )
 
 // DuoWorkflowClient is the client API for DuoWorkflow service.
@@ -35,6 +36,7 @@ type DuoWorkflowClient interface {
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
 	ListFlows(ctx context.Context, in *ListFlowsRequest, opts ...grpc.CallOption) (*ListFlowsResponse, error)
 	TrackSelfHostedExecuteWorkflow(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TrackSelfHostedClientEvent, TrackSelfHostedAction], error)
+	ValidateFlowConfig(ctx context.Context, in *ValidateFlowConfigRequest, opts ...grpc.CallOption) (*ValidateFlowConfigResponse, error)
 }
 
 type duoWorkflowClient struct {
@@ -101,6 +103,16 @@ func (c *duoWorkflowClient) TrackSelfHostedExecuteWorkflow(ctx context.Context, 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DuoWorkflow_TrackSelfHostedExecuteWorkflowClient = grpc.BidiStreamingClient[TrackSelfHostedClientEvent, TrackSelfHostedAction]
 
+func (c *duoWorkflowClient) ValidateFlowConfig(ctx context.Context, in *ValidateFlowConfigRequest, opts ...grpc.CallOption) (*ValidateFlowConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateFlowConfigResponse)
+	err := c.cc.Invoke(ctx, DuoWorkflow_ValidateFlowConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DuoWorkflowServer is the server API for DuoWorkflow service.
 // All implementations must embed UnimplementedDuoWorkflowServer
 // for forward compatibility.
@@ -110,6 +122,7 @@ type DuoWorkflowServer interface {
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
 	ListFlows(context.Context, *ListFlowsRequest) (*ListFlowsResponse, error)
 	TrackSelfHostedExecuteWorkflow(grpc.BidiStreamingServer[TrackSelfHostedClientEvent, TrackSelfHostedAction]) error
+	ValidateFlowConfig(context.Context, *ValidateFlowConfigRequest) (*ValidateFlowConfigResponse, error)
 	mustEmbedUnimplementedDuoWorkflowServer()
 }
 
@@ -134,6 +147,9 @@ func (UnimplementedDuoWorkflowServer) ListFlows(context.Context, *ListFlowsReque
 }
 func (UnimplementedDuoWorkflowServer) TrackSelfHostedExecuteWorkflow(grpc.BidiStreamingServer[TrackSelfHostedClientEvent, TrackSelfHostedAction]) error {
 	return status.Errorf(codes.Unimplemented, "method TrackSelfHostedExecuteWorkflow not implemented")
+}
+func (UnimplementedDuoWorkflowServer) ValidateFlowConfig(context.Context, *ValidateFlowConfigRequest) (*ValidateFlowConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateFlowConfig not implemented")
 }
 func (UnimplementedDuoWorkflowServer) mustEmbedUnimplementedDuoWorkflowServer() {}
 func (UnimplementedDuoWorkflowServer) testEmbeddedByValue()                     {}
@@ -224,6 +240,24 @@ func _DuoWorkflow_TrackSelfHostedExecuteWorkflow_Handler(srv interface{}, stream
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DuoWorkflow_TrackSelfHostedExecuteWorkflowServer = grpc.BidiStreamingServer[TrackSelfHostedClientEvent, TrackSelfHostedAction]
 
+func _DuoWorkflow_ValidateFlowConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateFlowConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DuoWorkflowServer).ValidateFlowConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DuoWorkflow_ValidateFlowConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DuoWorkflowServer).ValidateFlowConfig(ctx, req.(*ValidateFlowConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DuoWorkflow_ServiceDesc is the grpc.ServiceDesc for DuoWorkflow service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -242,6 +276,10 @@ var DuoWorkflow_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFlows",
 			Handler:    _DuoWorkflow_ListFlows_Handler,
+		},
+		{
+			MethodName: "ValidateFlowConfig",
+			Handler:    _DuoWorkflow_ValidateFlowConfig_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

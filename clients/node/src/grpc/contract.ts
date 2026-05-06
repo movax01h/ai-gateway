@@ -300,6 +300,22 @@ export interface TrackSelfHostedAction {
   requestID: string;
 }
 
+export interface ValidateFlowConfigRequest {
+  /**
+   * The flow configuration payload as a JSON/YAML-equivalent struct.
+   * Must contain a top-level `version` field identifying the schema
+   * (e.g. "v1" or "experimental").
+   */
+  flow_config: { [key: string]: any } | undefined;
+}
+
+export interface ValidateFlowConfigResponse {
+  /** Whether the flow configuration is valid. */
+  valid: boolean;
+  /** List of validation error messages. Empty when valid is true. */
+  errors: string[];
+}
+
 function createBaseClientEvent(): ClientEvent {
   return { startRequest: undefined, actionResponse: undefined, heartbeat: undefined, stopWorkflow: undefined };
 }
@@ -4454,6 +4470,140 @@ export const TrackSelfHostedAction: MessageFns<TrackSelfHostedAction> = {
   },
 };
 
+function createBaseValidateFlowConfigRequest(): ValidateFlowConfigRequest {
+  return { flow_config: undefined };
+}
+
+export const ValidateFlowConfigRequest: MessageFns<ValidateFlowConfigRequest> = {
+  encode(message: ValidateFlowConfigRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.flow_config !== undefined) {
+      Struct.encode(Struct.wrap(message.flow_config), writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ValidateFlowConfigRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseValidateFlowConfigRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.flow_config = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ValidateFlowConfigRequest {
+    return { flow_config: isObject(object.flow_config) ? object.flow_config : undefined };
+  },
+
+  toJSON(message: ValidateFlowConfigRequest): unknown {
+    const obj: any = {};
+    if (message.flow_config !== undefined) {
+      obj.flow_config = message.flow_config;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ValidateFlowConfigRequest>, I>>(base?: I): ValidateFlowConfigRequest {
+    return ValidateFlowConfigRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ValidateFlowConfigRequest>, I>>(object: I): ValidateFlowConfigRequest {
+    const message = createBaseValidateFlowConfigRequest();
+    message.flow_config = object.flow_config ?? undefined;
+    return message;
+  },
+};
+
+function createBaseValidateFlowConfigResponse(): ValidateFlowConfigResponse {
+  return { valid: false, errors: [] };
+}
+
+export const ValidateFlowConfigResponse: MessageFns<ValidateFlowConfigResponse> = {
+  encode(message: ValidateFlowConfigResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.valid !== false) {
+      writer.uint32(8).bool(message.valid);
+    }
+    for (const v of message.errors) {
+      writer.uint32(18).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ValidateFlowConfigResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseValidateFlowConfigResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.valid = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.errors.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ValidateFlowConfigResponse {
+    return {
+      valid: isSet(object.valid) ? globalThis.Boolean(object.valid) : false,
+      errors: globalThis.Array.isArray(object?.errors) ? object.errors.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ValidateFlowConfigResponse): unknown {
+    const obj: any = {};
+    if (message.valid !== false) {
+      obj.valid = message.valid;
+    }
+    if (message.errors?.length) {
+      obj.errors = message.errors;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ValidateFlowConfigResponse>, I>>(base?: I): ValidateFlowConfigResponse {
+    return ValidateFlowConfigResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ValidateFlowConfigResponse>, I>>(object: I): ValidateFlowConfigResponse {
+    const message = createBaseValidateFlowConfigResponse();
+    message.valid = object.valid ?? false;
+    message.errors = object.errors?.map((e) => e) || [];
+    return message;
+  },
+};
+
 export type DuoWorkflowService = typeof DuoWorkflowService;
 export const DuoWorkflowService = {
   executeWorkflow: {
@@ -4504,6 +4654,17 @@ export const DuoWorkflowService = {
       Buffer.from(TrackSelfHostedAction.encode(value).finish()),
     responseDeserialize: (value: Buffer): TrackSelfHostedAction => TrackSelfHostedAction.decode(value),
   },
+  validateFlowConfig: {
+    path: "/DuoWorkflow/ValidateFlowConfig",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ValidateFlowConfigRequest): Buffer =>
+      Buffer.from(ValidateFlowConfigRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ValidateFlowConfigRequest => ValidateFlowConfigRequest.decode(value),
+    responseSerialize: (value: ValidateFlowConfigResponse): Buffer =>
+      Buffer.from(ValidateFlowConfigResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ValidateFlowConfigResponse => ValidateFlowConfigResponse.decode(value),
+  },
 } as const;
 
 export interface DuoWorkflowServer extends UntypedServiceImplementation {
@@ -4512,6 +4673,7 @@ export interface DuoWorkflowServer extends UntypedServiceImplementation {
   listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
   listFlows: handleUnaryCall<ListFlowsRequest, ListFlowsResponse>;
   trackSelfHostedExecuteWorkflow: handleBidiStreamingCall<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  validateFlowConfig: handleUnaryCall<ValidateFlowConfigRequest, ValidateFlowConfigResponse>;
 }
 
 export interface DuoWorkflowClient extends Client {
@@ -4571,6 +4733,21 @@ export interface DuoWorkflowClient extends Client {
     metadata: Metadata,
     options?: Partial<CallOptions>,
   ): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  validateFlowConfig(
+    request: ValidateFlowConfigRequest,
+    callback: (error: ServiceError | null, response: ValidateFlowConfigResponse) => void,
+  ): ClientUnaryCall;
+  validateFlowConfig(
+    request: ValidateFlowConfigRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ValidateFlowConfigResponse) => void,
+  ): ClientUnaryCall;
+  validateFlowConfig(
+    request: ValidateFlowConfigRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ValidateFlowConfigResponse) => void,
+  ): ClientUnaryCall;
 }
 
 export const DuoWorkflowClient = makeGenericClientConstructor(DuoWorkflowService, "DuoWorkflow") as unknown as {
