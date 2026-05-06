@@ -545,7 +545,7 @@ models:
     family:
       - gpt_5
     params:
-      model: gpt-5.5
+      model: gpt-5.5-2026-04-23
       max_tokens: 128_000
 
   - name: "GPT-5.4"
