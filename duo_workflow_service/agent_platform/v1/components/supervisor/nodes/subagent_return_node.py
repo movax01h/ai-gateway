@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any
+from typing import Any, Optional
 
 import structlog
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -7,12 +7,17 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from duo_workflow_service.agent_platform.v1.components.supervisor.delegate_task import (
     DelegateTask,
 )
+from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
+    UILogEventsSupervisor,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     IOKey,
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
+from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.entities import build_tool_info
 
 log = structlog.stdlib.get_logger("subagent_return_node")
 
@@ -32,7 +37,8 @@ class SubagentReturnNode:
     3. Injects it as a ToolMessage into the supervisor's conversation history
         (matching the delegate_task tool_call_id)
     4. Resets the active session context
-    5. Routes back to the supervisor's agent node
+    5. Emits a ``delegation_returns`` UI log entry
+    6. Routes back to the supervisor's agent node
 
     All state interactions are performed exclusively through ``IOKey`` instances,
     following the Flow Registry guideline of avoiding direct state dictionary access.
@@ -47,7 +53,13 @@ class SubagentReturnNode:
             session-scoped final_answer ``IOKey`` at runtime.
         supervisor_history_key: ``RuntimeIOKey`` that resolves the supervisor's
             conversation-history ``IOKey`` at runtime.
+        session_id: The subsession ID of the supervisor component that the
+            subagent is returning to. ``None`` for top-level supervisors; set to
+            a subsession ID for nested subagent architectures.
+        ui_history: ``UIHistory`` for emitting ``delegation_returns`` log entries.
     """
+
+    MESSAGE_SUB_TYPE = "delegation_returns"
 
     def __init__(
         self,
@@ -58,6 +70,8 @@ class SubagentReturnNode:
         active_subagent_name_key: IOKey,
         final_answer_key: RuntimeIOKey,
         supervisor_history_key: RuntimeIOKey,
+        session_id: Optional[str] = None,
+        ui_history: UIHistory,
     ):
         self.name = name
         self._delegate_task_cls = delegate_task_cls
@@ -65,6 +79,8 @@ class SubagentReturnNode:
         self._active_subagent_name_key = active_subagent_name_key
         self._final_answer_key = final_answer_key
         self._supervisor_history_key = supervisor_history_key
+        self._session_id = session_id
+        self._ui_history = ui_history
 
     async def run(self, state: FlowState) -> dict:
         """Inject subagent result into supervisor conversation history."""
@@ -84,15 +100,40 @@ class SubagentReturnNode:
         # Read the subagent's final_answer via the session-scoped RuntimeIOKey
         final_answer = self._final_answer_key.to_iokey(state).value_from_state(state)
 
+        delegate_tool_title: str = self._delegate_task_cls.tool_title
+        delegate_args = {
+            "subagent_name": active_subagent_name,
+            "session_id": active_session,
+        }
+
         # Determine status based on whether we got a result
         if final_answer is not None:
             status = DelegationStatus.COMPLETED
             result_content = final_answer
+            tool_response = str(result_content)
+            self._ui_history.log.success(
+                tool_response,
+                event=UILogEventsSupervisor.ON_DELEGATION_RETURNS,
+                message_sub_type=self.MESSAGE_SUB_TYPE,
+                tool_info=build_tool_info(
+                    delegate_tool_title, delegate_args, tool_response
+                ),
+                session_id=self._session_id,
+            )
         else:
             status = DelegationStatus.ERROR
             result_content = (
                 f"Subagent '{active_subagent_name}' subsession {active_session} "
                 f"did not produce a final_answer."
+            )
+            self._ui_history.log.error(
+                result_content,
+                event=UILogEventsSupervisor.ON_DELEGATION_RETURNS,
+                message_sub_type=self.MESSAGE_SUB_TYPE,
+                tool_info=build_tool_info(
+                    delegate_tool_title, delegate_args, result_content
+                ),
+                session_id=self._session_id,
             )
 
         # Find the delegate_task tool_call_id from supervisor's conversation history
@@ -136,12 +177,17 @@ class SubagentReturnNode:
             self._active_subagent_name_key.to_nested_dict(None),
         )
 
-        return {
+        result: dict[str, Any] = {
             **supervisor_history_key.to_nested_dict(
                 supervisor_history + [tool_message]
             ),
             **context_updates,
         }
+
+        ui_updates = self._ui_history.pop_state_updates()
+        result = merge_nested_dict(result, ui_updates)
+
+        return result
 
     def _find_delegate_call_id(self, supervisor_history: list[BaseMessage]) -> str:
         """Find the delegate_task tool_call_id from the supervisor's last AIMessage.

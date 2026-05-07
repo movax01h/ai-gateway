@@ -52,6 +52,7 @@ from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
+from duo_workflow_service.entities.state import MessageTypeEnum
 
 __all__ = ["SubagentConfig", "SupervisorAgentComponent", "extract_subagent_names"]
 
@@ -631,6 +632,14 @@ class SupervisorAgentComponent(AgentComponentBase):
             supervisor_history_key=supervisor_history_key,
             subsession_history_key_factory=self._subsession_history_key_factory,
             subsession_goal_key_factory=self._subsession_goal_key_factory,
+            ui_history=UIHistory(
+                events=[UILogEventsSupervisor.ON_DELEGATION],
+                writer_class=default_ui_log_writer_class(
+                    events_class=UILogEventsSupervisor,
+                    ui_role_as=MessageTypeEnum.TOOL.value,
+                    component_name=self.name,
+                ),
+            ),
         )
 
         # --- Subagent return node ---
@@ -641,6 +650,14 @@ class SupervisorAgentComponent(AgentComponentBase):
             active_subagent_name_key=self._resolved_active_subagent_name_key,
             final_answer_key=self._active_subagent_final_answer_key,
             supervisor_history_key=supervisor_history_key,
+            ui_history=UIHistory(
+                events=[UILogEventsSupervisor.ON_DELEGATION_RETURNS],
+                writer_class=default_ui_log_writer_class(
+                    events_class=UILogEventsSupervisor,
+                    ui_role_as=MessageTypeEnum.TOOL.value,
+                    component_name=self.name,
+                ),
+            ),
         )
 
         # --- Add supervisor nodes to graph ---
