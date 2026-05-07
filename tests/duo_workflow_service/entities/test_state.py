@@ -22,6 +22,104 @@ from duo_workflow_service.entities.state import (
 )
 
 
+class TestConversationHistoryReducer:
+    def test_appends_new_messages_to_existing(self):
+        current = {"agent1": [HumanMessage(content="hello")]}
+        new = {"agent1": [AIMessage(content="hi there")]}
+
+        result = _conversation_history_reducer(current, new)
+
+        assert len(result["agent1"]) == 2
+        assert result["agent1"][0].content == "hello"
+        assert result["agent1"][1].content == "hi there"
+
+    def test_returns_copy_when_new_is_none(self):
+        current = {"agent1": [HumanMessage(content="hello")]}
+
+        result = _conversation_history_reducer(current, None)
+
+        assert result == current
+        assert result is not current
+
+    def test_adds_new_agent_key(self):
+        current = {"agent1": [HumanMessage(content="hello")]}
+        new = {"agent2": [HumanMessage(content="world")]}
+
+        result = _conversation_history_reducer(current, new)
+
+        assert "agent1" in result
+        assert "agent2" in result
+        assert len(result["agent2"]) == 1
+
+    def test_skips_empty_new_messages(self):
+        current = {"agent1": [HumanMessage(content="hello")]}
+        new = {"agent1": []}
+
+        result = _conversation_history_reducer(current, new)
+
+        assert len(result["agent1"]) == 1
+
+    def test_handles_empty_current(self):
+        current: Dict[str, List[BaseMessage]] = {}
+        new = {"agent1": [HumanMessage(content="hello")]}
+
+        result = _conversation_history_reducer(current, new)
+
+        assert len(result["agent1"]) == 1
+        assert result["agent1"][0].content == "hello"
+
+    def test_does_not_mutate_current(self):
+        original_messages = [HumanMessage(content="hello")]
+        current = {"agent1": original_messages}
+        new = {"agent1": [AIMessage(content="hi")]}
+
+        result = _conversation_history_reducer(current, new)
+
+        # Original current dict should not be mutated
+        assert len(current["agent1"]) == 1
+        assert len(result["agent1"]) == 2
+
+    def test_handles_multiple_agents(self):
+        current = {
+            "planner": [HumanMessage(content="plan this")],
+            "executor": [HumanMessage(content="execute this")],
+        }
+        new = {
+            "planner": [AIMessage(content="here's the plan")],
+            "executor": [AIMessage(content="done executing")],
+        }
+
+        result = _conversation_history_reducer(current, new)
+
+        assert len(result["planner"]) == 2
+        assert len(result["executor"]) == 2
+
+    def test_does_not_trim_messages(self):
+        """Verify the reducer appends without trimming.
+
+        Token-based trimming is deferred to agent run time via maybe_compact_history(), so the reducer should never
+        discard messages.
+        """
+        # Build a large history that would have triggered the old trim logic
+        large_history = [HumanMessage(content=f"message {i}" * 500) for i in range(100)]
+        current = {"agent1": large_history}
+        new = {"agent1": [AIMessage(content="new response")]}
+
+        result = _conversation_history_reducer(current, new)
+
+        assert len(result["agent1"]) == 101
+
+    def test_idempotency_returns_new_object_each_call(self):
+        current = {"agent1": [HumanMessage(content="hello")]}
+        new = {"agent1": [AIMessage(content="hi")]}
+
+        result1 = _conversation_history_reducer(current, new)
+        result2 = _conversation_history_reducer(current, new)
+
+        assert result1 is not result2
+        assert result1 == result2
+
+
 def test_ui_chat_log_reducer():
     current: List[UiChatLog] = [
         {
