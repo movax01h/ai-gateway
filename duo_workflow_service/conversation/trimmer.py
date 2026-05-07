@@ -145,6 +145,7 @@ def restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage
     Walks through messages in subset groups and fixes each group in place:
 
     - Single HumanMessage or SystemMessage: passed through unchanged.
+    - AIMessage with empty content: removed to prevent Bedrock Blank ContentBlock text error
     - AIMessage without tool calls: passed through unchanged.
     - AIMessage with tool calls followed by ToolMessages: the immediately
         following ToolMessages are matched against the declared tool_call_ids.
@@ -176,7 +177,13 @@ def restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage
                 result.append(HumanMessage(content=msg.content))
             i += 1
         else:
-            result.append(msg)
+            if not (
+                isinstance(msg, AIMessage)
+                and not msg.tool_calls
+                and isinstance(msg.content, str)
+                and not msg.content.strip()
+            ):
+                result.append(msg)
             i += 1
 
     return result

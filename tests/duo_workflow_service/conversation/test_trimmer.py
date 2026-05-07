@@ -713,6 +713,40 @@ def test_restore_message_consistency_tool_message_not_immediately_after_ai():
     assert len(result) == 7
 
 
+@pytest.mark.parametrize(
+    "content, tool_calls, expect_dropped",
+    [
+        pytest.param("", [], True, id="empty_string_dropped"),
+        pytest.param("   ", [], True, id="whitespace_only_dropped"),
+        pytest.param("hello", [], False, id="non_empty_kept"),
+        pytest.param(
+            "",
+            [{"id": "tc-1", "name": "some_tool", "args": {}}],
+            False,
+            id="tool_calls_kept",
+        ),
+    ],
+)
+def test_restore_message_consistency_drops_blank_ai_messages(
+    content, tool_calls, expect_dropped
+):
+    messages = [
+        HumanMessage(content="user message"),
+        AIMessage(content=content, tool_calls=tool_calls),
+    ]
+    if tool_calls:
+        messages.append(ToolMessage(content="result", tool_call_id=tool_calls[0]["id"]))
+
+    result = restore_message_consistency(messages)
+
+    ai_messages = [m for m in result if m.type == "ai"]
+    if expect_dropped:
+        assert ai_messages == []
+    else:
+        assert len(ai_messages) == 1
+        assert ai_messages[0].content == content
+
+
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
 def test_apply_token_based_trim_empty_result_handling(
