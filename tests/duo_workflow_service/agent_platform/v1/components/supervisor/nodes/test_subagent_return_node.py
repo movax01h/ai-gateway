@@ -13,6 +13,9 @@ from duo_workflow_service.agent_platform.experimental.state.base import RuntimeI
 from duo_workflow_service.agent_platform.v1.components.supervisor.nodes.subagent_return_node import (
     SubagentReturnNode,
 )
+from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
+    UILogEventsSupervisor,
+)
 
 
 @pytest.fixture(name="final_answer_runtime_key")
@@ -51,6 +54,7 @@ def return_node_fixture(
     active_subagent_name_key,
     supervisor_history_runtime_key,
     final_answer_runtime_key,
+    ui_history,
 ):
     """SubagentReturnNode wired with supervisor-scoped key fixtures."""
     return SubagentReturnNode(
@@ -60,6 +64,7 @@ def return_node_fixture(
         active_subagent_name_key=active_subagent_name_key,
         final_answer_key=final_answer_runtime_key,
         supervisor_history_key=supervisor_history_runtime_key,
+        ui_history=ui_history,
     )
 
 
@@ -304,3 +309,113 @@ class TestSubagentReturnNodeRun:
 
         with pytest.raises(ValueError, match="mixed with other tool calls"):
             await return_node.run(state)
+
+
+class TestSubagentReturnNodeUILog:
+    """Tests for SubagentReturnNode UI log emission."""
+
+    def _make_return_node_with_ui_history(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        active_subsession_key,
+        active_subagent_name_key,
+        supervisor_history_runtime_key,
+        final_answer_runtime_key,
+        ui_history,
+    ):
+        return SubagentReturnNode(
+            name=f"{supervisor_name}#subagent_return",
+            delegate_task_cls=delegate_task_cls,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            final_answer_key=final_answer_runtime_key,
+            supervisor_history_key=supervisor_history_runtime_key,
+            ui_history=ui_history,
+        )
+
+    @pytest.mark.asyncio
+    async def test_emits_delegation_returns_ui_log_on_success(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        active_subsession_key,
+        active_subagent_name_key,
+        supervisor_history_runtime_key,
+        final_answer_runtime_key,
+        supervisor_state_with_completed_subsession,
+        ui_history,
+    ):
+        """SubagentReturnNode calls ui_history.log.success and includes pop_state_updates in result."""
+        sentinel = {"ui_chat_log": ["sentinel_log_entry"]}
+        ui_history.pop_state_updates.return_value = sentinel
+
+        node = self._make_return_node_with_ui_history(
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            final_answer_runtime_key=final_answer_runtime_key,
+            ui_history=ui_history,
+        )
+
+        result = await node.run(supervisor_state_with_completed_subsession)
+
+        ui_history.log.success.assert_called_once()
+        call_kwargs = ui_history.log.success.call_args.kwargs
+        assert call_kwargs["event"] == UILogEventsSupervisor.ON_DELEGATION_RETURNS
+        assert call_kwargs["message_sub_type"] == SubagentReturnNode.MESSAGE_SUB_TYPE
+        assert call_kwargs["tool_info"] is not None
+        ui_history.pop_state_updates.assert_called_once()
+        assert result["ui_chat_log"] == ["sentinel_log_entry"]
+
+    @pytest.mark.asyncio
+    async def test_emits_delegation_returns_ui_log_on_failure(
+        self,
+        supervisor_name,
+        developer_name,
+        delegate_task_cls,
+        active_subsession_key,
+        active_subagent_name_key,
+        supervisor_history_runtime_key,
+        final_answer_runtime_key,
+        base_flow_state,
+        delegate_tool_call,
+        ui_history,
+    ):
+        """SubagentReturnNode calls ui_history.log.error and includes pop_state_updates in result on failure."""
+        sentinel = {"ui_chat_log": ["sentinel_error_entry"]}
+        ui_history.pop_state_updates.return_value = sentinel
+
+        node = self._make_return_node_with_ui_history(
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            final_answer_runtime_key=final_answer_runtime_key,
+            ui_history=ui_history,
+        )
+
+        # State with active subsession but no final_answer
+        ai_msg = Mock(spec=AIMessage)
+        ai_msg.tool_calls = [delegate_tool_call]
+        state = {**base_flow_state}
+        state["context"] = {
+            supervisor_name: {
+                "active_subsession": 1,
+                "active_subagent_name": developer_name,
+            }
+        }
+        state["conversation_history"] = {supervisor_name: [ai_msg]}
+
+        result = await node.run(state)
+
+        ui_history.log.error.assert_called_once()
+        call_kwargs = ui_history.log.error.call_args.kwargs
+        assert call_kwargs["event"] == UILogEventsSupervisor.ON_DELEGATION_RETURNS
+        assert call_kwargs["message_sub_type"] == SubagentReturnNode.MESSAGE_SUB_TYPE
+        assert call_kwargs["tool_info"] is not None
+        ui_history.pop_state_updates.assert_called_once()
+        assert result["ui_chat_log"] == ["sentinel_error_entry"]

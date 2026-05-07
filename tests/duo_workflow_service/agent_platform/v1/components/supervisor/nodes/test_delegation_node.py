@@ -13,6 +13,9 @@ from duo_workflow_service.agent_platform.v1.components.supervisor.nodes.delegati
     DelegationFatalError,
     DelegationNode,
 )
+from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
+    UILogEventsSupervisor,
+)
 
 
 class TestDelegationNodeNewSession:
@@ -31,6 +34,7 @@ class TestDelegationNodeNewSession:
         supervisor_history_runtime_key,
         subsession_history_key_factory,
         subsession_goal_key_factory,
+        ui_history,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -43,6 +47,7 @@ class TestDelegationNodeNewSession:
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
         )
 
     @pytest.mark.asyncio
@@ -157,6 +162,7 @@ class TestDelegationNodeResumeSession:
         supervisor_history_runtime_key,
         subsession_history_key_factory,
         subsession_goal_key_factory,
+        ui_history,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -169,6 +175,7 @@ class TestDelegationNodeResumeSession:
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
         )
 
     @pytest.mark.asyncio
@@ -403,6 +410,7 @@ class TestDelegationNodeErrorHandling:
         supervisor_history_runtime_key,
         subsession_history_key_factory,
         subsession_goal_key_factory,
+        ui_history,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -415,6 +423,7 @@ class TestDelegationNodeErrorHandling:
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
         )
 
     @pytest.mark.asyncio
@@ -431,6 +440,7 @@ class TestDelegationNodeErrorHandling:
         supervisor_history_runtime_key,
         subsession_history_key_factory,
         subsession_goal_key_factory,
+        ui_history,
     ):
         """Test that exceeding max_delegations returns error ToolMessage."""
         node = DelegationNode(
@@ -444,6 +454,7 @@ class TestDelegationNodeErrorHandling:
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
         )
 
         state = {**base_flow_state}
@@ -481,6 +492,7 @@ class TestDelegationNodeErrorHandling:
         supervisor_history_runtime_key,
         subsession_history_key_factory,
         subsession_goal_key_factory,
+        ui_history,
     ):
         """Test that None max_delegations imposes no delegation limit."""
         node = DelegationNode(
@@ -494,6 +506,7 @@ class TestDelegationNodeErrorHandling:
             supervisor_history_key=supervisor_history_runtime_key,
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
         )
 
         # Set delegation_count to a very high value — should not trigger any limit
@@ -674,3 +687,124 @@ class TestDelegationNodeErrorHandling:
         history = result[FlowStateKeys.CONVERSATION_HISTORY][supervisor_name]
         assert isinstance(history[-1], ToolMessage)
         assert "Invalid delegate_task arguments" in history[-1].content
+
+
+class TestDelegationNodeUILog:
+    """Tests for DelegationNode UI log emission."""
+
+    def _make_node_with_ui_history(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_name_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        subsession_history_key_factory,
+        subsession_goal_key_factory,
+        ui_history,
+        max_delegations=None,
+    ):
+        return DelegationNode(
+            name=f"{supervisor_name}#delegation",
+            max_delegations=max_delegations,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_key=supervisor_history_runtime_key,
+            subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
+        )
+
+    @pytest.mark.asyncio
+    async def test_emits_delegation_ui_log_on_success(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_name_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        subsession_history_key_factory,
+        subsession_goal_key_factory,
+        supervisor_flow_state,
+        ai_message_with_delegate,
+        ui_history,
+    ):
+        """DelegationNode calls ui_history.log.success and includes pop_state_updates in result."""
+        sentinel = {"ui_chat_log": ["sentinel_log_entry"]}
+        ui_history.pop_state_updates.return_value = sentinel
+
+        node = self._make_node_with_ui_history(
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
+        )
+
+        state = supervisor_flow_state
+        state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
+
+        result = await node.run(state)
+
+        ui_history.log.success.assert_called_once()
+        call_kwargs = ui_history.log.success.call_args.kwargs
+        assert call_kwargs["event"] == UILogEventsSupervisor.ON_DELEGATION
+        assert call_kwargs["message_sub_type"] == DelegationNode.MESSAGE_SUB_TYPE
+        assert call_kwargs["tool_info"] is not None
+        assert call_kwargs["tool_info"]["name"] == delegate_task_cls.tool_title
+        ui_history.pop_state_updates.assert_called_once()
+        assert result["ui_chat_log"] == ["sentinel_log_entry"]
+
+    @pytest.mark.asyncio
+    async def test_no_ui_log_emitted_on_delegation_error(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_name_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        subsession_history_key_factory,
+        subsession_goal_key_factory,
+        supervisor_flow_state,
+        ai_message_with_delegate,
+        ui_history,
+    ):
+        """DelegationNode does not call ui_history.log when delegation fails (error ToolMessage returned)."""
+        # Set max_delegations to 1 to force an error when delegation_count is already 1
+        node = self._make_node_with_ui_history(
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
+            max_delegations=1,
+        )
+
+        state = supervisor_flow_state
+        state["context"][supervisor_name]["delegation_count"] = 1  # Already at max
+        state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
+
+        await node.run(state)
+
+        # Error path returns early — ui_history.log should not be called
+        ui_history.log.success.assert_not_called()
+        ui_history.pop_state_updates.assert_not_called()

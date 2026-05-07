@@ -26,4 +26,4 @@ class TestUILogEventsSupervisor:
 
     def test_event_count(self):
         """Test the total number of events."""
-        assert len(UILogEventsSupervisor) == 3
+        assert len(UILogEventsSupervisor) == 5

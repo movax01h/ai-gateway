@@ -6,12 +6,17 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from duo_workflow_service.agent_platform.v1.components.supervisor.delegate_task import (
     DelegateTask,
 )
+from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
+    UILogEventsSupervisor,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     IOKey,
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
+from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.entities import build_tool_info
 
 # Factory that builds a subsession-scoped conversation-history IOKey given the
 # subagent type name and subsession ID.  Defined as a named type so callers
@@ -79,7 +84,7 @@ class DelegationError(Exception):
         self.call_ids = call_ids
 
 
-class DelegationNode:
+class DelegationNode:  # pylint: disable=too-many-instance-attributes
     """Handles delegate_task tool calls from the supervisor.
 
     Responsibilities:
@@ -89,6 +94,7 @@ class DelegationNode:
     - For resumed subsessions: appends a HumanMessage to the existing conversation history
     - Sets the active subsession context
     - Tracks delegation count for safety limits
+    - Emits a ``delegation`` UI log entry for each successful delegation
 
     Routing after this node is handled by
     ``SupervisorAgentComponent._delegation_router``, which owns all routing
@@ -97,6 +103,8 @@ class DelegationNode:
     All state interactions are performed exclusively through ``IOKey`` instances,
     following the Flow Registry guideline of avoiding direct state dictionary access.
     """
+
+    MESSAGE_SUB_TYPE = "delegation"
 
     def __init__(
         self,
@@ -118,6 +126,7 @@ class DelegationNode:
         # in this case
         subsession_history_key_factory: SubsessionHistoryKeyFactory,
         subsession_goal_key_factory: Callable[[str, int], IOKey],
+        ui_history: UIHistory,
     ):
         self.name = name
         self._max_delegations = max_delegations
@@ -129,6 +138,7 @@ class DelegationNode:
         self._supervisor_history_key = supervisor_history_key
         self._subsession_history_key_factory = subsession_history_key_factory
         self._subsession_goal_key_factory = subsession_goal_key_factory
+        self._ui_history = ui_history
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Process a delegate_task tool call from the supervisor."""
@@ -195,6 +205,21 @@ class DelegationNode:
             is_resume=delegation.subsession_id is not None,
         )
 
+        # Emit delegation UI log entry
+        delegate_tool_title: str = self._delegate_task_cls.tool_title
+        delegate_args = {
+            "subagent_name": subagent_name,
+            "session_id": subsession_result.subsession_id,
+            "prompt": delegation.prompt,
+        }
+        self._ui_history.log.success(
+            "",
+            event=UILogEventsSupervisor.ON_DELEGATION,
+            message_sub_type=self.MESSAGE_SUB_TYPE,
+            tool_info=build_tool_info(delegate_tool_title, delegate_args),
+            session_id=None,
+        )
+
         context_updates: dict[str, Any] = {}
         for iokey, value in (
             (self._max_subsession_id_key, subsession_result.new_max_id),
@@ -207,7 +232,14 @@ class DelegationNode:
                 iokey.to_nested_dict(value),
             )
 
-        return merge_nested_dict(context_updates, subsession_result.state_updates)
+        state_updates = merge_nested_dict(
+            context_updates, subsession_result.state_updates
+        )
+
+        ui_updates = self._ui_history.pop_state_updates()
+        state_updates = merge_nested_dict(state_updates, ui_updates)
+
+        return state_updates
 
     def _extract_delegate_call(
         self,
