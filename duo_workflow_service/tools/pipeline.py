@@ -30,6 +30,10 @@ class GetPipelineFailingJobsInput(ProjectResourceInput):
         default=None,
         description="The IID of the merge request. Required if URL is not provided.",
     )
+    exclude_allow_failure: bool = Field(
+        default=False,
+        description="If true, exclude jobs where allow_failure is true.",
+    )
 
 
 class GetPipelineFailingJobs(DuoBaseTool):
@@ -67,6 +71,7 @@ class GetPipelineFailingJobs(DuoBaseTool):
         url = kwargs.get("url", None)
         project_id = kwargs.get("project_id")
         merge_request_iid = kwargs.get("merge_request_iid", None)
+        exclude_allow_failure = kwargs.get("exclude_allow_failure", False)
 
         pipeline_id = None
         merge_request = None
@@ -115,7 +120,7 @@ class GetPipelineFailingJobs(DuoBaseTool):
             pipeline_id = last_pipeline["id"]
 
         failing_jobs = await self._get_failing_jobs(
-            validation_result.project_id, pipeline_id
+            validation_result.project_id, pipeline_id, exclude_allow_failure
         )
         if len(failing_jobs) > MAX_JOBS_RETURNED:
             failing_jobs = failing_jobs[:MAX_JOBS_RETURNED]
@@ -147,14 +152,20 @@ class GetPipelineFailingJobs(DuoBaseTool):
         return json.dumps({"pipeline_id": pipeline_id, "failed_jobs": failed_jobs_str})
 
     async def _get_failing_jobs(
-        self, project_id: str | None, pipeline_id: int | None
+        self,
+        project_id: str | None,
+        pipeline_id: int | None,
+        exclude_allow_failure: bool = False,
     ) -> list[dict]:
-        return await self._paginate_get(
+        jobs = await self._paginate_get(
             endpoint=f"/api/v4/projects/{project_id}/pipelines/{pipeline_id}/jobs",
             per_page=100,
             max_pages=MAX_LOG_PAGES_FOR_PIPELINE,
             extra_params={"scope[]": "failed"},
         )
+        if exclude_allow_failure:
+            jobs = [job for job in jobs if not job.get("allow_failure", False)]
+        return jobs
 
     def format_display_message(
         self, args: GetPipelineFailingJobsInput, _tool_response: Any = None

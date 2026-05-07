@@ -415,6 +415,104 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_success(
 
 
 @pytest.mark.asyncio
+async def test_get_pipeline_failing_jobs_filters_allow_failure_jobs(
+    gitlab_client_mock, metadata
+):
+    """Test that jobs with allow_failure=true are excluded when exclude_allow_failure is True."""
+    jobs_response = [
+        {"id": 101, "name": "real_failure", "status": "failed", "allow_failure": False},
+        {
+            "id": 102,
+            "name": "allowed_failure",
+            "status": "failed",
+            "allow_failure": True,
+        },
+        {"id": 103, "name": "another_failure", "status": "failed"},
+    ]
+
+    responses = [
+        GitLabHttpResponse(
+            status_code=200, body=json.dumps(jobs_response), headers={"X-Next-Page": ""}
+        ),
+    ]
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses)
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123",
+        exclude_allow_failure=True,
+    )
+    response_json = json.loads(response)
+
+    expected_traces = (
+        "Failed Jobs:\n<jobs>\n"
+        "  <job>\n"
+        "    <job_name>real_failure</job_name>\n"
+        "    <job_id>101</job_id>\n"
+        "  </job>\n"
+        "  <job>\n"
+        "    <job_name>another_failure</job_name>\n"
+        "    <job_id>103</job_id>\n"
+        "  </job>\n"
+        "</jobs>\n"
+    )
+
+    assert response_json == {
+        "pipeline_id": 123,
+        "failed_jobs": expected_traces,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_failing_jobs_includes_allow_failure_jobs_by_default(
+    gitlab_client_mock, metadata
+):
+    """Test that jobs with allow_failure=true are included by default."""
+    jobs_response = [
+        {"id": 101, "name": "real_failure", "status": "failed", "allow_failure": False},
+        {
+            "id": 102,
+            "name": "allowed_failure",
+            "status": "failed",
+            "allow_failure": True,
+        },
+    ]
+
+    responses = [
+        GitLabHttpResponse(
+            status_code=200, body=json.dumps(jobs_response), headers={"X-Next-Page": ""}
+        ),
+    ]
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses)
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    expected_traces = (
+        "Failed Jobs:\n<jobs>\n"
+        "  <job>\n"
+        "    <job_name>real_failure</job_name>\n"
+        "    <job_id>101</job_id>\n"
+        "  </job>\n"
+        "  <job>\n"
+        "    <job_name>allowed_failure</job_name>\n"
+        "    <job_id>102</job_id>\n"
+        "  </job>\n"
+        "</jobs>\n"
+    )
+
+    assert response_json == {
+        "pipeline_id": 123,
+        "failed_jobs": expected_traces,
+    }
+
+
+@pytest.mark.asyncio
 async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
     gitlab_client_mock, metadata
 ):
