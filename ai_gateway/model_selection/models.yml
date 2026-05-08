@@ -825,6 +825,16 @@ models:
       temperature: 0.0
       max_tokens: 4_096
 
+  - name: "Self-Hosted Gemini"
+    gitlab_identifier: gemini
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    family:
+      - gemini
+    params:
+      temperature: 1
+      max_tokens: 65_536
+
   - name: "Self-Hosted General Models"
     gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
     max_context_tokens: 200000
