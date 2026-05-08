@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain.tools import BaseTool
 from pydantic import AnyUrl
+from structlog.testing import capture_logs
 
 from ai_gateway.api.v3 import api_router
 from ai_gateway.model_metadata import (
@@ -32,6 +33,7 @@ __all__ = [
     "TestUnauthorizedScopes",
     "TestIncomingRequest",
     "TestUnauthorizedIssuer",
+    "TestCodeSuggestionTypeLogged",
 ]
 
 
@@ -1576,3 +1578,55 @@ class TestCustomModelsSSRF:
                     },
                 },
             )
+
+
+class TestCodeSuggestionTypeLogged:
+    @pytest.mark.parametrize(
+        "component_type",
+        [
+            "code_editor_completion",
+            "code_editor_generation",
+        ],
+    )
+    def test_code_suggestion_type_in_access_log(
+        self,
+        mock_client: TestClient,
+        mock_completions: Mock,
+        mock_generations: Mock,
+        component_type: str,
+        route: str,
+    ):
+        payload = {
+            "file_name": "main.py",
+            "content_above_cursor": "# Create a fast binary search\n",
+            "content_below_cursor": "\n",
+            "language_identifier": "python",
+        }
+
+        prompt_component = {
+            "type": component_type,
+            "payload": payload,
+        }
+
+        data = {
+            "prompt_components": [prompt_component],
+        }
+
+        with capture_logs() as cap_logs:
+            response = mock_client.post(
+                route,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                    "X-Gitlab-Global-User-Id": "test-user-id",
+                },
+                json=data,
+            )
+
+        assert response.status_code == 200
+
+        access_logs = [log for log in cap_logs if "code_suggestion_type" in log]
+        assert access_logs
+        assert access_logs[0]["code_suggestion_type"] == component_type
