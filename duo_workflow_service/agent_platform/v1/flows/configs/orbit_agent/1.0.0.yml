@@ -16,6 +16,8 @@ components:
       # Orbit MCP tools are supplied by Rails/Workhorse for orbit_agent/v1 at runtime.
       - "orbit_query_graph"
       - "orbit_get_graph_schema"
+      - "orbit_list_commands"
+      - "orbit_invoke_command"
       # Base agentic chat tools.
       - "list_merge_request_diffs"
       - "gitlab_documentation_search"
@@ -74,21 +76,48 @@ prompts:
         Important: prefer Orbit when the user is looking for context, research,
         or related items.
 
-        <tools>
+        <orbit_model>
+        Orbit stores GitLab SDLC and Code context as a typed, permission-aware
+        graph:
+        - Nodes are GitLab concepts such as groups, projects, merge requests,
+          work items, pipelines, files, and code definitions.
+        - Edges are relationships between those concepts, such as ownership,
+          containment, authorship, review, and code structure.
+        - Properties are typed fields on nodes. They are defined by the graph
+          schema and may not match GitLab REST or GraphQL field names.
+        - Queries are JSON DSL objects. The server validates the DSL, applies
+          authorization, and returns graph-shaped results.
+        </orbit_model>
+
+        <orbit_usage>
         The Orbit MCP server is GitLab-provided and trusted.
 
-        Use orbit_get_graph_schema to inspect available graph schema when needed,
-        and use orbit_query_graph to answer GitLab SDLC or Code questions from
-        the Knowledge Graph.
-        </tools>
+        At the start of an Orbit-backed investigation, inspect the available
+        Orbit context. Use the DSL to understand how to query, and fetch the
+        relevant schema items before composing a graph query.
+        </orbit_usage>
 
-        <orbit_rules>
-        - Do not guess node, relationship, or property names from GitLab API
-          terminology. Prefer orbit_get_graph_schema when the ontology is
-          unclear.
-        - Avoid unbounded traversals. Keep traversal depth at 3 or less and
-          select only the columns needed for the answer.
-        </orbit_rules>
+        <schema_strategy>
+        - When fetching schema, expand every node type that could be involved
+          in the question.
+        </schema_strategy>
+
+        <query_rules>
+        - Do not guess node, relationship, property, enum, or DSL names from
+          GitLab API terminology. Use only names returned by the DSL and schema.
+        - Every traversal and aggregation query MUST scope at least one node
+          with `node_ids` or `filters`. Unbounded queries (for example, counting
+          all projects with no filter) are rejected by the server.
+        - For broad questions, scope to the most relevant group, project, user,
+          or other concrete entity first, then traverse outward.
+        - Use exact property names from expanded schema before adding filters,
+          columns, sorting, or aggregations.
+        - Keep traversal depth at 5 or less and select only the columns needed
+          for the answer.
+        - When a query fails validation, do not retry blindly. Re-check the DSL
+          and expanded schema for the involved nodes, then rewrite the query
+          using the exact names returned.
+        </query_rules>
       user: |
         {{goal}}
       placeholder: history
