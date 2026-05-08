@@ -164,6 +164,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         ],
     ) -> AsyncIterator[contract_pb2.Action]:
         user: CloudConnectorUser = current_user_context_var.get()
+        monitoring_context: MonitoringContext = current_monitoring_context.get()
 
         # Fetch the start workflow call
         start_workflow_request: contract_pb2.ClientEvent = await anext(
@@ -171,6 +172,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
 
         start_req = start_workflow_request.startRequest
+        monitoring_context.workflow_id = start_req.workflowID
+        monitoring_context.workflow_definition = start_req.workflowDefinition
 
         client_capabilities.set(set(start_req.clientCapabilities))
 
@@ -186,6 +189,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
         unit_primitive = choose_unit_primitive(workflow_definition)
         legacy_unit_primitive = choose_legacy_unit_primitive(workflow_definition)
+        monitoring_context.workflow_definition = (
+            workflow_definition  # Overriding monitoring context by mapped data
+        )
 
         if not user.can(unit_primitive):
             # DUO_WORKFLOW_EXECUTE_WORKFLOW unit primitive is being deprecated and replaced with DUO_AGENT_PLATFORM
@@ -201,8 +207,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED,
                     f"Unauthorized to execute {workflow_definition or 'workflow'}",
                 )
-
-        monitoring_context: MonitoringContext = current_monitoring_context.get()
 
         workflow_id = start_req.workflowID
         if not workflow_id:
@@ -253,8 +257,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             additional_context = None
 
         workflow_metadata = {}
-        monitoring_context.workflow_id = workflow_id
-        monitoring_context.workflow_definition = workflow_definition
         if start_req.workflowMetadata:
             workflow_metadata = json.loads(start_req.workflowMetadata)
 
