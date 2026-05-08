@@ -41,6 +41,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tracking import MonitoringContext
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
@@ -2306,3 +2307,37 @@ async def test_validate_flow_config_unexpected_exception(mock_flow_validator_cls
     assert len(response.errors) == 1
     assert "RuntimeError" in response.errors[0]
     assert "Something went very wrong" in response.errors[0]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.current_monitoring_context")
+async def test_monitoring_context_populated_before_empty_workflow_id_abort(
+    mock_current_monitoring_context,
+    mock_context,
+    servicer,
+):
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="",
+                workflowDefinition="duo_planner/v1",
+                goal="test",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.INVALID_ARGUMENT, "workflowID must not be empty"
+    )
+    assert monitoring_context.workflow_definition == "duo_planner/v1"
