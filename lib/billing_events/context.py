@@ -35,6 +35,7 @@ class BillingEventContext(BaseModel):
     seat_ids: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     deployment_type: Optional[str] = None
+    subject_type: Optional[str] = None
     assignments: Optional[List[str]] = None
     organization_id: Optional[int] = None
 

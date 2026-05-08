@@ -43,6 +43,7 @@ BASE_CONTEXT_SCHEMA = {
     "total_tokens": None,
     "deployment_type": None,
     "organization_id": None,
+    "user_type": None,
 }
 
 
