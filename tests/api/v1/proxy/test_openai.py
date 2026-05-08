@@ -319,6 +319,7 @@ class TestProxyOpenAI:
                         "agent_name": None,
                         "cache_read_tokens": 0,
                         "cache_write_tokens": 0,
+                        "operation_type": "standard",
                     }
                 ],
                 "feature_qualified_name": "ai_gateway_proxy_use",

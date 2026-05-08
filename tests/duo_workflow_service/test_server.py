@@ -1687,6 +1687,7 @@ async def test_track_self_hosted_execute_workflow_billing_event(
                     "agent_name": None,
                     "cache_read_tokens": 0,
                     "cache_write_tokens": 0,
+                    "operation_type": "standard",
                 }
             ],
             "tool_names": [],

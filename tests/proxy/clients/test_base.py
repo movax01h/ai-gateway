@@ -77,6 +77,7 @@ async def test_valid_proxy_request(
                     "agent_name": None,
                     "cache_read_tokens": 0,
                     "cache_write_tokens": 0,
+                    "operation_type": "standard",
                 }
             ],
         ),
@@ -95,6 +96,7 @@ async def test_valid_proxy_request(
                     "agent_name": None,
                     "cache_read_tokens": 0,
                     "cache_write_tokens": 0,
+                    "operation_type": "standard",
                 }
             ],
         ),

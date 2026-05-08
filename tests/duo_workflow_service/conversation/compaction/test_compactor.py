@@ -606,6 +606,7 @@ class TestIsCompactionCallFlag:
         assert extra["agent_name"] == "test_agent"
         assert extra["workflow_id"] == "test_workflow"
         assert extra["workflow_type"] == "test_type"
+        assert extra["operation_type"] == "compaction_auto"
 
 
 @patch(

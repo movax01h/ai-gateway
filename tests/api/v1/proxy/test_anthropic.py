@@ -145,6 +145,7 @@ class TestProxyAnthropic:
                         "agent_name": None,
                         "cache_read_tokens": 3,
                         "cache_write_tokens": 2,
+                        "operation_type": "standard",
                     }
                 ],
                 "feature_qualified_name": "ai_gateway_proxy_use",

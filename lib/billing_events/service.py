@@ -36,6 +36,7 @@ class LLMOperation(BaseModel):
         agent_name: Name of the agent that triggered this operation, if any
         cache_read_tokens: Number of (read) tokens in the cache
         cache_write_tokens: Number of (write) tokens in the cache
+        operation_type: Categorizes the LLM call (e.g., 'standard', 'compaction_auto')
     """
 
     token_count: int
@@ -47,6 +48,7 @@ class LLMOperation(BaseModel):
     agent_name: str | None = None
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    operation_type: str = "standard"
 
 
 class SelfHostedLLMOperations:
