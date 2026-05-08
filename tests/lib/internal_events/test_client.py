@@ -136,3 +136,24 @@ class TestInternalEventsClientAIContext:
         assert ai_context_json["cache_read"] == 10
         assert ai_context_json["ephemeral_5m_input_tokens"] == 5
         assert ai_context_json["ephemeral_1h_input_tokens"] == 15
+
+    def test_track_event_standard_context_field_routing(self, client, mock_tracker):
+        """The gitlab_standard payload defines `user_type` but not `subject_type`.
+
+        `user_type` must be present (sourced from EventContext); `subject_type`
+        must be absent (it is billing-only and lives on a dedicated ContextVar).
+        """
+        current_event_context.set(EventContext(user_type="service_account"))
+
+        client.track_event("some_event")
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+
+        standard_context = next(
+            ctx
+            for ctx in structured_event.context
+            if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+        )
+        assert standard_context.data["user_type"] == "service_account"
+        assert "subject_type" not in standard_context.data

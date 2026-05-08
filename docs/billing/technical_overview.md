@@ -8,9 +8,9 @@ AI Gateway emits a structured event to the Data Insights Platform after each bil
 
 ## `BillingEventContext`
 
-Every billing event carries a `BillingEventContext` — a Pydantic model (`lib/billing_events/context.py`) that is serialized as the Snowplow context payload under the schema `iglu:com.gitlab/billable_usage/jsonschema/1-0-1`. You never construct it directly; `BillingEventsClient.track_billing_event` builds it automatically from two sources:
+Every billing event carries a `BillingEventContext` — a Pydantic model (`lib/billing_events/context.py`) that is serialized as the Snowplow context payload under the schema `iglu:com.gitlab/billable_usage/jsonschema`. You never construct it directly; `BillingEventsClient.track_billing_event` builds it automatically from two sources:
 
-1. **`current_event_context`** — a `ContextVar[EventContext]` (`lib/internal_events/context.py`) that is populated per-request by the authentication and middleware layers. It carries the ambient request state: realm, instance identifiers, user ID, namespace and project IDs, correlation ID, deployment type, and feature enablement type. Because it is a context variable, it is isolated per async task and requires no explicit passing through call chains.
+1. **`current_event_context`** — a `ContextVar[EventContext]` (`lib/internal_events/context.py`) that is populated per-request by the authentication and middleware layers. It carries the ambient request state: realm, instance identifiers, user ID, user type, namespace and project IDs, correlation ID, deployment type, and feature enablement type. Because it is a context variable, it is isolated per async task and requires no explicit passing through call chains.
 
 1. **`CloudConnectorUser`** — passed explicitly to `track_billing_event`. The `unique_instance_id` field on `BillingEventContext` is sourced from `user.claims.gitlab_instance_uid` rather than from `current_event_context`, because the Cloud Connector JWT is the authoritative source for the instance UID.
 

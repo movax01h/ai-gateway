@@ -23,6 +23,7 @@ from duo_workflow_service.interceptors import (
     X_GITLAB_PROJECT_ID,
     X_GITLAB_REALM_HEADER,
     X_GITLAB_ROOT_NAMESPACE_ID,
+    X_GITLAB_SUBJECT_TYPE,
     X_GITLAB_USER_ID_HEADER,
 )
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
@@ -106,6 +107,7 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             instance_version=instance_version_value,
             global_user_id=metadata.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
             user_id=metadata.get(X_GITLAB_USER_ID_HEADER),
+            user_type=metadata.get(X_GITLAB_SUBJECT_TYPE),
             context_generated_at=datetime.now(timezone.utc).isoformat(),
             correlation_id=correlation_id.get(),
             project_id=project_id,

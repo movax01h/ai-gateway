@@ -29,6 +29,8 @@ def test_billing_event_context_required_fields():
     assert context.correlation_id is None
     assert context.seat_ids is None
     assert context.metadata == {}
+    assert context.deployment_type is None
+    assert context.subject_type is None
 
 
 def test_billing_event_context_all_fields():
@@ -50,6 +52,8 @@ def test_billing_event_context_all_fields():
         correlation_id="corr-123",
         seat_ids=["seat-1", "seat-2"],
         metadata={"model": "claude-3", "feature": "completion"},
+        deployment_type="self-managed",
+        subject_type="human",
     )
     assert context.event_id == "test-event-456"
     assert context.event_type == "code_suggestions"
@@ -68,6 +72,8 @@ def test_billing_event_context_all_fields():
     assert context.correlation_id == "corr-123"
     assert context.seat_ids == ["seat-1", "seat-2"]
     assert context.metadata == {"model": "claude-3", "feature": "completion"}
+    assert context.deployment_type == "self-managed"
+    assert context.subject_type == "human"
 
 
 def test_billing_event_context_model_validation():

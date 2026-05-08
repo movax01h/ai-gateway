@@ -35,6 +35,7 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "metadata": {},
     "deployment_type": None,
     "organization_id": None,
+    "subject_type": None,
 }
 
 
@@ -181,6 +182,7 @@ class TestBillingEventsClient:
             user_id=kwargs.get("user_id"),
             correlation_id="corr-123",
             deployment_type=".com",
+            user_type="human",
             feature_enablement_type="duo_pro",
             organization_id=kwargs.get("organization_id"),
         )
@@ -205,6 +207,7 @@ class TestBillingEventsClient:
             "metadata": metadata or {},
             "unique_instance_id": "test-instance-uid",
             "deployment_type": ".com",
+            "subject_type": "human",
             "assignments": ["duo_pro"],
             "organization_id": kwargs.get("organization_id"),
         }
@@ -448,6 +451,46 @@ class TestBillingEventsClient:
         assert billing_data["instance_version"] == instance_version
         assert billing_data["instance_id"] == "instance-123"
         assert billing_data["deployment_type"] == "self-managed"
+
+    @pytest.mark.parametrize(
+        "subject_type",
+        ["human", "service_account", "bot", None],
+    )
+    def test_track_billing_event_with_subject_type(
+        self, client, user, mock_dependencies, subject_type
+    ):
+        """Test that EventContext.user_type is mapped to subject_type on the billing context."""
+        internal_context = EventContext(
+            realm="user",
+            instance_id="instance-123",
+            host_name="gitlab.example.com",
+            correlation_id="corr-456",
+            deployment_type="self-managed",
+            user_type=subject_type,
+        )
+        current_event_context.set(internal_context)
+
+        client.track_billing_event(
+            user=user,
+            event=BillingEvent.AIGW_PROXY_USE,
+            category="test_category",
+            unit_of_measure="tokens",
+            quantity=50.0,
+        )
+
+        mock_dependencies["track"].assert_called_once()
+        mock_dependencies["structured_event_init"].assert_called_once()
+
+        event_init_args = mock_dependencies["structured_event_init"].call_args[1]
+        context = event_init_args["context"][0]
+        billing_data = context.data
+
+        # Schema 1-0-3 declares subject_type as nullable; the key must be
+        # present in the wire payload even when None so the iglu validator
+        # sees `null` rather than a missing field.
+        assert "subject_type" in billing_data
+        assert billing_data["subject_type"] == subject_type
+        assert context.schema == "iglu:com.gitlab/billable_usage/jsonschema/1-0-3"
 
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")

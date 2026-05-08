@@ -40,7 +40,7 @@ Incoming request
 - **`BillingEventsClient`** (`client.py`) — low-level Snowplow emitter; builds and sends `BillingEventContext`
 - **`BillingEventService`** (`service.py`) — higher-level service; resolves LLM operations and wraps the client
 - **`BillingEvent`** (`client.py`) — enum of all billable event types
-- **`BillingEventContext`** (`context.py`) — Snowplow context schema (`iglu:com.gitlab/billable_usage/jsonschema/1-0-1`)
+- **`BillingEventContext`** (`context.py`) — Snowplow context schema ([iglu schemas](https://gitlab.com/gitlab-org/iglu/-/tree/master/public/schemas/com.gitlab/billable_usage/jsonschema))
 - **`ContainerBillingEvent`** (`container.py`) — DI container wiring client and service
 
 **Usage quota** (`lib/usage_quota/`):

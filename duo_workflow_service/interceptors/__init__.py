@@ -15,6 +15,7 @@ X_GITLAB_IS_A_GITLAB_MEMBER = "x-gitlab-is-a-gitlab-member"
 X_GITLAB_IS_GITLAB_MEMBER = "x-gitlab-is-team-member"
 X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
 X_GITLAB_DEPLOYMENT_TYPE = "x-gitlab-deployment-type"
+X_GITLAB_SUBJECT_TYPE = "x-gitlab-subject-type"
 X_GITLAB_ORGANIZATION_ID = "x-gitlab-organization-id"
 
 GRPC_HEALTH_METHODS = (

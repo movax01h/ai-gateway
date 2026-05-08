@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
+from duo_workflow_service.interceptors import X_GITLAB_SUBJECT_TYPE
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.internal_events_interceptor import (
     InternalEventsInterceptor,
@@ -59,6 +60,7 @@ def create_handler_call_details(metadata_dict):
                 "x-gitlab-root-namespace-id": "3",
                 "x-gitlab-is-a-gitlab-member": "true",
                 "x-gitlab-organization-id": "1337",
+                "x-gitlab-subject-type": "service_account",
             },
             {
                 "realm": "test-realm",
@@ -76,6 +78,7 @@ def create_handler_call_details(metadata_dict):
                 "client_type": None,
                 "client_version": None,
                 "organization_id": 1337,
+                "user_type": "service_account",
             },
             id="standard_metadata",
         ),
@@ -401,6 +404,7 @@ async def test_interceptor_metadata_handling(
     )
     assert event_context.is_gitlab_team_member == expected["is_gitlab_team_member"]
     assert event_context.unique_instance_id == expected["unique_instance_id"]
+    assert event_context.user_type == expected.get("user_type")
     assert event_context.client_name == expected["client_name"]
     assert event_context.client_type == expected["client_type"]
     assert event_context.client_version == expected["client_version"]
@@ -535,6 +539,42 @@ async def test_interceptor_without_instance_version(
 
     # Verify instance_version is None
     assert event_context.instance_version is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "subject_type_value,expected",
+    [
+        ("human", "human"),
+        ("service_account", "service_account"),
+        ("bot", "bot"),
+        (None, None),
+    ],
+)
+async def test_interceptor_propagates_subject_type_header(
+    interceptor, mock_continuation, mock_user, subject_type_value, expected
+):
+    """The x-gitlab-subject-type metadata is propagated to EventContext.user_type."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+    }
+    if subject_type_value is not None:
+        metadata[X_GITLAB_SUBJECT_TYPE] = subject_type_value
+
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert current_event_context.get().user_type == expected
+
+
+def test_x_gitlab_subject_type_constant_is_lowercase():
+    """GRPC metadata keys are lowercased by the transport; the constant must match."""
+    assert X_GITLAB_SUBJECT_TYPE == X_GITLAB_SUBJECT_TYPE.lower()
 
 
 @pytest.mark.asyncio
