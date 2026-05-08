@@ -2,7 +2,7 @@
 description: Tracks failed Duo Workflow executions
 internal_events: true
 action: request_duo_workflow_failure
-product_group: duo_workflow
+product_group: agent_foundations
 additional_properties:
   label:
     description: Workflow event type label
