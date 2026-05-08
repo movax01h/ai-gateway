@@ -137,6 +137,7 @@ instructions:
     instructions: |
       For LLM model integration changes, verify:
       1. New models are registered in `ai_gateway/model_selection/models.yml` with correct metadata.
+      1. Metadata in `ai_gateway/model_selection/models.yml` should have `params.model` using a pinned or snapshot model version (date format or version ID) rather than a provider alias.
       1. LiteLLM is used as the unified interface for multi-provider support where applicable.
       1. Token limits and context window sizes are correctly configured for new models.
       1. Streaming and non-streaming response paths are both handled.
