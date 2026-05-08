@@ -230,6 +230,12 @@ Compaction integrates with state management differently depending on the workflo
 1. **Lower `trim_threshold` for aggressive compaction**: If you're hitting token limits, trigger compaction earlier
 1. **Monitor compaction frequency**: If compaction happens every turn, consider increasing the token budget
 
+## Billing
+
+Compaction makes an LLM call to summarize older messages. These calls are tagged with `operation_type="compaction_auto"` in the `LLMOperation` metadata, which affects billing differently depending on the deployment type:
+
+- **Cloud-hosted**: Compaction LLM calls are emitted in the billing event with `operation_type="compaction_auto"`. CustomersDot uses this field to decide whether to exclude compaction operations from credit calculation.
+
 ## Feature Flag
 
 Compaction requires the `AI_CONTEXT_COMPACTION` feature flag (runtime key: `ai_context_compaction`) to be enabled. The flag is checked in the `maybe_compact_history()` function. Even with compaction configured, it will fall back to token-based trimming if the feature flag is disabled.

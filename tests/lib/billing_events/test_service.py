@@ -81,6 +81,7 @@ class TestBillingEventService:
                         "agent_name": None,
                         "cache_read_tokens": 0,
                         "cache_write_tokens": 0,
+                        "operation_type": "standard",
                     }
                 ],
                 "tool_names": [],
@@ -396,3 +397,106 @@ class TestBillingEventService:
         assert metadata["feature_qualified_name"] == "software_development"
         assert metadata["execution_environment"] == ExecutionEnvironment.DAP.value
         assert len(metadata["llm_operations"]) == 1
+
+    def test_track_billing_emits_event_with_compaction_ops(
+        self,
+        billing_event_service,
+        billing_event_client,
+        user,
+        gl_context,
+    ):
+        """Test that billing events are emitted for compaction ops.
+
+        CustomersDot uses operation_type to decide billing treatment.
+        """
+        compaction_op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=150,
+            prompt_tokens=100,
+            completion_tokens=50,
+            operation_type="compaction_auto",
+        )
+
+        billing_event_service.track_billing(
+            user,
+            gl_context,
+            workflow_id="workflow-compaction",
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[compaction_op],
+        )
+
+        billing_event_client.track_billing_event.assert_called_once()
+        metadata = get_call_metadata(billing_event_client)
+        assert metadata["llm_operations"][0]["operation_type"] == "compaction_auto"
+
+    def test_track_billing_with_mixed_operation_types(
+        self,
+        billing_event_service,
+        billing_event_client,
+        user,
+        gl_context,
+    ):
+        """Test that billing proceeds when there are both compaction and standard ops."""
+        compaction_op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=150,
+            prompt_tokens=100,
+            completion_tokens=50,
+            operation_type="compaction_auto",
+        )
+        standard_op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=200,
+            prompt_tokens=150,
+            completion_tokens=50,
+            operation_type="standard",
+        )
+
+        billing_event_service.track_billing(
+            user,
+            gl_context,
+            workflow_id="workflow-mixed",
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[compaction_op, standard_op],
+        )
+
+        billing_event_client.track_billing_event.assert_called_once()
+        metadata = get_call_metadata(billing_event_client)
+        assert len(metadata["llm_operations"]) == 2
+        assert metadata["llm_operations"][0]["operation_type"] == "compaction_auto"
+        assert metadata["llm_operations"][1]["operation_type"] == "standard"
+
+    def test_llm_operation_defaults_for_operation_type(self):
+        """Test that LLMOperation defaults operation_type to 'standard'."""
+        op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=150,
+            prompt_tokens=100,
+            completion_tokens=50,
+        )
+        assert op.operation_type == "standard"
+
+    def test_llm_operation_model_validate_fills_defaults(self):
+        """Test that model_validate fills defaults for missing operation_type."""
+        raw_dict = {
+            "model_id": "gpt-4",
+            "model_engine": "openai",
+            "model_provider": "openai",
+            "token_count": 300,
+            "prompt_tokens": 200,
+            "completion_tokens": 100,
+        }
+        op = LLMOperation.model_validate(raw_dict)
+        assert op.operation_type == "standard"

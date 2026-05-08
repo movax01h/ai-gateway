@@ -249,11 +249,11 @@ class ModelRequestInstrumentator:
 
             _update_token_usage(model, usage)
 
-            agent_name = (
-                internal_event_extra.get("agent_name") if internal_event_extra else None
-            )
-            self._update_llm_operations(model, usage, agent_name)
-            self._track_usage(model, usage, internal_event_extra or {})
+            extra = internal_event_extra or {}
+            agent_name = extra.get("agent_name")
+            operation_type = extra.get("operation_type", "standard")
+            self._update_llm_operations(model, usage, agent_name, operation_type)
+            self._track_usage(model, usage, extra)
 
             INFERENCE_INPUT_TOKENS.labels(**token_usage_labels).inc(
                 usage["input_tokens"]
@@ -365,7 +365,11 @@ class ModelRequestInstrumentator:
                 )
 
         def _update_llm_operations(
-            self, model: str, usage: UsageMetadata, agent_name: str | None = None
+            self,
+            model: str,
+            usage: UsageMetadata,
+            agent_name: str | None = None,
+            operation_type: str = "standard",
         ) -> None:
             current_llm_operations = llm_operations.get()
 
@@ -385,6 +389,7 @@ class ModelRequestInstrumentator:
                     "agent_name": agent_name,
                     "cache_read_tokens": cache_read_tokens,
                     "cache_write_tokens": cache_write_tokens,
+                    "operation_type": operation_type,
                 }
             )
 

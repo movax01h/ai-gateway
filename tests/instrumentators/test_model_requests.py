@@ -135,6 +135,7 @@ class TestWatchContainer:
                 "agent_name": None,
                 "cache_read_tokens": 0,
                 "cache_write_tokens": 0,
+                "operation_type": "standard",
             },
             {
                 "token_count": 15,
@@ -146,6 +147,7 @@ class TestWatchContainer:
                 "agent_name": None,
                 "cache_read_tokens": 0,
                 "cache_write_tokens": 0,
+                "operation_type": "standard",
             },
             {
                 "token_count": 3,
@@ -157,6 +159,7 @@ class TestWatchContainer:
                 "agent_name": None,
                 "cache_read_tokens": 0,
                 "cache_write_tokens": 0,
+                "operation_type": "standard",
             },
         ]
 
@@ -212,6 +215,7 @@ class TestWatchContainer:
                 "agent_name": None,
                 "cache_read_tokens": 4,
                 "cache_write_tokens": 5,
+                "operation_type": "standard",
             }
         ]
 
@@ -270,6 +274,7 @@ class TestWatchContainer:
                     "agent_name": None,
                     "cache_read_tokens": 0,
                     "cache_write_tokens": 0,
+                    "operation_type": "standard",
                 }
             ]
 
@@ -300,6 +305,39 @@ class TestWatchContainer:
                 "agent_name": "planning_agent",
                 "cache_read_tokens": 0,
                 "cache_write_tokens": 0,
+                "operation_type": "standard",
+            }
+        ]
+
+    @mock.patch("prometheus_client.Counter.labels")
+    def test_register_token_usage_with_compaction_billing_fields(
+        self, mock_counters, container
+    ):
+        init_token_usage()
+        init_llm_operations()
+
+        container.register_token_usage(
+            "test_model",
+            {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25},
+            {
+                "agent_name": "compactor",
+                "is_compaction_call": True,
+                "operation_type": "compaction_auto",
+            },
+        )
+
+        assert llm_operations.get() == [
+            {
+                "token_count": 25,
+                "model_id": "test_model",
+                "model_engine": "test_provider",
+                "model_provider": "test_provider",
+                "prompt_tokens": 10,
+                "completion_tokens": 15,
+                "agent_name": "compactor",
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "operation_type": "compaction_auto",
             }
         ]
 

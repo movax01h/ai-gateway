@@ -22,7 +22,6 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import NotifiableException
-from duo_workflow_service.gitlab.gitlab_api import fetch_workflow_and_container_data
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -118,7 +117,9 @@ def mock_llm_operations_fixture():
         },
     ]
     llm_operations.set(operations)
-    return operations
+    # Return the expected serialized output after LLMOperation.model_validate().model_dump()
+    # which includes default values for operation_type
+    return [LLMOperation.model_validate(op).model_dump() for op in operations]
 
 
 @pytest.fixture(autouse=True)

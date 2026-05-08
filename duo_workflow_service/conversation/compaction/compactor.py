@@ -49,6 +49,8 @@ class ConversationCompactor:
     of conversation history.
     """
 
+    OPERATION_TYPE = "compaction_auto"
+
     def __init__(
         self,
         prompt_registry: BasePromptRegistry,
@@ -81,6 +83,7 @@ class ConversationCompactor:
                 "workflow_id": workflow_id,
                 "workflow_type": workflow_type,
                 "is_compaction_call": True,
+                "operation_type": self.OPERATION_TYPE,
             },
         )
         self._agent_name = agent_name
