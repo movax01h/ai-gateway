@@ -2,7 +2,7 @@
 description: Tracks Duo Workflow User's messages input
 internal_events: true
 action: message_duo_workflow
-product_group: duo_workflow
+product_group: agent_foundations
 additional_properties:
   label:
     description: Hardcoded string workflow_message_event
