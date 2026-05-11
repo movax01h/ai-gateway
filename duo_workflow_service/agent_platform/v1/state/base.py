@@ -38,6 +38,7 @@ __all__ = [
     "IOKey",
     "IOKeyTemplate",
     "IOKeyFactory",
+    "NoneIOKey",
     "RuntimeIOKey",
     "get_vars_from_state",
 ]
@@ -182,6 +183,25 @@ class BaseIOKey(BaseModel):
         """
         raise NotImplementedError(
             f"{type(self).__name__} must override template_variable_name."
+        )
+
+    def value_from_state(self, state: "FlowState") -> Any:
+        """Read this key's value from the given flow state.
+
+        Subclasses must override this method to provide their own resolution
+        logic.
+
+        Args:
+            state: Current flow state.
+
+        Returns:
+            The value stored at this key's location in state.
+
+        Raises:
+            NotImplementedError: Always — concrete subclasses must override.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override value_from_state."
         )
 
 
@@ -444,6 +464,49 @@ class RuntimeIOKey(BaseIOKey):
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         """Resolve the concrete IOKey at runtime and return its template variable."""
         return self.factory(state).template_variable_from_state(state)
+
+
+class NoneIOKey(BaseIOKey):
+    """A sentinel ``IOKey`` that always resolves to ``None``.
+
+    Used as a safe default value for optional ``IOKey`` parameters (e.g.
+    ``session_id_key`` in ``ToolNode`` and ``FinalResponseNode``) instead of
+    ``Optional[IOKey] = None``.  This avoids ``None``-checks at call sites and
+    keeps the parameter type non-optional.
+
+    Like ``RuntimeIOKey``, ``NoneIOKey`` does not carry a ``target`` field —
+    it has no backing state location.  The ``alias`` field (inherited from
+    ``BaseIOKey``, required here via model validator) is used as the static
+    template variable name, enabling prompt-input validation without graph
+    execution.
+
+    ``value_from_state`` always returns ``None``, regardless of state contents.
+
+    Construction::
+
+        NoneIOKey(alias="session_id")
+    """
+
+    @model_validator(mode="after")
+    def validate_alias(self) -> Self:
+        """Ensure ``alias`` is provided.
+
+        ``alias`` is the only build-time requirement for ``NoneIOKey`` — it
+        is used by prompt-input validators to reference the template variable
+        name without executing the graph.
+        """
+        if not self.alias or self.alias.strip() == "":
+            raise ValueError("Field 'alias' is required for NoneIOKey")
+        return self
+
+    @property
+    def template_variable_name(self) -> str:
+        """Return the statically-declared template variable name."""
+        return self.alias  # type: ignore[return-value]
+
+    def value_from_state(self, state: FlowState) -> None:
+        """Always return ``None``, regardless of state contents."""
+        return None
 
 
 def get_vars_from_state(

@@ -21,14 +21,14 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
     ``component_name`` is an optional parameter stored at construction time and
     embedded in every log entry, identifying the component that owns this writer.
 
-    ``session_id`` is **not** stored at construction time — it must be supplied by
+    ``subsession_id`` is **not** stored at construction time — it must be supplied by
     the caller on each ``_log_success`` / ``_log_error`` invocation via
     ``**kwargs``.  This keeps the writer compatible with session-aware components
-    and nodes (e.g. ``AgentComponent``) that resolve the session ID dynamically at
+    and nodes (e.g. ``AgentComponent``) that resolve the subsession ID dynamically at
     runtime.
 
     When ``ui_role_as=MessageTypeEnum.TOOL`` is used, the writer also forwards
-    ``tool_info``, ``message_sub_type``, and ``session_id`` from ``**kwargs`` into
+    ``tool_info``, ``message_sub_type``, and ``subsession_id`` from ``**kwargs`` into
     the log entry, making it suitable for delegation and subagent return nodes.
 
     Args:
@@ -86,7 +86,7 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
             message_sub_type=kwargs.get("message_sub_type"),
             message_id=kwargs.get("message_id"),
             component_name=self._component_name,
-            session_id=kwargs.get("session_id"),
+            subsession_id=kwargs.get("subsession_id"),
         )
 
 

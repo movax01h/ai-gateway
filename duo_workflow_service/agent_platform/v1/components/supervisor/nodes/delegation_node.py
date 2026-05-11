@@ -217,7 +217,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             event=UILogEventsSupervisor.ON_DELEGATION,
             message_sub_type=self.MESSAGE_SUB_TYPE,
             tool_info=build_tool_info(delegate_tool_title, delegate_args),
-            session_id=None,
+            subsession_id=None,
         )
 
         context_updates: dict[str, Any] = {}

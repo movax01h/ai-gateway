@@ -75,6 +75,7 @@ class TestFinalResponseNode:
         ui_history.log.success.assert_called_once_with(
             final_response_content,
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -317,6 +318,7 @@ class TestFinalResponseNode:
         ui_history.log.success.assert_called_once_with(
             "Text-only response",
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+            subsession_id=None,
         )
 
     @pytest.mark.asyncio

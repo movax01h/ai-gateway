@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKey,
     RuntimeIOKey,
 )
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import DefaultUILogWriter, UIHistory
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import ToolInvokedEvent
@@ -43,12 +44,24 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
     the supervisor case where the key depends on runtime state such as the active
     subsession ID.
 
+    ``component_name`` is embedded in ``UiChatLog`` entries via the ``ui_history``
+    writer (see ``default_ui_log_writer_class``).  The node retains ``component_name``
+    only for response-schema tracking metrics; it is no longer forwarded to log
+    calls.
+
     Args:
         name: LangGraph node name.
-        ui_history: UI log history writer for final-answer events.
+        ui_history: UI log history writer for final-answer events.  Must be
+            constructed with a writer that already has ``component_name`` bound
+            (e.g. via ``default_ui_log_writer_class``).
         conversation_history_key: ``RuntimeIOKey`` that resolves the
             conversation-history ``IOKey`` at runtime.
         output_key: ``RuntimeIOKey`` that resolves the output ``IOKey`` at runtime.
+        component_name: Human-readable name of the owning component.  Used only
+            for response-schema tracking metrics, not for UI log entries.
+        session_id_key: ``IOKey`` pointing to the active subsession ID in state.
+            Defaults to ``NoneIOKey()`` for standalone components (always
+            resolves to ``None``).
     """
 
     def __init__(
@@ -62,6 +75,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         response_schema_tracking: bool = False,
         response_schema_tracking_context: Optional[dict[str, str]] = None,
         component_name: Optional[str] = None,
+        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
         flow_id: Optional[str] = None,
         flow_type: Optional[GLReportingEventContext] = None,
         internal_event_client: Optional[InternalEventsClient] = None,
@@ -74,13 +88,25 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         self._response_schema_tracking = response_schema_tracking
         self._response_schema_tracking_context = response_schema_tracking_context or {}
         self._component_name = component_name
+        self._session_id_key = session_id_key
         self._flow_id = flow_id
         self._flow_type = flow_type
         self._internal_event_client = internal_event_client
 
+    def _resolve_session_id(self, state: FlowState) -> Optional[str]:
+        """Resolve the active session ID from state.
+
+        Returns:
+            The session ID string when running as a subagent, or ``None`` for
+            standalone components (when ``session_id_key`` is ``NoneIOKey``).
+        """
+        value = self._session_id_key.value_from_state(state)
+        return str(value) if value is not None else None
+
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         output_iokey = self._output_key.to_iokey(state)
+        session_id = self._resolve_session_id(state)
 
         last_message, history = self._get_last_ai_message(state, history_iokey)
 
@@ -96,6 +122,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         self._ui_history.log.success(
             final_response_text,
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+            subsession_id=session_id,
         )
 
         return {**self._ui_history.pop_state_updates(), **updates}

@@ -17,7 +17,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, RuntimeIOKey
-from duo_workflow_service.agent_platform.v1.state.base import IOKey
+from duo_workflow_service.agent_platform.v1.state.base import IOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.compaction import CompactionConfig
 
@@ -1458,3 +1458,85 @@ class TestAgentComponentBindToSupervisor:
 
         # After binding, outputs should be empty
         assert component.outputs == ()
+
+    def test_bind_to_supervisor_sets_session_id_key(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that bind_to_supervisor stores the provided session_id_key."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            description="Test agent for supervisor",
+        )
+
+        # Before binding, session_id_key should be NoneIOKey (standalone mode)
+        assert isinstance(component._session_id_key, NoneIOKey)
+
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_session_id_key = IOKey(
+            target="context", subkeys=["supervisor", "active_subsession"], optional=True
+        )
+
+        component.bind_to_supervisor(
+            conversation_history_key=mock_history_key,
+            output_key=mock_output_key,
+            goal_key=mock_goal_key,
+            session_id_key=mock_session_id_key,
+        )
+
+        # session_id_key should now be set to the provided value
+        assert component._session_id_key is mock_session_id_key
+
+    def test_bind_to_supervisor_session_id_key_defaults_to_none(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that session_id_key defaults to NoneIOKey when not provided to bind_to_supervisor."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            description="Test agent for supervisor",
+        )
+
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+
+        # Bind without session_id_key
+        component.bind_to_supervisor(
+            conversation_history_key=mock_history_key,
+            output_key=mock_output_key,
+            goal_key=mock_goal_key,
+        )
+
+        # session_id_key should be NoneIOKey (always resolves to None)
+        assert isinstance(component._session_id_key, NoneIOKey)

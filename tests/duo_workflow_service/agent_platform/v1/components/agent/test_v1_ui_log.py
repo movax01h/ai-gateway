@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from unittest.mock import Mock
 
 import pytest
@@ -6,6 +7,7 @@ from langchain_core.tools import BaseTool
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
+    agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolInfo, ToolStatus
 
@@ -117,3 +119,69 @@ class TestUILogWriterAgentTools:
 
         args = mock_callback.call_args[0][0]
         assert args.record["content"] == custom_message
+
+    def test_log_success_component_name_from_constructor(
+        self, mock_callback, mock_tool
+    ):
+        """Test that component_name set at construction is embedded in success log entries."""
+        writer = UILogWriterAgentTools(mock_callback, component_name="developer")
+        tool_call_args = {"param": "value"}
+
+        writer.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+            subsession_id="2",
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] == "developer"
+        assert args.record["subsession_id"] == "2"
+
+    def test_log_success_component_name_defaults_to_none(
+        self, ui_log_writer, mock_tool, mock_callback
+    ):
+        """Test that component_name defaults to None when not provided at construction."""
+        tool_call_args = {"param": "value"}
+
+        ui_log_writer.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] is None
+        assert args.record["subsession_id"] is None
+
+    def test_log_error_component_name_from_constructor(self, mock_callback, mock_tool):
+        """Test that component_name set at construction is embedded in error log entries."""
+        writer = UILogWriterAgentTools(mock_callback, component_name="researcher")
+        tool_call_args = {"param": "value"}
+
+        writer.error(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            subsession_id="1",
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] == "researcher"
+        assert args.record["subsession_id"] == "1"
+
+    def test_agent_tools_ui_log_writer_class_factory(self, mock_callback, mock_tool):
+        """Test that agent_tools_ui_log_writer_class returns a factory that creates UILogWriterAgentTools."""
+        factory_fn = agent_tools_ui_log_writer_class(component_name="my_agent")
+        writer = factory_fn(mock_callback)
+
+        assert isinstance(writer, UILogWriterAgentTools)
+
+        writer.success(
+            tool=mock_tool,
+            tool_call_args={},
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] == "my_agent"
