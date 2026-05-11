@@ -22,7 +22,6 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import NotifiableException
-from duo_workflow_service.gitlab.gitlab_api import fetch_workflow_and_container_data
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -34,7 +33,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.billing_events.service import LLMOperation
-from lib.context import llm_operations
+from lib.context import current_model_metadata_context, llm_operations
 from lib.context.tool_executions import init_tool_executions, tool_executions
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -1093,6 +1092,64 @@ async def test_aput(
     assert result == {
         "configurable": {"thread_id": workflow_id, "checkpoint_id": checkpoint["id"]}
     }
+
+
+@pytest.mark.asyncio
+async def test_aput_includes_model_metadata_json_when_context_is_set(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    workflow_id,
+    model_metadata,
+):
+    """Test that aput() includes model_metadata_json in the HTTP POST payload when the context is set."""
+    current_model_metadata_context.set(model_metadata)
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "model_metadata_json" in post_call_body
+    assert post_call_body["model_metadata_json"] == model_metadata.model_dump_json(
+        exclude={"llm_definition", "friendly_name"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_aput_omits_model_metadata_json_when_context_is_not_set(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Test that aput() does not include model_metadata_json in the HTTP POST payload when the context is not set."""
+    # Ensure context is not set (default)
+    current_model_metadata_context.set(None)
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "model_metadata_json" not in post_call_body
 
 
 def test_aput_with_no_status_update(

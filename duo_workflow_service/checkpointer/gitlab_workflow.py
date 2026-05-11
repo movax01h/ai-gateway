@@ -73,7 +73,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
-from lib.context import init_llm_operations
+from lib.context import current_model_metadata_context, init_llm_operations
 from lib.context.tool_executions import get_tool_executions, init_tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -822,12 +822,17 @@ class GitLabWorkflow(
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
         endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
 
-        payload = {
+        payload: Dict[str, Any] = {
             "thread_ts": checkpoint["id"],
             "parent_ts": configurable.get("checkpoint_id"),
             "metadata": metadata,
             "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
+
+        if (model_metadata := current_model_metadata_context.get()) is not None:
+            payload["model_metadata_json"] = model_metadata.model_dump_json(
+                exclude={"llm_definition", "friendly_name"}
+            )
 
         with duo_workflow_metrics.time_gitlab_response(
             endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints", method="POST"

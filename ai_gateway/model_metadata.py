@@ -18,7 +18,7 @@ PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
 
 class BaseModelMetadata(BaseModel):
     llm_definition: LLMDefinition
-    family: list[str] = []
+    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -36,7 +36,6 @@ class AmazonQModelMetadata(BaseModelMetadata):
     provider: Literal["amazon_q"]
     name: Literal["amazon_q"]
     role_arn: Annotated[str, StringConstraints(max_length=255)]
-    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
     @override
     def to_params(self) -> Dict[str, Any]:
@@ -51,7 +50,6 @@ class FireworksModelMetadata(BaseModelMetadata):
     name: Annotated[str, StringConstraints(max_length=255)]
     endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
-    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
     model_identifier: Optional[str] = None
     using_cache: Optional[bool] = None
     session_id: Optional[str] = None
@@ -84,7 +82,6 @@ class ModelMetadata(BaseModelMetadata):
     endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
-    friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
 
     @override
     def to_params(self) -> Dict[str, Any]:
@@ -212,7 +209,6 @@ def _create_fireworks_metadata(
         using_cache=data.get("using_cache"),
         session_id=data.get("session_id"),
         llm_definition=llm_definition,
-        family=llm_definition.family,
         friendly_name=llm_definition.name,
     )
 
@@ -234,7 +230,6 @@ def _create_mistral_metadata(data: dict[str, Any]) -> ModelMetadata:
 
     return ModelMetadata(
         llm_definition=llm_definition,
-        family=llm_definition.family,
         friendly_name=llm_definition.name,
         provider="mistral",
         name=data["name"],
@@ -271,7 +266,6 @@ def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
 
     return ModelMetadata(
         llm_definition=llm_definition,
-        family=llm_definition.family,
         friendly_name=llm_definition.name,
         **data,
     )
@@ -290,7 +284,6 @@ def create_model_metadata(
         llm_definition = configs.get_model("amazon_q")
         return AmazonQModelMetadata(
             llm_definition=llm_definition,
-            family=llm_definition.family,
             friendly_name=llm_definition.name,
             **data,
         )
