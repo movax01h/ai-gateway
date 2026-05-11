@@ -2,6 +2,7 @@ from typing import Optional, Tuple, TypedDict
 
 from packaging.version import InvalidVersion, Version
 
+from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
@@ -283,12 +284,20 @@ async def fetch_workflow_and_container_data(
 
     variables = {"workflowId": f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"}
 
-    response = await client.graphql(query, variables)
+    try:
+        response = await client.graphql(query, variables)
+    except Exception as e:
+        # Check if the error message indicates workflow not found
+        if "Workflow not found" in str(e):
+            raise InvalidWorkflowIdException(str(e))
+        raise
 
     workflows = response.get("duoWorkflowWorkflows", {}).get("nodes", [])
 
     if not workflows:
-        raise Exception(f"No workflow found for workflow ID: {workflow_id}")
+        raise InvalidWorkflowIdException(
+            f"No workflow found for workflow ID: {workflow_id}"
+        )
 
     # Get the first workflow (assuming there's at least one)
     workflow = workflows[0]
