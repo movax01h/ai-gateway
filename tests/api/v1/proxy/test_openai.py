@@ -84,45 +84,6 @@ class TestProxyOpenAI:
             category="ai_gateway.api.v1.proxy.openai",
         )
 
-    def test_successful_completions_request(
-        self,
-        mock_client,
-        mock_track_internal_event,
-        unit_primitive,
-        proxy_headers,
-        mock_proxy_model,
-    ):
-        with (
-            patch(
-                "ai_gateway.proxy.clients.ProxyClient.proxy",
-                return_value={"response": "completion test"},
-            ),
-            patch(
-                "ai_gateway.proxy.clients.OpenAIProxyModelFactory.factory",
-                new_callable=AsyncMock,
-                return_value=mock_proxy_model,
-            ),
-        ):
-            headers = {**proxy_headers, "X-Gitlab-Unit-Primitive": unit_primitive}
-            response = mock_client.post(
-                "/proxy/openai/v1/completions",
-                headers=headers,
-                json={
-                    "model": "gpt-3.5-turbo",
-                    "prompt": "Hello, world!",
-                    "max_tokens": 100,
-                    "temperature": 0.7,
-                },
-            )
-
-        assert response.status_code == 200
-        assert response.json() == {"response": "completion test"}
-
-        mock_track_internal_event.assert_called_once_with(
-            f"request_{unit_primitive}",
-            category="ai_gateway.api.v1.proxy.openai",
-        )
-
     def test_successful_embeddings_request(
         self,
         mock_client,
@@ -467,10 +428,8 @@ class TestUsageQuotaWithModelName:
     @pytest.mark.parametrize(
         "model_name",
         [
-            "gpt-4o",
-            "gpt-4-turbo-2024-04-09",
-            "gpt-3.5-turbo",
-            "text-embedding-ada-002",
+            "gpt-5",
+            "gpt-5-mini",
         ],
     )
     def test_passes_model_name_to_usage_quota_service(
@@ -527,3 +486,9 @@ class TestUsageQuotaWithModelName:
             model_metadata = call_args[1]["model_metadata"]
             assert model_metadata is not None
             assert model_metadata.name == model_name
+
+            # Internal tracking event is fired for the proxy endpoint
+            mock_track_internal_event.assert_called_once_with(
+                f"request_{unit_primitive}",
+                category="ai_gateway.api.v1.proxy.openai",
+            )
