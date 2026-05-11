@@ -25,6 +25,7 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
 from duo_workflow_service import server as server_module
+from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
@@ -727,6 +728,15 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
             None,
             grpc.StatusCode.INTERNAL,
             "workflow execution failure: ForbiddenStatusEvent: Sessions status cannot be updated due to 403 response",
+        ),
+        (
+            InvalidWorkflowIdException(
+                "Workflow not found for workflow ID: invalid-id"
+            ),
+            False,
+            None,
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "Invalid workflow ID:",
         ),
     ],
 )

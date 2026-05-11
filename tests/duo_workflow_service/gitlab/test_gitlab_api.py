@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.gitlab.gitlab_api import (
     GITLAB_18_2_QUERY,
     GITLAB_18_3_OR_ABOVE_QUERY,
@@ -144,11 +145,47 @@ async def test_fetch_workflow_and_container_data_no_workflow():
 
     workflow_id = "abc-123"
     with pytest.raises(
-        Exception, match=f"No workflow found for workflow ID: {workflow_id}"
+        InvalidWorkflowIdException,
+        match=f"No workflow found for workflow ID: {workflow_id}",
     ):
         await fetch_workflow_and_container_data(gitlab_client, workflow_id)
 
     # Verify GraphQL call
+    gitlab_client.graphql.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_graphql_workflow_not_found_error():
+    """Test that GraphQL 'Workflow not found' error is converted to InvalidWorkflowIdError."""
+    gitlab_client = AsyncMock()
+
+    gitlab_client.graphql.side_effect = Exception(
+        "GraphQL errors: [{'message': 'Workflow not found'}]"
+    )
+
+    workflow_id = "invalid-id"
+    with pytest.raises(
+        InvalidWorkflowIdException,
+        match="Workflow not found",
+    ):
+        await fetch_workflow_and_container_data(gitlab_client, workflow_id)
+
+    gitlab_client.graphql.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_graphql_other_error():
+    """Test that other GraphQL errors are not converted to InvalidWorkflowIdError."""
+    gitlab_client = AsyncMock()
+
+    gitlab_client.graphql.side_effect = Exception(
+        "GraphQL errors: [{'message': 'Something else'}]"
+    )
+
+    workflow_id = "valid-id"
+    with pytest.raises(Exception, match="GraphQL errors"):
+        await fetch_workflow_and_container_data(gitlab_client, workflow_id)
+
     gitlab_client.graphql.assert_called_once()
 
 

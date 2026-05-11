@@ -26,3 +26,7 @@ class TierAccessDeniedException(ToolException):
         super().__init__(
             message or f"This feature requires a {plan_display} GitLab subscription."
         )
+
+
+class InvalidWorkflowIdException(Exception):
+    """Raised when a workflow ID is invalid or not found."""
