@@ -38,12 +38,11 @@ def _load_user_prompt_template(flow_name: str, flow_version: str | None = None) 
     scope="module",
     params=[
         ("developer", None),
-        ("developer", "2.0.0"),
-        ("developer_unstable", None),
     ],
-    ids=["developer-1.0.0", "developer-2.0.0", "developer_unstable-1.0.0"],
+    ids=["developer-1.0.0"],
 )
 def user_prompt_template(request):
+    """User prompt template for configs that have goal-routing logic."""
     flow_name, flow_version = request.param
     return _load_user_prompt_template(flow_name, flow_version)
 
@@ -62,10 +61,9 @@ def render(template_str, **kwargs):
     "flow_name,flow_version",
     [
         ("developer", None),
-        ("developer", "2.0.0"),
         ("developer_unstable", None),
     ],
-    ids=["developer-1.0.0", "developer-2.0.0", "developer_unstable-1.0.0"],
+    ids=["developer-1.0.0", "developer_unstable-1.0.0"],
 )
 class TestLangChainTemplateCompatibility:
     """Ensure the prompt template works end-to-end through LangChain's ChatPromptTemplate.
