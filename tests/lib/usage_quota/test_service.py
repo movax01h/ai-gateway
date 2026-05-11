@@ -207,7 +207,6 @@ class TestFailOpenBehavior:
         "exception_class",
         [
             UsageQuotaTimeoutError,
-            UsageQuotaHTTPError,
             UsageQuotaConnectionError,
         ],
     )
@@ -216,10 +215,7 @@ class TestFailOpenBehavior:
         self, service, gl_context, exception_class
     ):
         """Test that service fails open on UsageQuotaError exceptions."""
-        if exception_class == UsageQuotaHTTPError:
-            exception = exception_class(status_code=500)
-        else:
-            exception = exception_class()
+        exception = exception_class()
 
         with (
             patch.object(
@@ -230,12 +226,64 @@ class TestFailOpenBehavior:
             ),
             patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
         ):
-            # Should not raise exception (fail-open behavior)
             await service.execute(
                 gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
             )
 
         mock_metrics.labels.assert_called_once_with(result="fail_open", realm="saas")
+        mock_metrics.labels.return_value.inc.assert_called_once()
+
+
+class TestFailCloseBehavior:
+    """Tests for fail-close behavior on errors."""
+
+    @pytest.mark.asyncio
+    async def test_fails_close_on_http_error_for_saas(self, service, gl_context):
+        """Test that service raises on UsageQuotaHTTPError for saas realm."""
+        with (
+            patch.object(
+                service.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                side_effect=UsageQuotaHTTPError(422),
+            ),
+            patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
+        ):
+            with pytest.raises(UsageQuotaHTTPError):
+                await service.execute(
+                    gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                )
+
+        mock_metrics.labels.assert_called_once_with(result="deny", realm="saas")
+        mock_metrics.labels.return_value.inc.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fails_open_on_http_error_for_non_saas(
+        self, service, gl_context, internal_event_context
+    ):
+        """Test that service fails open on UsageQuotaHTTPError for non-saas realm."""
+        non_saas_context = internal_event_context.model_copy(
+            update={"realm": "self-managed"}
+        )
+
+        with (
+            patch("lib.usage_quota.service.current_event_context") as mock_ctx,
+            patch.object(
+                service.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                side_effect=UsageQuotaHTTPError(422),
+            ),
+            patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
+        ):
+            mock_ctx.get.return_value = non_saas_context
+            await service.execute(
+                gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
+            )
+
+        mock_metrics.labels.assert_called_once_with(
+            result="fail_open", realm="self-managed"
+        )
         mock_metrics.labels.return_value.inc.assert_called_once()
 
 
