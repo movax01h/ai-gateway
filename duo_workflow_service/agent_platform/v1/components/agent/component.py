@@ -30,7 +30,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
-    UILogWriterAgentTools,
+    agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
@@ -44,6 +44,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKeyTemplate,
     RuntimeIOKey,
 )
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
@@ -256,10 +257,11 @@ class AgentComponent(AgentComponentBase):
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
-    # Private attributes for RuntimeIOKey instances with default values.
+    # Private attributes for key instances with default values.
     # Overridden by bind_to_supervisor when used as a subagent.
     _conversation_history_key: RuntimeIOKey = PrivateAttr()
     _output_key: RuntimeIOKey = PrivateAttr()
+    _session_id_key: BaseIOKey = PrivateAttr()
     _is_bound_to_supervisor: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
@@ -280,6 +282,9 @@ class AgentComponent(AgentComponentBase):
             factory=lambda _: static_output_key,
         )
 
+        # Standalone components have no session — use NoneIOKey sentinel
+        self._session_id_key = NoneIOKey(alias="session_id")
+
         return self
 
     def bind_to_supervisor(
@@ -288,13 +293,14 @@ class AgentComponent(AgentComponentBase):
         conversation_history_key: RuntimeIOKey,
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
+        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
     ) -> None:
         """Bind this agent to a supervisor.
 
         Must be called before ``attach`` when using this component as a subagent.
-        The supervisor passes subsession-scoped ``RuntimeIOKey`` instances so the
-        agent never needs to scan state to discover which supervisor owns it or
-        what the active subsession ID is.
+        The supervisor passes subsession-scoped key instances so the agent never
+        needs to scan state to discover which supervisor owns it or what the
+        active subsession ID is.
 
         When bound to a supervisor, the description field must be set.
 
@@ -308,6 +314,11 @@ class AgentComponent(AgentComponentBase):
                 ``context:goal`` input so the subagent reads the delegation
                 prompt written by ``DelegationNode`` rather than the shared
                 flow goal.
+            session_id_key: ``IOKey`` pointing to the active subsession ID in
+                state.  When provided, the resolved value is included in every
+                ``UiChatLog`` entry emitted by this component's nodes so the UI
+                can attribute tool calls and final answers to the correct
+                subsession.  Defaults to ``NoneIOKey()`` (always ``None``).
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -318,6 +329,7 @@ class AgentComponent(AgentComponentBase):
             )
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
+        self._session_id_key = session_id_key
         self._is_bound_to_supervisor = True
 
         # Ensure subagent does not read shared `context:goal` directly
@@ -459,9 +471,13 @@ class AgentComponent(AgentComponentBase):
             conversation_history_key=self._conversation_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
-                events=self.ui_log_events, writer_class=UILogWriterAgentTools
+                events=self.ui_log_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
             ),
             tracker=tracker,
+            session_id_key=self._session_id_key,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
@@ -470,13 +486,16 @@ class AgentComponent(AgentComponentBase):
             ui_history=UIHistory(
                 events=self.ui_log_events,
                 writer_class=default_ui_log_writer_class(
-                    events_class=UILogEventsAgent, ui_role_as=self.ui_role_as
+                    events_class=UILogEventsAgent,
+                    ui_role_as=self.ui_role_as,
+                    component_name=self.name,
                 ),
             ),
             response_schema=self._response_schema,
             response_schema_tracking=self.response_schema_tracking,
             response_schema_tracking_context=self.response_schema_tracking_context,
             component_name=self.name,
+            session_id_key=self._session_id_key,
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,

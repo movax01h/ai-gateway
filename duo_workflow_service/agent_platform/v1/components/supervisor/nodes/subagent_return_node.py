@@ -118,7 +118,7 @@ class SubagentReturnNode:
                 tool_info=build_tool_info(
                     delegate_tool_title, delegate_args, tool_response
                 ),
-                session_id=self._session_id,
+                subsession_id=self._session_id,
             )
         else:
             status = DelegationStatus.ERROR
@@ -133,7 +133,7 @@ class SubagentReturnNode:
                 tool_info=build_tool_info(
                     delegate_tool_title, delegate_args, result_content
                 ),
-                session_id=self._session_id,
+                subsession_id=self._session_id,
             )
 
         # Find the delegate_task tool_call_id from supervisor's conversation history

@@ -19,7 +19,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
-    UILogWriterAgentTools,
+    agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
     RouterProtocol,
@@ -42,6 +42,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.state.base import (
     IOKey,
+    NoneIOKey,
     RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import (
@@ -600,9 +601,14 @@ class SupervisorAgentComponent(AgentComponentBase):
             conversation_history_key=supervisor_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
-                events=tool_events, writer_class=UILogWriterAgentTools
+                events=tool_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
             ),
             tracker=tracker,
+            # Supervisor is never a subagent — session_id is always None for its own nodes
+            session_id_key=NoneIOKey(alias="session_id"),
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
@@ -615,9 +621,13 @@ class SupervisorAgentComponent(AgentComponentBase):
                 writer_class=default_ui_log_writer_class(
                     events_class=UILogEventsSupervisor,
                     ui_role_as=self.ui_role_as,  # type: ignore[arg-type]
+                    component_name=self.name,
                 ),
             ),
             response_schema=self._response_schema,
+            component_name=self.name,
+            # Supervisor is never a subagent — session_id is always None for its own nodes
+            session_id_key=NoneIOKey(alias="session_id"),
         )
 
         # --- Delegation node ---
@@ -700,5 +710,6 @@ class SupervisorAgentComponent(AgentComponentBase):
                 conversation_history_key=self._subsession_history_key_for(agent_name),
                 output_key=self._subagent_final_answer_key_for(agent_name),
                 goal_key=self._subsession_goal_key_for(agent_name),
+                session_id_key=self._resolved_active_subsession_key,
             )
             subagent.attach(graph, subagent_router)

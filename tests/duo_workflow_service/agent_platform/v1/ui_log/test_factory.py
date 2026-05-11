@@ -93,14 +93,14 @@ class TestDefaultUILogWriter:
         assert record["component_name"] is None
 
     def test_log_success_passes_through_kwargs(self, tool_writer, mock_callback):
-        """_log_success forwards tool_info, message_sub_type, and session_id from kwargs."""
+        """_log_success forwards tool_info, message_sub_type, and subsession_id from kwargs."""
         tool_info = build_tool_info("my_tool", {"arg": "val"})
         tool_writer.success(
             "msg",
             event=MockUILogEvents.ON_TEST,
             tool_info=tool_info,
             message_sub_type="delegation_returns",
-            session_id="1",
+            subsession_id="1",
         )
 
         record = mock_callback.call_args[0][0].record
@@ -108,38 +108,38 @@ class TestDefaultUILogWriter:
         assert record["tool_info"]["name"] == "my_tool"
         assert record["message_sub_type"] == "delegation_returns"
         assert record["component_name"] == "supervisor"
-        assert record["session_id"] == "1"
+        assert record["subsession_id"] == "1"
 
     def test_log_error_passes_through_kwargs(self, tool_writer, mock_callback):
-        """_log_error forwards tool_info, message_sub_type, and session_id from kwargs."""
+        """_log_error forwards tool_info, message_sub_type, and subsession_id from kwargs."""
         tool_info = build_tool_info("my_tool", {"arg": "val"})
         tool_writer.error(
             "err",
             event=MockUILogEvents.ON_TEST,
             tool_info=tool_info,
             message_sub_type="delegation_returns",
-            session_id="1",
+            subsession_id="1",
         )
 
         record = mock_callback.call_args[0][0].record
         assert record["tool_info"] is not None
         assert record["message_sub_type"] == "delegation_returns"
         assert record["component_name"] == "supervisor"
-        assert record["session_id"] == "1"
+        assert record["subsession_id"] == "1"
 
-    def test_session_id_from_kwarg(self, tool_writer, mock_callback):
-        """session_id passed as kwarg to log methods is used in the log entry."""
-        tool_writer.success("msg", event=MockUILogEvents.ON_TEST, session_id="42")
+    def test_subsession_id_from_kwarg(self, tool_writer, mock_callback):
+        """subsession_id passed as kwarg to log methods is used in the log entry."""
+        tool_writer.success("msg", event=MockUILogEvents.ON_TEST, subsession_id="42")
 
         record = mock_callback.call_args[0][0].record
-        assert record["session_id"] == "42"
+        assert record["subsession_id"] == "42"
 
-    def test_session_id_defaults_to_none(self, tool_writer, mock_callback):
-        """When session_id is not passed as kwarg, it defaults to None in the log entry."""
+    def test_subsession_id_defaults_to_none(self, tool_writer, mock_callback):
+        """When subsession_id is not passed as kwarg, it defaults to None in the log entry."""
         tool_writer.success("msg", event=MockUILogEvents.ON_TEST)
 
         record = mock_callback.call_args[0][0].record
-        assert record["session_id"] is None
+        assert record["subsession_id"] is None
 
     def test_log_warning_raises_not_implemented(self, agent_writer):
         """_log_warning raises NotImplementedError."""

@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
@@ -13,12 +14,15 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node imp
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
+    agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.state import (
     FlowStateKeys,
     IOKey,
     RuntimeIOKey,
 )
+from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
+from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (
@@ -74,9 +78,9 @@ def tool_node_fixture(
     flow_type,
     ui_history,
     mock_internal_event_client,
-    mock_tool_monitoring,
-    mock_prompt_security,
-    mock_logger,
+    mock_tool_monitoring,  # pylint: disable=unused-argument
+    mock_prompt_security,  # pylint: disable=unused-argument
+    mock_logger,  # pylint: disable=unused-argument
 ):
     """Fixture for ToolNode instance."""
     tracker = ToolEventTracker(
@@ -145,6 +149,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
             tool_response="Tool execution result",
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -172,8 +177,7 @@ class TestToolNode:
         def mock_getitem(key):
             if key == "tool_1":
                 return mock_tool_1
-            elif key == "tool_2":
-                return mock_tool_2
+            return mock_tool_2
 
         mock_toolset.__getitem__ = Mock(side_effect=mock_getitem)
 
@@ -204,7 +208,7 @@ class TestToolNode:
         component_name,
         mock_toolset,
         mock_prompt_security,
-        mock_tool_call,
+        mock_tool_call,  # pylint: disable=unused-argument
         mock_ai_message_with_tool_calls,
     ):
         """Test run when tool is not found in toolset."""
@@ -274,6 +278,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response="Invalid argument type",
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -335,6 +340,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response=ANY,
+            subsession_id=None,
         )
 
         assert ui_history.log.error.call_args.kwargs["tool_response"].startswith(
@@ -397,6 +403,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response="Generic error",
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -513,7 +520,7 @@ class TestToolNodeSecurity:
         flow_state_with_tool_calls,
         component_name,
         mock_tool,
-        mock_tool_call,
+        mock_tool_call,  # pylint: disable=unused-argument
         mock_ai_message_with_tool_calls,
     ):
         """Test run with successful security sanitization."""
@@ -619,3 +626,197 @@ class TestToolNodeEventTracking:
         additional_props = call_args[1]["additional_properties"]
         assert hasattr(additional_props, "property")
         assert additional_props.property == mock_tool.name
+
+
+class TestToolNodeComponentIdentity:
+    """Test suite for ToolNode component_name and subsession_id attribution in UiChatLog entries.
+
+    ``component_name`` is now embedded in the ``UILogWriterAgentTools`` writer at
+    construction time (via ``agent_tools_ui_log_writer_class``).  These tests
+    verify that the writer correctly stores and uses ``component_name``, and that
+    ``subsession_id`` is still resolved at runtime from state via ``session_id_key``.
+    """
+
+    def _make_tool_node(
+        self,
+        component_name,
+        mock_toolset,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        *,
+        writer_component_name=None,
+        session_id_key=NoneIOKey(alias="session_id"),
+    ):
+        """Helper to build a ToolNode with a real UIHistory using the writer factory."""
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
+        static_key = IOKey(
+            target="conversation_history",
+            subkeys=[component_name],
+            optional=True,
+        )
+        conversation_history_key = RuntimeIOKey(
+            alias="conversation_history", factory=lambda _: static_key
+        )
+        ui_history = UIHistory(
+            events=[
+                UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+                UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            ],
+            writer_class=agent_tools_ui_log_writer_class(
+                component_name=writer_component_name,
+            ),
+        )
+        return (
+            ToolNode(
+                name="test_tool_node",
+                conversation_history_key=conversation_history_key,
+                toolset=mock_toolset,
+                ui_history=ui_history,
+                tracker=tracker,
+                session_id_key=session_id_key,
+            ),
+            ui_history,
+        )
+
+    @pytest.mark.asyncio
+    async def test_component_name_embedded_in_writer(
+        self,
+        component_name,
+        mock_toolset,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_tool_monitoring,  # pylint: disable=unused-argument
+        mock_prompt_security,  # pylint: disable=unused-argument
+        mock_logger,  # pylint: disable=unused-argument
+        flow_state_with_tool_calls,
+    ):
+        """Test that component_name set in the writer is embedded in UiChatLog entries."""
+        node, _ = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+            writer_component_name=component_name,
+        )
+
+        result = await node.run(flow_state_with_tool_calls)
+
+        # Verify the log entry has the correct component_name from the writer
+        logs = result.get("ui_chat_log", [])
+        assert len(logs) == 1
+        assert logs[0]["component_name"] == component_name
+        assert logs[0]["subsession_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_session_id_resolved_from_state_on_success(
+        self,
+        component_name,
+        mock_toolset,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_tool_monitoring,  # pylint: disable=unused-argument
+        mock_prompt_security,  # pylint: disable=unused-argument
+        mock_logger,  # pylint: disable=unused-argument
+        flow_state_with_tool_calls,
+    ):
+        """Test that subsession_id is resolved from state via session_id_key and embedded in log entries."""
+        # Build a session_id_key that reads context.active_subsession directly (no RuntimeIOKey needed)
+        session_id_key = IOKey(
+            target="context",
+            subkeys=["supervisor", "active_subsession"],
+            optional=True,
+        )
+
+        node, _ = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+            writer_component_name=component_name,
+            session_id_key=session_id_key,
+        )
+
+        # Inject active_subsession into state
+        state = flow_state_with_tool_calls.copy()
+        state["context"] = {
+            **state.get("context", {}),
+            "supervisor": {"active_subsession": 3},
+        }
+
+        result = await node.run(state)
+
+        logs = result.get("ui_chat_log", [])
+        assert len(logs) == 1
+        assert logs[0]["component_name"] == component_name
+        assert logs[0]["subsession_id"] == "3"
+
+    @pytest.mark.asyncio
+    async def test_component_name_embedded_in_error_log(
+        self,
+        component_name,
+        mock_toolset,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_tool_monitoring,  # pylint: disable=unused-argument
+        mock_prompt_security,  # pylint: disable=unused-argument
+        mock_logger,  # pylint: disable=unused-argument
+        mock_tool,
+        flow_state_with_tool_calls,
+    ):
+        """Test that component_name from the writer is embedded in error UiChatLog entries."""
+        mock_tool.ainvoke = AsyncMock(side_effect=Exception("Tool failed"))
+
+        node, _ = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+            writer_component_name=component_name,
+        )
+
+        result = await node.run(flow_state_with_tool_calls)
+
+        logs = result.get("ui_chat_log", [])
+        assert len(logs) == 1
+        assert logs[0]["component_name"] == component_name
+        assert logs[0]["subsession_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_session_id_none_when_no_session_id_key(
+        self,
+        component_name,
+        mock_toolset,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_tool_monitoring,  # pylint: disable=unused-argument
+        mock_prompt_security,  # pylint: disable=unused-argument
+        mock_logger,  # pylint: disable=unused-argument
+        flow_state_with_tool_calls,
+    ):
+        """Test that subsession_id is None when no session_id_key is provided (standalone mode)."""
+        node, _ = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+            # No session_id_key — standalone mode
+        )
+
+        result = await node.run(flow_state_with_tool_calls)
+
+        logs = result.get("ui_chat_log", [])
+        assert len(logs) == 1
+        assert logs[0]["subsession_id"] is None

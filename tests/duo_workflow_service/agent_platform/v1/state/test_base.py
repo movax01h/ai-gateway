@@ -11,6 +11,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKey,
     IOKeyFactory,
     IOKeyTemplate,
+    NoneIOKey,
     RuntimeIOKey,
     conversation_history_replace_reducer,
     create_nested_dict,
@@ -1620,3 +1621,77 @@ class TestRuntimeIOKey:
         factory: IOKeyFactory = lambda state: IOKey(target="status")
         key = RuntimeIOKey(alias="status", factory=factory)
         assert key.alias == "status"
+
+
+class TestNoneIOKey:
+    """Tests for NoneIOKey class."""
+
+    @pytest.fixture
+    def base_state(self) -> FlowState:
+        return {
+            "status": WorkflowStatusEnum.EXECUTION,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {"agent": {"final_answer": "hello"}},
+        }
+
+    def test_alias_is_required(self):
+        """NoneIOKey requires alias to be provided."""
+        with pytest.raises(ValidationError) as exc_info:
+            NoneIOKey()
+        assert "Field 'alias' is required for NoneIOKey" in str(exc_info.value)
+
+    def test_alias_must_be_non_empty(self):
+        """NoneIOKey requires alias to be a non-empty string."""
+        with pytest.raises(ValidationError) as exc_info:
+            NoneIOKey(alias="")
+        assert "Field 'alias' is required for NoneIOKey" in str(exc_info.value)
+
+    def test_alias_must_not_be_whitespace_only(self):
+        """NoneIOKey rejects whitespace-only alias."""
+        with pytest.raises(ValidationError) as exc_info:
+            NoneIOKey(alias="   ")
+        assert "Field 'alias' is required for NoneIOKey" in str(exc_info.value)
+
+    def test_construction_with_alias(self):
+        """NoneIOKey can be constructed with a valid alias."""
+        key = NoneIOKey(alias="session_id")
+        assert key.alias == "session_id"
+
+    def test_template_variable_name_returns_alias(self):
+        """template_variable_name returns the alias."""
+        key = NoneIOKey(alias="session_id")
+        assert key.template_variable_name == "session_id"
+
+    def test_value_from_state_always_returns_none(self, base_state):
+        """value_from_state always returns None regardless of state contents."""
+        key = NoneIOKey(alias="session_id")
+        assert key.value_from_state(base_state) is None
+
+    def test_value_from_state_returns_none_for_empty_state(self):
+        """value_from_state returns None even for a minimal state."""
+        key = NoneIOKey(alias="session_id")
+        empty_state: FlowState = {
+            "status": WorkflowStatusEnum.NOT_STARTED,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {},
+        }
+        assert key.value_from_state(empty_state) is None
+
+    def test_none_io_key_is_subclass_of_base_io_key(self):
+        """NoneIOKey is a subclass of BaseIOKey but not IOKey."""
+        key = NoneIOKey(alias="session_id")
+        assert isinstance(key, BaseIOKey)
+        assert not isinstance(key, IOKey)
+
+    def test_target_attribute_does_not_exist(self):
+        """NoneIOKey has no ``target`` field."""
+        key = NoneIOKey(alias="session_id")
+        with pytest.raises(AttributeError):
+            _ = key.target
+
+    def test_none_io_key_is_not_runtime_io_key(self):
+        """NoneIOKey is not a RuntimeIOKey instance."""
+        key = NoneIOKey(alias="session_id")
+        assert not isinstance(key, RuntimeIOKey)

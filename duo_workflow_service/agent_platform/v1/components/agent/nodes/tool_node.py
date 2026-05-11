@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 import structlog
 from langchain_core.messages import ToolMessage
@@ -12,7 +12,12 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowState, RuntimeIOKey
+from duo_workflow_service.agent_platform.v1.state import FlowState
+from duo_workflow_service.agent_platform.v1.state.base import (
+    BaseIOKey,
+    NoneIOKey,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
@@ -36,12 +41,27 @@ class ToolNode:
     wrapped in a ``RuntimeIOKey`` by the caller) and the supervisor case where
     the key is only known at runtime.
 
+    ``component_name`` is embedded in ``UiChatLog`` entries via the ``ui_history``
+    writer (see ``agent_tools_ui_log_writer_class``).  The node itself does not
+    store or forward ``component_name`` — it is the writer's responsibility.
+
+    ``session_id_key`` is an ``IOKey`` (or ``NoneIOKey`` sentinel) that reads the
+    active subsession ID from state.  When ``NoneIOKey`` (standalone mode),
+    ``session_id`` is always ``None`` in log entries.  When an ``IOKey`` is
+    provided (subagent mode), the resolved value is included in every log entry
+    so the UI can attribute tool calls to the correct subsession.
+
     Args:
         name: LangGraph node name.
         conversation_history_key: ``RuntimeIOKey`` that resolves the
             conversation-history ``IOKey`` at runtime.
         toolset: Collection of tools available for execution.
-        ui_history: UI log history writer for tool execution events.
+        ui_history: UI log history writer for tool execution events.  Must be
+            constructed with a writer that already has ``component_name`` bound
+            (e.g. via ``agent_tools_ui_log_writer_class``).
+        session_id_key: ``IOKey`` pointing to the active subsession ID in state.
+            Defaults to ``NoneIOKey()`` for standalone components (always
+            resolves to ``None``).
     """
 
     def __init__(
@@ -52,6 +72,7 @@ class ToolNode:
         ui_history: UIHistory[UILogWriterAgentTools, UILogEventsAgent],
         conversation_history_key: RuntimeIOKey,
         tracker: ToolEventTracker,
+        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
     ):
         self.name = name
         self._toolset = toolset
@@ -59,10 +80,22 @@ class ToolNode:
         self._ui_history = ui_history
         self._conversation_history_key = conversation_history_key
         self._tracker = tracker
+        self._session_id_key = session_id_key
+
+    def _resolve_session_id(self, state: FlowState) -> Optional[str]:
+        """Resolve the active session ID from state.
+
+        Returns:
+            The session ID string when running as a subagent, or ``None`` for
+            standalone components (when ``session_id_key`` is ``NoneIOKey``).
+        """
+        value = self._session_id_key.value_from_state(state)
+        return str(value) if value is not None else None
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         conversation_history = history_iokey.value_from_state(state) or []
+        session_id = self._resolve_session_id(state)
 
         # TODO: add ability to register all tool calls in a follow up
         # context = state["context"].get(self.component_name, {})
@@ -81,7 +114,9 @@ class ToolNode:
                 response = f"Tool {tool_name} not found"
             else:
                 response = await self._execute_tool(
-                    tool=self._toolset[tool_name], tool_call_args=tool_call_args
+                    tool=self._toolset[tool_name],
+                    tool_call_args=tool_call_args,
+                    session_id=session_id,
                 )
 
             if not isinstance(response, (str, list, dict)):
@@ -92,7 +127,7 @@ class ToolNode:
             tool = self._toolset.get(tool_name)
             set_hidden_layer_log_context(tool_name, tool_call_args)
             sanitized = self._sanitize_response(
-                response=response, tool_name=tool_name, tool=tool
+                response=response, tool_name=tool_name, tool=tool, session_id=session_id
             )
             tools_responses.append(
                 ToolMessage(
@@ -110,7 +145,10 @@ class ToolNode:
         }
 
     async def _execute_tool(
-        self, tool_call_args: dict[str, Any], tool: BaseTool
+        self,
+        tool_call_args: dict[str, Any],
+        tool: BaseTool,
+        session_id: Optional[str] = None,
     ) -> str:
         try:
             with duo_workflow_metrics.time_tool_call(
@@ -128,6 +166,7 @@ class ToolNode:
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
                 tool_response=tool_call_result,
+                subsession_id=session_id,
             )
 
             return tool_call_result
@@ -138,6 +177,7 @@ class ToolNode:
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
                 tool_response=f"{str(e)} {response}" if response else str(e),
+                subsession_id=session_id,
             )
 
             if isinstance(e, TypeError):
@@ -160,6 +200,7 @@ class ToolNode:
         response: str | dict | list,
         tool_name: str,
         tool: BaseTool | None = None,
+        session_id: Optional[str] = None,
     ) -> str | dict | list:
         try:
             trust_level = getattr(tool, "trust_level", None)
@@ -177,5 +218,6 @@ class ToolNode:
                     tool_call_args={},
                     message=error_message,
                     event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                    subsession_id=session_id,
                 )
             return error_message
