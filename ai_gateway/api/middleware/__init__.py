@@ -1,5 +1,5 @@
+from .access_log import AccessLogMiddleware
 from .authentication import MiddlewareAuthentication
-from .base import AccessLogMiddleware
 from .distributed_trace import DistributedTraceMiddleware
 from .feature_flag import FeatureFlagMiddleware
 from .headers import (
