@@ -227,6 +227,7 @@ def _validate_flow_config_prompts(
                         f"Developer-controlled prompts cannot contain:\n"
                         f"  - Dangerous tags: <system>, <goal>\n"
                         f"  - HTML comments: <!-- ... -->\n"
+                        f"  - Markdown link comments: [//]: # (...) or [comment]: <> (...)\n"
                         f"  - Hidden unicode characters\n"
                         f"Please remove these patterns from your prompt configuration."
                     ) from e

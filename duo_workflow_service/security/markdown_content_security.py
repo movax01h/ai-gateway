@@ -18,18 +18,17 @@ def _apply_recursively(response: Any, func: Callable[[str], str]) -> Any:
     """
     if isinstance(response, dict):
         return {k: _apply_recursively(v, func) for k, v in response.items()}
-    elif isinstance(response, list):
+    if isinstance(response, list):
         return [_apply_recursively(item, func) for item in response]
-    elif isinstance(response, str):
+    if isinstance(response, str):
         return func(response)
-    elif response is None:
-        return None
-    else:
-        # Reject unsupported types for security
-        raise SecurityException(
-            f"Unsupported type for security processing: {type(response).__name__}. "
-            f"All data must be explicitly validated for security."
-        )
+    if response is None or isinstance(response, (int, float, bool)):
+        return response
+    # Reject unsupported types for security
+    raise SecurityException(
+        f"Unsupported type for security processing: {type(response).__name__}. "
+        f"All data must be explicitly validated for security."
+    )
 
 
 def strip_hidden_html_comments(
@@ -66,6 +65,26 @@ def strip_hidden_html_comments(
 
         # Remove backslash-escaped HTML comments
         text = re.sub(r"\\+<!--.*?--\\+>", "", text, flags=re.DOTALL)
+
+        # Defense-in-depth: strip unclosed HTML-like constructs that cause
+        # bleach to consume the rest of the string. Two-pass approach avoids
+        # ReDoS from unbounded negative lookaheads. Skip lazy-match passes if
+        # no closing tags exist (O(n²) → O(n) optimization).
+
+        # HTML comments
+        if "-->" in text:
+            text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+        text = re.sub(r"<!--.*", "", text, flags=re.DOTALL)
+
+        # CDATA sections
+        if "]]>" in text:
+            text = re.sub(r"<!\[CDATA\[.*?\]\]>", "", text, flags=re.DOTALL)
+        text = re.sub(r"<!\[CDATA\[.*", "", text, flags=re.DOTALL)
+
+        # Processing instructions
+        if "?>" in text:
+            text = re.sub(r"<\?.*?\?>", "", text, flags=re.DOTALL)
+        text = re.sub(r"<\?.*", "", text, flags=re.DOTALL)
 
         # Configure Bleach with extended allowed tags
         allowed_tags = list(bleach.ALLOWED_TAGS) + [
@@ -172,14 +191,16 @@ def strip_mermaid_comments(
     return _apply_recursively(response, _strip_mermaid_comments)
 
 
-def strip_markdown_link_comments(
+def strip_hidden_markdown_comments(
     response: Union[str, Dict[str, Any], List[Any]],
 ) -> Union[str, List[Union[str, Dict[str, Any]]]]:
-    """Strip Markdown link reference definition comments to prevent prompt injection.
+    """Strip hidden Markdown comments to prevent prompt injection.
 
-    Removes Markdown comment patterns that use link reference definitions.
-    These are valid Markdown syntax that renders as non-visible content in rendered
-    views but can be exploited to inject additional instructions into LLM conversations.
+    Removes hidden Markdown comment patterns, including link reference definition
+    comments. These are valid Markdown syntax that renders as non-visible content
+    in rendered views but can be exploited to inject additional instructions into
+    LLM conversations. This covers both user-generated plain-string content (e.g.
+    MR descriptions) and JSON-encoded responses.
 
     Supported comment formats:
         - [comment]: <> (injected text)
@@ -205,15 +226,15 @@ def strip_markdown_link_comments(
         response: The response data to process (string, dict, or list)
 
     Returns:
-        Response with Markdown link reference comments removed
+        Response with hidden Markdown comments removed
 
     Examples:
         >>> text = "Task description\\n[comment]: <> (additional instructions)\\nMore text"
-        >>> strip_markdown_link_comments(text)
+        >>> strip_hidden_markdown_comments(text)
         "Task description\\n\\nMore text"
 
         >>> data = {"desc": "Content\\n[//]: # (injected prompt)\\nText"}
-        >>> strip_markdown_link_comments(data)
+        >>> strip_hidden_markdown_comments(data)
         {"desc": "Content\\n\\nText"}
     """
 
@@ -233,9 +254,7 @@ def strip_markdown_link_comments(
             if decoded_text == prev_text:
                 break
 
-        pattern = (
-            r"(^|\\n)\s*\[(?://|comment)\]:\s*(?:<[^>]*>|#|\S*)\s*\((?:[^)\\]|\\.)*\)"
-        )
+        pattern = r"(^|\\n|\n)\s*\[(?://|comment)\]:\s*(?:<[^>]*>|#|\S*)\s*\((?:[^)\\]|\\.)*\)"
         result = re.sub(pattern, r"\1", decoded_text, flags=re.IGNORECASE)
 
         return result
