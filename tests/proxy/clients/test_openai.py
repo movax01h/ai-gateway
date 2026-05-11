@@ -31,18 +31,6 @@ def request_params_fixture():
     }
 
 
-@pytest.fixture(name="completion_request_params")
-def completion_request_params_fixture():
-    """Fixture for completion API request parameters."""
-    return {
-        "model": "gpt-5-codex",
-        "prompt": "Hello, world!",
-        "max_tokens": 100,
-        "temperature": 0.7,
-        "stream": False,
-    }
-
-
 @pytest.fixture(name="request_headers")
 def request_headers_fixture():
     """Fixture for common request headers."""
@@ -58,7 +46,6 @@ def request_headers_fixture():
     "request_url,expected_status",
     [
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/chat/completions", 200),
-        ("http://0.0.0.0:5052/v1/proxy/openai/v1/completions", 200),
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/embeddings", 200),
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/models", 200),
         ("http://0.0.0.0:5052/v1/proxy/openai/v1/responses", 200),
@@ -86,29 +73,6 @@ async def test_valid_proxy_requests(
 
     assert isinstance(response, fastapi.Response)
     assert response.status_code == expected_status
-
-
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_proxy_async_client")
-async def test_valid_completions_request(
-    openai_factory,
-    proxy_client,
-    request_factory,
-    completion_request_params,
-    request_headers,
-):
-    """Test valid completion requests."""
-    request = request_factory(
-        request_url="http://0.0.0.0:5052/v1/proxy/openai/v1/completions",
-        request_body=json.dumps(completion_request_params).encode("utf-8"),
-        request_headers=request_headers,
-    )
-
-    model = await openai_factory.factory(request)
-    response = await proxy_client.proxy(request, model)
-
-    assert isinstance(response, fastapi.Response)
-    assert response.status_code == 200
 
 
 @pytest.mark.asyncio

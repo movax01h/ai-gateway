@@ -13,7 +13,6 @@ from ai_gateway.proxy.clients.base import (
 )
 
 _ALLOWED_UPSTREAM_PATHS = [
-    "/v1/completions",
     "/v1/chat/completions",
     "/v1/embeddings",
     "/v1/models",
@@ -66,20 +65,16 @@ def _load_allowed_upstream_models() -> list[str]:
 
 def _build_headers_to_upstream() -> dict[str, str]:
     try:
-        api_key = os.environ[
+        api_key = os.environ[  # pylint: disable=direct-environment-variable-reference
             "OPENAI_API_KEY"
-        ]  # pylint: disable=direct-environment-variable-reference
+        ]
         if not api_key:
             raise fastapi.HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Server configuration error: API key not set",
             )
 
-        return {
-            "Authorization": (
-                f"Bearer {os.environ['OPENAI_API_KEY']}"  # pylint: disable=direct-environment-variable-reference
-            )
-        }
+        return {"Authorization": f"Bearer {api_key}"}
     except KeyError:
         raise fastapi.HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -91,7 +86,7 @@ class OpenAIProxyModelFactory(BaseProxyModelFactory):
     @override
     async def factory(self, request: fastapi.Request) -> ProxyModel:
         upstream_path = _extract_upstream_path(
-            request.url.__str__(), _UPSTREAM_SERVICE, _ALLOWED_UPSTREAM_PATHS
+            str(request.url), _UPSTREAM_SERVICE, _ALLOWED_UPSTREAM_PATHS
         )
 
         json_body = await extract_json_body(request)
