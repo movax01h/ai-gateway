@@ -34,7 +34,7 @@ app = Starlette(
 client = TestClient(app)
 
 
-@mock.patch("ai_gateway.api.middleware.base.log_exception")
+@mock.patch("ai_gateway.api.middleware.access_log.log_exception")
 def test_x_gitlab_headers_logged_when_set(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         client.post(
@@ -62,7 +62,7 @@ def test_x_gitlab_headers_logged_when_set(mock_log_exception):
     assert cap_logs[0]["gitlab_root_namespace_id"] == "123"
 
 
-@mock.patch("ai_gateway.api.middleware.base.log_exception")
+@mock.patch("ai_gateway.api.middleware.access_log.log_exception")
 def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         client.post("/", headers={}, data={"foo": "bar"})
@@ -78,7 +78,7 @@ def test_x_gitlab_headers_not_logged_when_not_set(mock_log_exception):
     assert cap_logs[0]["gitlab_root_namespace_id"] is None
 
 
-@mock.patch("ai_gateway.api.middleware.base.log_exception")
+@mock.patch("ai_gateway.api.middleware.access_log.log_exception")
 def test_exception_capture(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(RuntimeError):
         response = client.post("/", headers={}, data={"foo": "bar"})
@@ -91,7 +91,7 @@ def test_exception_capture(mock_log_exception):
     assert cap_logs[0]["exception_backtrace"].startswith("Traceback")
 
 
-@mock.patch("ai_gateway.api.middleware.base.log_exception")
+@mock.patch("ai_gateway.api.middleware.access_log.log_exception")
 def test_exception_group_capture(mock_log_exception):
     with capture_logs() as cap_logs, pytest.raises(ValueError):
         response = client.post("/exception_group", headers={}, data={"foo": "bar"})
