@@ -463,15 +463,14 @@ class TestFlowConfigPromptConfiguration:
         function_names = [func.__name__ for func in overrides]
         assert "encode_dangerous_tags" in function_names
         assert "strip_hidden_unicode_tags" in function_names
-        assert "strip_markdown_link_comments" in function_names
+        assert "strip_hidden_markdown_comments" in function_names
         assert "strip_hidden_html_comments" in function_names
 
-    def test_flow_config_markdown_comments_not_stripped_in_plain_strings(self):
-        """Test that markdown link comments in plain strings (flow configs) are not stripped.
+    def test_flow_config_markdown_comments_stripped_in_plain_strings(self):
+        """Test that markdown link comments in plain strings (flow configs) are stripped.
 
-        strip_markdown_link_comments is designed for JSON-encoded tool responses (with \\n literals), not plain strings
-        with actual newlines. This is acceptable because flow configs are developer-controlled and reviewed, not user-
-        generated.
+        strip_hidden_markdown_comments now catches both literal \\n and real newlines, so markdown link comments in
+        plain strings are also detected and stripped.
         """
         # Plain string with actual newlines (as in flow configs)
         prompt_with_markdown = """
@@ -480,16 +479,15 @@ class TestFlowConfigPromptConfiguration:
             Follow these rules.
         """
 
-        # Should pass validation - markdown comments in plain strings are allowed
-        result = PromptSecurity.apply_security_to_tool_response(
-            response=prompt_with_markdown,
-            tool_name="flow_config_prompts",
-            validate_only=True,
-        )
+        # Should raise validation error - markdown comments are now detected
+        with pytest.raises(SecurityException) as exc_info:
+            PromptSecurity.apply_security_to_tool_response(
+                response=prompt_with_markdown,
+                tool_name="flow_config_prompts",
+                validate_only=True,
+            )
 
-        # Content should be unchanged
-        assert result == prompt_with_markdown
-        assert "[comment]:" in result
+        assert "strip_hidden_markdown_comments" in str(exc_info.value)
 
     def test_flow_config_strips_html_comments(self):
         """Test that HTML comment injections are stripped in validate mode."""
@@ -511,34 +509,28 @@ class TestFlowConfigPromptConfiguration:
 
         assert "strip_hidden_html_comments" in str(exc_info.value)
 
-    def test_flow_config_sanitizes_html_comments_only(self):
-        """Test that HTML comments are sanitized but markdown link comments are not.
-
-        For plain strings (flow configs), only HTML comments are stripped. Markdown link comments require JSON-encoded
-        format to be detected.
-        """
+    def test_flow_config_sanitizes_both_html_and_markdown_comments(self):
+        """Test that both HTML comments and markdown link comments are sanitized."""
         prompt_with_comments = """
             You are an assistant.
-            [comment]: <> (markdown comment - not stripped in plain strings)
+            [comment]: <> (markdown comment - should be stripped)
             <!-- HTML comment - should be stripped -->
             Follow these rules.
         """
 
-        # In sanitize mode, should strip HTML comments but not markdown link comments
+        # In sanitize mode, should strip both HTML and markdown link comments
         result = PromptSecurity.apply_security_to_tool_response(
             response=prompt_with_comments,
             tool_name="flow_config_prompts",
             validate_only=False,
         )
 
-        # Verify expected behavior: HTML stripped, markdown preserved, content intact
-        assert "<!--" not in result  # HTML comments should be stripped
+        assert "<!--" not in result
         assert "HTML comment" not in result
-        assert (
-            "[comment]:" in result
-        )  # Markdown link comments NOT stripped in plain strings
-        assert "You are an assistant" in result  # Legitimate content should remain
-        assert "Follow these rules" in result
+        assert "[comment]:" not in result
+        assert "markdown comment" not in result
+        assert "You are an assistant." in result
+        assert "Follow these rules." in result
 
 
 class TestToolResponseScenarios:

@@ -101,10 +101,4 @@ def strip_emojis(
 
         return text
 
-    processed = _apply_recursively(response, _strip_emojis_from_string)
-
-    # Wrap dict in list for ToolMessage compatibility
-    if isinstance(processed, dict):
-        return [processed]
-
-    return processed
+    return _apply_recursively(response, _strip_emojis_from_string)
