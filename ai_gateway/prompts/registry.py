@@ -285,7 +285,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             )
             # For these legacy prompt version tied to a model, we always used the `base` prompt, so we override the
             # `family` in case the current model from models.yml specifies a different value for this property
-            model_metadata.family = [self.key_prompt_type_base]
+            model_metadata.llm_definition.family = [self.key_prompt_type_base]
             return model_metadata
 
         return create_model_metadata(
@@ -345,7 +345,7 @@ class LocalPromptRegistry(BasePromptRegistry):
                     prompt_id, prompt_version, is_graph_node  # type: ignore[arg-type]
                 )
 
-            family = model_metadata.family if model_metadata else []
+            family = model_metadata.llm_definition.family if model_metadata else []
             prompt_path = self._resolve_id(prompt_id, family)
 
             log.info("Resolved prompt id", prompt_id=prompt_id, prompt_path=prompt_path)

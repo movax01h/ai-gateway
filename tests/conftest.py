@@ -394,7 +394,6 @@ def model_metadata_fixture(llm_definition: LLMDefinition):
     return ModelMetadata(
         provider="gitlab",
         name="mistral",
-        family=["mistral"],
         llm_definition=llm_definition,
         friendly_name="Mistral",
     )

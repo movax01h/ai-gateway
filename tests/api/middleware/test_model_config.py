@@ -24,9 +24,7 @@ def middleware_test_client_fixture(model_metadata_context):
         await request.body()
         model_metadata = model_metadata_context.get()
         return (
-            model_metadata.model_dump(
-                exclude={"llm_definition", "family", "friendly_name"}
-            )
+            model_metadata.model_dump(exclude={"llm_definition", "friendly_name"})
             if model_metadata
             else None
         )

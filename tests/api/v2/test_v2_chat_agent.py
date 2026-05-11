@@ -328,7 +328,7 @@ class TestReActAgentStream:
         json_params = agent_request.model_dump(mode="json")
         if model_metadata:
             json_params["model_metadata"] = model_metadata.model_dump(
-                exclude={"llm_definition", "family", "friendly_name"},
+                exclude={"llm_definition", "friendly_name"},
                 mode="json",
             )
 
@@ -460,7 +460,7 @@ class TestReActAgentStream:
                 json={
                     "messages": [m.model_dump(mode="json") for m in messages],
                     "model_metadata": model_metadata.model_dump(
-                        exclude={"llm_definition", "family", "friendly_name"},
+                        exclude={"llm_definition", "friendly_name"},
                         mode="json",
                     ),
                     "unavailable_resources": unavailable_resources,
@@ -783,7 +783,7 @@ class TestReActAgentStream:
 
         if model_metadata:
             json_params["model_metadata"] = model_metadata.model_dump(
-                exclude={"llm_definition", "family", "friendly_name"},
+                exclude={"llm_definition", "friendly_name"},
                 mode="json",
             )
 
@@ -997,7 +997,7 @@ class TestReActAgentStream:
 
         if model_metadata:
             json_params["model_metadata"] = model_metadata.model_dump(
-                exclude={"llm_definition", "family", "friendly_name"},
+                exclude={"llm_definition", "friendly_name"},
                 mode="json",
             )
 
