@@ -57,7 +57,29 @@ class AccessLogMiddleware:
         structlog.contextvars.clear_contextvars()
         # These context vars will be added to all log entries emitted during the request
         request_id = correlation_id.get()
-        structlog.contextvars.bind_contextvars(correlation_id=request_id)
+        structlog.contextvars.bind_contextvars(
+            correlation_id=request_id,
+            gitlab_language_server_version=request.headers.get(
+                X_GITLAB_LANGUAGE_SERVER_VERSION
+            ),
+            gitlab_instance_id=request.headers.get(X_GITLAB_INSTANCE_ID_HEADER),
+            gitlab_global_user_id=request.headers.get(X_GITLAB_GLOBAL_USER_ID_HEADER),
+            gitlab_host_name=request.headers.get(X_GITLAB_HOST_NAME_HEADER),
+            gitlab_version=request.headers.get(X_GITLAB_VERSION_HEADER),
+            gitlab_saas_duo_pro_namespace_ids=request.headers.get(
+                X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER
+            ),
+            gitlab_root_namespace_id=request.headers.get(X_GITLAB_ROOT_NAMESPACE_ID),
+            gitlab_feature_enabled_by_namespace_ids=request.headers.get(
+                X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER
+            ),
+            gitlab_feature_enablement_type=request.headers.get(
+                X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
+            ),
+            gitlab_realm=request.headers.get(X_GITLAB_REALM_HEADER),
+            is_gitlab_team_member=request.headers.get(X_GITLAB_TEAM_MEMBER_HEADER),
+            gitlab_organization_id=request.headers.get(X_GITLAB_ORGANIZATION_ID),
+        )
 
         start_time_total = time.perf_counter()
         start_time_cpu = time.process_time()
@@ -134,32 +156,6 @@ class AccessLogMiddleware:
                 "cpu_s": cpu_time,
                 "content_type": content_type,
                 "user_agent": request.headers.get("User-Agent"),
-                "gitlab_language_server_version": request.headers.get(
-                    X_GITLAB_LANGUAGE_SERVER_VERSION
-                ),
-                "gitlab_instance_id": request.headers.get(X_GITLAB_INSTANCE_ID_HEADER),
-                "gitlab_global_user_id": request.headers.get(
-                    X_GITLAB_GLOBAL_USER_ID_HEADER
-                ),
-                "gitlab_host_name": request.headers.get(X_GITLAB_HOST_NAME_HEADER),
-                "gitlab_version": request.headers.get(X_GITLAB_VERSION_HEADER),
-                "gitlab_saas_duo_pro_namespace_ids": request.headers.get(
-                    X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER
-                ),
-                "gitlab_root_namespace_id": request.headers.get(
-                    X_GITLAB_ROOT_NAMESPACE_ID
-                ),
-                "gitlab_feature_enabled_by_namespace_ids": request.headers.get(
-                    X_GITLAB_FEATURE_ENABLED_BY_NAMESPACE_IDS_HEADER
-                ),
-                "gitlab_feature_enablement_type": request.headers.get(
-                    X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
-                ),
-                "gitlab_organization_id": request.headers.get(X_GITLAB_ORGANIZATION_ID),
-                "gitlab_realm": request.headers.get(X_GITLAB_REALM_HEADER),
-                "is_gitlab_team_member": request.headers.get(
-                    X_GITLAB_TEAM_MEMBER_HEADER
-                ),
             }
 
             fields.update(starlette_context.data)

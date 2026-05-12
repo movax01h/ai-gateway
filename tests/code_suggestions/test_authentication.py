@@ -1,6 +1,7 @@
 from typing import Annotated
 
 import pytest
+import structlog
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -549,7 +550,7 @@ invalid_authentication_token_type_error = {
 async def test_failed_authorization_logging(
     mock_client, headers, data, expected_status_code, expected_response, log_keys
 ):
-    with capture_logs() as cap_logs:
+    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as cap_logs:
         response = mock_client.post("/", headers=headers, data=data)
 
         assert response.status_code == expected_status_code
