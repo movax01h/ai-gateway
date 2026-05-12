@@ -235,6 +235,7 @@ class ChatWorkflowState(TypedDict):
     namespace: Namespace | None
     approval: ApprovalStateRejection | None
     preapproved_tools: list[str] | None
+    denied_tools: list[str] | None
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]
