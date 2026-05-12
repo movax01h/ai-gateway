@@ -28,6 +28,7 @@ from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
+from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -2282,6 +2283,76 @@ class TestCodeGenerations:
             assert set(body["metadata"]["enabled_feature_flags"]) == set(
                 enabled_feature_flags
             )
+
+    def test_billing_event(
+        self,
+        mock_client,
+        mock_track_billing_event,
+        mock_anthropic_chat,  # pylint: disable=unused-argument
+    ):
+        """Verify a generations request results in a billing event reaching the underlying BillingEventsClient with the
+        expected payload."""
+        synthetic_llm_ops = [
+            {
+                "model_id": "claude-sonnet-4-20250514",
+                "model_engine": "anthropic",
+                "model_provider": "anthropic",
+                "token_count": 10,
+                "prompt_tokens": 6,
+                "completion_tokens": 4,
+            }
+        ]
+        with patch(
+            "lib.billing_events.service.get_llm_operations",
+            return_value=synthetic_llm_ops,
+        ):
+            response = mock_client.post(
+                "/code/generations",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 1,
+                    "project_path": "gitlab-org/gitlab",
+                    "project_id": 278964,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "foo",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "anthropic",
+                    "model_name": "claude-sonnet-4-20250514",
+                },
+            )
+
+        assert response.status_code == 200
+
+        mock_track_billing_event.assert_called_once_with(
+            ANY,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata={
+                "feature_qualified_name": "code_suggestions",
+                "feature_ai_catalog_item": False,
+                "execution_environment": ExecutionEnvironment.CODE_GENERATIONS.value,
+                "llm_operations": [
+                    {
+                        **synthetic_llm_ops[0],
+                        "agent_name": None,
+                        "cache_read_tokens": 0,
+                        "cache_write_tokens": 0,
+                        "operation_type": "standard",
+                    }
+                ],
+                "tool_names": [],
+                "orbit_called": False,
+            },
+        )
 
 
 class TestUnauthorizedScopes:

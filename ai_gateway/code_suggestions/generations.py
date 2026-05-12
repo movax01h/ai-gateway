@@ -28,12 +28,15 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
-from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.billing_events import (
+    BillingEvent,
+    BillingEventService,
+    ExecutionEnvironment,
+)
+from lib.context.llm_operations import init_llm_operations
+from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 
 __all__ = ["CodeGenerations"]
-
-from lib.context.llm_operations import get_llm_operations, init_llm_operations
-from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 
 log = structlog.stdlib.get_logger("codesuggestions")
 
@@ -52,7 +55,7 @@ class CodeGenerations:
         self,
         model: TextGenModelBase,
         tokenization_strategy: TokenStrategyBase,
-        billing_event_client: Optional[BillingEventsClient] = None,
+        billing_event_service: BillingEventService,
     ):
         self.model = model
 
@@ -61,7 +64,7 @@ class CodeGenerations:
             model.input_token_limit, tokenization_strategy
         )
         self.tokenization_strategy = tokenization_strategy
-        self.billing_event_client = billing_event_client
+        self.billing_event_service = billing_event_service
 
     def _get_prompt(
         self, prefix: str, file_name: str, lang_id: Optional[LanguageId] = None
@@ -89,32 +92,26 @@ class CodeGenerations:
 
     def _track_billing_event(self, user: Optional[CloudConnectorUser]) -> None:
         """Track billing event for code generations."""
-        if self.billing_event_client and user:
+        if user:
             try:
                 gl_event_context = GLReportingEventContext.from_static_name(
                     FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
                     is_ai_catalog_item=False,
                 )
 
-                billing_metadata = {
-                    "execution_environment": "code_generations",
-                    "llm_operations": get_llm_operations(),
-                    "feature_qualified_name": gl_event_context.feature_qualified_name,
-                    "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
-                }
-
-                self.billing_event_client.track_billing_event(
+                self.billing_event_service.track_billing(
                     user=user,
+                    gl_context=gl_event_context,
                     event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+                    execution_env=ExecutionEnvironment.CODE_GENERATIONS,
                     category=self.__class__.__name__,
-                    unit_of_measure="request",
-                    quantity=1,
-                    metadata=billing_metadata,
                 )
             except Exception as e:
                 log.error(
                     "Failed to track billing event for code generations",
                     error=str(e),
+                    billing_event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS.value,
+                    execution_env=ExecutionEnvironment.CODE_GENERATIONS.value,
                 )
 
     async def execute(

@@ -15,7 +15,7 @@ from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import ChatModelBase
 from ai_gateway.models.base_text import TextGenModelBase
 from ai_gateway.tokenizer import init_tokenizer
-from lib.billing_events.client import BillingEventsClient
+from lib.billing_events.service import BillingEventService
 
 __all__ = [
     "ContainerCodeSuggestions",
@@ -31,7 +31,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
     litellm_chat = providers.Dependency(instance_of=ChatModelBase)  # type: ignore[type-abstract]
     agent_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
 
-    billing_event_client = providers.Dependency(instance_of=BillingEventsClient)
+    billing_event_service = providers.Dependency(instance_of=BillingEventService)
 
     vertex = providers.Factory(
         CodeGenerations,
@@ -41,7 +41,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     anthropic_chat_factory = providers.Factory(
@@ -50,7 +50,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     litellm_factory = providers.Factory(
@@ -59,7 +59,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     amazon_q_factory = providers.Factory(
@@ -68,7 +68,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     agent_factory = providers.Factory(
@@ -77,7 +77,7 @@ class ContainerCodeGenerations(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
 
@@ -88,7 +88,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
     litellm = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     agent_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
     amazon_q_model = providers.Dependency(instance_of=TextGenModelBase)  # type: ignore[type-abstract]
-    billing_event_client = providers.Dependency(instance_of=BillingEventsClient)
+    billing_event_service = providers.Dependency(instance_of=BillingEventService)
 
     config = providers.Configuration(strict=True)
 
@@ -98,7 +98,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     litellm_factory = providers.Factory(
@@ -107,7 +107,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     fireworks_factory = providers.Factory(
@@ -128,7 +128,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
             ],
             score_threshold=config.fireworks_score_threshold,
         ).provider,
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     litellm_vertex_codestral_factory = providers.Factory(
@@ -146,7 +146,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
             extras=[PostProcessorOperation.STRIP_ASTERISKS],
             exclude=config.excl_post_process,
         ).provider,
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     agent_factory = providers.Factory(
@@ -155,7 +155,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
     amazon_q_factory = providers.Factory(
@@ -164,7 +164,7 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         tokenization_strategy=providers.Factory(
             TokenizerTokenStrategy, tokenizer=tokenizer
         ),
-        billing_event_client=billing_event_client,
+        billing_event_service=billing_event_service,
     )
 
 
@@ -187,7 +187,7 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
         litellm_chat=models.litellm_chat,
         agent_model=models.agent_model,
         amazon_q_model=models.amazon_q_model,
-        billing_event_client=billing_event.client,
+        billing_event_service=billing_event.service,
     )
 
     completions = providers.Container(
@@ -199,5 +199,5 @@ class ContainerCodeSuggestions(containers.DeclarativeContainer):
         agent_model=models.agent_model,
         amazon_q_model=models.amazon_q_model,
         config=config,
-        billing_event_client=billing_event.client,
+        billing_event_service=billing_event.service,
     )

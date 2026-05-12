@@ -301,6 +301,7 @@ async def generations(
         editor_lang=payload.current_file.language_identifier,
         model_provider=payload.model_provider,
         stream=payload.stream,
+        user=current_user.cloud_connector_user,
     )
 
     if isinstance(suggestion, AsyncIterator):
