@@ -1,9 +1,11 @@
 from langchain_core.messages import BaseMessage
 from structlog import get_logger
 
+from ai_gateway.app import get_config
 from duo_workflow_service.conversation.compaction.compactor import ConversationCompactor
 from duo_workflow_service.conversation.trimmer import apply_token_based_trim
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
+from lib.context import is_gitlab_team_member
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum
@@ -18,16 +20,23 @@ async def maybe_compact_history(
 ) -> list[BaseMessage]:
     """Compact or trim conversation history.
 
-    Uses compaction (LLM summarization) when enabled, otherwise falls back to legacy token-based trimming.
+    Uses compaction (LLM summarization) when enabled, otherwise falls back to legacy token-based trimming. Compaction is
+    disabled in self-hosted mode (AIGW_CUSTOM_MODELS__ENABLED=true) to avoid billing self-hosted model customers until
+    billing is validated for them.
     """
+    config = get_config()
+    is_self_hosted = config.custom_models.enabled
+
     # Compact history if enabled and ff is true otherwise fallback
     is_ff_on = is_feature_enabled(FeatureFlag.AI_CONTEXT_COMPACTION)
 
-    if compactor and is_ff_on:
+    if compactor and is_ff_on and not is_self_hosted:
         log.info(
             "Start trying context compaction",
             compactor_enable=compactor is not None,
             ff_enable=is_ff_on,
+            is_self_hosted=is_self_hosted,
+            is_gitlab_team_member=is_gitlab_team_member.get(),
             agent_name=agent_name,
         )
         result = await compactor.compact(messages=history)
@@ -37,6 +46,8 @@ async def maybe_compact_history(
         "Fallback to legacy trim messages",
         compactor_enable=compactor is not None,
         ff_enable=is_ff_on,
+        is_self_hosted=is_self_hosted,
+        is_gitlab_team_member=is_gitlab_team_member.get(),
         agent_name=agent_name,
     )
     trim_result = apply_token_based_trim(
