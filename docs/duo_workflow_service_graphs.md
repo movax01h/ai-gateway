@@ -439,6 +439,7 @@ graph TD;
     fix_pipeline_next_context --> fix_pipeline_next_decide_approach;
     fix_pipeline_next_decide_approach -.->|add_comment| fix_pipeline_add_comment;
     fix_pipeline_next_decide_approach -.->|create_plan| fix_pipeline_next_checkout_existing_branch;
+    fix_pipeline_next_decide_approach -.->|no_action| __end__;
     fix_pipeline_next_decide_approach -.->|default_route| fix_pipeline_add_comment;
     fix_pipeline_next_checkout_existing_branch --> fix_pipeline_next_execution;
     fix_pipeline_add_comment --> __end__;
