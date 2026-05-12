@@ -4259,14 +4259,14 @@ reference = "litellm"
 
 [[package]]
 name = "litellm"
-version = "1.81.11"
+version = "1.83.0"
 description = "Library to easily interface with LLM API providers"
 optional = false
 python-versions = ">=3.9,<4.0"
 groups = ["main", "eval"]
 files = [
-    {file = "litellm-1.81.11-py3-none-any.whl", hash = "sha256:06a66c24742e082ddd2813c87f40f5c12fe7baa73ce1f9457eaf453dc44a0f65"},
-    {file = "litellm-1.81.11.tar.gz", hash = "sha256:fc55aceafda325bd5f704ada61c8be5bd322e6dfa5f8bdcab3290b8732c5857e"},
+    {file = "litellm-1.83.0-py3-none-any.whl", hash = "sha256:88c536d339248f3987571493015784671ba3f193a328e1ea6780dbebaa2094a8"},
+    {file = "litellm-1.83.0.tar.gz", hash = "sha256:860bebc76c4bb27b4cf90b4a77acd66dba25aced37e3db98750de8a1766bfb7a"},
 ]
 
 [package.dependencies]
@@ -4275,7 +4275,7 @@ apscheduler = {version = ">=3.10.4,<4.0.0", optional = true, markers = "extra ==
 azure-identity = {version = ">=1.15.0,<2.0.0", optional = true, markers = "python_version >= \"3.9\" and (extra == \"proxy\" or extra == \"extra-proxy\")"}
 azure-storage-blob = {version = ">=12.25.1,<13.0.0", optional = true, markers = "extra == \"proxy\""}
 backoff = {version = "*", optional = true, markers = "extra == \"proxy\""}
-boto3 = {version = "1.40.76", optional = true, markers = "extra == \"proxy\""}
+boto3 = {version = ">=1.40.76,<2.0.0", optional = true, markers = "extra == \"proxy\""}
 click = "*"
 cryptography = {version = "*", optional = true, markers = "extra == \"proxy\""}
 fastapi = {version = ">=0.120.1", optional = true, markers = "extra == \"proxy\""}
@@ -4286,34 +4286,35 @@ httpx = ">=0.23.0"
 importlib-metadata = ">=6.8.0"
 jinja2 = ">=3.1.2,<4.0.0"
 jsonschema = ">=4.23.0,<5.0.0"
-litellm-enterprise = {version = "0.1.31", optional = true, markers = "extra == \"proxy\""}
-litellm-proxy-extras = {version = "0.4.35", optional = true, markers = "extra == \"proxy\""}
+litellm-enterprise = {version = "0.1.35", optional = true, markers = "extra == \"proxy\""}
+litellm-proxy-extras = {version = ">=0.4.62,<0.5.0", optional = true, markers = "extra == \"proxy\""}
 mcp = {version = ">=1.25.0,<2.0.0", optional = true, markers = "python_version >= \"3.10\" and extra == \"proxy\""}
 openai = ">=2.8.0"
 orjson = {version = ">=3.9.7,<4.0.0", optional = true, markers = "extra == \"proxy\""}
 polars = {version = ">=1.31.0,<2.0.0", optional = true, markers = "python_version >= \"3.10\" and extra == \"proxy\""}
 pydantic = ">=2.5.0,<3.0.0"
-PyJWT = {version = ">=2.10.1,<3.0.0", optional = true, markers = "python_version >= \"3.9\" and extra == \"proxy\""}
+PyJWT = {version = ">=2.12.0,<3.0.0", optional = true, markers = "python_version >= \"3.9\" and extra == \"proxy\""}
 pynacl = {version = ">=1.5.0,<2.0.0", optional = true, markers = "extra == \"proxy\""}
+pyroscope-io = {version = ">=0.8,<0.9", optional = true, markers = "sys_platform != \"win32\" and extra == \"proxy\""}
 python-dotenv = ">=0.2.0"
-python-multipart = {version = ">=0.0.22,<0.0.23", optional = true, markers = "python_version >= \"3.10\" and extra == \"proxy\""}
+python-multipart = {version = ">=0.0.20", optional = true, markers = "extra == \"proxy\""}
 pyyaml = {version = ">=6.0.1,<7.0.0", optional = true, markers = "extra == \"proxy\""}
-rich = {version = "13.7.1", optional = true, markers = "extra == \"proxy\""}
+rich = {version = ">=13.7.1,<14.0.0", optional = true, markers = "extra == \"proxy\""}
 rq = {version = "*", optional = true, markers = "extra == \"proxy\""}
 soundfile = {version = ">=0.12.1,<0.13.0", optional = true, markers = "extra == \"proxy\""}
 tiktoken = ">=0.7.0"
 tokenizers = "*"
-uvicorn = {version = ">=0.31.1,<0.32.0", optional = true, markers = "extra == \"proxy\""}
+uvicorn = {version = ">=0.32.1,<1.0.0", optional = true, markers = "extra == \"proxy\""}
 uvloop = {version = ">=0.21.0,<0.22.0", optional = true, markers = "sys_platform != \"win32\" and extra == \"proxy\""}
 websockets = {version = ">=15.0.1,<16.0.0", optional = true, markers = "extra == \"proxy\""}
 
 [package.extras]
 caching = ["diskcache (>=5.6.1,<6.0.0)"]
-extra-proxy = ["a2a-sdk (>=0.3.22,<0.4.0) ; python_version >= \"3.10\"", "azure-identity (>=1.15.0,<2.0.0) ; python_version >= \"3.9\"", "azure-keyvault-secrets (>=4.8.0,<5.0.0)", "google-cloud-iam (>=2.19.1,<3.0.0)", "google-cloud-kms (>=2.21.3,<3.0.0)", "prisma (==0.11.0)", "redisvl (>=0.4.1,<0.5.0) ; python_version >= \"3.9\" and python_version < \"3.14\"", "resend (>=0.8.0)"]
+extra-proxy = ["a2a-sdk (>=0.3.22,<0.4.0) ; python_version >= \"3.10\"", "azure-identity (>=1.15.0,<2.0.0) ; python_version >= \"3.9\"", "azure-keyvault-secrets (>=4.8.0,<5.0.0)", "google-cloud-iam (>=2.19.1,<3.0.0)", "google-cloud-kms (>=2.21.3,<3.0.0)", "prisma (>=0.11.0,<0.12.0)", "redisvl (>=0.4.1,<0.5.0) ; python_version >= \"3.9\" and python_version < \"3.14\"", "resend (>=0.8.0)"]
 google = ["google-cloud-aiplatform (>=1.38.0)"]
 grpc = ["grpcio (>=1.62.3,<1.68.dev0 || >1.71.0,!=1.71.1,!=1.72.0,!=1.72.1,!=1.73.0) ; python_version < \"3.14\"", "grpcio (>=1.75.0) ; python_version >= \"3.14\""]
 mlflow = ["mlflow (>3.1.4) ; python_version >= \"3.10\""]
-proxy = ["PyJWT (>=2.10.1,<3.0.0) ; python_version >= \"3.9\"", "apscheduler (>=3.10.4,<4.0.0)", "azure-identity (>=1.15.0,<2.0.0) ; python_version >= \"3.9\"", "azure-storage-blob (>=12.25.1,<13.0.0)", "backoff", "boto3 (==1.40.76)", "cryptography", "fastapi (>=0.120.1)", "fastapi-sso (>=0.16.0,<0.17.0)", "gunicorn (>=23.0.0,<24.0.0)", "litellm-enterprise (==0.1.31)", "litellm-proxy-extras (==0.4.35)", "mcp (>=1.25.0,<2.0.0) ; python_version >= \"3.10\"", "orjson (>=3.9.7,<4.0.0)", "polars (>=1.31.0,<2.0.0) ; python_version >= \"3.10\"", "pynacl (>=1.5.0,<2.0.0)", "python-multipart (>=0.0.22,<0.0.23) ; python_version >= \"3.10\"", "pyyaml (>=6.0.1,<7.0.0)", "rich (==13.7.1)", "rq", "soundfile (>=0.12.1,<0.13.0)", "uvicorn (>=0.31.1,<0.32.0)", "uvloop (>=0.21.0,<0.22.0) ; sys_platform != \"win32\"", "websockets (>=15.0.1,<16.0.0)"]
+proxy = ["PyJWT (>=2.12.0,<3.0.0) ; python_version >= \"3.9\"", "apscheduler (>=3.10.4,<4.0.0)", "azure-identity (>=1.15.0,<2.0.0) ; python_version >= \"3.9\"", "azure-storage-blob (>=12.25.1,<13.0.0)", "backoff", "boto3 (>=1.40.76,<2.0.0)", "cryptography", "fastapi (>=0.120.1)", "fastapi-sso (>=0.16.0,<0.17.0)", "gunicorn (>=23.0.0,<24.0.0)", "litellm-enterprise (==0.1.35)", "litellm-proxy-extras (>=0.4.62,<0.5.0)", "mcp (>=1.25.0,<2.0.0) ; python_version >= \"3.10\"", "orjson (>=3.9.7,<4.0.0)", "polars (>=1.31.0,<2.0.0) ; python_version >= \"3.10\"", "pynacl (>=1.5.0,<2.0.0)", "pyroscope-io (>=0.8,<0.9) ; sys_platform != \"win32\"", "python-multipart (>=0.0.20)", "pyyaml (>=6.0.1,<7.0.0)", "rich (>=13.7.1,<14.0.0)", "rq", "soundfile (>=0.12.1,<0.13.0)", "uvicorn (>=0.32.1,<1.0.0)", "uvloop (>=0.21.0,<0.22.0) ; sys_platform != \"win32\"", "websockets (>=15.0.1,<16.0.0)"]
 semantic-router = ["semantic-router (>=0.1.12) ; python_version >= \"3.9\" and python_version < \"3.14\""]
 utils = ["numpydoc"]
 
@@ -4324,14 +4325,14 @@ reference = "gitlab_cloud_connector"
 
 [[package]]
 name = "litellm-enterprise"
-version = "0.1.31"
+version = "0.1.35"
 description = "Package for LiteLLM Enterprise features"
 optional = false
 python-versions = ">=3.8, !=2.7.*, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*, !=3.7.*"
 groups = ["main"]
 files = [
-    {file = "litellm_enterprise-0.1.31-py3-none-any.whl", hash = "sha256:7b0f750343e6f28c88e1557c656a6bea50fa6c8990a13e86ea20497cf666c79b"},
-    {file = "litellm_enterprise-0.1.31.tar.gz", hash = "sha256:684d09daa3ededf1394df4ec1439aab606b884b68af2c92c478af0784a30e588"},
+    {file = "litellm_enterprise-0.1.35-py3-none-any.whl", hash = "sha256:8d2d9c925de8ee35e308c0f4975483b60f5e22beb50506e261e555e466f019c5"},
+    {file = "litellm_enterprise-0.1.35.tar.gz", hash = "sha256:b752d07e538424743fcc08ba0d3d9d83d1f04a45c115811ac7828d789b6d87cc"},
 ]
 
 [package.source]
@@ -4341,20 +4342,20 @@ reference = "litellm"
 
 [[package]]
 name = "litellm-proxy-extras"
-version = "0.4.35"
+version = "0.4.65"
 description = "Additional files for the LiteLLM Proxy. Reduces the size of the main litellm package."
 optional = false
 python-versions = ">=3.8, !=2.7.*, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*, !=3.7.*"
 groups = ["main"]
 files = [
-    {file = "litellm_proxy_extras-0.4.35-py3-none-any.whl", hash = "sha256:7c430bb43c04d520ce45fa492e6707e762cfbe10e09f8394cd06feb0689cd1b7"},
-    {file = "litellm_proxy_extras-0.4.35.tar.gz", hash = "sha256:c62f2add33753cffebef73aa5ce993a0765def0ff47bb47fcb498b5573a1aa3f"},
+    {file = "litellm_proxy_extras-0.4.65-py3-none-any.whl", hash = "sha256:d0e16ce13cfdcf06e75c70a3fa91110401ec9a9bc5c6c2657f3c400a7631c34c"},
+    {file = "litellm_proxy_extras-0.4.65.tar.gz", hash = "sha256:2dd4b75b17008a36e05ef8e234fe4ab1cf1e1e2231baeb8b8f8d2f48162e2b08"},
 ]
 
 [package.source]
 type = "legacy"
-url = "https://gitlab.com/api/v4/projects/58733651/packages/pypi/simple"
-reference = "gitlab_cloud_connector"
+url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
+reference = "litellm"
 
 [[package]]
 name = "lxml"
@@ -6404,14 +6405,14 @@ reference = "litellm"
 
 [[package]]
 name = "pyjwt"
-version = "2.11.0"
+version = "2.12.1"
 description = "JSON Web Token implementation in Python"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "pyjwt-2.11.0-py3-none-any.whl", hash = "sha256:94a6bde30eb5c8e04fee991062b534071fd1439ef58d2adc9ccb823e7bcd0469"},
-    {file = "pyjwt-2.11.0.tar.gz", hash = "sha256:35f95c1f0fbe5d5ba6e43f00271c275f7a1a4db1dab27bf708073b75318ea623"},
+    {file = "pyjwt-2.12.1-py3-none-any.whl", hash = "sha256:28ca37c070cad8ba8cd9790cd940535d40274d22f80ab87f3ac6a713e6e8454c"},
+    {file = "pyjwt-2.12.1.tar.gz", hash = "sha256:c74a7a2adf861c04d002db713dd85f84beb242228e671280bf709d765b03672b"},
 ]
 
 [package.dependencies]
@@ -6529,23 +6530,20 @@ reference = "litellm"
 
 [[package]]
 name = "pyroscope-io"
-version = "1.0.6"
+version = "0.8.16"
 description = "Pyroscope Python integration"
 optional = false
-python-versions = ">=3.10"
+python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "pyroscope_io-1.0.6-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:9cba2e3be45412d15e0e5725675c28ddbc270cccb305525cdd2acd7e8f9c4f8c"},
-    {file = "pyroscope_io-1.0.6-cp310-abi3-macosx_11_0_x86_64.whl", hash = "sha256:ea62d35269b82e333e94a7bb02df0765185750743a6a6b0c216417bd7db84c72"},
-    {file = "pyroscope_io-1.0.6-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:2a577eff1302c8ac7cd73505e385707eb3ed97d7c0e840c834b1b86ce94c320c"},
-    {file = "pyroscope_io-1.0.6-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b30e1796d2ab517015aa242bce1ea3433439f6723d6012bb9997727e7bb4c822"},
-    {file = "pyroscope_io-1.0.6-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:57de53da60797da15eb7477475b2b81f2e9f200ea45efa135f6bcaff780b997e"},
-    {file = "pyroscope_io-1.0.6-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:c14a07195d8a171f20d11a34af9ba8c19985a6c3b0f1d49b6f976d8a04fd4f8c"},
-    {file = "pyroscope_io-1.0.6.tar.gz", hash = "sha256:bf6b37cb0639fc07c325d000fc6ff649bb19a8a61ef9633dfb5945054ec54084"},
+    {file = "pyroscope_io-0.8.16-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:e07edcfd59f5bdce42948b92c9b118c824edbd551730305f095a6b9af401a9e8"},
+    {file = "pyroscope_io-0.8.16-py2.py3-none-macosx_11_0_x86_64.whl", hash = "sha256:dc98355e27c0b7b61f27066500fe1045b70e9459bb8b9a3082bc4755cb6392b6"},
+    {file = "pyroscope_io-0.8.16-py2.py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:86f0f047554ff62bd92c3e5a26bc2809ccd467d11fbacb9fef898ba299dbda59"},
+    {file = "pyroscope_io-0.8.16-py2.py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:6b91ce5b240f8de756c16a17022ca8e25ef8a4eed461c7d074b8a0841cf7b445"},
 ]
 
 [package.dependencies]
-cffi = ">=2.0.0,<3.0.0"
+cffi = ">=1.6.0"
 
 [package.source]
 type = "legacy"
@@ -9300,21 +9298,21 @@ reference = "litellm"
 
 [[package]]
 name = "uvicorn"
-version = "0.31.1"
+version = "0.32.1"
 description = "The lightning-fast ASGI server."
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "uvicorn-0.31.1-py3-none-any.whl", hash = "sha256:adc42d9cac80cf3e51af97c1851648066841e7cfb6993a4ca8de29ac1548ed41"},
-    {file = "uvicorn-0.31.1.tar.gz", hash = "sha256:f5167919867b161b7bcaf32646c6a94cdbd4c3aa2eb5c17d36bb9aa5cfd8c493"},
+    {file = "uvicorn-0.32.1-py3-none-any.whl", hash = "sha256:82ad92fd58da0d12af7482ecdb5f2470a04c9c9a53ced65b9bbb4a205377602e"},
+    {file = "uvicorn-0.32.1.tar.gz", hash = "sha256:ee9519c246a72b1c084cea8d3b44ed6026e78a4a309cbedae9c37e4cb9fbb175"},
 ]
 
 [package.dependencies]
 click = ">=7.0"
 colorama = {version = ">=0.4", optional = true, markers = "sys_platform == \"win32\" and extra == \"standard\""}
 h11 = ">=0.8"
-httptools = {version = ">=0.5.0", optional = true, markers = "extra == \"standard\""}
+httptools = {version = ">=0.6.3", optional = true, markers = "extra == \"standard\""}
 python-dotenv = {version = ">=0.13", optional = true, markers = "extra == \"standard\""}
 pyyaml = {version = ">=5.1", optional = true, markers = "extra == \"standard\""}
 uvloop = {version = ">=0.14.0,<0.15.0 || >0.15.0,<0.15.1 || >0.15.1", optional = true, markers = "sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\" and extra == \"standard\""}
@@ -9322,7 +9320,7 @@ watchfiles = {version = ">=0.13", optional = true, markers = "extra == \"standar
 websockets = {version = ">=10.4", optional = true, markers = "extra == \"standard\""}
 
 [package.extras]
-standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.5.0)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "uvloop (>=0.14.0,!=0.15.0,!=0.15.1) ; sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\"", "watchfiles (>=0.13)", "websockets (>=10.4)"]
+standard = ["colorama (>=0.4) ; sys_platform == \"win32\"", "httptools (>=0.6.3)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "uvloop (>=0.14.0,!=0.15.0,!=0.15.1) ; sys_platform != \"win32\" and sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\"", "watchfiles (>=0.13)", "websockets (>=10.4)"]
 
 [package.source]
 type = "legacy"
@@ -10156,4 +10154,4 @@ reference = "litellm"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "bf7c33b254c2cb52a456b1c0e959a8ae71dbc23c9d849646d2c6a976c782bca8"
+content-hash = "44922605a8ec09154a9cf160b633fc74fda5097d3d81bf57053016799b6c6c4c"
