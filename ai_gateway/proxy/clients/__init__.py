@@ -28,6 +28,7 @@ pass_through_endpoints.InitPassThroughEndpointHelpers.is_registered_pass_through
 
 def _get_registered_pass_through_route(
     route: str,
+    method: Any = None,
 ) -> dict[str, Any]:  # pylint: disable=unused-argument
     return {}
 
