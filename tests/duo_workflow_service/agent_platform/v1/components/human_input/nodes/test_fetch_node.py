@@ -8,7 +8,7 @@ from duo_workflow_service.agent_platform.v1.components.human_input.nodes.fetch_n
 )
 from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import (
     UILogEventsHumanInput,
-    UserLogWriter,
+    user_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
 from duo_workflow_service.agent_platform.v1.state.base import FlowEventType
@@ -24,7 +24,7 @@ class TestFetchNode:
         """Create FetchNode instance for testing."""
         ui_history = UIHistory(
             events=[UILogEventsHumanInput.ON_USER_RESPONSE],
-            writer_class=UserLogWriter,
+            writer_class=user_log_writer_class(component_name="test_component"),
         )
         return FetchNode(
             name="test_component#fetch",

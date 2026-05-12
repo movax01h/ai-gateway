@@ -12,9 +12,9 @@ from duo_workflow_service.agent_platform.experimental.components.human_input.nod
     RequestNode,
 )
 from duo_workflow_service.agent_platform.experimental.components.human_input.ui_log import (
-    AgentLogWriter,
     UILogEventsHumanInput,
-    UserLogWriter,
+    agent_log_writer_class,
+    user_log_writer_class,
 )
 from duo_workflow_service.agent_platform.experimental.components.registry import (
     register_component,
@@ -145,12 +145,15 @@ class HumanInputComponent(BaseComponent):
 
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
-        ui_history = UIHistory(events=self.ui_log_events, writer_class=AgentLogWriter)
+        ui_history = UIHistory(
+            events=self.ui_log_events,
+            writer_class=agent_log_writer_class(component_name=self.name),
+        )
 
         # Create UI history for user responses using UserLogWriter
         user_response_ui_history = UIHistory(
             events=self.ui_log_events,
-            writer_class=UserLogWriter,
+            writer_class=user_log_writer_class(component_name=self.name),
         )
 
         # Create request node (experimental IOKey compatible with v1 IOKey at runtime)

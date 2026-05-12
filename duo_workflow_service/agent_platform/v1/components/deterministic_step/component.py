@@ -18,7 +18,7 @@ from duo_workflow_service.agent_platform.v1.components.deterministic_step.nodes 
 )
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.ui_log import (
     UILogEventsDeterministicStep,
-    UILogWriterDeterministicStep,
+    deterministic_step_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     extract_configured_params,
@@ -122,7 +122,10 @@ class DeterministicStepComponent(BaseComponent):
             tool_name=self.tool_name,
             inputs=self.inputs,
             ui_history=UIHistory(
-                events=self.ui_log_events, writer_class=UILogWriterDeterministicStep
+                events=self.ui_log_events,
+                writer_class=deterministic_step_ui_log_writer_class(
+                    component_name=self.name,
+                ),
             ),
             tool_responses_key=self._tool_responses_key.to_iokey(
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}

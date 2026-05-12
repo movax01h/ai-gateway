@@ -7,9 +7,7 @@ from duo_workflow_service.agent_platform.v1.components.human_input.component imp
     HumanInputComponent,
 )
 from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import (
-    AgentLogWriter,
     UILogEventsHumanInput,
-    UserLogWriter,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowState, IOKey
 from duo_workflow_service.agent_platform.v1.ui_log.base import UIHistory
@@ -209,7 +207,7 @@ class TestHumanInputComponent:
         assert len(component.ui_log_events) >= 2
 
     def test_ui_log_events_integration(self, human_input_component):
-        """Test UI log events are properly passed to nodes."""
+        """Test UI log events are properly passed to nodes using factory functions."""
         graph = StateGraph(FlowState)
         router = Mock()
 
@@ -223,8 +221,16 @@ class TestHumanInputComponent:
             patch(
                 "duo_workflow_service.agent_platform.v1.components.human_input.component.UIHistory"
             ) as mock_ui_history,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.human_input.component.agent_log_writer_class"
+            ) as mock_agent_factory,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.human_input.component.user_log_writer_class"
+            ) as mock_user_factory,
         ):
             mock_ui_history.return_value = Mock(spec=UIHistory)
+            mock_agent_factory.return_value = Mock()
+            mock_user_factory.return_value = Mock()
 
             # Mock node instances
             request_instance = Mock()
@@ -237,6 +243,13 @@ class TestHumanInputComponent:
 
             human_input_component.attach(graph, router)
 
+            # Verify factories were called with the component name
+            mock_agent_factory.assert_called_once_with(
+                component_name="test_human_input"
+            )
+            mock_user_factory.assert_called_once_with(component_name="test_human_input")
+
+            # Verify UIHistory was called with the factory results
             mock_ui_history.assert_has_calls(
                 [
                     call(
@@ -244,14 +257,14 @@ class TestHumanInputComponent:
                             UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
                             UILogEventsHumanInput.ON_USER_RESPONSE,
                         ],
-                        writer_class=AgentLogWriter,
+                        writer_class=mock_agent_factory.return_value,
                     ),
                     call(
                         events=[
                             UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
                             UILogEventsHumanInput.ON_USER_RESPONSE,
                         ],
-                        writer_class=UserLogWriter,
+                        writer_class=mock_user_factory.return_value,
                     ),
                 ]
             )
