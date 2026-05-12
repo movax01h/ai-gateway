@@ -842,8 +842,20 @@ models:
     model_class_provider: litellm_embedding
     family:
       - vertex
+      - embedding
     params:
       model: "text-embedding-005"
       custom_llm_provider: vertex_ai
     prompt_params:
       vertex_location: global
+
+  - name: "Self-Hosted Embedding Models"
+    gitlab_identifier: "embedding"
+    description: "Code embeddings tasks"
+    max_context_tokens: 200000
+    model_class_provider: litellm_embedding
+    family:
+      - embedding
+    params:
+      model: embedding
+      custom_llm_provider: openai

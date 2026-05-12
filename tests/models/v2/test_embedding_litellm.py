@@ -5,6 +5,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from ai_gateway.models.v2.embedding_litellm import (
+    EmbeddingAuthenticationError,
     EmbeddingBadRequestError,
     EmbeddingLiteLLM,
     EmbeddingRateLimitError,
@@ -72,6 +73,31 @@ class TestEmbeddingLiteLLMAsyncInvoke:
 
         call_kwargs = mock_litellm_aembedding.call_args[1]
         assert call_kwargs["input"] == ["test text 1", "test text 2"]
+        assert call_kwargs["model"] == "test-embedding-model"
+        assert call_kwargs["custom_llm_provider"] == "openai"
+        assert "dimensions" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_with_dimensions(
+        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        result = await model.ainvoke(
+            input={
+                "contents": ["test text 1", "test text 2"],
+                "dimensions": 768,
+            }
+        )
+
+        assert isinstance(result, AIMessage)
+        assert result.content == mock_litellm_aembedding_response.data
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["input"] == ["test text 1", "test text 2"]
+        assert call_kwargs["dimensions"] == 768
         assert call_kwargs["model"] == "test-embedding-model"
         assert call_kwargs["custom_llm_provider"] == "openai"
 
@@ -154,6 +180,27 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["api_key"] == override_api_key or default_api_key
 
     @pytest.mark.asyncio
+    async def test_async_invoke_with_model_override(
+        self,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        model = EmbeddingLiteLLM(model="embedding", custom_llm_provider="openai")
+
+        result = await model.ainvoke(
+            input={"contents": ["test text 1", "test text 2"]},
+            model="test-embedding-model-override",
+        )
+
+        assert isinstance(result, AIMessage)
+        assert result.content == mock_litellm_aembedding_response.data
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["input"] == ["test text 1", "test text 2"]
+        assert call_kwargs["model"] == "test-embedding-model-override"
+        assert call_kwargs["custom_llm_provider"] == "openai"
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(("mock_response_values"), [{"data": None}, {"data": []}])
     async def test_async_invoke_empty_response_data(
         self, mock_response_values, mock_litellm_aembedding
@@ -197,3 +244,70 @@ class TestEmbeddingLiteLLMAsyncInvoke:
 
         with pytest.raises(EmbeddingRateLimitError, match=error_message):
             await model.ainvoke(input={"contents": ["test text"]})
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_authentication_error(self, mock_litellm_aembedding):
+        error_message = "Authentication error"
+
+        mock_litellm_aembedding.side_effect = litellm.AuthenticationError(
+            message=error_message, model="test-embedding-model", llm_provider="openai"
+        )
+
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        with pytest.raises(EmbeddingAuthenticationError, match=error_message):
+            await model.ainvoke(input={"contents": ["test text"]})
+
+
+class TestEmbeddingLiteLLMBind:
+    @pytest.mark.parametrize(
+        (
+            "custom_models_enabled",
+            "override_api_base",
+            "override_api_key",
+        ),
+        [
+            (False, None, None),
+            (True, "http://test", "test-api-key"),
+        ],
+    )
+    def test_bind_successful(
+        self, custom_models_enabled, override_api_base, override_api_key
+    ):
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=custom_models_enabled,
+        )
+
+        bound_model = model.bind(api_base=override_api_base, api_key=override_api_key)
+
+        assert bound_model.model == "test-embedding-model"
+        assert bound_model.custom_llm_provider == "custom_openai"
+
+    @pytest.mark.parametrize(
+        (
+            "override_api_base",
+            "override_api_key",
+            "unexpected_field",
+        ),
+        [
+            ("http://test", None, "api_base"),
+            (None, "test-api-key", "api_key"),
+        ],
+    )
+    def test_bind_failed_for_custom_models_disabled(
+        self, override_api_base, override_api_key, unexpected_field
+    ):
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="custom_openai",
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=f"specifying custom models endpoint is disabled: {unexpected_field} is not allowed",
+        ):
+            model.bind(api_base=override_api_base, api_key=override_api_key)

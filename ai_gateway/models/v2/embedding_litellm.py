@@ -27,6 +27,10 @@ class EmbeddingRateLimitError(Exception):
     pass
 
 
+class EmbeddingAuthenticationError(Exception):
+    pass
+
+
 class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     """Runnable wrapper for embeddings endpoints via LiteLLM.
 
@@ -77,24 +81,30 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     def _build_embedding_args(
         self,
         contents: list[str],
+        dimensions: Optional[int] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        # Get api_base and api_key from kwargs (bound from model_metadata) or fall back to instance
-        api_base = kwargs.pop("api_base", None) or self.api_base
-        api_key = kwargs.pop("api_key", None) or self.api_key
-        vertex_location = kwargs.pop("vertex_location", None)
-
-        embedding_args = {
+        embedding_args: dict[str, Any] = {
             **self._default_params,
             "input": contents,
         }
 
+        if dimensions:
+            embedding_args["dimensions"] = dimensions
+
+        # Override model from default params if it is set in kwargs (bound from model_metadata)
+        if model := kwargs.pop("model", None):
+            embedding_args["model"] = model
+
+        # Get api_base and api_key from kwargs (bound from model_metadata) or fall back to instance
+        api_base = kwargs.pop("api_base", None) or self.api_base
+        api_key = kwargs.pop("api_key", None) or self.api_key
         if api_base:
             embedding_args["api_base"] = api_base
         if api_key:
             embedding_args["api_key"] = api_key
 
-        if vertex_location:
+        if vertex_location := kwargs.pop("vertex_location", None):
             embedding_args["vertex_ai_location"] = vertex_location
 
         return embedding_args
@@ -134,9 +144,11 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             AIMessage containing the embeddings
         """
         contents = input.get("contents", [])
+        dimensions = input.get("dimensions", None)
 
         embedding_args = self._build_embedding_args(
             contents,
+            dimensions,
             **kwargs,
         )
 
@@ -146,6 +158,8 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             raise EmbeddingBadRequestError(str(e)) from e
         except litellm.RateLimitError as e:
             raise EmbeddingRateLimitError(str(e)) from e
+        except litellm.AuthenticationError as e:
+            raise EmbeddingAuthenticationError(str(e)) from e
 
         predictions = self._extract_predictions(response)
 
