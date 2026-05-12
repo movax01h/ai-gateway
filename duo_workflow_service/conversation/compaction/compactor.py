@@ -21,7 +21,7 @@ from duo_workflow_service.conversation.compaction.utils import (
 from duo_workflow_service.conversation.token_estimator import count_tokens
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from lib.context import StarletteUser
+from lib.context import StarletteUser, is_gitlab_team_member
 from lib.context.model import get_model_metadata
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import InternalEventAdditionalProperties
@@ -119,6 +119,7 @@ class ConversationCompactor:
             "Checking if compact is needed.",
             message_token=token_count,
             threshold=threshold,
+            is_gitlab_team_member=is_gitlab_team_member.get(),
         )
         return token_count > threshold
 
@@ -191,6 +192,7 @@ class ConversationCompactor:
                 error_type=type(e).__name__,
                 n_msgs=len(messages),
                 n_to_summarize=len(slices.to_summarize),
+                is_gitlab_team_member=is_gitlab_team_member.get(),
                 exc_info=True,
             )
             return CompactionResult(
@@ -253,6 +255,7 @@ class ConversationCompactor:
             agent_name=self._agent_name,
             model_name=self._model_name,
             compaction_config=self._config.model_dump(),
+            is_gitlab_team_member=is_gitlab_team_member.get(),
         )
 
         return CompactionResult(
@@ -271,7 +274,10 @@ class ConversationCompactor:
         for hiding internal LLM calls from stream_mode="messages" output.
         See: langgraph.constants.TAG_NOSTREAM
         """
-        log.info("Start compaction summarization llm call.")
+        log.info(
+            "Start compaction summarization llm call.",
+            is_gitlab_team_member=is_gitlab_team_member.get(),
+        )
         # Strip tool metadata from messages before summarization.
         # The summarizer only needs text content, and some LLM providers
         # reject messages with tool_calls when no tools= param is specified.
