@@ -24,22 +24,56 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from ai_gateway.safety_attributes import SafetyAttributes
-from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
+from lib.billing_events.client import BillingEventsClient
+
+
+@pytest.fixture(name="llm_ops_from_context")
+def llm_ops_from_context_fixture():
+    """Raw llm_operations dicts as populated by the request-context contextvar."""
+    return [
+        {
+            "model_id": "context-model",
+            "model_engine": "openai",
+            "model_provider": "openai",
+            "token_count": 999,
+            "prompt_tokens": 500,
+            "completion_tokens": 499,
+        }
+    ]
+
+
+@pytest.fixture(name="expected_llm_ops")
+def expected_llm_ops_fixture(llm_ops_from_context):
+    """Same dicts after BillingEventService validates them through LLMOperation."""
+    return [
+        {
+            **llm_ops_from_context[0],
+            "agent_name": None,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "operation_type": "standard",
+        }
+    ]
+
+
+@pytest.fixture(name="expected_billing_metadata")
+def expected_billing_metadata_fixture(expected_llm_ops):
+    """Full metadata dict the service forwards to the client."""
+    return {
+        "feature_qualified_name": "code_suggestions",
+        "feature_ai_catalog_item": False,
+        "execution_environment": ExecutionEnvironment.CODE_GENERATIONS.value,
+        "llm_operations": expected_llm_ops,
+        "tool_names": [],
+        "orbit_called": False,
+    }
 
 
 @pytest.fixture(name="mock_get_llm_operations")
-def mock_get_llm_operations_fixture():
-    with patch("ai_gateway.code_suggestions.generations.get_llm_operations") as mock:
-        mock.return_value = [
-            {
-                "model_id": "context-model",
-                "model_engine": "openai",
-                "model_provider": "openai",
-                "token_count": 999,
-                "prompt_tokens": 500,
-                "completion_tokens": 499,
-            }
-        ]
+def mock_get_llm_operations_fixture(llm_ops_from_context):
+    with patch("lib.billing_events.service.get_llm_operations") as mock:
+        mock.return_value = llm_ops_from_context
         yield mock
 
 
@@ -64,6 +98,10 @@ class TestCodeGeneration:
     def mock_billing_client_fixture(self):
         return Mock(spec=BillingEventsClient)
 
+    @pytest.fixture(name="billing_service")
+    def billing_service_fixture(self, mock_billing_client):
+        return BillingEventService(client=mock_billing_client)
+
     @pytest.fixture(name="use_case", scope="class")
     def use_case_fixture(self):
         model = Mock(spec=TextGenModelBase)
@@ -84,7 +122,9 @@ class TestCodeGeneration:
         )
         prompt_builder_mock.build = Mock(return_value=prompt)
 
-        use_case = CodeGenerations(model, tokenization_strategy_mock)
+        use_case = CodeGenerations(
+            model, tokenization_strategy_mock, Mock(spec=BillingEventService)
+        )
         use_case.prompt_builder = prompt_builder_mock
 
         yield use_case
@@ -109,7 +149,9 @@ class TestCodeGeneration:
         )
         prompt_builder_mock.build = Mock(return_value=prompt)
 
-        use_case = CodeGenerations(model, tokenization_strategy_mock)
+        use_case = CodeGenerations(
+            model, tokenization_strategy_mock, Mock(spec=BillingEventService)
+        )
         use_case.prompt_builder = prompt_builder_mock
 
         yield use_case
@@ -342,7 +384,7 @@ class TestCodeGeneration:
             )
 
     @pytest.fixture(name="use_case_with_billing")
-    def use_case_with_billing_fixture(self, mock_billing_client):
+    def use_case_with_billing_fixture(self, billing_service):
         model = Mock(spec=TextGenModelBase)
         type(model).input_token_limit = PropertyMock(return_value=2_048)
         model.metadata = Mock(
@@ -358,7 +400,7 @@ class TestCodeGeneration:
         use_case = CodeGenerations(
             model=model,
             tokenization_strategy=tokenization_strategy_mock,
-            billing_event_client=mock_billing_client,
+            billing_event_service=billing_service,
         )
 
         prompt_builder_mock = Mock(spec=PromptBuilderBase)
@@ -384,6 +426,7 @@ class TestCodeGeneration:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event is tracked when code generation is successful."""
         expected_output = "generated code"
@@ -404,20 +447,15 @@ class TestCodeGeneration:
                 user=mock_user,
             )
 
-        # Verify billing event was tracked with correct parameters
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
-            category="CodeGenerations",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_generations",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()
 
     async def test_no_billing_event_when_no_user_provided(
         self, use_case_with_billing, mock_billing_client
@@ -441,59 +479,13 @@ class TestCodeGeneration:
 
         mock_billing_client.track_billing_event.assert_not_called()
 
-    async def test_no_billing_event_when_no_billing_client(self, mock_user):
-        """Test that no billing event is tracked when billing client is not provided."""
-        model = Mock(spec=TextGenModelBase)
-        type(model).input_token_limit = PropertyMock(return_value=2_048)
-        model.metadata = Mock(name="test-model", engine="test-engine")
-        model.metadata.name = "test-model"
-        model.metadata.engine = "test-engine"
-
-        tokenization_strategy_mock = Mock(spec=TokenStrategyBase)
-        tokenization_strategy_mock.estimate_length = Mock(return_value=[25, 30])
-
-        use_case = CodeGenerations(
-            model=model,
-            tokenization_strategy=tokenization_strategy_mock,
-            # No billing client provided
-        )
-
-        prompt_builder_mock = Mock(spec=PromptBuilderBase)
-        prompt = Prompt(
-            prefix="prompt",
-            metadata=MetadataPromptBuilder(
-                components={
-                    "prompt": MetadataCodeContent(
-                        length=len("prompt"),
-                        length_tokens=1,
-                    ),
-                }
-            ),
-        )
-        prompt_builder_mock.build = Mock(return_value=prompt)
-        use_case.prompt_builder = prompt_builder_mock
-
-        use_case.model.generate = AsyncMock(
-            return_value=TextGenModelOutput(
-                text="generated code",
-                score=0.8,
-                safety_attributes=SafetyAttributes(),
-            )
-        )
-
-        # This should not raise an exception
-        with patch.object(PostProcessor, "process", return_value="generated code"):
-            result = await use_case.execute(
-                prefix="def hello",
-                file_name="test.py",
-                editor_lang="python",
-                user=mock_user,
-            )
-
-        assert result.text == "generated code"
-
     async def test_billing_event_exception_handling(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event exceptions are handled gracefully."""
         expected_output = "generated code"
@@ -506,7 +498,7 @@ class TestCodeGeneration:
             )
         )
 
-        # Make billing client raise an exception
+        # Make billing service raise an exception
         mock_billing_client.track_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
@@ -520,12 +512,24 @@ class TestCodeGeneration:
                 user=mock_user,
             )
 
-        # Verify the generation still works despite billing error
         assert result.text == expected_output
-        mock_billing_client.track_billing_event.assert_called_once()
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata=expected_billing_metadata,
+        )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_exception_handling_streaming(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event exceptions are handled gracefully for streaming."""
 
@@ -537,7 +541,7 @@ class TestCodeGeneration:
             side_effect=lambda *args, **kwargs: _stream_generator()
         )
 
-        # Make billing client raise an exception
+        # Make billing service raise an exception
         mock_billing_client.track_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
@@ -556,7 +560,15 @@ class TestCodeGeneration:
             chunks.append(chunk.text)
 
         assert chunks == ["hello ", "world!"]
-        mock_billing_client.track_billing_event.assert_called_once()
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
+            unit_of_measure="request",
+            quantity=1,
+            metadata=expected_billing_metadata,
+        )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_with_zero_tokens(
         self,
@@ -564,9 +576,9 @@ class TestCodeGeneration:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event is tracked even when output tokens is zero."""
-        # Mock tokenization strategy to return 0 tokens
         use_case_with_billing.tokenization_strategy.estimate_length = Mock(
             return_value=[0, 0]
         )
@@ -589,18 +601,14 @@ class TestCodeGeneration:
 
         # Should still track billing event even with 0 tokens for consistency
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
-            category="CodeGenerations",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_generations",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_with_anthropic_provider(
         self,
@@ -608,6 +616,7 @@ class TestCodeGeneration:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event is tracked correctly with Anthropic provider."""
         expected_output = "generated code"
@@ -631,20 +640,15 @@ class TestCodeGeneration:
                 user=mock_user,
             )
 
-        # Verify billing event was tracked
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
-            category="CodeGenerations",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_generations",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_tracked_for_streaming(
         self,
@@ -652,6 +656,7 @@ class TestCodeGeneration:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing events are tracked for streaming responses."""
 
@@ -678,18 +683,12 @@ class TestCodeGeneration:
 
         assert chunks == ["hello ", "world!"]
 
-        # Billing events should now be tracked for streaming responses
-        # The billing event is tracked in the finally block of _handle_stream
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
-            category="CodeGenerations",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
+            "CodeGenerations",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_generations",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()

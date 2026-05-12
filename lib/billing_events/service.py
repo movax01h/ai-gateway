@@ -21,6 +21,8 @@ class ExecutionEnvironment(StrEnum):
     """Execution environment identifiers for billing categorization."""
 
     DAP = "duo_agent_platform"
+    CODE_COMPLETIONS = "code_completions"
+    CODE_GENERATIONS = "code_generations"
 
 
 class LLMOperation(BaseModel):

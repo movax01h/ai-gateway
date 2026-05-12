@@ -33,22 +33,56 @@ from ai_gateway.models.base_text import (
     TextGenModelOutput,
 )
 from ai_gateway.safety_attributes import SafetyAttributes
-from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
+from lib.billing_events.client import BillingEventsClient
+
+
+@pytest.fixture(name="llm_ops_from_context")
+def llm_ops_from_context_fixture():
+    """Raw llm_operations dicts as populated by the request-context contextvar."""
+    return [
+        {
+            "model_id": "context-model",
+            "model_engine": "openai",
+            "model_provider": "openai",
+            "token_count": 999,
+            "prompt_tokens": 500,
+            "completion_tokens": 499,
+        }
+    ]
+
+
+@pytest.fixture(name="expected_llm_ops")
+def expected_llm_ops_fixture(llm_ops_from_context):
+    """Same dicts after BillingEventService validates them through LLMOperation."""
+    return [
+        {
+            **llm_ops_from_context[0],
+            "agent_name": None,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "operation_type": "standard",
+        }
+    ]
+
+
+@pytest.fixture(name="expected_billing_metadata")
+def expected_billing_metadata_fixture(expected_llm_ops):
+    """Full metadata dict the service forwards to the client."""
+    return {
+        "feature_qualified_name": "code_suggestions",
+        "feature_ai_catalog_item": False,
+        "execution_environment": ExecutionEnvironment.CODE_COMPLETIONS.value,
+        "llm_operations": expected_llm_ops,
+        "tool_names": [],
+        "orbit_called": False,
+    }
 
 
 @pytest.fixture(name="mock_get_llm_operations")
-def mock_get_llm_operations_fixture():
-    with patch("ai_gateway.code_suggestions.completions.get_llm_operations") as mock:
-        mock.return_value = [
-            {
-                "model_id": "context-model",
-                "model_engine": "openai",
-                "model_provider": "openai",
-                "token_count": 999,
-                "prompt_tokens": 500,
-                "completion_tokens": 499,
-            }
-        ]
+def mock_get_llm_operations_fixture(llm_ops_from_context):
+    with patch("lib.billing_events.service.get_llm_operations") as mock:
+        mock.return_value = llm_ops_from_context
         yield mock
 
 
@@ -73,6 +107,10 @@ class TestCodeCompletions:
     def mock_billing_client_fixture(self):
         return Mock(spec=BillingEventsClient)
 
+    @pytest.fixture(name="billing_service")
+    def billing_service_fixture(self, mock_billing_client):
+        return BillingEventService(client=mock_billing_client)
+
     @pytest.fixture(name="use_case", scope="class")
     def use_case_fixture(self):
         model = Mock(spec=TextGenModelBase)
@@ -83,13 +121,15 @@ class TestCodeCompletions:
             return_value=[10, 0]
         )  # Return subscriptable list
 
-        use_case = CodeCompletions(model, tokenization_strategy)
+        use_case = CodeCompletions(
+            model, tokenization_strategy, Mock(spec=BillingEventService)
+        )
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
 
         yield use_case
 
     @pytest.fixture(name="use_case_with_billing")
-    def use_case_with_billing_fixture(self, mock_billing_client):
+    def use_case_with_billing_fixture(self, billing_service):
         model = Mock(spec=TextGenModelBase)
         type(model).input_token_limit = PropertyMock(return_value=2_048)
         model.metadata = Mock(
@@ -102,7 +142,7 @@ class TestCodeCompletions:
         use_case = CodeCompletions(
             model=model,
             tokenization_strategy=Mock(spec=TokenStrategyBase),
-            billing_event_client=mock_billing_client,
+            billing_event_service=billing_service,
         )
         use_case.prompt_builder = Mock()
         use_case.prompt_builder.build.return_value = Prompt(
@@ -159,6 +199,7 @@ class TestCodeCompletions:
         completions = CodeCompletions(
             model,
             tokenization_strategy=Mock(spec=TokenStrategyBase),
+            billing_event_service=Mock(spec=BillingEventService),
             post_processor=post_processor_factory,
         )
         completions.prompt_builder = prompt_builder
@@ -628,7 +669,9 @@ class TestCodeCompletions:
         # Create use case with AmazonQModel
         tokenization_strategy = Mock(spec=TokenStrategyBase)
         tokenization_strategy.estimate_length = Mock(return_value=[10, 0])
-        use_case = CodeCompletions(model, tokenization_strategy)
+        use_case = CodeCompletions(
+            model, tokenization_strategy, Mock(spec=BillingEventService)
+        )
 
         # Mock prompt builder
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
@@ -696,7 +739,11 @@ class TestCodeCompletions:
             )
         )
 
-        use_case = CodeCompletions(agent_model, Mock(spec=TokenStrategyBase))
+        use_case = CodeCompletions(
+            agent_model,
+            Mock(spec=TokenStrategyBase),
+            Mock(spec=BillingEventService),
+        )
 
         # Mock prompt builder
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
@@ -741,18 +788,15 @@ class TestCodeCompletions:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event is tracked when code completion is successful."""
-        expected_output_tokens = 25
-
         use_case_with_billing.model.generate = AsyncMock(
             return_value=TextGenModelOutput(
                 text="generated code",
                 score=0.8,
                 safety_attributes=SafetyAttributes(),
-                metadata=Mock(
-                    output_tokens=expected_output_tokens, max_output_tokens_used=False
-                ),
+                metadata=Mock(output_tokens=25, max_output_tokens_used=False),
             )
         )
 
@@ -765,18 +809,14 @@ class TestCodeCompletions:
         )
 
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
-            category="CodeCompletions",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            "CodeCompletions",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_completions",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()
 
     async def test_no_billing_event_when_no_user_provided(
         self, use_case_with_billing, mock_billing_client
@@ -802,7 +842,12 @@ class TestCodeCompletions:
         mock_billing_client.track_billing_event.assert_not_called()
 
     async def test_billing_event_exception_handling(
-        self, use_case_with_billing, mock_user, mock_billing_client
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event exceptions are handled gracefully."""
         use_case_with_billing.model.generate = AsyncMock(
@@ -814,12 +859,10 @@ class TestCodeCompletions:
             )
         )
 
-        # Make billing client raise an exception
         mock_billing_client.track_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
 
-        # This should not raise an exception - billing errors should be handled gracefully
         result = await use_case_with_billing.execute(
             prefix="def hello",
             suffix=":",
@@ -828,9 +871,16 @@ class TestCodeCompletions:
             user=mock_user,
         )
 
-        # Verify the completion still works despite billing error
         assert result.text == "generated code"
-        mock_billing_client.track_billing_event.assert_called_once()
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            "CodeCompletions",
+            unit_of_measure="request",
+            quantity=1,
+            metadata=expected_billing_metadata,
+        )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_with_zero_tokens(
         self,
@@ -838,6 +888,7 @@ class TestCodeCompletions:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event is tracked when output tokens is zero."""
         use_case_with_billing.model.generate = AsyncMock(
@@ -859,18 +910,14 @@ class TestCodeCompletions:
 
         # Should still track billing event even with 0 tokens for consistency
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
-            category="CodeCompletions",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            "CodeCompletions",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_completions",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_tracked_for_streaming(
         self,
@@ -878,6 +925,7 @@ class TestCodeCompletions:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing events are tracked for streaming responses."""
 
@@ -910,24 +958,22 @@ class TestCodeCompletions:
 
         # Billing events should be tracked for streaming responses
         mock_billing_client.track_billing_event.assert_called_once_with(
-            user=mock_user,
-            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
-            category="CodeCompletions",
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            "CodeCompletions",
             unit_of_measure="request",
             quantity=1,
-            metadata={
-                "execution_environment": "code_completions",
-                "llm_operations": mock_get_llm_operations.return_value,
-                "feature_qualified_name": "code_suggestions",
-                "feature_ai_catalog_item": False,
-            },
+            metadata=expected_billing_metadata,
         )
+        mock_get_llm_operations.assert_called()
 
     async def test_billing_event_exception_handling_streaming(
         self,
         use_case_with_billing,
         mock_user,
         mock_billing_client,
+        mock_get_llm_operations,
+        expected_billing_metadata,
     ):
         """Test that billing event exceptions are handled gracefully for streaming."""
 
@@ -942,7 +988,7 @@ class TestCodeCompletions:
             return_value=[12, 0]
         )
 
-        # Make billing client raise an exception
+        # Make billing service raise an exception
         mock_billing_client.track_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
@@ -962,7 +1008,15 @@ class TestCodeCompletions:
             chunks.append(chunk.text)
 
         assert chunks == ["hello ", "world!"]
-        mock_billing_client.track_billing_event.assert_called_once()
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            "CodeCompletions",
+            unit_of_measure="request",
+            quantity=1,
+            metadata=expected_billing_metadata,
+        )
+        mock_get_llm_operations.assert_called()
 
     async def test_execute_agent_model_with_unknown_language_should_not_crash(self):
         """Test that AgentModel handles the case where both editor_lang is None and resolve_lang_name returns None
@@ -988,7 +1042,11 @@ class TestCodeCompletions:
             )
         )
 
-        use_case = CodeCompletions(agent_model, Mock(spec=TokenStrategyBase))
+        use_case = CodeCompletions(
+            agent_model,
+            Mock(spec=TokenStrategyBase),
+            Mock(spec=BillingEventService),
+        )
 
         # Mock prompt builder
         use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
