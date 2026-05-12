@@ -9,82 +9,86 @@ Your `failure_category` must be supported by direct evidence visible in the job 
 <failure_categories>
   <category>
     <failure_category>runner_system_failure</failure_category>
-    <description>Runner configuration issues, crashes, resource exhaustion</description>
+    <description>The GitLab Runner itself crashed or failed before the job script ran. Includes "runner system failure" messages, Docker daemon errors, container start failures, stuck runners. Transient — retrying resolves these.</description>
   </category>
   <category>
     <failure_category>environment_failure</failure_category>
-    <description>Environment provisioning problems, Docker image issues</description>
+    <description>The job environment could not be provisioned. Includes Docker image pull failures, service container startup errors (postgres, redis), Docker Hub rate limits ("toomanyrequests"). Transient — retrying resolves these.</description>
   </category>
   <category>
     <failure_category>network_failure</failure_category>
-    <description>Network connectivity, DNS resolution failures</description>
+    <description>Network connectivity failed during job execution. Includes DNS resolution errors ("could not resolve host"), connection refused/reset, TLS handshake failures, HTTP 502/503/504 from external services, artifact download timeouts. Transient — retrying resolves these.</description>
   </category>
   <category>
     <failure_category>permissions_failure</failure_category>
-    <description>Authentication errors, access denied, missing credentials</description>
+    <description>Authentication or authorization errors requiring human intervention. Includes "access denied", 403/401 errors, expired CI tokens, SSH key failures, protected environment blocks, insufficient bridge permissions. Persistent — retrying will not help.</description>
   </category>
   <category>
     <failure_category>resource_limit_failure</failure_category>
-    <description>Quota exceeded, disk full, out of memory, timeouts</description>
+    <description>The job exceeded a system resource limit. Includes OOM killed, "no space left on device", job timeout ("exceeded the time limit"), disk quota exceeded. Transient — typically caused by system contention.</description>
   </category>
   <category>
     <failure_category>ci_config_error</failure_category>
-    <description>YAML syntax errors, job ordering issues, missing variables</description>
+    <description>The CI/CD configuration is invalid. Includes .gitlab-ci.yml syntax errors, invalid job/stage references, undefined CI variables, incorrect `rules:` clauses, missing `needs:` dependencies. The job script may not have run at all.</description>
   </category>
   <category>
     <failure_category>test_failure</failure_category>
-    <description>Test assertion failures, test setup issues</description>
+    <description>A test assertion failed due to a defect introduced by the MR's code changes. Use this only when there is a clear causal link — the failing test imports or exercises code that was changed. Includes assertion errors, expected-vs-actual mismatches. Use `flaky_test` instead when the failure has no link to changed files or also exists on the target branch.</description>
+  </category>
+  <category>
+    <failure_category>flaky_test</failure_category>
+    <description>A test failure not caused by the MR's code changes. Includes intermittent failures (passes on retry, timing-dependent, race conditions), random ordering sensitivity, and pre-existing failures on the target branch ("master-broken specs").</description>
   </category>
   <category>
     <failure_category>lint_failure</failure_category>
-    <description>Linting violations, formatting errors</description>
+    <description>A linter, formatter, or static analysis tool reported violations. Includes ESLint, RuboCop, Prettier, semgrep, pajamas-adoption-scanner output. The specific rule or violation must be visible in the job trace — do not infer from the MR diff or branch name.</description>
   </category>
   <category>
     <failure_category>build_failure</failure_category>
-    <description>Compilation errors, syntax errors, import errors</description>
+    <description>The project failed to compile or build. Includes compilation errors, syntax errors in source code, type errors, bad import statements. Use `dependency_failure` instead when the root cause is a missing or incompatible package.</description>
   </category>
   <category>
     <failure_category>dependency_failure</failure_category>
-    <description>Missing packages, version conflicts, dependency resolution failures</description>
+    <description>Package installation or resolution failed. Includes "package not found", version conflicts, `bundle install` / `yarn install` / `pip install` errors, lockfile conflicts. The failure occurs during dependency installation, not during source code compilation.</description>
   </category>
   <category>
     <failure_category>insufficient_context</failure_category>
-    <description>Cannot analyze due to missing, truncated, or unavailable logs</description>
+    <description>The job logs are missing, truncated, or insufficient to classify the failure. Also use this when a scanner name is visible but the specific rule that fired is not in the trace.</description>
   </category>
   <category>
     <failure_category>security_sensitive</failure_category>
-    <description>Failure requires human security review</description>
+    <description>The failure involves security scanning findings requiring human review. Includes secret detection alerts, SAST (Brakeman, Bandit), DAST findings, dependency vulnerability scans, license compliance failures.</description>
   </category>
   <category>
     <failure_category>unknown_failure</failure_category>
-    <description>Cannot classify the failure into any other category</description>
+    <description>The failure does not fit any other category after reviewing the full job trace. Use as a last resort. Prefer `insufficient_context` when the issue is lack of log data rather than an unrecognizable pattern.</description>
   </category>
 </failure_categories>
 
 <fix_types>
   <fix_type>
     <suggested_fix_type>code_fix</suggested_fix_type>
-    <description>Source code changes can fix this</description>
+    <description>The failure can be resolved by changing application source code. Includes fixing broken tests, correcting logic errors, updating imports, or resolving type errors.</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>update_ci_config</suggested_fix_type>
-    <description>CI/CD configuration changes can fix this</description>
+    <description>The failure can be resolved by modifying .gitlab-ci.yml or related CI/CD configuration. Includes fixing job definitions, stage ordering, variable references, or rules/only/except clauses.</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>update_dependencies</suggested_fix_type>
-    <description>Dependency changes can fix this</description>
+    <description>The failure can be resolved by updating dependencies. Includes adding missing packages, fixing version constraints, regenerating lockfiles, or resolving version conflicts.</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>retry_job</suggested_fix_type>
-    <description>Retrying the job is the best action for transient infrastructure issues</description>
+    <description>The failure is transient and retrying the job will likely resolve it. Includes runner crashes, network blips, environment provisioning errors, resource contention, flaky tests, and pre-existing failures on the target branch.</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>comment_only</suggested_fix_type>
-    <description>Analysis and recommendations should be provided but no code can be pushed</description>
+    <description>The failure requires human attention but no automated code fix is possible. Includes persistent permission errors, security findings, or failures where the root cause is clear but the fix requires decisions beyond the agent's scope.</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>no_action</suggested_fix_type>
-    <description>Cannot determine an appropriate action</description>
+    <description>The failure does not fit any of the above fix types. Use as a last resort when no appropriate action can be determined.</description>
   </fix_type>
 </fix_types>
 
@@ -129,9 +133,20 @@ Set the decision field based on these criteria:
     <decision>add_comment</decision>
     <response_reason>
       Set decision to `add_comment` when ANY of the following apply:
-      - None of the failures needs to be fixed, as per criteria above
-      - When conditions for `create_plan` are not met
+      - None of the failures needs to be fixed, as per criteria above, AND the failure is not a flaky test or infrastructure issue
+      - When conditions for `create_plan` are not met AND the failure is not a flaky test or infrastructure issue
       - You cannot quote a specific log line that names the failing rule, assertion, or check. Inference from MR title, branch name, or diff content alone is not sufficient evidence.
+    </response_reason>
+  </possible_response>
+  <possible_response>
+    <decision>no_action</decision>
+    <response_reason>
+      Set decision to `no_action` when the failure is transient or not actionable — code fixes and comments WILL NOT help. Choose this when the failure_category is one of:
+      - `runner_system_failure` (transient runner/Docker issues)
+      - `environment_failure` (transient environment setup issues)
+      - `network_failure` (transient connectivity issues)
+      - `resource_limit_failure` (transient resource exhaustion)
+      - `flaky_test` (intermittent test failures or pre-existing failures on the target branch)
     </response_reason>
   </possible_response>
 </possible_responses>
