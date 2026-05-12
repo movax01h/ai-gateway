@@ -553,15 +553,20 @@ class TestDeterministicStepComponentAttachNodes:
         deterministic_step_component,
         mock_state_graph,
         mock_router,
+        component_name,
     ):
-        """Test that the correct UI log writer class is used."""
+        """Test that the correct UI log writer factory is used and embeds component_name."""
         deterministic_step_component.attach(mock_state_graph, mock_router)
 
         # Get the ui_history argument
         node_call_kwargs = mock_deterministic_step_node_cls.call_args[1]
         ui_history = node_call_kwargs["ui_history"]
 
-        assert ui_history.writer_class == UILogWriterDeterministicStep
+        # writer_class should be a factory (partial) that creates UILogWriterDeterministicStep
+        assert callable(ui_history.writer_class)
+        writer = ui_history.writer_class(Mock())
+        assert isinstance(writer, UILogWriterDeterministicStep)
+        assert writer._component_name == component_name
 
 
 class TestDeterministicStepComponentAttachEdges:

@@ -30,7 +30,7 @@ from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_w
 )
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
-    UILogWriterOneOffTools,
+    one_off_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.components.registry import (
     register_component,
@@ -218,7 +218,9 @@ class OneOffComponent(BaseComponent):
             max_correction_attempts=self.max_correction_attempts,
             ui_history=UIHistory(
                 events=self.ui_log_events,
-                writer_class=UILogWriterOneOffTools,
+                writer_class=one_off_ui_log_writer_class(
+                    component_name=self.name,
+                ),
             ),
             tool_calls_key=self._tool_calls_key.to_iokey(
                 {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from enum import auto
-from typing import Any, Optional, override
+from functools import partial
+from typing import Any, Callable, Optional, override
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 from duo_workflow_service.agent_platform.v1.ui_log import (
     BaseUILogEvents,
     BaseUILogWriter,
+    UILogCallback,
 )
 from duo_workflow_service.entities import (
     MessageTypeEnum,
@@ -17,7 +19,11 @@ from duo_workflow_service.entities import (
     build_tool_info,
 )
 
-__all__ = ["UILogEventsDeterministicStep", "UILogWriterDeterministicStep"]
+__all__ = [
+    "UILogEventsDeterministicStep",
+    "UILogWriterDeterministicStep",
+    "deterministic_step_ui_log_writer_class",
+]
 
 from duo_workflow_service.tools import DuoBaseTool
 
@@ -28,6 +34,28 @@ class UILogEventsDeterministicStep(BaseUILogEvents):
 
 
 class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]):
+    """A UI log writer for tool-execution events in deterministic step components.
+
+    ``component_name`` is stored at construction time and embedded in every log
+    entry, identifying the component that owns this writer.
+
+    ``subsession_id`` is **not** stored at construction time — it must be supplied
+    by the caller on each ``_log_success`` / ``_log_error`` invocation via
+    ``**kwargs``.
+
+    Args:
+        log_callback: Callback function that receives log entries.
+        component_name: Human-readable name of the component that owns this writer.
+            Embedded in every log entry as ``component_name``.
+    """
+
+    def __init__(
+        self,
+        log_callback: UILogCallback,
+        component_name: str,
+    ):
+        super().__init__(log_callback)
+        self._component_name = component_name
 
     @property
     @override
@@ -54,6 +82,8 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
             message_sub_type=tool.name,
             correlation_id=correlation_id,
             additional_context=additional_context,
+            component_name=self._component_name,
+            subsession_id=kwargs.get("subsession_id"),
         )
 
     @override
@@ -79,6 +109,8 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=tool.name,
+            component_name=self._component_name,
+            subsession_id=kwargs.get("subsession_id"),
         )
 
     @staticmethod
@@ -100,3 +132,26 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
             )  # type: ignore[return-value]
 
         return tool.format_display_message(tool_call_args, tool_response)
+
+
+def deterministic_step_ui_log_writer_class(
+    component_name: str,
+) -> Callable[[UILogCallback], UILogWriterDeterministicStep]:
+    """Factory that creates a ``UILogWriterDeterministicStep`` bound to *component_name*.
+
+    The returned callable accepts a single ``UILogCallback`` argument, making it
+    compatible with ``UIHistory.writer_class``.
+
+    ``component_name`` is embedded in the writer and included in every log entry.
+    ``subsession_id`` is not embedded — callers must pass it as a keyword argument to
+    each ``log.success`` / ``log.error`` call.
+
+    Args:
+        component_name: Human-readable name of the component that owns this writer.
+            Embedded in every log entry as ``component_name``.
+
+    Returns:
+        A partial that constructs a ``UILogWriterDeterministicStep`` when called with a
+        ``UILogCallback``.
+    """
+    return partial(UILogWriterDeterministicStep, component_name=component_name)

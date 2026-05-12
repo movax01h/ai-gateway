@@ -6,6 +6,8 @@ from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import
     AgentLogWriter,
     UILogEventsHumanInput,
     UserLogWriter,
+    agent_log_writer_class,
+    user_log_writer_class,
 )
 from duo_workflow_service.entities import MessageTypeEnum
 
@@ -22,7 +24,7 @@ class TestAgentLogWriter:
     @pytest.fixture
     def agent_log_writer(self, mock_log_callback):
         """Fixture for an AgentLogWriter instance."""
-        return AgentLogWriter(mock_log_callback)
+        return AgentLogWriter(mock_log_callback, component_name="test_component")
 
     def test_events_type_property(self, agent_log_writer):
         """Test that events_type property returns correct type."""
@@ -51,6 +53,46 @@ class TestAgentLogWriter:
         assert args.record["message_sub_type"] == "approval"
         assert args.record["status"] is None
 
+    def test_log_success_embeds_component_name(self, mock_log_callback):
+        """Test that component_name is embedded in success log entries."""
+        writer = AgentLogWriter(mock_log_callback, component_name="my_component")
+
+        writer.success(
+            content="Please approve:",
+            event=UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
+            request_type="approval",
+        )
+
+        args = mock_log_callback.call_args[0][0]
+        assert args.record["component_name"] == "my_component"
+
+    def test_log_success_subsession_id_from_kwargs(self, mock_log_callback):
+        """Test that subsession_id is taken from kwargs, not stored at construction."""
+        writer = AgentLogWriter(mock_log_callback, component_name="my_component")
+
+        writer.success(
+            content="Please approve:",
+            event=UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
+            request_type="approval",
+            subsession_id="sub-123",
+        )
+
+        args = mock_log_callback.call_args[0][0]
+        assert args.record["subsession_id"] == "sub-123"
+
+    def test_log_success_subsession_id_none_by_default(self, mock_log_callback):
+        """Test that subsession_id is None when not passed in kwargs."""
+        writer = AgentLogWriter(mock_log_callback, component_name="my_component")
+
+        writer.success(
+            content="Please approve:",
+            event=UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
+            request_type="approval",
+        )
+
+        args = mock_log_callback.call_args[0][0]
+        assert args.record.get("subsession_id") is None
+
 
 class TestUserLogWriter:
     """Test suite for UserLogWriter class."""
@@ -58,7 +100,7 @@ class TestUserLogWriter:
     @pytest.fixture
     def user_log_writer(self, mock_log_callback):
         """Fixture for a UserLogWriter instance."""
-        return UserLogWriter(mock_log_callback)
+        return UserLogWriter(mock_log_callback, component_name="test_component")
 
     def test_events_type_property(self, user_log_writer):
         """Test that events_type property returns correct type."""
@@ -84,3 +126,94 @@ class TestUserLogWriter:
         assert args.record["additional_context"] == additional_context
         assert args.record["message_type"] == MessageTypeEnum.USER
         assert args.record["status"] is None
+
+    def test_log_success_embeds_component_name(self, mock_log_callback):
+        """Test that component_name is embedded in success log entries."""
+        writer = UserLogWriter(mock_log_callback, component_name="my_component")
+
+        writer.success(
+            content="User response text",
+            event=UILogEventsHumanInput.ON_USER_RESPONSE,
+        )
+
+        args = mock_log_callback.call_args[0][0]
+        assert args.record["component_name"] == "my_component"
+
+    def test_log_success_subsession_id_from_kwargs(self, mock_log_callback):
+        """Test that subsession_id is taken from kwargs, not stored at construction."""
+        writer = UserLogWriter(mock_log_callback, component_name="my_component")
+
+        writer.success(
+            content="User response text",
+            event=UILogEventsHumanInput.ON_USER_RESPONSE,
+            subsession_id="sub-456",
+        )
+
+        args = mock_log_callback.call_args[0][0]
+        assert args.record["subsession_id"] == "sub-456"
+
+    def test_log_success_subsession_id_none_by_default(self, mock_log_callback):
+        """Test that subsession_id is None when not passed in kwargs."""
+        writer = UserLogWriter(mock_log_callback, component_name="my_component")
+
+        writer.success(
+            content="User response text",
+            event=UILogEventsHumanInput.ON_USER_RESPONSE,
+        )
+
+        args = mock_log_callback.call_args[0][0]
+        assert args.record.get("subsession_id") is None
+
+
+class TestAgentLogWriterClassFactory:
+    """Test suite for agent_log_writer_class factory."""
+
+    @pytest.fixture(name="mock_callback")
+    def mock_callback_fixture(self):
+        return Mock()
+
+    def test_factory_returns_callable(self):
+        """Test that the factory returns a callable."""
+        factory = agent_log_writer_class(component_name="my_component")
+        assert callable(factory)
+
+    def test_factory_creates_writer_with_component_name(self, mock_callback):
+        """Test that the factory creates a writer with the correct component_name."""
+        factory = agent_log_writer_class(component_name="my_component")
+        writer = factory(mock_callback)
+        assert isinstance(writer, AgentLogWriter)
+        assert writer._component_name == "my_component"
+
+    def test_factory_is_compatible_with_ui_history_writer_class(self, mock_callback):
+        """Test that the factory result is compatible with UIHistory.writer_class."""
+        factory = agent_log_writer_class(component_name="my_component")
+        # UIHistory.writer_class expects a callable that takes a single UILogCallback arg
+        writer = factory(mock_callback)
+        assert isinstance(writer, AgentLogWriter)
+
+
+class TestUserLogWriterClassFactory:
+    """Test suite for user_log_writer_class factory."""
+
+    @pytest.fixture(name="mock_callback")
+    def mock_callback_fixture(self):
+        return Mock()
+
+    def test_factory_returns_callable(self):
+        """Test that the factory returns a callable."""
+        factory = user_log_writer_class(component_name="my_component")
+        assert callable(factory)
+
+    def test_factory_creates_writer_with_component_name(self, mock_callback):
+        """Test that the factory creates a writer with the correct component_name."""
+        factory = user_log_writer_class(component_name="my_component")
+        writer = factory(mock_callback)
+        assert isinstance(writer, UserLogWriter)
+        assert writer._component_name == "my_component"
+
+    def test_factory_is_compatible_with_ui_history_writer_class(self, mock_callback):
+        """Test that the factory result is compatible with UIHistory.writer_class."""
+        factory = user_log_writer_class(component_name="my_component")
+        # UIHistory.writer_class expects a callable that takes a single UILogCallback arg
+        writer = factory(mock_callback)
+        assert isinstance(writer, UserLogWriter)

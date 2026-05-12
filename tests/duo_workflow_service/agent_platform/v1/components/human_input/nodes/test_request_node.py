@@ -6,8 +6,8 @@ from duo_workflow_service.agent_platform.v1.components.human_input.nodes.request
     RequestNode,
 )
 from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import (
-    AgentLogWriter,
     UILogEventsHumanInput,
+    agent_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
@@ -28,7 +28,7 @@ class TestRequestNode:
             inputs=[IOKey(target="context", subkeys=["test_key"])],
             ui_history=UIHistory(
                 events=[UILogEventsHumanInput.ON_USER_INPUT_PROMPT],
-                writer_class=AgentLogWriter,
+                writer_class=agent_log_writer_class(component_name="test_component"),
             ),
             status_key=IOKey(target="status"),
         )
@@ -103,7 +103,7 @@ class TestRequestNode:
                 events=[
                     UILogEventsHumanInput.ON_USER_INPUT_PROMPT
                 ],  # Include event so log is created
-                writer_class=AgentLogWriter,
+                writer_class=agent_log_writer_class(component_name="test_component"),
             ),
             status_key=IOKey(target="status"),
         )

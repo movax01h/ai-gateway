@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """Test suite for OneOff UI logging components."""
 
 from unittest.mock import Mock
@@ -8,6 +9,7 @@ from langchain_core.tools import BaseTool
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
     UILogWriterOneOffTools,
+    one_off_ui_log_writer_class,
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolInfo, ToolStatus
 
@@ -31,7 +33,7 @@ class TestUILogEventsOneOff:
             assert event_value is not None
 
 
-class TestUILogWriterOneOffTools:
+class TestUILogWriterOneOffTools:  # pylint: disable=too-many-public-methods
     """Test suite for UILogWriterOneOffTools class."""
 
     @pytest.fixture(name="mock_callback")
@@ -42,7 +44,12 @@ class TestUILogWriterOneOffTools:
     @pytest.fixture(name="ui_log_writer")
     def ui_log_writer_fixture(self, mock_callback):
         """Fixture for a UILogWriterOneOffTools instance."""
-        return UILogWriterOneOffTools(mock_callback)
+        return UILogWriterOneOffTools(mock_callback, component_name="test_component")
+
+    @pytest.fixture(name="ui_log_writer_with_component_name")
+    def ui_log_writer_with_component_name_fixture(self, mock_callback):
+        """Fixture for a UILogWriterOneOffTools instance with component_name."""
+        return UILogWriterOneOffTools(mock_callback, component_name="my_component")
 
     @pytest.fixture(name="mock_tool")
     def mock_tool_fixture(self):
@@ -178,6 +185,57 @@ class TestUILogWriterOneOffTools:
         assert result["message_type"] == MessageTypeEnum.TOOL
         assert result["message_sub_type"] == "test_tool_input"
         assert "Calling tool 'test_tool' with arguments:" in result["content"]
+        assert result["component_name"] == "test_component"
+
+    def test_log_tool_call_input_embeds_component_name(
+        self, ui_log_writer_with_component_name, mock_tool
+    ):
+        """Test that _log_tool_call_input embeds component_name."""
+        tool_call_args = {"param1": "value1"}
+
+        result = ui_log_writer_with_component_name._log_tool_call_input(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsOneOff.ON_TOOL_CALL_INPUT,
+        )
+
+        assert result["component_name"] == "my_component"
+
+    def test_log_tool_call_input_subsession_id_from_kwargs(
+        self, ui_log_writer_with_component_name, mock_tool
+    ):
+        """Test that _log_tool_call_input passes subsession_id from kwargs."""
+        tool_call_args = {"param1": "value1"}
+
+        result = ui_log_writer_with_component_name._log_tool_call_input(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsOneOff.ON_TOOL_CALL_INPUT,
+            subsession_id="sub-789",
+        )
+
+        assert result["subsession_id"] == "sub-789"
+
+    def test_log_warning_embeds_component_name(self, ui_log_writer_with_component_name):
+        """Test that _log_warning embeds component_name."""
+        result = ui_log_writer_with_component_name._log_warning(
+            message="No tools called, reasoning only.",
+        )
+
+        assert result["component_name"] == "my_component"
+        assert result["message_type"] == MessageTypeEnum.AGENT
+        assert result["message_sub_type"] == "reasoning"
+
+    def test_log_warning_subsession_id_from_kwargs(
+        self, ui_log_writer_with_component_name
+    ):
+        """Test that _log_warning passes subsession_id from kwargs."""
+        result = ui_log_writer_with_component_name._log_warning(
+            message="No tools called.",
+            subsession_id="sub-999",
+        )
+
+        assert result["subsession_id"] == "sub-999"
 
     def test_log_tool_call_input_with_custom_message(self, ui_log_writer, mock_tool):
         """Test _log_tool_call_input with custom message."""
@@ -255,3 +313,91 @@ class TestUILogWriterOneOffTools:
 
         args = mock_callback.call_args[0][0]
         assert args.record["additional_context"] == additional_context
+
+    def test_log_success_embeds_component_name(
+        self, ui_log_writer_with_component_name, mock_tool, mock_callback
+    ):
+        """Test that component_name is embedded in success log entries."""
+        tool_call_args = {"param1": "value1"}
+
+        ui_log_writer_with_component_name.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsOneOff.ON_TOOL_EXECUTION_SUCCESS,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] == "my_component"
+
+    def test_log_error_embeds_component_name(
+        self, ui_log_writer_with_component_name, mock_tool, mock_callback
+    ):
+        """Test that component_name is embedded in error log entries."""
+        tool_call_args = {"param1": "value1"}
+
+        ui_log_writer_with_component_name.error(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] == "my_component"
+
+    def test_log_success_subsession_id_from_kwargs(
+        self, ui_log_writer_with_component_name, mock_tool, mock_callback
+    ):
+        """Test that subsession_id is taken from kwargs, not stored at construction."""
+        tool_call_args = {"param1": "value1"}
+
+        ui_log_writer_with_component_name.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsOneOff.ON_TOOL_EXECUTION_SUCCESS,
+            subsession_id="sub-456",
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["subsession_id"] == "sub-456"
+
+    def test_log_success_subsession_id_none_by_default(
+        self, ui_log_writer_with_component_name, mock_tool, mock_callback
+    ):
+        """Test that subsession_id is None when not passed in kwargs."""
+        tool_call_args = {"param1": "value1"}
+
+        ui_log_writer_with_component_name.success(
+            tool=mock_tool,
+            tool_call_args=tool_call_args,
+            event=UILogEventsOneOff.ON_TOOL_EXECUTION_SUCCESS,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record.get("subsession_id") is None
+
+
+class TestOneOffUILogWriterClassFactory:
+    """Test suite for one_off_ui_log_writer_class factory."""
+
+    @pytest.fixture(name="mock_callback")
+    def mock_callback_fixture(self):
+        return Mock()
+
+    def test_factory_returns_callable(self):
+        """Test that the factory returns a callable."""
+        factory = one_off_ui_log_writer_class(component_name="my_component")
+        assert callable(factory)
+
+    def test_factory_creates_writer_with_component_name(self, mock_callback):
+        """Test that the factory creates a writer with the correct component_name."""
+        factory = one_off_ui_log_writer_class(component_name="my_component")
+        writer = factory(mock_callback)
+        assert isinstance(writer, UILogWriterOneOffTools)
+        assert writer._component_name == "my_component"
+
+    def test_factory_is_compatible_with_ui_history_writer_class(self, mock_callback):
+        """Test that the factory result is compatible with UIHistory.writer_class."""
+        factory = one_off_ui_log_writer_class(component_name="my_component")
+        # UIHistory.writer_class expects a callable that takes a single UILogCallback arg
+        writer = factory(mock_callback)
+        assert isinstance(writer, UILogWriterOneOffTools)

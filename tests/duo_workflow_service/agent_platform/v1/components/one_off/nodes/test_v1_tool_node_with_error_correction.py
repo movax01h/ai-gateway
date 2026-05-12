@@ -22,6 +22,7 @@ from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_w
 from duo_workflow_service.agent_platform.v1.components.one_off.ui_log import (
     UILogEventsOneOff,
     UILogWriterOneOffTools,
+    one_off_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
@@ -507,7 +508,7 @@ class TestToolNodeWithErrorCorrectionRun:
         """Test that ON_AGENT_REASONING log is included in the result when no tool calls."""
         ui_history = UIHistory(
             events=[UILogEventsOneOff.ON_AGENT_REASONING],
-            writer_class=UILogWriterOneOffTools,
+            writer_class=one_off_ui_log_writer_class(component_name=component_name),
         )
         tracker = ToolEventTracker(
             flow_id=flow_id,

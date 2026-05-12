@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """Test suite for DeterministicStepComponent class."""
 
 from unittest.mock import AsyncMock, Mock, patch
@@ -552,15 +553,21 @@ class TestDeterministicStepComponentAttachNodes:
         deterministic_step_component,
         mock_state_graph,
         mock_router,
+        component_name,
     ):
-        """Test that the correct UI log writer class is used."""
+        """Test that the correct UI log writer class is used with component_name bound."""
         deterministic_step_component.attach(mock_state_graph, mock_router)
 
         # Get the ui_history argument
         node_call_kwargs = mock_deterministic_step_node_cls.call_args[1]
         ui_history = node_call_kwargs["ui_history"]
 
-        assert ui_history.writer_class == UILogWriterDeterministicStep
+        # writer_class is now a factory (partial) that creates UILogWriterDeterministicStep
+        # with component_name bound — verify by instantiating it
+        mock_cb = Mock()
+        writer = ui_history.writer_class(mock_cb)
+        assert isinstance(writer, UILogWriterDeterministicStep)
+        assert writer._component_name == component_name
 
 
 class TestDeterministicStepComponentAttachEdges:

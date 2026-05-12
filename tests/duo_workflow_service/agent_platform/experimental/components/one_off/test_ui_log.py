@@ -42,7 +42,7 @@ class TestUILogWriterOneOffTools:
     @pytest.fixture(name="ui_log_writer")
     def ui_log_writer_fixture(self, mock_callback):
         """Fixture for a UILogWriterOneOffTools instance."""
-        return UILogWriterOneOffTools(mock_callback)
+        return UILogWriterOneOffTools(mock_callback, component_name="test_component")
 
     @pytest.fixture(name="mock_tool")
     def mock_tool_fixture(self):
