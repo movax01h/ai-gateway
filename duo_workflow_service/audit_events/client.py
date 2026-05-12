@@ -13,8 +13,7 @@ from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 logger = structlog.stdlib.get_logger("audit_event_client")
 
-# TODO: Update to the actual GitLab version that ships the /audit_events API endpoint.
-AUDIT_EVENTS_MIN_GITLAB_VERSION = Version("99.99.0")
+AUDIT_EVENTS_MIN_GITLAB_VERSION = Version("19.0.0")
 
 
 class AuditEventClient:
