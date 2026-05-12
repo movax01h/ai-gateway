@@ -8,7 +8,7 @@ from lib.billing_events.context import UsageQuotaEventContext
 from lib.events.base import GLReportingEventContext
 from lib.internal_events import current_event_context
 from lib.usage_quota.client import UsageQuotaClient
-from lib.usage_quota.errors import UsageQuotaError, UsageQuotaHTTPError
+from lib.usage_quota.errors import UsageQuotaError
 
 __all__ = [
     "UsageQuotaEvent",
@@ -95,23 +95,6 @@ class UsageQuotaService:
             is_quota_available = await self.usage_quota_client.check_quota_available(
                 extended_context
             )
-        except UsageQuotaHTTPError as e:
-            if usage_quota_event_context.realm == "saas":
-                USAGE_QUOTA_CHECK_TOTAL.labels(
-                    result="deny", realm=usage_quota_event_context.realm
-                ).inc()
-                raise
-            USAGE_QUOTA_CHECK_TOTAL.labels(
-                result="fail_open", realm=usage_quota_event_context.realm
-            ).inc()
-            log.warning(
-                "Usage quota check failed, failing open to allow request",
-                realm=usage_quota_event_context.realm,
-                error_message=e.message,
-                error_type=type(e).__name__,
-                correlation_id=getattr(event_context, "correlation_id", None),
-            )
-            return
         except UsageQuotaError as e:
             USAGE_QUOTA_CHECK_TOTAL.labels(
                 result="fail_open", realm=usage_quota_event_context.realm
