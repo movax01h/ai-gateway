@@ -44,7 +44,7 @@ variables:
   FIPS_TARGET_IMAGE: "$DOCKER_MODEL_GATEWAY/fips:$CI_COMMIT_SHORT_SHA"
   SELF_HOSTED_FIPS_TARGET_IMAGE: "$DOCKER_MODEL_GATEWAY/self-hosted-fips:$CI_COMMIT_SHORT_SHA"
 
-  DOCS_LINT_IMAGE: "registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0"
+  DOCS_LINT_IMAGE: "registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2"
 
   SAST_EXCLUDED_PATHS: "tests, tmp, api"
   CS_IMAGE: $TARGET_IMAGE
