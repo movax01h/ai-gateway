@@ -292,77 +292,59 @@ class Config(BaseSettings):
         ),
     )
 
-    logging: Annotated[ConfigLogging, Field(default_factory=ConfigLogging)] = (
-        ConfigLogging()
-    )
+    logging: Annotated[ConfigLogging, Field(default_factory=ConfigLogging)]
     self_signed_jwt: Annotated[
         ConfigSelfSignedJwt, Field(default_factory=ConfigSelfSignedJwt)
-    ] = ConfigSelfSignedJwt()
-    fastapi: Annotated[ConfigFastApi, Field(default_factory=ConfigFastApi)] = (
-        ConfigFastApi()
-    )
-    auth: Annotated[ConfigAuth, Field(default_factory=ConfigAuth)] = ConfigAuth()
+    ]
+    fastapi: Annotated[ConfigFastApi, Field(default_factory=ConfigFastApi)]
+    auth: Annotated[ConfigAuth, Field(default_factory=ConfigAuth)]
     process_level_feature_flags: Annotated[
         ConfigProcessLevelFeatureFlags,
         Field(default_factory=ConfigProcessLevelFeatureFlags),
-    ] = ConfigProcessLevelFeatureFlags()
+    ]
     google_cloud_profiler: Annotated[
         ConfigGoogleCloudProfiler, Field(default_factory=ConfigGoogleCloudProfiler)
-    ] = ConfigGoogleCloudProfiler()
+    ]
     instrumentator: Annotated[
         ConfigInstrumentator, Field(default_factory=ConfigInstrumentator)
-    ] = ConfigInstrumentator()
-    snowplow: Annotated[ConfigSnowplow, Field(default_factory=ConfigSnowplow)] = (
-        ConfigSnowplow()
-    )
+    ]
+    snowplow: Annotated[ConfigSnowplow, Field(default_factory=ConfigSnowplow)]
     internal_event: Annotated[
         ConfigInternalEvent, Field(default_factory=ConfigInternalEvent)
-    ] = ConfigInternalEvent()
+    ]
     billing_event: Annotated[
         ConfigBillingEvent, Field(default_factory=ConfigBillingEvent)
-    ] = ConfigBillingEvent()
-    audit_event: Annotated[
-        ConfigAuditEvent, Field(default_factory=ConfigAuditEvent)
-    ] = ConfigAuditEvent()
+    ]
+    audit_event: Annotated[ConfigAuditEvent, Field(default_factory=ConfigAuditEvent)]
     google_cloud_platform: Annotated[
         ConfigGoogleCloudPlatform, Field(default_factory=ConfigGoogleCloudPlatform)
-    ] = ConfigGoogleCloudPlatform()
-    amazon_q: Annotated[ConfigAmazonQ, Field(default_factory=ConfigAmazonQ)] = (
-        ConfigAmazonQ()
-    )
+    ]
+    amazon_q: Annotated[ConfigAmazonQ, Field(default_factory=ConfigAmazonQ)]
     custom_models: Annotated[
         ConfigCustomModels, Field(default_factory=ConfigCustomModels)
-    ] = ConfigCustomModels()
-    duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)] = (
-        ConfigDuoChat()
-    )
-    model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)] = (
-        ConfigModelKeys()
-    )
+    ]
+    duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)]
+    model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)]
     vertex_text_model: Annotated[
         ConfigVertexTextModel, Field(default_factory=ConfigVertexTextModel)
-    ] = ConfigVertexTextModel()
+    ]
     vertex_search: Annotated[
         ConfigVertexSearch, Field(default_factory=ConfigVertexSearch)
-    ] = ConfigVertexSearch()
+    ]
     model_engine_limits: Annotated[
         ConfigModelLimits, Field(default_factory=ConfigModelLimits)
-    ] = ConfigModelLimits()
+    ]
     bind_tools_cache: Annotated[
         ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)
-    ] = ConfigBindToolsCache()
+    ]
     feature_flags: Annotated[
         ConfigFeatureFlags, Field(default_factory=ConfigFeatureFlags)
-    ] = ConfigFeatureFlags()
+    ]
     customersdot: Annotated[
         ConfigCustomersDot, Field(default_factory=ConfigCustomersDot)
-    ] = ConfigCustomersDot()
-    agentic_mock: Annotated[
-        ConfigAgenticMock, Field(default_factory=ConfigAgenticMock)
-    ] = ConfigAgenticMock()
-    duo_workflow: Annotated[
-        ConfigDuoWorkflow, Field(default_factory=ConfigDuoWorkflow)
-    ] = ConfigDuoWorkflow()
+    ]
+    agentic_mock: Annotated[ConfigAgenticMock, Field(default_factory=ConfigAgenticMock)]
+    duo_workflow: Annotated[ConfigDuoWorkflow, Field(default_factory=ConfigDuoWorkflow)]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
