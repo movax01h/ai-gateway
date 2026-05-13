@@ -10,6 +10,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
+from starlette_context import context as starlette_context
 
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
@@ -132,6 +133,7 @@ async def code_suggestions(
         == "true"
     )
     component = payload.prompt_components[0]
+    starlette_context["code_suggestion_type"] = component.type.value
     code_context = [
         component.payload.content
         for component in payload.prompt_components
