@@ -1,0 +1,9 @@
+{% include 'common/tool_output_security/1.0.0.jinja' %}
+
+Assign reviewers for merge request !{{ merge_request_iid }} in project {{ project_id }}.
+
+Here is the summary comment that was posted:
+{{ comment_data }}
+
+Here is the reviewer data (for looking up user IDs):
+{{ reviewer_data }}

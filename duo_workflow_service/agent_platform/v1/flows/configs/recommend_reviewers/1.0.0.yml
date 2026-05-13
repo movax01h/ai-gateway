@@ -1,0 +1,56 @@
+version: "v1"
+environment: ambient
+components:
+  - name: "post_recommendation"
+    type: OneOffComponent
+    prompt_id: "recommend_reviewers_post"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.reviewer_data"
+        as: "reviewer_data"
+    toolset:
+      - "create_merge_request_note"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "assign_reviewers"
+    type: OneOffComponent
+    prompt_id: "recommend_reviewers_assign"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.reviewer_data"
+        as: "reviewer_data"
+      - from: "context:post_recommendation.tool_responses"
+        as: "comment_data"
+    toolset:
+      - "update_merge_request"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "post_recommendation"
+    to: "assign_reviewers"
+  - from: "assign_reviewers"
+    to: "end"
+
+flow:
+  entry_point: "post_recommendation"
+  inputs:
+    - category: reviewer_data
+      input_schema:
+        current_reviewers:
+          type: array
+        approval_rules:
+          type: array
