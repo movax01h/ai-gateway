@@ -33,6 +33,7 @@ from duo_workflow_service.components import tools_registry
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import normalize_flow_request
 from duo_workflow_service.gitlab.connection_pool import connection_pool
+from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
 )
@@ -223,7 +224,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             additional_properties=InternalEventAdditionalProperties(
                 label=EventLabelEnum.WORKFLOW_RECEIVE_START_REQUEST_LABEL.value,
                 property=EventPropertyEnum.WORKFLOW_ID.value,
-                value=workflow_id,
+                value=extract_id_from_global_id(workflow_id),
             ),
             category=gl_event_context.value,
         )

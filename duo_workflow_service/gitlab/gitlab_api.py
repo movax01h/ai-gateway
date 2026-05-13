@@ -386,6 +386,8 @@ def extract_id_from_global_id(global_id: str):
     extracted_id = 0
     if global_id and isinstance(global_id, str) and "gid://" in global_id:
         extracted_id = int(global_id.split("/")[-1])
+    elif global_id and isinstance(global_id, str) and global_id.startswith("#"):
+        extracted_id = int(global_id.split("#")[-1])
     else:
         extracted_id = int(global_id) if global_id else 0
 

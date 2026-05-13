@@ -49,6 +49,9 @@ def test_extract_id_from_global_id():
     # Test with numeric string project ID
     assert extract_id_from_global_id("456") == 456
 
+    # Test with string and hash
+    assert extract_id_from_global_id("#123") == 123
+
     # Test with missing project ID
     assert extract_id_from_global_id(None) == 0
 

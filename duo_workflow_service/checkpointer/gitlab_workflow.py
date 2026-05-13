@@ -133,6 +133,8 @@ WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
     **{status: "RUNNING" for status in NOOP_WORKFLOW_STATUSES},
 }
 
+PROPERTY_MAX_LENGTH = 1000
+
 
 def _attribute_dirty(
     attribute: str, writes: Sequence[Tuple[str, Any]]
@@ -381,7 +383,7 @@ class GitLabWorkflow(
         except Exception as e:
             failure_properties = InternalEventAdditionalProperties(
                 label=EventLabelEnum.WORKFLOW_FINISH_LABEL.value,
-                property=repr(e),
+                property=repr(e)[:PROPERTY_MAX_LENGTH],
                 value=self._workflow_id,
                 error_type=type(e).__name__,
             )
