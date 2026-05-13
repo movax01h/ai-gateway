@@ -1429,7 +1429,7 @@ async def test_execute_workflow_valid_workflow_metadata(
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="123",
+                workflowID="#123",
                 workflowMetadata=json.dumps({"key": "value"}),
                 mcpTools=mcp_tools,
                 approval=approval,
@@ -1455,7 +1455,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         await anext(result)
 
     mock_abstract_workflow_class.assert_called_once_with(
-        workflow_id="123",
+        workflow_id="#123",
         workflow_metadata={"key": "value"},
         workflow_type=GLReportingEventContext.from_workflow_definition(
             "software_development"
@@ -1583,7 +1583,7 @@ async def test_self_hosted_execute_workflow(
         for request_id in request_ids:
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
-                workflowID="test-workflow",
+                workflowID="#1773",
                 featureQualifiedName="test_feature",
                 featureAiCatalogItem=True,
             )
@@ -1619,7 +1619,7 @@ async def test_track_self_hosted_execute_workflow_unauthorized(
     ):
         yield contract_pb2.TrackSelfHostedClientEvent(
             requestID="test-req",
-            workflowID="test-workflow",
+            workflowID="#1337",
             featureQualifiedName="test_feature",
             featureAiCatalogItem=True,
         )
@@ -1661,7 +1661,7 @@ async def test_track_self_hosted_execute_workflow_billing_event(
     ):
         yield contract_pb2.TrackSelfHostedClientEvent(
             requestID="test-req-id",
-            workflowID="test-workflow-id",
+            workflowID="#1337",
             featureQualifiedName="test_feature",
             featureAiCatalogItem=True,
         )
@@ -1683,7 +1683,7 @@ async def test_track_self_hosted_execute_workflow_billing_event(
         unit_of_measure="request",
         quantity=1,
         metadata={
-            "workflow_id": "test-workflow-id",
+            "workflow_id": "#1337",
             "feature_qualified_name": "test_feature",
             "feature_ai_catalog_item": True,
             "execution_environment": ExecutionEnvironment.DAP.value,
@@ -1750,7 +1750,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="test-workflow-123",
+                workflowID="#1337",
                 workflowDefinition="test",
                 flowConfig=flow_config,
                 flowConfigSchemaVersion=flow_config_schema_version,
@@ -1828,7 +1828,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
         additional_properties=InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_RECEIVE_START_REQUEST_LABEL.value,
             property=EventPropertyEnum.WORKFLOW_ID.value,
-            value="123",
+            value=123,
         ),
         category=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
     )
@@ -1993,7 +1993,7 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="test-id",
+                workflowID="123",
                 flowConfigId="developer",
                 flowConfigSchemaVersion="v1",
                 flowVersion="1.0.0",
@@ -2108,7 +2108,7 @@ async def test_execute_workflow_flow_config_id_and_flow_config_conflict(
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="test-id",
+                workflowID="123",
                 flowConfigId="developer",
                 flowConfigSchemaVersion="v1",
                 flowVersion="1.0.0",

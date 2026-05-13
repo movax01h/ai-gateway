@@ -82,7 +82,7 @@ async def test_execute_workflow_enhanced_logging_with_context(
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="test-workflow-123",
+                workflowID="#123",
                 workflowDefinition="software_development",
             )
         )
@@ -126,7 +126,7 @@ async def test_execute_workflow_enhanced_logging_with_context(
     assert "extra" in call_kwargs
     extra_fields = call_kwargs["extra"]
 
-    assert extra_fields["workflow_id"] == "test-workflow-123"
+    assert extra_fields["workflow_id"] == "#123"
     assert extra_fields["workflow_definition"] == "software_development"
     assert extra_fields["instance_id"] == "test-instance-123"
     assert extra_fields["host_name"] == "gitlab.example.com"
@@ -166,7 +166,7 @@ async def test_execute_workflow_enhanced_logging_without_context(
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
-                workflowID="test-workflow-123",
+                workflowID="#123",
                 workflowDefinition="software_development",
             )
         )
@@ -218,7 +218,7 @@ async def test_execute_workflow_enhanced_logging_without_context(
     assert "extra" in call_kwargs
     extra_fields = call_kwargs["extra"]
 
-    assert extra_fields["workflow_id"] == "test-workflow-123"
+    assert extra_fields["workflow_id"] == "#123"
     assert extra_fields["workflow_definition"] == "software_development"
 
     # Verify event context fields are not present
