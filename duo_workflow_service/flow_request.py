@@ -121,8 +121,14 @@ def normalize_flow_request(
     Raises:
         ValueError: On invalid or conflicting field combinations.
     """
-    has_flow_config_id = start_req.HasField("flowConfigId")
-    has_flow_version = start_req.HasField("flowVersion")
+    # Treat empty strings as "not provided". Some clients (e.g. duo-cli 8.92.0) explicitly
+    # set these fields to "" in the proto, which makes HasField() return True even though
+    # semantically the client meant "unset". Without this guard, Path A activates with an
+    # empty config_id and the validator rejects the request.
+    has_flow_config_id = start_req.HasField("flowConfigId") and bool(
+        start_req.flowConfigId
+    )
+    has_flow_version = start_req.HasField("flowVersion") and bool(start_req.flowVersion)
     has_flow_config = start_req.HasField("flowConfig")
     flow_config_schema_version = start_req.flowConfigSchemaVersion or None
 
