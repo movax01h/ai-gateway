@@ -493,7 +493,7 @@ class AgentComponent(AgentComponentBase):
             conversation_history_key=self._conversation_history_key,
             output_key=self._output_key,
             ui_history=UIHistory(
-                events=self.ui_log_events,  # type: ignore[arg-type]
+                events=self.ui_log_events,
                 writer_class=default_ui_log_writer_class(
                     events_class=UILogEventsAgent, ui_role_as=self.ui_role_as
                 ),
