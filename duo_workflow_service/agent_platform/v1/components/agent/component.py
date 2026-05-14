@@ -26,10 +26,13 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     AgentNode,
     FinalResponseNode,
+    ToolApprovalFetchNode,
+    ToolApprovalRequestNode,
     ToolNode,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
+    UILogWriterAgentTools,
     agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
@@ -39,6 +42,7 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     RouterProtocol,
 )
 from duo_workflow_service.agent_platform.v1.state import (
+    FlowEventType,
     FlowState,
     IOKey,
     IOKeyTemplate,
@@ -53,6 +57,7 @@ from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
+from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
@@ -254,6 +259,8 @@ class AgentComponent(AgentComponentBase):
     description: Optional[str] = None
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
+    require_tool_approval: bool = False
+    pre_approved_tools: list[str] = Field(default_factory=list)
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
@@ -370,7 +377,60 @@ class AgentComponent(AgentComponentBase):
         ):
             return f"{self.name}#final_response"
 
+        if self.require_tool_approval:
+            return f"{self.name}#tool_approval_request"
+
         return f"{self.name}#tools"
+
+    def _tool_approval_request_router(self, state: FlowState) -> str:
+        """Route from tool approval request node.
+
+        Routes to:
+            - fetch: If approval is required (status=TOOL_CALL_APPROVAL_REQUIRED)
+            - tools: If all tools pre-approved (status=EXECUTION)
+        """
+        status_iokey = RuntimeIOKey(
+            alias="status",
+            factory=lambda _: IOKey(target="status"),
+        ).to_iokey(state)
+        status = status_iokey.value_from_state(state)
+
+        needs_approval = status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+
+        if needs_approval:
+            target = f"{self.name}#tool_approval_fetch"
+        else:
+            target = f"{self.name}#tools"
+
+        return target
+
+    def _tool_approval_fetch_router(self, state: FlowState) -> str:
+        """Route from tool approval fetch node.
+
+        Routes to:
+            - tools: If approval was granted (decision=APPROVE)
+            - agent: If approval was rejected (decision=REJECT or MODIFY)
+        """
+        approval_decision_iokey = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: IOKey(
+                target="context",
+                subkeys=[f"{self.name}__tool_approval_decision"],
+                optional=True,
+            ),
+        ).to_iokey(state)
+
+        decision = approval_decision_iokey.value_from_state(state)
+
+        if not decision:
+            raise RoutingError(f"No approval decision found in state for {self.name}")
+
+        if decision == FlowEventType.APPROVE:
+            return f"{self.name}#tools"
+        if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
+            return f"{self.name}#agent"
+
+        raise RoutingError(f"Unexpected approval decision: {decision}")
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
@@ -504,6 +564,58 @@ class AgentComponent(AgentComponentBase):
         graph.add_node(self.__entry_hook__(), node_agent.run)
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)
+
+        # Conditionally add tool approval nodes
+        if self.require_tool_approval:
+            node_tool_approval_request = ToolApprovalRequestNode(
+                name=f"{self.name}#tool_approval_request",
+                conversation_history_key=self._conversation_history_key,
+                toolset=self.toolset,
+                pre_approved_tools=self.pre_approved_tools,
+                status_key=RuntimeIOKey(
+                    alias="status",
+                    factory=lambda _: IOKey(target="status"),
+                ),
+                ui_history=UIHistory(
+                    events=self.ui_log_events,
+                    writer_class=UILogWriterAgentTools,
+                ),
+            )
+
+            node_tool_approval_fetch = ToolApprovalFetchNode(
+                name=f"{self.name}#tool_approval_fetch",
+                conversation_history_key=self._conversation_history_key,
+                status_key=RuntimeIOKey(
+                    alias="status",
+                    factory=lambda _: IOKey(target="status"),
+                ),
+                approval_decision_key=RuntimeIOKey(
+                    alias="tool_approval_decision",
+                    factory=lambda _: IOKey(
+                        target="context",
+                        subkeys=[f"{self.name}__tool_approval_decision"],
+                        optional=True,
+                    ),
+                ),
+            )
+
+            # Add approval nodes to graph
+            graph.add_node(
+                node_tool_approval_request.name, node_tool_approval_request.run
+            )
+            graph.add_node(node_tool_approval_fetch.name, node_tool_approval_fetch.run)
+
+            # Add edges for approval flow
+            # Conditional edge from request: goes to fetch if approval needed, tools if all pre-approved
+            graph.add_conditional_edges(
+                node_tool_approval_request.name,
+                self._tool_approval_request_router,
+            )
+            # Conditional edge from fetch: goes to tools if approved, agent if rejected
+            graph.add_conditional_edges(
+                node_tool_approval_fetch.name,
+                self._tool_approval_fetch_router,
+            )
 
         graph.add_conditional_edges(
             node_agent.name,
