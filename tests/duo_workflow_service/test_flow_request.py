@@ -191,21 +191,25 @@ class TestNormalizeFlowEdgeCases:
         assert result.config_id == "developer"
 
     def test_empty_flow_config_id_raises(self):
+        # flowConfigId="" is treated as "not provided" (client bug workaround), so
+        # has_flow_config_id=False but has_flow_version=True — Path C raises this error.
         req = contract_pb2.StartWorkflowRequest(
             flowConfigId="",
             flowConfigSchemaVersion="v1",
             flowVersion="1.0.0",
         )
-        with pytest.raises(ValidationError, match="flowConfigId cannot be empty"):
+        with pytest.raises(ValueError, match="flowVersion requires flowConfigId"):
             normalize_flow_request(req, lsp_version=Mock())
 
     def test_empty_flow_version_raises(self):
+        # flowVersion="" is treated as "not provided" (client bug workaround), so
+        # has_flow_version=False while has_flow_config_id=True — Path A raises this error.
         req = contract_pb2.StartWorkflowRequest(
             flowConfigId="developer",
             flowConfigSchemaVersion="v1",
             flowVersion="",
         )
-        with pytest.raises(ValidationError, match="flowVersion cannot be empty"):
+        with pytest.raises(ValueError, match="flowConfigId requires flowVersion"):
             normalize_flow_request(req, lsp_version=Mock())
 
     def test_inline_config_ignores_legacy_workflow_definition(self):
