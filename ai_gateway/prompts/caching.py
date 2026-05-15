@@ -20,6 +20,39 @@ CACHE_CONTROL_SUPPORTED_PROVIDERS = frozenset(
 )
 
 
+def _is_gemini_on_litellm(model_kwargs: MutableMapping[str, Any]) -> bool:
+    """Return True when the LiteLLM target is a Gemini model on Vertex AI or Google AI Studio.
+
+    Vertex AI's `cachedContent` API is mutually exclusive with `tools` and
+    `system_instruction` on the same request, and LiteLLM translates Anthropic-style
+    `cache_control_injection_points` into `cachedContent` for these routes. Default
+    injection must be skipped for Gemini, but Anthropic models served via Vertex
+    (e.g. `vertex_ai/claude-...`) keep their native Anthropic cache semantics.
+    """
+    provider = (model_kwargs.get("custom_llm_provider") or "").lower()
+    model = (model_kwargs.get("model") or "").lower()
+
+    # Strip a leading "<provider>/" so we can match the bare model id.
+    bare_model = model.split("/", 1)[1] if "/" in model else model
+
+    on_google_route = provider in {"vertex_ai", "gemini"} or model.startswith(
+        ("vertex_ai/", "gemini/")
+    )
+    return on_google_route and bare_model.startswith("gemini")
+
+
+def should_inject_default_cache_control(
+    model_class_provider: str | None,
+    model_kwargs: MutableMapping[str, Any],
+) -> bool:
+    """Return True when default cache_control_injection_points are safe to inject."""
+    if model_class_provider == ModelClassProvider.ANTHROPIC:
+        return True
+    if model_class_provider == ModelClassProvider.LITE_LLM:
+        return not _is_gemini_on_litellm(model_kwargs)
+    return False
+
+
 def default_cache_control_injection_points() -> list[dict]:
     """Generate default cache control injection points.
 
