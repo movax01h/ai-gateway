@@ -55,10 +55,10 @@ from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvide
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
-    CACHE_CONTROL_SUPPORTED_PROVIDERS,
     CacheControlInjectionPointsConverter,
     default_cache_control_injection_points,
     filter_cache_control_injection_points,
+    should_inject_default_cache_control,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
@@ -412,7 +412,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         if (
             CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
             and prompt_template
-            and model_class_provider in CACHE_CONTROL_SUPPORTED_PROVIDERS
+            and should_inject_default_cache_control(model_class_provider, model_kwargs)
         ):
             model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] = (
                 default_cache_control_injection_points()
