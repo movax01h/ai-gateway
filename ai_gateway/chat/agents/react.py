@@ -33,10 +33,6 @@ __all__ = [
 
 
 _REACT_AGENT_TOOL_ACTION_CONTEXT_KEY = "duo_chat.agent_tool_action"
-_RESPONSE_MAX_TOKENS_WARNING = (
-    "**Warning:** Response was incomplete due to token limits. "
-    "Please try again with less context."
-)
 
 request_log = get_request_logger("react")
 
@@ -107,17 +103,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
         if not meta_data:
             return None
 
-        reason = None
-
-        if finish_reason := meta_data.get("finish_reason"):  # Vertex
-            reason = finish_reason
-
-        if stop_reason := meta_data.get("stop_reason"):  # Anthropic
-            reason = stop_reason
-            if stop_reason == "max_tokens":
-                reason = "length"  # Convert to Vertex format
-
-        return reason
+        return meta_data.get("stop_reason") or meta_data.get("finish_reason")
 
     @override
     def parse_result(
@@ -227,9 +213,7 @@ class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
     def _append_final_message_warnings(
         self, event: AgentFinalAnswer
     ) -> AgentFinalAnswer:
-        if event.finish_reason == "length":
-            event.text = event.text + "\n\n" + _RESPONSE_MAX_TOKENS_WARNING
-        elif event.finish_reason == "guardrail_intervened":
+        if event.finish_reason == "guardrail_intervened":
             event.text = event.text + "\n\n" + GUARDRAIL_INTERVENED_WARNING
         return event
 
