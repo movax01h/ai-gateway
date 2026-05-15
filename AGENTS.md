@@ -179,13 +179,6 @@ make duo-workflow-docs
 # Validate model selection config
 poetry run validate-model-selection-config
 
-# Generate dataset for evaluation
-poetry run generate-dataset
-
-# Run evaluation
-make eval PROMPT_ID=<id> PROMPT_VERSION=<version> DATASET=<path> EVALUATORS=<evaluators>
-```
-
 ## Code Style
 
 ### Formatting Rules

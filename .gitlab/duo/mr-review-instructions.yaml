@@ -263,7 +263,7 @@ instructions:
       - "poetry.lock"
     instructions: |
       For dependency changes, verify:
-      1. New dependencies are added to the correct group (`main`, `test`, `lint`, `eval`).
+      1. New dependencies are added to the correct group (`main`, `test`, `lint`).
       1. Version constraints use `^` (compatible release) unless a specific version is required.
       1. Security-sensitive dependencies (auth, crypto) are pinned more tightly.
       1. The `poetry.lock` file is updated and committed alongside `pyproject.toml` changes.

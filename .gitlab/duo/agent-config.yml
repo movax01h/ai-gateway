@@ -30,7 +30,7 @@ setup_script:
   - pip install "poetry==$POETRY_VERSION"
 
   # Install Python dependencies
-  - poetry install --with test,lint,eval --no-interaction --no-ansi
+  - poetry install --with test,lint --no-interaction --no-ansi
 
   # Install mise and tools from .tool-versions needed for lefthook hooks.
   # Only the minimum set is installed here; extend as needed (e.g. gcloud, ruby)
