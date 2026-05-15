@@ -1,0 +1,90 @@
+<orbit_skill>
+You have access to **GitLab Orbit (Knowledge Graph)** via REST endpoints under
+`/api/v4/orbit/*`. Orbit answers code-structure, cross-project, and SDLC
+questions by traversing GitLab's unified entity graph (projects, users, MRs,
+issues, pipelines, files, definitions, vulnerabilities) more directly than
+browsing REST resources one item at a time.
+
+Use `glab api` (already pre-configured for the current project) to call Orbit.
+The endpoints are user-scoped — do **not** pass `-R owner/repo`.
+
+# Endpoints
+
+| Endpoint                    | Method | Purpose                                                  |
+|-----------------------------|--------|----------------------------------------------------------|
+| `orbit/status`              | GET    | Cluster health.                                          |
+| `orbit/schema`              | GET    | Graph ontology: domains, nodes, edges.                   |
+| `orbit/schema?expand=A,B`   | GET    | Drill into nodes for properties and relationships.       |
+| `orbit/tools`               | GET    | MCP tool manifest with the full query DSL JSON Schema.   |
+| `orbit/query`               | POST   | Execute a query. **Requires `Content-Type` header.**     |
+
+# Discovery first
+
+Before writing queries, discover the live ontology and DSL — names and edges
+evolve, do not guess from REST/API terminology:
+
+```bash
+glab api orbit/status
+glab api orbit/schema
+glab api "orbit/schema?expand=MergeRequest,Project"
+glab api orbit/tools
+```
+
+Budget ≤ 1 discovery call per new entity type per session.
+
+# Running a query
+
+`POST /api/v4/orbit/query` requires an explicit `Content-Type: application/json`
+header. Without it you get `HTTP 415`.
+
+```bash
+cat > /tmp/q.json <<'JSON'
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {"id": "p", "entity": "Project"},
+    "limit": 5
+  },
+  "response_format": "llm"
+}
+JSON
+
+glab api --method POST orbit/query \
+  --header "Content-Type: application/json" \
+  --input /tmp/q.json
+```
+
+Set `"response_format": "llm"` for compact agent-friendly output. Use `"raw"`
+when you need to pipe to `jq`.
+
+# When to use Orbit
+
+- "Who calls this function?" / "Where is this symbol defined?" — code traversal
+- Cross-project dependency / blast-radius analysis
+- "Find MRs touching file X" / "Issues linked to commit Y"
+- Anything answerable by traversing relationships across projects, users, MRs,
+  issues, pipelines, files
+
+Prefer Orbit over multiple REST calls when the question is about **relationships**
+between entities, not a single resource lookup.
+
+# Rules
+
+1. **Discover before querying.** Validate node names, edge types, property
+   names with `orbit/schema` / `orbit/tools`. Do not guess.
+2. **Set `Content-Type: application/json` on POST.** Missing → 415.
+3. **No `-R owner/repo`.** Orbit endpoints are user-scoped.
+4. **Keep `limit` small while iterating** (5–10). Queries can fan out across
+   many namespaces.
+5. **`query_type` dictates the top-level key:** `neighbors` and single-node
+   `traversal` → `node` (singular); multi-node `traversal` / `aggregation` /
+   `path_finding` → `nodes` (array).
+6. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
+   `offset + page_size` must not exceed `limit`. `page_size` max 100.
+7. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
+8. **`path_finding` with `filters` or `id_range` endpoints requires `rel_types`.**
+   When both endpoints use `node_ids`, `rel_types` is optional.
+9. **Read-only.** All endpoints are idempotent queries.
+10. **Sequential.** `orbit/query` is rate-limited. Prefer one aggregation/
+    traversal over N separate queries.
+</orbit_skill>
