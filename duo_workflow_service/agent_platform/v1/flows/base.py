@@ -523,6 +523,12 @@ class Flow(AbstractWorkflow):
         2. Dict with options: {"tool_name": {"option": "value"}}
 
         Returns a Toolset with the appropriate tool options applied.
+
+        Raises:
+            ValueError: If a tool name does not exist in the registry. Note that
+                MCP tools are supplied at runtime and are not present in the
+                registry at validation time; configs using MCP tool names in
+                non-chat-partial environments will fail validation.
         """
         tool_names: list[str] = []
         tool_options: dict[str, dict[str, Any]] = {}
@@ -535,6 +541,15 @@ class Flow(AbstractWorkflow):
                     tool_names.append(tool_name)
                     if options:
                         tool_options[tool_name] = options
+
+        known_names = tools_registry.known_tool_names
+        unknown_names = [name for name in tool_names if name not in known_names]
+        if unknown_names:
+            raise ValueError(
+                f"Unknown tool name(s) in toolset: {unknown_names}. "
+                f"Verify that the tool names are spelled correctly. "
+                f"Note: MCP tools are supplied at runtime and cannot be validated statically."
+            )
 
         return tools_registry.toolset(tool_names, tool_options=tool_options)
 
