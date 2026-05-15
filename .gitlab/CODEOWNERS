@@ -1,5 +1,11 @@
 * @gitlab-org/maintainers/ai-gateway @gitlab-org/maintainers/duo-workflow-service
 
+# Fix Pipeline flows can be approved by all Verify maintainers
+/docs/workflows/fix_pipeline.md @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+/duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+/ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+/ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/ai-gateway
@@ -10,9 +16,16 @@
 /contract/
 /tests/duo_workflow_service/
 
+# Fix Pipeline flow configs
+/duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+
 [AI Gateway] @gitlab-org/maintainers/ai-gateway
 /ai_gateway/
 /tests/ai_gateway/
+
+# Fix Pipeline prompts and response schemas
+/ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+/ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
 ^[Model Configuration] @gitlab-org/maintainers/ai-gateway
 /ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
