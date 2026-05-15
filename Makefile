@@ -3,7 +3,6 @@ AI_GATEWAY_DIR := ${ROOT_DIR}/ai_gateway
 DUO_WORKFLOW_SERVICE_DIR := ${ROOT_DIR}/duo_workflow_service
 DOC_DIR := ${ROOT_DIR}/docs
 LIB_DIR := ${ROOT_DIR}/lib
-EVAL_DIR := ${ROOT_DIR}/eval
 LINTS_DIR := ${ROOT_DIR}/lints
 SCRIPTS_DIR := ${ROOT_DIR}/scripts
 TESTS_DIR := ${ROOT_DIR}/tests
@@ -12,7 +11,6 @@ INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${DUO_WORKFLOW_SERVICE_DIR} \
 	${LIB_DIR} \
-	${EVAL_DIR} \
 	${LINTS_DIR} \
 	${SCRIPTS_DIR} \
 	${TESTS_DIR} \
@@ -149,7 +147,7 @@ clean:
 .PHONY: install-lint-deps
 install-lint-deps:
 	@echo "Installing lint dependencies..."
-	@poetry install --with eval,lint,test # Install all relevant dependencies so pylint has access to them
+	@poetry install --with lint,test # Install all relevant dependencies so pylint has access to them
 
 .PHONY: codespell
 codespell: install-lint-deps
@@ -250,7 +248,7 @@ check-graphql:
 .PHONY: install-test-deps
 install-test-deps:
 	@echo "Installing test dependencies..."
-	@poetry install --with test,eval
+	@poetry install --with test
 
 .PHONY: test
 test: install-test-deps
@@ -301,16 +299,6 @@ markdownlint:
 ingest:
 	@echo "Running data ingestion and refreshing for search APIs..."
 	@$(ROOT_DIR)/scripts/ingest/gitlab-docs/run.sh
-
-.PHONY: install-eval-deps
-install-eval-deps:
-	@echo "Installing evaluation dependencies..."
-	@poetry install --with eval
-
-.PHONY: eval
-eval: install-eval-deps
-	@echo "Running evaluation..."
-	@poetry run eval --prompt-id $(PROMPT_ID) --prompt-version $(PROMPT_VERSION) --dataset $(DATASET) $(EVALUATORS)
 
 .PHONY: duo-workflow-docs
 duo-workflow-docs:

@@ -15,8 +15,6 @@ readme = "README.md"
 ai_gateway = "ai_gateway.main:run_app"
 ai-gateway = "ai_gateway.main:run_app"
 validate-model-selection-config = "ai_gateway.model_selection:validate_model_selection_config"
-eval = "eval.main:main"
-generate-dataset = "eval.generate_dataset:main"
 index_docs = "ai_gateway.scripts.index_docs_as_sqlite:build_indexed_docs"
 troubleshoot = "ai_gateway.scripts.troubleshoot_selfhosted_installation:troubleshoot"
 compute-tps = "ai_gateway.scripts.tps_test:compute_tps"
@@ -96,21 +94,9 @@ url = "https://gitlab.com/api/v4/projects/58733651/packages/pypi/simple"
 priority = "supplemental"
 
 [[tool.poetry.source]]
-name = "cef"
-url = "https://gitlab.com/api/v4/projects/46678122/packages/pypi/simple"
-priority = "supplemental"
-
-[[tool.poetry.source]]
 name = "litellm"
 url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
 priority = "primary"
-
-[tool.poetry.group.eval]
-optional = true
-
-[tool.poetry.group.eval.dependencies]
-cef = { version = "^0.7.1", source = "cef" }
-typer = "^0.21.0"
 
 [tool.poetry.group.test]
 optional = true
@@ -188,7 +174,6 @@ asyncio_default_fixture_loop_scope = "function"
 source = [
   "ai_gateway",
   "duo_workflow_service",
-  "eval",
   "lib",
   "lints",
 ]

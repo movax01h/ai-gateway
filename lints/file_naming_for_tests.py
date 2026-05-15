@@ -16,7 +16,7 @@ EXCLUDED_FILES = {
 
 # Folders to scan for implementation files
 # All AI Gateway service related files is nested under `ai_gateway` folder.
-# Others are directly under root folder, for example, `lints`, `eval` & `duo-workflow-service`.
+# Others are directly under root folder, for example, `lints` & `duo-workflow-service`.
 SOURCE_DIRS = {
     ".",
     "ai_gateway",
