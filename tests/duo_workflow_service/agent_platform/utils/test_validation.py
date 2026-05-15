@@ -12,9 +12,13 @@ from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 def _build_yaml(
     inputs: list[dict] | None = None,
     template_vars: str = "Hello {{ goal }}",
+    toolset: list | None = None,
 ) -> str:
     if inputs is None:
         inputs = [{"from": "context:goal", "as": "goal"}]
+
+    if toolset is None:
+        toolset = []
 
     return yaml.dump(
         {
@@ -26,7 +30,7 @@ def _build_yaml(
                     "name": "comp",
                     "type": "AgentComponent",
                     "prompt_id": "test_prompt",
-                    "toolset": [],
+                    "toolset": toolset,
                     "inputs": inputs,
                 }
             ],
@@ -104,4 +108,45 @@ class TestPromptVariableValidation:
             template_vars="{{ goal }}",
         )
         with pytest.raises(ValueError, match="extra input variables"):
+            validator.validate(yml)
+
+
+class TestToolNameValidation:
+    def test_valid_tool_name_passes(self, validator: FlowValidator):
+        """A known tool name in the toolset should pass validation."""
+        yml = _build_yaml(toolset=["get_issue"])
+        validator.validate(yml)
+
+    def test_empty_toolset_passes(self, validator: FlowValidator):
+        """An empty toolset should pass validation."""
+        yml = _build_yaml(toolset=[])
+        validator.validate(yml)
+
+    def test_unknown_tool_name_raises(self, validator: FlowValidator):
+        """An unknown tool name in the toolset should raise a validation error."""
+        yml = _build_yaml(toolset=["nonexistent_tool_xyz"])
+        with pytest.raises(ValueError, match="Unknown tool name"):
+            validator.validate(yml)
+
+    def test_misspelled_tool_name_raises(self, validator: FlowValidator):
+        """A misspelled tool name should raise a validation error."""
+        yml = _build_yaml(toolset=["get_isue"])  # typo: missing 's'
+        with pytest.raises(ValueError, match="Unknown tool name"):
+            validator.validate(yml)
+
+    def test_multiple_unknown_tool_names_raises(self, validator: FlowValidator):
+        """Multiple unknown tool names should all be reported in the error."""
+        yml = _build_yaml(toolset=["bad_tool_one", "bad_tool_two"])
+        with pytest.raises(ValueError, match="Unknown tool name"):
+            validator.validate(yml)
+
+    def test_valid_tool_with_options_passes(self, validator: FlowValidator):
+        """A known tool name with valid options should pass validation."""
+        yml = _build_yaml(toolset=[{"create_merge_request_note": {"internal": True}}])
+        validator.validate(yml)
+
+    def test_invalid_tool_option_key_raises(self, validator: FlowValidator):
+        """An invalid option key for a known tool should raise a validation error."""
+        yml = _build_yaml(toolset=[{"get_issue": {"nonexistent_option": "value"}}])
+        with pytest.raises(ValueError, match="Invalid tool option"):
             validator.validate(yml)
