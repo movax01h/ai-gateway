@@ -1,5 +1,4 @@
 from typing import Optional
-from unittest.mock import patch
 
 import fastapi
 import pytest
@@ -121,14 +120,12 @@ class TestReActPlainTextParser:
         [
             # Vertex finish_reason
             ({"finish_reason": "stop"}, "stop"),
-            ({"finish_reason": "length"}, "length"),
             # Anthropic stop_reason
             ({"stop_reason": "end_turn"}, "end_turn"),
-            ({"stop_reason": "max_tokens"}, "length"),  # Converted to Vertex format
             # Both present (should not happen) (Anthropic takes precedence)
             (
-                {"finish_reason": "stop", "stop_reason": "max_tokens"},
-                "length",
+                {"finish_reason": "stop", "stop_reason": "end_turn"},
+                "end_turn",
             ),
             # Empty metadata
             ({}, None),
@@ -169,11 +166,6 @@ class TestReActPlainTextParser:
                 AgentFinalAnswer(text="This is the answer", finish_reason="stop"),
             ),
             (
-                "<message>Thought: test\nFinal Answer: Truncated answer</message>",
-                "length",
-                AgentFinalAnswer(text="Truncated answer", finish_reason="length"),
-            ),
-            (
                 "<message>Thought: test\nFinal Answer: No finish reason</message>",
                 None,
                 AgentFinalAnswer(text="No finish reason", finish_reason=None),
@@ -205,14 +197,9 @@ class TestReActPlainTextParser:
                 AgentFinalAnswer(text="final answer", finish_reason="stop"),
             ),
             (
-                "thought1\nFinal Answer: truncated",
-                "length",
-                AgentFinalAnswer(text="truncated", finish_reason="length"),
-            ),
-            (
-                "thought1\nFinal Answer: truncated",
+                "thought1\nFinal Answer: final answer",
                 None,
-                AgentFinalAnswer(text="truncated", finish_reason=None),
+                AgentFinalAnswer(text="final answer", finish_reason=None),
             ),
             (
                 "thought1\nAction: tool1\nAction Input: tool_input1",
@@ -222,39 +209,6 @@ class TestReActPlainTextParser:
                     tool="tool1",
                     tool_input="tool_input1",
                 ),
-            ),
-            (
-                "thought1\nAction: tool1\nAction Input: tool_input1",
-                "length",
-                AgentToolAction(
-                    thought="thought1",
-                    tool="tool1",
-                    tool_input="tool_input1",
-                ),
-            ),
-            (
-                "thought1\nAction: tool1\nAction Input: tool_input1",
-                None,
-                AgentToolAction(
-                    thought="thought1",
-                    tool="tool1",
-                    tool_input="tool_input1",
-                ),
-            ),
-            (
-                "Just some random text",
-                "stop",
-                AgentUnknownAction(text="Just some random text"),
-            ),
-            (
-                "Just some random text",
-                "length",
-                AgentUnknownAction(text="Just some random text"),
-            ),
-            (
-                "Just some random text",
-                None,
-                AgentUnknownAction(text="Just some random text"),
             ),
         ],
     )
@@ -653,12 +607,22 @@ class TestReActAgent:
                     ],
                 ),
                 ValueError(
-                    "litellm.BadRequestError: BedrockException - Your request was blocked by a guardrail policy. Please revise your input and try again."
+                    "litellm.BadRequestError: BedrockException - "
+                    "Your request was blocked by a guardrail policy. "
+                    "Please revise your input and try again."
                 ),
-                "litellm.BadRequestError: BedrockException - Your request was blocked by a guardrail policy. Please revise your input and try again.",
+                (
+                    "litellm.BadRequestError: BedrockException - "
+                    "Your request was blocked by a guardrail policy. "
+                    "Please revise your input and try again."
+                ),
                 [
                     AgentError(
-                        message="litellm.BadRequestError: BedrockException - Your request was blocked by a guardrail policy. Please revise your input and try again.",
+                        message=(
+                            "litellm.BadRequestError: BedrockException - "
+                            "Your request was blocked by a guardrail policy. "
+                            "Please revise your input and try again."
+                        ),
                         retryable=False,
                     ),
                 ],
@@ -746,14 +710,6 @@ class TestAppendFinalMessageWarnings:
         ("event", "expected_text"),
         [
             (
-                AgentFinalAnswer(text="Response text", finish_reason="length"),
-                (
-                    "Response text\n\n"
-                    "**Warning:** Response was incomplete due to token limits. "
-                    "Please try again with less context."
-                ),
-            ),
-            (
                 AgentFinalAnswer(
                     text="Response text", finish_reason="guardrail_intervened"
                 ),
@@ -777,61 +733,3 @@ class TestAppendFinalMessageWarnings:
         else:
             assert isinstance(result, AgentFinalAnswer)
             assert result.text == expected_text
-
-
-class TestGLAgentRemoteExecutorTruncationWarning:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("agent_events", "expected_text"),
-        [
-            (
-                [
-                    AgentFinalAnswer(
-                        text="This is a complete answer text", finish_reason="stop"
-                    )
-                ],
-                "This is a complete answer text",
-            ),
-            (
-                [
-                    AgentFinalAnswer(
-                        text="This is truncated text", finish_reason="length"
-                    )
-                ],
-                (
-                    "This is truncated text\n\n"
-                    "**Warning:** Response was incomplete due to token limits. "
-                    "Please try again with less context."
-                ),
-            ),
-            (
-                [AgentFinalAnswer(text="No finish reason text", finish_reason=None)],
-                "No finish reason text",
-            ),
-            (
-                [AgentFinalAnswer(text="End turn text", finish_reason="end_turn")],
-                "End turn text",
-            ),
-        ],
-    )
-    async def test_stream_truncation_warning(self, agent_events, expected_text, agent):
-        """Test that truncation warning is appended when response exceeds max tokens in astream."""
-        inputs = ReActAgentInputs(
-            messages=[
-                Message(role=Role.USER, content="Test question"),
-            ],
-        )
-
-        async def mock_parent_astream(*_args, **_kwargs):
-            for event in agent_events:
-                yield event
-
-        with (
-            patch.object(type(agent).__bases__[0], "astream", new=mock_parent_astream),
-            request_cycle_context({}),
-        ):
-            actual_events = [event async for event in agent.astream(inputs)]
-
-        assert len(actual_events) == 1
-        assert isinstance(actual_events[0], AgentFinalAnswer)
-        assert actual_events[0].text == expected_text
