@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,line-too-long,too-many-lines,unused-argument
 import json
 from datetime import datetime
 from typing import AsyncIterator, Type
@@ -472,7 +473,7 @@ class TestReActAgentStream:
             for chunk in response.text.strip().split("\n")
         ]
 
-        agent_inputs = ReActAgentInputs(
+        ReActAgentInputs(
             messages=messages,
             agent_scratchpad=[
                 AgentStep(

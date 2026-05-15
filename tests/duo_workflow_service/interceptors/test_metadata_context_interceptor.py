@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,8 +16,8 @@ from lib.langsmith_tracing import X_GITLAB_LANGSMITH_TRACE_HEADER
 from lib.mcp_server_tools.context import current_mcp_server_tools_context
 
 
-@pytest.fixture
-def mock_config():
+@pytest.fixture(name="mock_config")
+def mock_config_fixture():
     """Create a properly configured mock Config for tests."""
     config = MagicMock(spec=Config)
     config.custom_models = MagicMock()
@@ -24,8 +25,8 @@ def mock_config():
     return config
 
 
-@pytest.fixture
-def langsmith_trace_headers():
+@pytest.fixture(name="langsmith_trace_headers")
+def langsmith_trace_headers_fixture():
     """Realistic LangSmith trace headers as received from gRPC metadata."""
     return {
         "langsmith-trace": "20260311T174147261908Z019cddfd-8c7d-78c3-820e-5bcd59922f3d",
@@ -42,8 +43,8 @@ def langsmith_trace_headers():
     }
 
 
-@pytest.fixture
-def interceptor_setup(mock_config):
+@pytest.fixture(name="interceptor_setup")
+def interceptor_setup_fixture(mock_config):
     """Helper to set up interceptor test with given metadata."""
 
     def _setup(metadata_list):

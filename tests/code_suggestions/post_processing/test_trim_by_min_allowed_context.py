@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import pytest
 
 from ai_gateway.code_suggestions.processing.ops import LanguageId, find_cursor_position

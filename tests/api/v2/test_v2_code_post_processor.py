@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,unsubscriptable-object,unsupported-membership-test
 """Tests for post processor creation in code completions."""
 
 import pytest

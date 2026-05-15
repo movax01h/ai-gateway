@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests, unused-argument, redefined-outer-name, direct-environment-variable-reference
+# pylint: disable=file-naming-for-tests, unused-argument, redefined-outer-name
 import asyncio
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch

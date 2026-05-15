@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import json
 from unittest.mock import AsyncMock, Mock
 

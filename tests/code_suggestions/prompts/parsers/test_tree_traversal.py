@@ -1,5 +1,4 @@
-from typing import List
-
+# pylint: disable=file-naming-for-tests,simplifiable-if-expression
 import pytest
 from tree_sitter import Node
 

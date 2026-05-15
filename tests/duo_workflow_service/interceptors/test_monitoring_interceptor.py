@@ -1,3 +1,4 @@
+# pylint: disable=pointless-statement,unused-argument
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import grpc
@@ -254,9 +255,9 @@ async def test_interceptor_handles_exception():
 
     assert total_calls == 1.0
     assert len(cap_logs) == 2
-    assert cap_logs[0]["event"] == f"Test Exception"
+    assert cap_logs[0]["event"] == "Test Exception"
     assert cap_logs[0]["exception_class"] == "Exception"
-    assert cap_logs[1]["event"] == f"Finished ErrorMethod RPC"
+    assert cap_logs[1]["event"] == "Finished ErrorMethod RPC"
 
 
 @pytest.mark.asyncio
@@ -305,6 +306,6 @@ async def test_interceptor_stream_handles_exception():
 
     assert total_calls == 1.0
     assert len(cap_logs) == 2
-    assert cap_logs[0]["event"] == f"Test Exception"
+    assert cap_logs[0]["event"] == "Test Exception"
     assert cap_logs[0]["exception_class"] == "BaseException"
-    assert cap_logs[1]["event"] == f"Finished StreamErrorMethod RPC"
+    assert cap_logs[1]["event"] == "Finished StreamErrorMethod RPC"

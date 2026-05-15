@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from time import time
 from unittest.mock import patch
 
@@ -59,8 +60,6 @@ async def test_success(
     request_body: dict,
     search_results: dict,
 ):
-    from ai_gateway.searches.typing import SearchResult
-
     time_now = time()
     search_result_objects = [
         SearchResult(

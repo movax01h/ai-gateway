@@ -1,3 +1,4 @@
+# pylint: disable=invalid-overridden-method,super-init-not-called,unidiomatic-typecheck
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

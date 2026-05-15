@@ -1,5 +1,6 @@
+# pylint: disable=import-outside-toplevel,unused-variable,unused-argument
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import grpc
 import pytest
@@ -23,8 +24,8 @@ def mock_user_with_skip_usage_cutoff_fixture():
     )
 
 
-@pytest.fixture(autouse=True)
-def mock_usage_quota_service(mock_duo_workflow_service_container):
+@pytest.fixture(autouse=True, name="mock_usage_quota_service")
+def mock_usage_quota_service_fixture(mock_duo_workflow_service_container):
     """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
 
     This ensures the @has_sufficient_usage_quota decorator works correctly.

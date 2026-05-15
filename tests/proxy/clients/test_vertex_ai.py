@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel
 import json
 from unittest.mock import ANY, patch
 
@@ -149,7 +150,7 @@ async def test_request_url(
 
 def test_allowed_upstream_models_includes_anthropic():
     """Test allowed models include text-embeddings and Claude models."""
-    vertex_factory = VertexAIProxyModelFactory(
+    VertexAIProxyModelFactory(
         endpoint="test-endpoint",
         project="test-project",
         location="test-location",

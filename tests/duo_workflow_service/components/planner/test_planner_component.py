@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,unused-argument
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -23,7 +24,7 @@ def approval_component_fixture(mock_toolset):
 
 
 @pytest.fixture(name="mock_build_agent")
-def mock_build_agent():
+def mock_build_agent_fixture():
     with patch("duo_workflow_service.components.planner.component.build_agent") as mock:
         yield mock
 

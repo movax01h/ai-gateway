@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines
+# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments,unused-variable,unused-argument
 
 import time
 from typing import Any, Dict, List, Union
@@ -17,13 +17,10 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import (
-    _get_provider_config,
     _track_code_suggestions_event,
 )
-from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
-from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator

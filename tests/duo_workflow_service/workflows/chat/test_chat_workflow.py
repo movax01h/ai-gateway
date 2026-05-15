@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg,unused-argument
 import json
 from unittest.mock import ANY, MagicMock, Mock, patch
 from uuid import UUID
@@ -455,7 +456,6 @@ async def test_workflow_run_with_agent_name_override(
     flow_type,
 ):
     """Test that agent_name_override is passed to create_agent for chat-partial flows."""
-    mock_user_interface_instance = mock_checkpoint_notifier.return_value
     state = {"status": "Not Started", "ui_chat_log": []}
 
     class AsyncIterator:

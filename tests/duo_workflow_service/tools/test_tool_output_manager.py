@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel
 import json
 from typing import Any
 from unittest.mock import Mock, patch

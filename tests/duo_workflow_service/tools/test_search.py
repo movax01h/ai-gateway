@@ -1,10 +1,10 @@
+# pylint: disable=too-many-lines,import-outside-toplevel,unused-argument
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.search import (
     AdvanceBlobSearch,
     BaseSearchInput,
@@ -609,8 +609,6 @@ class TestBlobSearchFileExclusion:
         from langchain_core.tools.base import ToolException
         from structlog.testing import capture_logs
 
-        from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-
         failed_response = GitLabHttpResponse(
             status_code=404,
             body={"message": "404 Project Not Found"},
@@ -926,7 +924,7 @@ class TestAdvanceBlobSearch:
 
         tool = AdvanceBlobSearch(metadata=metadata_with_project)
 
-        with capture_logs() as captured_logs:
+        with capture_logs():
             with pytest.raises(ToolException) as exc_info:
                 await tool._arun(
                     search="test",

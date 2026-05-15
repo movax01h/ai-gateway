@@ -11,20 +11,20 @@ from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitla
 )
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     return Mock()
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
     }
 
 
-@pytest.fixture
-def success_response_mock():
+@pytest.fixture(name="success_response_mock")
+def success_response_mock_fixture():
     return GitLabHttpResponse(
         status_code=200,
         body={

@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import pytest
 
 from ai_gateway.models.v2.openai import ChatOpenAI

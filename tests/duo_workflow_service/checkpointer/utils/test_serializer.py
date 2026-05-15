@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel
 import ormsgpack
 import pytest
 from langgraph.types import Interrupt
@@ -8,8 +9,8 @@ from duo_workflow_service.checkpointer.utils.serializer import (
 )
 
 
-@pytest.fixture
-def serializer():
+@pytest.fixture(name="serializer")
+def serializer_fixture():
     return CheckpointSerializer()
 
 

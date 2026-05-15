@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long,too-many-lines
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -1416,29 +1417,29 @@ def test_revert_to_detected_vulnerability_format_display_message(
     assert tool.format_display_message(input_data) == expected_message
 
 
-@pytest.fixture
-def vulnerability_ids():
+@pytest.fixture(name="vulnerability_ids")
+def vulnerability_ids_fixture():
     return [
         "gid://gitlab/Vulnerability/542",
         "gid://gitlab/Vulnerability/543",
     ]
 
 
-@pytest.fixture
-def input_data(vulnerability_ids):
+@pytest.fixture(name="input_data")
+def input_data_fixture(vulnerability_ids):
     return {
         "project_full_path": "gitlab-duo/test",
         "vulnerability_ids": vulnerability_ids,
     }
 
 
-@pytest.fixture
-def successful_project_response():
+@pytest.fixture(name="successful_project_response")
+def successful_project_response_fixture():
     return {"data": {"project": {"id": "gid://gitlab/Project/1000000"}}}
 
 
-@pytest.fixture
-def successful_issue_response():
+@pytest.fixture(name="successful_issue_response")
+def successful_issue_response_fixture():
     return {
         "data": {
             "vulnerabilitiesCreateIssue": {
@@ -1453,13 +1454,15 @@ def successful_issue_response():
     }
 
 
-@pytest.fixture
-def successful_mock_sequence(successful_project_response, successful_issue_response):
+@pytest.fixture(name="successful_mock_sequence")
+def successful_mock_sequence_fixture(
+    successful_project_response, successful_issue_response
+):
     return [successful_project_response, successful_issue_response]
 
 
-@pytest.fixture
-def expected_response():
+@pytest.fixture(name="expected_response")
+def expected_response_fixture():
     return json.dumps(
         {
             "issue": {

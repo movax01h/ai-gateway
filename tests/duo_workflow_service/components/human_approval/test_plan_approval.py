@@ -1,3 +1,4 @@
+# pylint: disable=direct-environment-variable-reference
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 

@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from unittest.mock import Mock, patch
 
 import pytest

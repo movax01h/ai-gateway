@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, Mock
 
@@ -418,7 +419,7 @@ async def test_list_group_audit_events_with_filters(
         "created_before": "2019-08-31T23:59:59Z",
     }
 
-    response = await tool.arun(input_data)
+    await tool.arun(input_data)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/groups/60/audit_events",
@@ -628,7 +629,7 @@ async def test_list_project_audit_events_with_filters(
         "created_before": "2020-05-31T23:59:59Z",
     }
 
-    response = await tool.arun(input_data)
+    await tool.arun(input_data)
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/7/audit_events",

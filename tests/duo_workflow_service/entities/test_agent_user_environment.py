@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long,use-implicit-booleaness-not-comparison
 import json
 from typing import Any, Dict, Optional
 from unittest.mock import Mock

@@ -1,7 +1,7 @@
+# pylint: disable=unused-variable,direct-environment-variable-reference,unused-argument
 import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
-from uuid import uuid4
 
 import pytest
 
@@ -9,7 +9,6 @@ from contract import contract_pb2
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
-    UiChatLog,
     WorkflowStatusEnum,
 )
 from duo_workflow_service.errors.typing import NotifiableException
@@ -121,8 +120,8 @@ def workflow_fixture(user):
     )
 
 
-@pytest.fixture
-def langsmith_trace_headers():
+@pytest.fixture(name="langsmith_trace_headers")
+def langsmith_trace_headers_fixture():
     """Realistic LangSmith trace headers as stored by the interceptor."""
     return {
         "langsmith-trace": "20260311T180532123456Z-abcd1234-5678-90ef-ghij-klmnopqrstuv",
@@ -149,8 +148,8 @@ def mock_namespace_fixture():
     }
 
 
-@pytest.fixture
-def mock_action():
+@pytest.fixture(name="mock_action")
+def mock_action_fixture():
     return contract_pb2.Action()
 
 
@@ -360,8 +359,6 @@ async def test_compile_and_run_graph_with_cancellation_during_fetch(
     mock_fetch_workflow_and_container_data,
     workflow,
 ):
-    from duo_workflow_service.entities.state import WorkflowStatusEnum
-
     mock_fetch_workflow_and_container_data.side_effect = asyncio.CancelledError(
         AIO_CANCEL_STOP_WORKFLOW_REQUEST
     )

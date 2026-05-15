@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import pytest
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims

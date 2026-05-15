@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, Mock
 
@@ -6,7 +7,6 @@ from langchain_core.tools import ToolException
 
 from duo_workflow_service.tools.vulnerabilities.severity import (
     UpdateVulnerabilitySeverity,
-    UpdateVulnerabilitySeverityInput,
 )
 
 # Common URL test parameters
@@ -41,8 +41,8 @@ URL_ERROR_CASES = [
 ]
 
 
-@pytest.fixture
-def vulnerability_data():
+@pytest.fixture(name="vulnerability_data")
+def vulnerability_data_fixture():
     """Fixture for common vulnerability data."""
     return [
         {
@@ -58,21 +58,21 @@ def vulnerability_data():
     ]
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     return Mock()
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
     }
 
 
-@pytest.fixture
-def tool(metadata):
+@pytest.fixture(name="tool")
+def tool_fixture(metadata):
     return UpdateVulnerabilitySeverity(metadata=metadata)
 
 

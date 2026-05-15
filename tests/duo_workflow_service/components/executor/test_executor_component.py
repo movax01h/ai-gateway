@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,unused-argument
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -13,7 +14,7 @@ from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_build_agent")
-def mock_build_agent():
+def mock_build_agent_fixture():
     with patch(
         "duo_workflow_service.components.executor.component.build_agent"
     ) as mock:

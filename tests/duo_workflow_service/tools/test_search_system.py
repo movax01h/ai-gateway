@@ -1,10 +1,10 @@
+# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.tools import ToolException
 
-from contract import contract_pb2
 from duo_workflow_service.tools.search_system import (
     ExtractLinesFromText,
     ExtractLinesFromTextInput,

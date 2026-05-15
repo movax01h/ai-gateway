@@ -49,20 +49,20 @@ GET_SECURITY_FINDINGS_JSON = """
 # editorconfig-checker-enable
 
 
-@pytest.fixture
-def gitlab_client_mock():
+@pytest.fixture(name="gitlab_client_mock")
+def gitlab_client_mock_fixture():
     """Fixture for a mocked GitLab client."""
     return Mock()
 
 
-@pytest.fixture
-def metadata(gitlab_client_mock):
+@pytest.fixture(name="metadata")
+def metadata_fixture(gitlab_client_mock):
     """Fixture for tool metadata containing the mocked client."""
     return {"gitlab_client": gitlab_client_mock}
 
 
-@pytest.fixture
-def security_finding_response_data():
+@pytest.fixture(name="security_finding_response_data")
+def security_finding_response_data_fixture():
     """Fixture for a successful security finding GraphQL response."""
     return json.loads(GET_SECURITY_FINDINGS_JSON)
 

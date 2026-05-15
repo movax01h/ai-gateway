@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel
 """Tests for HiddenLayerScanner logging behavior based on realm configuration.
 
 Tests verify that HiddenLayerScanner only logs threat detection responses when:
@@ -16,8 +17,8 @@ from duo_workflow_service.security.hidden_layer_scanner import (
 from duo_workflow_service.security.prompt_scanner import DetectionType
 
 
-@pytest.fixture
-def mock_hidden_layer_response_with_detection():
+@pytest.fixture(name="mock_hidden_layer_response_with_detection")
+def mock_hidden_layer_response_with_detection_fixture():
     """Create a mock Hidden Layer response with threat detection."""
     response = MagicMock()
     response.evaluation = MagicMock()
@@ -36,8 +37,8 @@ def mock_hidden_layer_response_with_detection():
     return response
 
 
-@pytest.fixture
-def mock_hidden_layer_response_no_detection():
+@pytest.fixture(name="mock_hidden_layer_response_no_detection")
+def mock_hidden_layer_response_no_detection_fixture():
     """Create a mock Hidden Layer response without threat detection."""
     response = MagicMock()
     response.evaluation = MagicMock()

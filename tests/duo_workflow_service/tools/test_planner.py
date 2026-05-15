@@ -1,3 +1,4 @@
+# pylint: disable=pointless-statement
 import json
 from typing import Any, cast
 

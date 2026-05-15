@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import pytest
 from anthropic import AsyncAnthropic
 

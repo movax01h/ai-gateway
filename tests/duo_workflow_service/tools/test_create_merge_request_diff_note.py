@@ -662,14 +662,14 @@ async def test_create_diff_note_no_op_guard(
     )
     gitlab_client_mock.apost = AsyncMock(return_value=discussion_response)
     tool = CreateMergeRequestDiffNote(metadata=metadata)
-    args = dict(
-        project_id=1,
-        merge_request_iid=9,
-        body=body,
-        old_path="src/main.py",
-        new_path="src/main.py",
-        new_line=42,
-    )
+    args = {
+        "project_id": 1,
+        "merge_request_iid": 9,
+        "body": body,
+        "old_path": "src/main.py",
+        "new_path": "src/main.py",
+        "new_line": 42,
+    }
 
     if refused:
         with pytest.raises(ToolException, match="identical to the targeted line"):

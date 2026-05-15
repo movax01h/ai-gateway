@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 # This test module covers DuoBaseTool and all its helper methods (_paginate_get,
 # _process_http_response, _validate_*_url, _check_tier_access, etc.).
 # Splitting it would scatter related tests across multiple files and reduce

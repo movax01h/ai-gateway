@@ -39,7 +39,7 @@ async def test_get_workflow_status(gitlab_status_updater):
         parse_json=True,
     )
 
-    assert result is "running"
+    assert result == "running"
 
 
 @pytest.mark.asyncio

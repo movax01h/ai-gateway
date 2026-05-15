@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 

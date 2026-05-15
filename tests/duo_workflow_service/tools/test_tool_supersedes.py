@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """Tests for tool supersedes functionality.
 
 Ensures that tools superseding other tools have the same name as the superseded tool. This constraint is critical for

@@ -1,3 +1,5 @@
+# pylint: disable=file-naming-for-tests
+# flake8: noqa: E122,E261
 import pytest
 
 from ai_gateway.code_suggestions.processing.ops import (

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines,too-many-public-methods
 from unittest.mock import patch
 from urllib.parse import quote
 

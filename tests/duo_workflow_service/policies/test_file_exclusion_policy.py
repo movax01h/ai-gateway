@@ -1,8 +1,5 @@
+# pylint: disable=implicit-str-concat,too-many-public-methods,use-implicit-booleaness-not-comparison
 """Tests for FileExclusionPolicy class."""
-
-from pathlib import Path
-
-import pytest
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy

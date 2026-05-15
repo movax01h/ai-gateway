@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,line-too-long,use-dict-literal,unused-argument
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, call, patch
 

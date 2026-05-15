@@ -1,5 +1,5 @@
+# pylint: disable=unnecessary-lambda,file-naming-for-tests,unused-argument
 import asyncio
-import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -35,7 +35,7 @@ def tools_registry_with_all_privileges_fixture(tool_metadata):
 
 
 @pytest.fixture(name="mock_build_agent")
-def mock_build_agent():
+def mock_build_agent_fixture():
     with patch(
         "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.build_agent"
     ) as mock:

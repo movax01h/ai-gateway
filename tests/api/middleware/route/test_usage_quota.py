@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,29 +13,31 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 from lib.usage_quota.service import UsageQuotaService
 
 
-@pytest.fixture
-def mock_user():
+@pytest.fixture(name="mock_user")
+def mock_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
     )
 
 
-@pytest.fixture
-def mock_user_with_skip_usage_cutoff():
+@pytest.fixture(name="mock_user_with_skip_usage_cutoff")
+def mock_user_with_skip_usage_cutoff_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
     )
 
 
-@pytest.fixture
-def mock_usage_quota_service():
+@pytest.fixture(name="mock_usage_quota_service")
+def mock_usage_quota_service_fixture():
     """Create a mock usage quota service."""
     return AsyncMock(spec=UsageQuotaService)
 
 
-@pytest.fixture
-def mock_request(mock_user, mock_ai_gateway_container, mock_usage_quota_service):
+@pytest.fixture(name="mock_request")
+def mock_request_fixture(
+    mock_user, mock_ai_gateway_container, mock_usage_quota_service
+):
     """Create a mock request object with usage_quota_service."""
     mock_ai_gateway_container.usage_quota.service.override(mock_usage_quota_service)
     request = MagicMock(spec=Request)
@@ -157,7 +160,7 @@ class TestEventTypeResolution:
 
         mock_usage_quota_service.execute = AsyncMock()
 
-        response = await decorated(mock_request)
+        await decorated(mock_request)
 
         # Verify execute was called with correct event_type
         call_args = mock_usage_quota_service.execute.call_args
@@ -186,7 +189,7 @@ class TestEventTypeResolution:
 
         mock_usage_quota_service.execute = AsyncMock()
 
-        response = await decorated(mock_request, payload=mock_payload)
+        await decorated(mock_request, payload=mock_payload)
 
         # Verify execute was called with resolved event_type
         call_args = mock_usage_quota_service.execute.call_args
@@ -242,7 +245,7 @@ class TestFeatureQualifiedName:
 
         mock_usage_quota_service.execute = AsyncMock()
 
-        response = await decorated(mock_request)
+        await decorated(mock_request)
 
         # Verify execute was called with correct feature name
         call_args = mock_usage_quota_service.execute.call_args

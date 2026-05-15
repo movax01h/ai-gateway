@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel,line-too-long,too-many-lines
 import base64
 import json
 from unittest.mock import AsyncMock, Mock, patch

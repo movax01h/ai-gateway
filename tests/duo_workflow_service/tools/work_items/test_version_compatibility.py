@@ -1,5 +1,5 @@
-# pylint: disable=file-naming-for-tests
 """Tests for version compatibility utilities."""
+
 from unittest.mock import patch
 
 import pytest

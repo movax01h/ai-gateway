@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,import-outside-toplevel
 """Tests for AI prompt scanning integration.
 
 Tests verify security scanning behavior based on prompt_injection_protection_level:
@@ -8,7 +9,7 @@ Tests verify security scanning behavior based on prompt_injection_protection_lev
 PromptSecurity sanitization always runs regardless of protection level.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

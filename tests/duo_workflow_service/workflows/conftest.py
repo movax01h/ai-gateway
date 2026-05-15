@@ -1,4 +1,3 @@
-from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 

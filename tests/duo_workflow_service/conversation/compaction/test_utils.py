@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines
+# pylint: disable=too-many-lines,too-many-public-methods,use-implicit-booleaness-not-comparison
 """Tests for conversation compaction utility functions."""
 
 from unittest.mock import patch

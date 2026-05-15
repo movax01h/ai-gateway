@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """Integration test for verbose AI logs functionality in AI Gateway."""
 
 from unittest.mock import patch

@@ -1,5 +1,4 @@
 import asyncio
-from unittest.mock import MagicMock, Mock, patch
 from uuid import UUID
 
 import pytest
@@ -7,7 +6,6 @@ from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import (
-    MAX_MESSAGE_LENGTH,
     Outbox,
     OutboxSignal,
 )

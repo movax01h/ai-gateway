@@ -1,8 +1,9 @@
+# pylint: disable=file-naming-for-tests
 from dataclasses import asdict
 from unittest import mock
 
 import pytest
-from snowplow_tracker import SelfDescribingJson, Snowplow, StructuredEvent
+from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from ai_gateway.tracking import (
     SnowplowClient,

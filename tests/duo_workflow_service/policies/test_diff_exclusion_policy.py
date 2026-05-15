@@ -1,8 +1,5 @@
+# pylint: disable=use-implicit-booleaness-not-comparison
 """Tests for DiffExclusionPolicy class."""
-
-import json
-
-import pytest
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
