@@ -264,11 +264,14 @@ class TestProxyOpenAI:
 
         mock_track_billing_event.assert_called_once_with(
             ANY,
-            event=BillingEvent.AIGW_PROXY_USE,
-            category="ai_gateway.proxy.clients.base",
+            BillingEvent.AIGW_PROXY_USE,
+            "ai_gateway.proxy.clients.base",
             unit_of_measure="request",
             quantity=1,
             metadata={
+                "feature_qualified_name": "ai_gateway_proxy_use",
+                "feature_ai_catalog_item": False,
+                "execution_environment": "duo_agent_platform",
                 "llm_operations": [
                     {
                         "token_count": 3,
@@ -283,8 +286,8 @@ class TestProxyOpenAI:
                         "operation_type": "standard",
                     }
                 ],
-                "feature_qualified_name": "ai_gateway_proxy_use",
-                "feature_ai_catalog_item": False,
+                "tool_names": [],
+                "orbit_called": False,
             },
         )
 

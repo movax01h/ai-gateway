@@ -16,16 +16,17 @@ from ai_gateway.proxy.clients.base import (
     litellm_async_success_callback,
 )
 from lib.billing_events import BillingEvent
+from lib.billing_events.service import ExecutionEnvironment
 
 
 @pytest.fixture(name="proxy_client")
 def proxy_client_fixture(
     limits,
     internal_event_client,
-    billing_event_client,
+    billing_event_service,
 ):
-    """Fixture providing a ProxyClient instance."""
-    return ProxyClient(limits, internal_event_client, billing_event_client)
+    """Fixture providing a ProxyClient instance backed by a real BillingEventService."""
+    return ProxyClient(limits, internal_event_client, billing_event_service)
 
 
 @pytest.fixture(name="test_proxy_model")
@@ -132,17 +133,21 @@ async def test_valid_proxy_request_billing_event_callback(
         _end_time=1,
     )
 
-    # Verify billing event was tracked with correct parameters
+    # The service forwards to BillingEventsClient with positional event/category and
+    # an enriched metadata dict (execution_environment, tool_names, orbit_called).
     billing_event_client.track_billing_event.assert_called_once_with(
         proxy_client.user,
-        event=BillingEvent.AIGW_PROXY_USE,
-        category="ai_gateway.proxy.clients.base",
+        BillingEvent.AIGW_PROXY_USE,
+        "ai_gateway.proxy.clients.base",
         unit_of_measure="request",
         quantity=1,
         metadata={
-            "llm_operations": expected_llm_operations,
             "feature_qualified_name": "ai_gateway_proxy_use",
             "feature_ai_catalog_item": False,
+            "execution_environment": ExecutionEnvironment.DAP.value,
+            "llm_operations": expected_llm_operations,
+            "tool_names": [],
+            "orbit_called": False,
         },
     )
 
@@ -154,14 +159,14 @@ def test_litellm_callback_registered():
 def test_current_proxy_client_context_var_set_on_init(
     limits,
     internal_event_client,
-    billing_event_client,
+    billing_event_service,
 ):
     """Test that current_proxy_client context var is set when initializing a proxy client."""
     # Reset context var to None before test
     current_proxy_client.set(None)
 
     # Create a proxy client
-    proxy_client = ProxyClient(limits, internal_event_client, billing_event_client)
+    proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
 
     # Verify the context var is set to the proxy client instance
     assert current_proxy_client.get() is proxy_client
@@ -173,7 +178,7 @@ async def test_proxy_exception_code(
     limits,
     request_factory,
     internal_event_client,
-    billing_event_client,
+    billing_event_service,
     test_proxy_model,
 ):
 
@@ -191,7 +196,7 @@ async def test_proxy_exception_code(
 
     mock_proxy_async_client.request.side_effect = http_exception
 
-    proxy_client = ProxyClient(limits, internal_event_client, billing_event_client)
+    proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
     response = await proxy_client.proxy(request_factory(), test_proxy_model)
 
     assert isinstance(response, JSONResponse)
@@ -205,7 +210,7 @@ async def test_proxy_exception_code_with_malformed_json_message(
     limits,
     request_factory,
     internal_event_client,
-    billing_event_client,
+    billing_event_service,
     test_proxy_model,
 ):
 
@@ -215,7 +220,7 @@ async def test_proxy_exception_code_with_malformed_json_message(
 
     mock_proxy_async_client.request.side_effect = http_exception
 
-    proxy_client = ProxyClient(limits, internal_event_client, billing_event_client)
+    proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
     response = await proxy_client.proxy(request_factory(), test_proxy_model)
 
     assert isinstance(response, JSONResponse)

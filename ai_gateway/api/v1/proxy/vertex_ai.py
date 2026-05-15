@@ -12,14 +12,12 @@ from ai_gateway.api.v1.proxy.request import (
     verify_project_namespace_metadata,
 )
 from ai_gateway.async_dependency_resolver import (
-    get_billing_event_client,
     get_internal_event_client,
     get_proxy_client,
     get_vertexai_proxy_model_factory,
 )
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients import ProxyClient, VertexAIProxyModelFactory
-from lib.billing_events.client import BillingEventsClient
 from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent
@@ -45,9 +43,6 @@ async def vertex_ai(
     ],
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
-    ],
-    billing_event_client: Annotated[  # pylint: disable=unused-argument
-        BillingEventsClient, Depends(get_billing_event_client)
     ],
 ):
     model = await vertexai_proxy_model_factory.factory(request)

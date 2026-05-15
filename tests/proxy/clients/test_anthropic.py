@@ -15,9 +15,9 @@ def anthropic_factory_fixture(monkeypatch):
 
 
 @pytest.fixture(name="proxy_client")
-def proxy_client_fixture(limits, internal_event_client, billing_event_client):
+def proxy_client_fixture(limits, internal_event_client, billing_event_service):
     """Fixture to create a ProxyClient instance."""
-    return ProxyClient(limits, internal_event_client, billing_event_client)
+    return ProxyClient(limits, internal_event_client, billing_event_service)
 
 
 @pytest.fixture(name="request_params")
@@ -201,7 +201,7 @@ async def test_count_tokens_endpoint(
 async def test_anthropic_beta_header_handling(
     mock_proxy_async_client,
     internal_event_client,
-    billing_event_client,
+    billing_event_service,
     limits,
     monkeypatch,
     request_factory,
@@ -215,7 +215,7 @@ async def test_anthropic_beta_header_handling(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
 
     anthropic_factory = AnthropicProxyModelFactory()
-    proxy_client = ProxyClient(limits, internal_event_client, billing_event_client)
+    proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
 
     # Make request
     request = request_factory(
