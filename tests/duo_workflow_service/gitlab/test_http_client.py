@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long,unused-argument
 from typing import Any, Optional
 from unittest.mock import AsyncMock
 

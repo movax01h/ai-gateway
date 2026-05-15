@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,use-dict-literal
 from typing import Optional, Union
 
 import pytest

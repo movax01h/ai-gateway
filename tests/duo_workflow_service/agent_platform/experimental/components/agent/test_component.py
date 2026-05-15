@@ -1,4 +1,3 @@
-# pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
 """Test suite for AgentComponent class."""
 
 # pylint: disable=too-many-lines

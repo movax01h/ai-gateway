@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,unused-argument
 from json import JSONDecodeError
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -27,8 +28,8 @@ def config_values_fixture():
     }
 
 
-@pytest.fixture
-def config_values_custom_models_disabled(config_values, monkeypatch):
+@pytest.fixture(name="config_values_custom_models_disabled")
+def config_values_custom_models_disabled_fixture(config_values, monkeypatch):
     monkeypatch.setitem(config_values["custom_models"], "enabled", False)
     return config_values
 
@@ -362,7 +363,11 @@ class BaseTestCodeEmbeddings:
         ("error_class", "error_args", "expected_error_message"),
         [
             (ValueError, ["some error"], "some error"),
-            (JSONDecodeError, ["some error", "doc", 1], "some error"),
+            (
+                JSONDecodeError,
+                ["some error", "doc", 1],
+                "some error: line 1 column 2 (char 1)",
+            ),
             (
                 UnicodeDecodeError,
                 ["utf-8", b"", 0, 1, "some error"],
@@ -395,7 +400,7 @@ class BaseTestCodeEmbeddings:
             response_error_message = (
                 f"Error creating the model_metadata: {expected_error_message}"
             )
-            response.json()["detail"] == response_error_message
+            assert response.json()["detail"] == response_error_message
 
     def test_no_model_metadata_created(
         self,
@@ -414,7 +419,7 @@ class BaseTestCodeEmbeddings:
         ):
             response = self._post_request(mock_client=mock_client, params=params)
 
-            response.json()["detail"] == "No model metadata created"
+            assert response.json()["detail"] == "No model metadata created"
 
             assert response.status_code == 422
 

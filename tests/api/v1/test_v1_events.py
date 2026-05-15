@@ -1,15 +1,14 @@
+# pylint: disable=file-naming-for-tests,line-too-long,unused-argument
 import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, call, patch
 
 import pytest
-from botocore.exceptions import ClientError
-from fastapi import HTTPException, status
+from fastapi import status
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from q_developer_boto3 import boto3 as q_boto3
 
 from ai_gateway.api.v1 import api_router
-from ai_gateway.config import Config
 from ai_gateway.integrations.amazon_q.errors import AccessDeniedExceptionReason
 
 q_client = q_boto3.client("q", region_name="us-west-1")

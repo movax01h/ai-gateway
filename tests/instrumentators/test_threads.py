@@ -1,7 +1,6 @@
-import asyncio
-from typing import Awaitable, Callable
+# pylint: disable=global-statement,invalid-name,no-else-return
 from unittest import mock
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, Mock
 
 import pytest
 from structlog.testing import capture_logs

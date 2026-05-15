@@ -1,4 +1,4 @@
-import asyncio
+# pylint: disable=import-outside-toplevel
 import json
 from unittest.mock import AsyncMock
 

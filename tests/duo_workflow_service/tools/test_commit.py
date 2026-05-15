@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long,too-many-lines,unnecessary-lambda,unused-argument
 import base64
 import json
 from datetime import datetime
@@ -24,8 +25,6 @@ from duo_workflow_service.tools.commit import (
 
 def create_http_response(data, status_code=200):
     """Helper function to create a GitLabHttpResponse from data."""
-    from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-
     return GitLabHttpResponse(status_code=status_code, body=data)
 
 

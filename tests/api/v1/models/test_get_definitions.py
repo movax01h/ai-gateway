@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel,unused-argument
 from unittest.mock import MagicMock, patch
 
 import pytest

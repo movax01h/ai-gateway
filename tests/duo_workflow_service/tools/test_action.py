@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import asyncio
 from unittest.mock import AsyncMock, patch
 
@@ -12,8 +13,8 @@ from duo_workflow_service.executor.action import (
 from duo_workflow_service.executor.outbox import Outbox
 
 
-@pytest.fixture
-def metadata():
+@pytest.fixture(name="metadata")
+def metadata_fixture():
     outbox = Outbox()
     return {"outbox": outbox}
 

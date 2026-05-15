@@ -1,7 +1,5 @@
 """Tests for base tool methods shared across work item tools."""
 
-# pylint: disable=file-naming-for-tests
-
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest

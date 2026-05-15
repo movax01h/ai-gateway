@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,line-too-long
 from unittest.mock import Mock, patch
 
 from duo_workflow_service.security.prompt_security import (

@@ -1,3 +1,4 @@
+# pylint: disable=inconsistent-return-statements,no-else-return,unused-argument
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest

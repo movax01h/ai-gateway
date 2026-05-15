@@ -1,9 +1,9 @@
+# pylint: disable=import-outside-toplevel
 """Shared fixtures for tool tests."""
 
 import pytest
 
 from contract import contract_pb2
-from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 
 
 @pytest.fixture(autouse=True)
@@ -13,12 +13,8 @@ def mock_tool_trust_level(monkeypatch):
     This bypasses security wrapping so tool logic tests can verify raw output without wrapper interference. Security
     wrapping behavior is tested separately in tests/duo_workflow_service/security/.
     """
-    original_arun = None
-
     # Import here to avoid circular imports
     from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-
-    original_arun = DuoBaseTool._arun
 
     async def _arun_without_wrapping(self, *args, **kwargs):
         """Execute tool without security wrapping."""

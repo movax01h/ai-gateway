@@ -44,4 +44,4 @@ async def test_fetch_workflow_config_success():
     ]
     assert workflow["workflow_definition"] == "software_development"
     assert workflow["status"] == "finished"
-    assert workflow["allow_agent_to_request_user"] == True
+    assert workflow["allow_agent_to_request_user"] is True

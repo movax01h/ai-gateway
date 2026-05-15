@@ -1,4 +1,4 @@
-# pylint: disable=unused-argument
+# pylint: disable=line-too-long,unused-argument
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest

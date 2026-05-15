@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,import-outside-toplevel
 """Tests for Unicode tag security functionality."""
 
 from duo_workflow_service.security.prompt_security import (

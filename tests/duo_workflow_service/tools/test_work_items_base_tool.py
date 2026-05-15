@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,use-implicit-booleaness-not-comparison
 from typing import Any
 
 import pytest

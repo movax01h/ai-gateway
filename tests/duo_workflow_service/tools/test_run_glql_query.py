@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -8,30 +9,30 @@ from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.run_glql_query import GLQLQueryInput, RunGLQLQuery
 
 
-@pytest.fixture
-def mock_gitlab_client():
+@pytest.fixture(name="mock_gitlab_client")
+def mock_gitlab_client_fixture():
     """Fixture providing a mocked GitLab client."""
     client = AsyncMock()
     client.apost = AsyncMock()
     return client
 
 
-@pytest.fixture
-def glql_tool(mock_gitlab_client):
+@pytest.fixture(name="glql_tool")
+def glql_tool_fixture(mock_gitlab_client):
     """Fixture providing a RunGLQLQuery tool instance."""
     return RunGLQLQuery(metadata={"gitlab_client": mock_gitlab_client})
 
 
-@pytest.fixture
-def mock_version_18_6():
+@pytest.fixture(name="mock_version_18_6")
+def mock_version_18_6_fixture():
     """Fixture that mocks GitLab version as 18.6.0."""
     with patch("duo_workflow_service.tools.run_glql_query.gitlab_version") as mock:
         mock.get.return_value = "18.6.0"
         yield mock
 
 
-@pytest.fixture
-def sample_glql_query():
+@pytest.fixture(name="sample_glql_query")
+def sample_glql_query_fixture():
     """Sample GLQL query in markdown format."""
     return """```glql
 display: table

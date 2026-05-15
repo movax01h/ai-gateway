@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel,file-naming-for-tests
 import pytest
 
 from duo_workflow_service.security.exceptions import SecurityException
@@ -289,7 +290,6 @@ class TestFlowConfigPrompts:
     def test_placeholder_roles_not_validated(self):
         """Test that placeholder/metadata roles are not validated as prompt text."""
         # This simulates a real flow config with placeholder role
-        from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
         from duo_workflow_service.workflows.registry import (
             _validate_flow_config_prompts,
         )
@@ -312,7 +312,6 @@ class TestFlowConfigPrompts:
 
     def test_only_prompt_text_roles_validated(self):
         """Test that only system/user/assistant/function roles are validated."""
-        from duo_workflow_service.security.exceptions import SecurityException
         from duo_workflow_service.workflows.registry import (
             _validate_flow_config_prompts,
         )

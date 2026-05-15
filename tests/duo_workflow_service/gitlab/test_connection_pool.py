@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 """Tests for the connection pool manager."""
 
 import ssl
@@ -13,8 +14,8 @@ from duo_workflow_service.gitlab.connection_pool import (
 )
 
 
-@pytest_asyncio.fixture
-async def pool_manager():
+@pytest_asyncio.fixture(name="pool_manager")
+async def pool_manager_fixture():
     """Create a fresh connection pool manager for each test."""
     # Reset the singleton instance
     ConnectionPoolManager._instance = None

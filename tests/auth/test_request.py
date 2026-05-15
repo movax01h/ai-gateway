@@ -1,5 +1,4 @@
-from unittest.mock import Mock
-
+# pylint: disable=file-naming-for-tests,unused-argument
 import pytest
 from fastapi import HTTPException
 from gitlab_cloud_connector import GitLabUnitPrimitive

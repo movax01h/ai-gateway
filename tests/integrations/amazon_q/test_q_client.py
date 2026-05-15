@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from typing import Any, Optional
 from unittest.mock import MagicMock, Mock, call, patch
 

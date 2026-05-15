@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,8 +40,8 @@ from tests.duo_workflow_service.tools.constants import (
 )
 
 
-@pytest.fixture
-def mock_project():
+@pytest.fixture(name="mock_project")
+def mock_project_fixture():
     return Project(
         id=1,
         name="test-project",
@@ -52,8 +53,8 @@ def mock_project():
     )
 
 
-@pytest.fixture
-def metadata_with_project(mock_project):
+@pytest.fixture(name="metadata_with_project")
+def metadata_with_project_fixture(mock_project):
     mock_outbox = MagicMock()
     mock_outbox.put_action_and_wait_for_response = AsyncMock(
         return_value=create_mock_client_event_with_response("test contents")
@@ -88,10 +89,6 @@ async def test_read_file_not_implemented_error():
 
 @pytest.mark.asyncio
 async def test_write_file(mock_project):
-    from tests.duo_workflow_service.tools.conftest import (
-        create_mock_client_event_with_response,
-    )
-
     mock_outbox = MagicMock()
     mock_outbox.put_action_and_wait_for_response = AsyncMock(
         return_value=create_mock_client_event_with_response("done")
@@ -125,10 +122,6 @@ async def test_write_file_not_implemented_error():
 class TestFindFiles:
     @pytest.mark.asyncio
     async def test_find_files_arun_method(self, mock_project):
-        from tests.duo_workflow_service.tools.conftest import (
-            create_mock_client_event_with_response,
-        )
-
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
             return_value=create_mock_client_event_with_response("file1.py\nfile2.py")
@@ -169,10 +162,6 @@ class TestFindFiles:
 class TestLsDir:
     @pytest.mark.asyncio
     async def test_list_dir_success(self, mock_project):
-        from tests.duo_workflow_service.tools.conftest import (
-            create_mock_client_event_with_response,
-        )
-
         # Set up the mock outbox
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
@@ -294,10 +283,6 @@ class TestMkdir:
 class TestEditFile:
     @pytest.mark.asyncio
     async def test_basic(self, mock_project):
-        from tests.duo_workflow_service.tools.conftest import (
-            create_mock_client_event_with_response,
-        )
-
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
             return_value=create_mock_client_event_with_response("success")
@@ -972,10 +957,6 @@ class TestFileExclusionPolicy:
     @pytest.mark.asyncio
     async def test_list_dir_with_exclusion_policy(self, project_with_exclusions):
         """Test ListDir tool respects FileExclusionPolicy."""
-        from tests.duo_workflow_service.tools.conftest import (
-            create_mock_client_event_with_response,
-        )
-
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
             return_value=create_mock_client_event_with_response(
@@ -1000,10 +981,6 @@ class TestFileExclusionPolicy:
     @pytest.mark.asyncio
     async def test_find_files_with_exclusion_policy(self, project_with_exclusions):
         """Test FindFiles tool respects FileExclusionPolicy."""
-        from tests.duo_workflow_service.tools.conftest import (
-            create_mock_client_event_with_response,
-        )
-
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock(
             return_value=create_mock_client_event_with_response(

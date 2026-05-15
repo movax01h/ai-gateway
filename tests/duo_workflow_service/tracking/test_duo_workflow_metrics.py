@@ -1,3 +1,4 @@
+# pylint: disable=too-many-public-methods
 import time
 import unittest
 from typing import Any, cast

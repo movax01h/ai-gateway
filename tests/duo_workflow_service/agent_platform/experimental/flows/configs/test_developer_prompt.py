@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,redefined-outer-name,unsubscriptable-object
+# pylint: disable=file-naming-for-tests,unsubscriptable-object
 """Tests for the developer and developer_unstable flow user prompt template rendering."""
 
 import pytest
@@ -40,8 +40,9 @@ def _load_user_prompt_template(flow_name: str, flow_version: str | None = None) 
         ("developer", None),
     ],
     ids=["developer-1.0.0"],
+    name="user_prompt_template",
 )
-def user_prompt_template(request):
+def user_prompt_template_fixture(request):
     """User prompt template for configs that have goal-routing logic."""
     flow_name, flow_version = request.param
     return _load_user_prompt_template(flow_name, flow_version)

@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests,line-too-long
 from duo_workflow_service.security.markdown_content_security import (
     strip_mermaid_comments,
 )

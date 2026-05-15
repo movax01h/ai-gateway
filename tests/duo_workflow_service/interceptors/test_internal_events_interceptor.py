@@ -24,7 +24,7 @@ def interceptor_fixture():
 
 
 @pytest.fixture(name="mock_user")
-def mock_user():
+def mock_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(

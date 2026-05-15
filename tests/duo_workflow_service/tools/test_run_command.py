@@ -11,7 +11,6 @@ from duo_workflow_service.tools.command import (
     RunCommand,
     RunCommandInput,
     ShellCommand,
-    ShellCommandInput,
 )
 
 

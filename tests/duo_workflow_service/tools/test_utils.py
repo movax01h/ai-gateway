@@ -1,3 +1,4 @@
+# pylint: disable=invalid-name
 from abc import abstractmethod
 
 import pytest
@@ -6,8 +7,8 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.utils import get_all_ops_tools, get_all_subclasses
 
 
-@pytest.fixture
-def test_classes():
+@pytest.fixture(name="test_classes")
+def test_classes_fixture():
     class TestBase(DuoBaseTool):
         name: str = "base_tool"
         description: str = "A base tool"

@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """These tests live in the security test directory intentionally: the tool test
 directory's conftest replaces ``_arun`` with a stripped version that skips
 security processing, which would make these tests meaningless.  The security
@@ -23,7 +24,7 @@ class SecretReturningTool(DuoBaseTool):
     _response: Any = None
 
     def set_response(self, response: Any) -> None:
-        self._response = response  # pylint: disable=attribute-defined-outside-init
+        self._response = response
 
     async def _execute(self, *args: Any, **kwargs: Any) -> Any:
         return self._response

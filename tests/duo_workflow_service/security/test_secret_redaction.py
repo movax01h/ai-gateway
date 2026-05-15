@@ -1,6 +1,5 @@
+# pylint: disable=import-outside-toplevel
 """Tests for the secret_redaction module."""
-
-import copy
 
 import pytest
 from langchain_core.messages import ToolMessage

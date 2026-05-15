@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 from typing import Union
 
 import pytest

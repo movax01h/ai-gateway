@@ -1,5 +1,4 @@
-from typing import get_type_hints
-
+# pylint: disable=unused-variable
 from contract.contract_pb2 import OsInformationContext as OsInformationContextProto
 from contract.contract_pb2 import (
     ShellInformationContext as ShellInformationContextProto,

@@ -1,3 +1,4 @@
+# pylint: disable=dangerous-default-value,import-outside-toplevel
 from unittest.mock import AsyncMock, Mock
 
 import fastapi

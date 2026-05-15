@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 """Unit tests for bind_tools_cache module.
 
 Tests cover:
@@ -285,7 +286,7 @@ class TestBindToolsCache:
         assert bound1 is bound1_again
 
         # Add third entry - should evict bound2 (LRU)
-        bound3 = cache.get_or_bind(fake_model, "model-3", tools3, None, "test")
+        cache.get_or_bind(fake_model, "model-3", tools3, None, "test")
 
         # Verify bound2 was evicted (cache miss)
         bound2_new = cache.get_or_bind(fake_model, "model-2", tools2, None, "test")

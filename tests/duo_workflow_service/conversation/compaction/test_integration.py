@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 """Tests for integration.py maybe_compact_history function."""
 
 from unittest.mock import AsyncMock, MagicMock, patch

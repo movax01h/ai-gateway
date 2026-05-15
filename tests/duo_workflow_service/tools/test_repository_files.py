@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines,unused-argument
 import base64
 import json
 from unittest.mock import AsyncMock
@@ -43,8 +44,8 @@ def metadata_fixture(gitlab_client_mock):
     }
 
 
-@pytest.fixture
-def metadata_with_project(gitlab_client_mock):
+@pytest.fixture(name="metadata_with_project")
+def metadata_with_project_fixture(gitlab_client_mock):
     """Metadata with a mock project that has exclusion rules."""
     project = {"exclusion_rules": ["*.log", "node_modules/", "*.tmp", "secret_*"]}
     return {
@@ -54,8 +55,8 @@ def metadata_with_project(gitlab_client_mock):
     }
 
 
-@pytest.fixture
-def metadata_no_exclusion_rules(gitlab_client_mock):
+@pytest.fixture(name="metadata_no_exclusion_rules")
+def metadata_no_exclusion_rules_fixture(gitlab_client_mock):
     """Metadata with a project that has no exclusion rules."""
     project = {"exclusion_rules": []}
     return {

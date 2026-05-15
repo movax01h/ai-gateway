@@ -1,3 +1,4 @@
+# pylint: disable=direct-environment-variable-reference,unused-argument
 """Tests for ToolsApprovalComponent."""
 
 import os
@@ -25,18 +26,18 @@ from duo_workflow_service.tools.toolset import MalformedToolCallError
 
 
 def set_up_graph(
-    node_return_value, component: ToolsApprovalComponent
+    node_side_effect, component: ToolsApprovalComponent
 ) -> tuple[Runnable, AsyncMock, AsyncMock, AsyncMock]:
     graph = StateGraph(WorkflowState)
     graph.set_entry_point("first_node")
-    mock_entry_node = AsyncMock(side_effect=node_return_value)
+    mock_entry_node = AsyncMock(side_effect=node_side_effect)
     graph.add_node("first_node", mock_entry_node)
 
-    mock_termination_node = AsyncMock(side_effect=node_return_value)
+    mock_termination_node = AsyncMock(side_effect=node_side_effect)
     graph.add_node("termination", mock_termination_node)
     graph.add_edge("termination", END)
 
-    mock_continuation_node = AsyncMock(side_effect=node_return_value)
+    mock_continuation_node = AsyncMock(side_effect=node_side_effect)
     graph.add_node("continuation", mock_continuation_node)
     graph.add_edge("continuation", END)
     entry_point = component.attach(
@@ -171,7 +172,7 @@ class TestToolsApprovalComponent:
             patch(
                 "duo_workflow_service.components.human_approval.tools_approval.format_tool_display_message",
                 return_value=None,
-            ) as mock_format_tool_msg,
+            ),
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
             node_resp = [

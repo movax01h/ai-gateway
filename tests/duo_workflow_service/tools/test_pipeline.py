@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines
+# pylint: disable=import-outside-toplevel,too-many-lines,unused-argument
 import json
 from unittest.mock import AsyncMock, Mock, call
 

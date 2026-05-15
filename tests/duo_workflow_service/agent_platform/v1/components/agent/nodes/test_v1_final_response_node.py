@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests
+# pylint: disable=file-naming-for-tests,import-outside-toplevel,unused-argument
 import json
 from unittest.mock import Mock, patch
 

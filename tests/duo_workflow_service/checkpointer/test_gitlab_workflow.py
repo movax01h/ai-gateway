@@ -1,3 +1,4 @@
+# pylint: disable=comparison-with-callable,import-outside-toplevel,line-too-long,no-else-raise,no-else-return,too-many-lines,unused-argument
 import asyncio
 import json
 from asyncio import CancelledError

@@ -1,5 +1,4 @@
-import json
-import os
+# pylint: disable=unused-argument
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 

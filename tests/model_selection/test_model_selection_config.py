@@ -666,8 +666,8 @@ def test_validate_with_invalid_size_preference_field(fs: FakeFilesystem):
     assert "non-existent-small" in str(excinfo.value)
 
 
-@pytest.fixture
-def size_preference_model_dir(fs: FakeFilesystem):
+@pytest.fixture(name="size_preference_model_dir")
+def size_preference_model_dir_fixture(fs: FakeFilesystem):
     """Shared fixture for size preference validation tests.
 
     Creates a minimal models.yml with small and large models for testing models_for_size_preference validation
@@ -708,7 +708,7 @@ def size_preference_model_dir(fs: FakeFilesystem):
 
 
 def test_validate_size_preference_without_selectable_models_passes(
-    size_preference_model_dir: Path,  # pylint: disable=redefined-outer-name
+    size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
     """Server-side size routing without selectable_models should pass validation.
@@ -740,7 +740,7 @@ def test_validate_size_preference_without_selectable_models_passes(
 
 
 def test_validate_size_preference_models_not_required_in_selectable(
-    size_preference_model_dir: Path,  # pylint: disable=redefined-outer-name
+    size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
     """models_for_size_preference values don't need to appear in selectable_models.

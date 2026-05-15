@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 import pytest
 
 from ai_gateway.code_suggestions.processing.post.ops import clean_model_reflection
@@ -27,7 +28,7 @@ only
 COMPLETION_JAVASCRIPT_1_3 = """
 only
 
-const another_function = () => {} 
+const another_function = () => {}
 """.strip(
     "\n"
 )
@@ -145,10 +146,10 @@ COMPLETION_PYTHON_2_1 = """
 
 
 PREFIX_RUBY_1 = """
-# frozen_string_literal: true                    
-                                                 
-require 'carrierwave/orm/activerecord'           
-                                                 
+# frozen_string_literal: true
+
+require 'carrierwave/orm/activerecord'
+
 class Project < ApplicationRecord
   include Gitlab::ConfigHelper
   include Gitlab::VisibilityLevel

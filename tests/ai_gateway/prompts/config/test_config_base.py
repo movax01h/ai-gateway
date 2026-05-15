@@ -1,3 +1,4 @@
+# pylint: disable=file-naming-for-tests
 """Tests for ai_gateway.prompts.config.base module."""
 
 import pytest

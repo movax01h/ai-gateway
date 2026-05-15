@@ -1,3 +1,4 @@
+# pylint: disable=line-too-long,too-many-lines,use-implicit-booleaness-not-comparison,unused-argument
 from typing import List, cast
 from unittest.mock import patch
 

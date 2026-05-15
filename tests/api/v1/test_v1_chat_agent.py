@@ -1,24 +1,12 @@
-import json
-from datetime import datetime
-from typing import AsyncIterator
-from unittest.mock import Mock, PropertyMock, patch
+# pylint: disable=import-outside-toplevel,file-naming-for-tests,unused-argument
+from unittest.mock import Mock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from starlette.testclient import TestClient
 
 from ai_gateway.api.v1 import api_router
-from ai_gateway.api.v1.chat.typing import ChatRequest, PromptPayload
-from ai_gateway.api.v2.chat.typing import AgentRequest
-from ai_gateway.chat.agents import AgentStep, AgentToolAction, Message, ReActAgentInputs
-from ai_gateway.chat.agents.typing import AgentFinalAnswer, TypeAgentEvent
+from ai_gateway.chat.agents.typing import AgentFinalAnswer
 from ai_gateway.models import KindAnthropicModel
-from ai_gateway.models.base_chat import Role
-from lib.feature_flags import (
-    FeatureFlag,
-    current_feature_flag_context,
-    is_feature_enabled,
-)
 
 
 @pytest.fixture(name="auth_user")
@@ -169,7 +157,7 @@ class TestDuoCoreAuthorizationCutoff:
     async def test_duo_core_authorization_cutoff(
         self, cutoff_enabled, feature_enablement_type, should_raise
     ):
-        from unittest.mock import AsyncMock, Mock
+        from unittest.mock import AsyncMock
 
         from fastapi import HTTPException
         from gitlab_cloud_connector import GitLabUnitPrimitive
