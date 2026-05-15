@@ -155,6 +155,7 @@ components:
     prompt_version: "^1.0.0"
     toolset:
       - "create_issue"
+      - "gitlab_api_post"
     inputs:
       - from: "context:project_id"
         as: "project_id"

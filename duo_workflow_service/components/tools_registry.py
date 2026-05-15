@@ -333,15 +333,6 @@ class ToolsRegistry:
                 metadata=tool_metadata
             )
 
-    @property
-    def known_tool_names(self) -> frozenset[str]:
-        """Return the set of all tool names registered in this registry.
-
-        Returns:
-            A frozenset of all tool names available in the registry.
-        """
-        return frozenset(self._enabled_tools.keys())
-
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)
 

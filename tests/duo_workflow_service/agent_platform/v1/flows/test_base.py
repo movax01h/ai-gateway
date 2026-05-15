@@ -125,11 +125,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         ) as mock_tools_registry_class:
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
-            # Return a frozenset containing all tool names used in tests so that
-            # _parse_toolset validation passes without raising ValueError.
-            mock_tools_registry.known_tool_names = frozenset(
-                ["read_file", "create_file_with_contents", "edit_file"]
-            )
             mock_tools_registry_class.configure = AsyncMock(
                 return_value=mock_tools_registry
             )
