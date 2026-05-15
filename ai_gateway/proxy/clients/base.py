@@ -18,11 +18,11 @@ from starlette.background import BackgroundTask
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
-    get_llm_operations,
     init_llm_operations,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
-from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.billing_events import BillingEvent
+from lib.billing_events.service import BillingEventService, ExecutionEnvironment
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
 
@@ -100,11 +100,11 @@ class ProxyClient:
         self,
         limits: ConfigModelLimits,
         internal_event_client: InternalEventsClient,
-        billing_event_client: BillingEventsClient,
+        billing_event_service: BillingEventService,
     ):
         self.limits = limits
         self.internal_event_client = internal_event_client
-        self.billing_event_client = billing_event_client
+        self.billing_event_service = billing_event_service
         self.watcher = None
         self.user = None
         current_proxy_client.set(self)
@@ -222,20 +222,15 @@ async def litellm_async_success_callback(
         proxy_client.watcher.labels["model_name"], usage_metadata
     )
 
-    metadata = {
-        "llm_operations": get_llm_operations(),
-        "feature_qualified_name": gl_event_context.feature_qualified_name,
-        "feature_ai_catalog_item": gl_event_context.feature_ai_catalog_item,
-    }
-
     # Track event only after `func` returns so we don't trigger a billable event if an exception occurred
-    proxy_client.billing_event_client.track_billing_event(
+    proxy_client.billing_event_service.track_billing(
         proxy_client.user,
+        gl_event_context,
         event=BillingEvent.AIGW_PROXY_USE,
+        execution_env=ExecutionEnvironment.DAP,
         category=__name__,
         unit_of_measure="request",
         quantity=1,
-        metadata=metadata,
     )
 
 

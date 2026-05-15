@@ -13,13 +13,11 @@ from ai_gateway.api.v1.proxy.request import (
 )
 from ai_gateway.async_dependency_resolver import (
     get_anthropic_proxy_model_factory,
-    get_billing_event_client,
     get_internal_event_client,
     get_proxy_client,
 )
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.proxy.clients import AnthropicProxyModelFactory, ProxyClient
-from lib.billing_events.client import BillingEventsClient
 from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.usage_quota import UsageQuotaEvent
@@ -45,9 +43,6 @@ async def anthropic(
     ],
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
-    ],
-    billing_event_client: Annotated[  # pylint: disable=unused-argument
-        BillingEventsClient, Depends(get_billing_event_client)
     ],
 ):
     model = await anthropic_proxy_model_factory.factory(request)

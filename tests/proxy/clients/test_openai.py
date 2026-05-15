@@ -15,9 +15,9 @@ def openai_factory_fixture(monkeypatch):
 
 
 @pytest.fixture(name="proxy_client")
-def proxy_client_fixture(limits, internal_event_client, billing_event_client):
+def proxy_client_fixture(limits, internal_event_client, billing_event_service):
     """Fixture to create a ProxyClient instance."""
-    return ProxyClient(limits, internal_event_client, billing_event_client)
+    return ProxyClient(limits, internal_event_client, billing_event_service)
 
 
 @pytest.fixture(name="request_params")

@@ -21,9 +21,9 @@ def vertex_factory_fixture():
 
 
 @pytest.fixture(name="proxy_client")
-def proxy_client_fixture(limits, internal_event_client, billing_event_client):
+def proxy_client_fixture(limits, internal_event_client, billing_event_service):
     """Fixture to create a ProxyClient instance."""
-    return ProxyClient(limits, internal_event_client, billing_event_client)
+    return ProxyClient(limits, internal_event_client, billing_event_service)
 
 
 @pytest.mark.asyncio

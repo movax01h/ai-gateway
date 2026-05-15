@@ -150,7 +150,7 @@ class ContainerModels(containers.DeclarativeContainer):
             ProxyClient,
             limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
             internal_event_client=internal_event.client,
-            billing_event_client=billing_event.client,
+            billing_event_service=billing_event.service,
         ),
         mocked=providers.Factory(mock.ProxyClient),
     )
