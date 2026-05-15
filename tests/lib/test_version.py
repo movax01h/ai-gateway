@@ -29,3 +29,10 @@ class TestResolveVersion:
     def test_empty_available_raises(self):
         with pytest.raises(ValueError, match="No version matching"):
             resolve_version([], "1.0.0")
+
+    def test_non_pep440_exact_match(self):
+        assert resolve_version(["1.0.0", "2.0.0-orbit"], "2.0.0-orbit") == "2.0.0-orbit"
+
+    def test_non_pep440_no_match_raises(self):
+        with pytest.raises(ValueError, match="not a valid PEP 440 constraint"):
+            resolve_version(["1.0.0"], "2.0.0-orbit")
