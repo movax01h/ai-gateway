@@ -22,7 +22,7 @@ from duo_workflow_service.slash_commands.goal_parser import (
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from lib.context import get_model_metadata
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
-from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
+from lib.prompts.utilities import render_security_block
 
 VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
 
@@ -95,13 +95,19 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                 )
 
             static_content_text = jinja2_formatter(
-                TOOL_OUTPUT_SECURITY_INCLUDE + self.prompt_template["system_static"],
+                self.prompt_template["system_static"],
                 system_template_override=system_template_override,
                 **static_template_context,
             )
             # Always cache static system prompt for prompt caching supported models
             system_msg = SystemMessage(content=static_content_text)
             messages.append(system_msg)
+
+        # Add security block as a separate system message after static, before dynamic.
+        # This keeps the static message content stable across sessions so it can be
+        # cached by LLM's prompt caching, while still injecting security rules
+        # early in the conversation.
+        messages.append(SystemMessage(content=render_security_block()))
 
         if "system_dynamic" in self.prompt_template:
             caching_status = prompt_caching_enabled_in_current_request()

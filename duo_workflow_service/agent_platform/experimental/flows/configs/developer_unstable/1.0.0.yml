@@ -89,8 +89,6 @@ prompts:
       - duo_agent_platform
     prompt_template:
       system: |
-        {% include 'common/tool_output_security/1.0.0.jinja' %}
-
         You are Duo, an expert coding agent made by GitLab. You operate autonomously — you receive a task, execute it, and persist your results to GitLab.
 
         # Guidelines

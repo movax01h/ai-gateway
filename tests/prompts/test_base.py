@@ -61,8 +61,14 @@ from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
-from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
+from lib.prompts.utilities import render_security_block
 from tests.conftest import FakeModel
+
+
+@pytest.fixture(autouse=True)
+def mock_security_suffix():
+    with mock.patch("lib.prompts.utilities._security_suffix", return_value="test"):
+        yield
 
 
 @pytest.fixture(name="mock_watch")
@@ -158,7 +164,7 @@ configurable_unit_primitives:
             [
                 (
                     "system",
-                    TOOL_OUTPUT_SECURITY_INCLUDE + "{% include 'system.jinja' %}",
+                    render_security_block() + "{% include 'system.jinja' %}",
                 ),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("history", optional=True),
@@ -209,7 +215,7 @@ configurable_unit_primitives:
             [
                 (
                     "system",
-                    TOOL_OUTPUT_SECURITY_INCLUDE + "{% include 'system.jinja' %}",
+                    render_security_block() + "{% include 'system.jinja' %}",
                 ),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("messages"),
@@ -246,7 +252,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {TOOL_OUTPUT_SECURITY_INCLUDE}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -287,7 +293,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {TOOL_OUTPUT_SECURITY_INCLUDE}Hi, I'm Duo\n"
+                f"System: {render_security_block()}Hi, I'm Duo\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -326,7 +332,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {TOOL_OUTPUT_SECURITY_INCLUDE}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -376,7 +382,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {TOOL_OUTPUT_SECURITY_INCLUDE}Hi, I'm Duo\n"
+                f"System: {render_security_block()}Hi, I'm Duo\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -420,7 +426,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {TOOL_OUTPUT_SECURITY_INCLUDE}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -471,7 +477,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {TOOL_OUTPUT_SECURITY_INCLUDE}Hi, I'm Duo\n"
+                f"System: {render_security_block()}Hi, I'm Duo\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -614,7 +620,7 @@ configurable_unit_primitives:
         mock_ainvoke.assert_called_once()
         assert mock_ainvoke.call_args.args[0] == ChatPromptValue(
             messages=[
-                SystemMessage(content=TOOL_OUTPUT_SECURITY_INCLUDE + "Hi, I'm Duo"),
+                SystemMessage(content=render_security_block() + "Hi, I'm Duo"),
                 HumanMessage(content="What's up?"),
             ]
         )
@@ -641,7 +647,7 @@ configurable_unit_primitives:
         mock_astream.assert_called_once()
         assert mock_astream.call_args.args[0] == ChatPromptValue(
             messages=[
-                SystemMessage(content=TOOL_OUTPUT_SECURITY_INCLUDE + "Hi, I'm Duo"),
+                SystemMessage(content=render_security_block() + "Hi, I'm Duo"),
                 HumanMessage(content="What's up?"),
             ]
         )

@@ -44,6 +44,10 @@ from lib.context.tool_executions import (
     init_tool_executions,
     tool_executions,
 )
+from lib.context.workflow import (
+    get_workflow_id,
+    set_workflow_id,
+)
 
 __all__ = [
     # request_metadata
@@ -84,4 +88,7 @@ __all__ = [
     "ORBIT_TOOL_PREFIX",
     "orbit_tool_call_count",
     "total_tool_call_count",
+    # workflow
+    "get_workflow_id",
+    "set_workflow_id",
 ]

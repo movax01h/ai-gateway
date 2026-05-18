@@ -1,7 +1,6 @@
 # pylint: disable=direct-environment-variable-reference
 
 import logging
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Optional
 
@@ -16,12 +15,9 @@ from duo_workflow_service.interceptors.correlation_id_interceptor import (
     correlation_id,
     gitlab_global_user_id,
 )
+from lib.context.workflow import _workflow_id, set_workflow_id
 
-_workflow_id: ContextVar[str] = ContextVar("workflow_id", default="undefined")
-
-
-def set_workflow_id(wrk_id: str):
-    _workflow_id.set(wrk_id)
+__all__ = ["set_workflow_id", "setup_logging"]
 
 
 class LoggingConfig(BaseSettings):
