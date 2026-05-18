@@ -13,6 +13,7 @@ from ai_gateway.models.v2._model_compat import (
     remove_trailing_assistant_message,
     supports_assistant_prefill,
 )
+from ai_gateway.models.v2.litellm_model_registry import register_external_models
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
 __all__ = ["ChatLiteLLM"]
@@ -159,6 +160,13 @@ register_model(
 )
 
 add_known_models()
+
+# Register any additional model metadata supplied by operators via an external
+# JSON file (path set by AIGW_LITELLM__MODEL_METADATA_FILE). This is additive:
+# it does NOT override the hardcoded registrations above. It allows operators
+# to enable parameters like `tool_choice` for models that are missing from
+# LiteLLM's built-in registry, without running a LiteLLM proxy.
+register_external_models()
 
 
 class ChatLiteLLM(_LChatLiteLLM):
