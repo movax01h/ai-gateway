@@ -24,10 +24,9 @@ from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
-from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.language_models.chat_models import BaseChatModel, _ChatModelBinding
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from langchain_core.runnables import Runnable
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.model_selection.models import CompletionType
@@ -406,7 +405,7 @@ class CompletionLiteLLM(BaseChatModel):
         return getattr(choice, "text", "") or ""
 
     @override
-    def bind(self, **kwargs: Any) -> Runnable:
+    def bind(self, **kwargs: Any) -> _ChatModelBinding:
         validate_custom_endpoint(
             self.custom_models_enabled,
             api_base=kwargs.get("api_base"),

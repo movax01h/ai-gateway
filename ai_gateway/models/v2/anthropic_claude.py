@@ -5,6 +5,7 @@ from anthropic import AsyncAnthropic
 from langchain_anthropic import ChatAnthropic as _LChatAnthropic
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable
@@ -93,7 +94,7 @@ class ChatAnthropic(_LChatAnthropic):
         return self
 
     @override
-    def bind(self, **kwargs: Any) -> Runnable[LanguageModelInput, AIMessage]:
+    def bind(self, **kwargs: Any) -> _ChatModelBinding:
         validate_custom_endpoint(
             self.custom_models_enabled,
             api_base=kwargs.get("api_base"),

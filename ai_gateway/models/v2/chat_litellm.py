@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union, override
 
 from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -29,7 +30,7 @@ class ChatLiteLLM(_LChatLiteLLM):
     allowed_api_bases: frozenset[str] = frozenset()
 
     @override
-    def bind(self, **kwargs: Any) -> Runnable[LanguageModelInput, AIMessage]:
+    def bind(self, **kwargs: Any) -> _ChatModelBinding:
         validate_custom_endpoint(
             self.custom_models_enabled,
             api_base=kwargs.get("api_base"),

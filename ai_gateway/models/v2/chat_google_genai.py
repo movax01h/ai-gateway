@@ -2,9 +2,7 @@ from typing import Any, Self, override
 
 from google.genai import Client
 from google.genai.types import HttpOptions
-from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import AIMessage
-from langchain_core.runnables import Runnable
+from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_google_genai import ChatGoogleGenerativeAI as _LCChatGoogleGenerativeAI
 from langchain_google_genai._common import get_user_agent
 from langchain_google_genai.chat_models import _is_gemini_3_or_later
@@ -62,7 +60,7 @@ class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
         return self
 
     @override
-    def bind(self, **kwargs: Any) -> Runnable[LanguageModelInput, AIMessage]:
+    def bind(self, **kwargs: Any) -> _ChatModelBinding:
         validate_custom_endpoint(
             self.custom_models_enabled,
             api_base=kwargs.get("api_base"),

@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, override
 
 from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
@@ -17,7 +18,7 @@ class ChatOpenAI(_LChatOpenAI):
     """Whether custom model endpoints are allowed."""
 
     @override
-    def bind(self, **kwargs: Any) -> Runnable[LanguageModelInput, AIMessage]:
+    def bind(self, **kwargs: Any) -> _ChatModelBinding:
         validate_custom_endpoint(
             self.custom_models_enabled,
             api_base=kwargs.get("api_base"),
