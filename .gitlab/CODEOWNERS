@@ -14,7 +14,6 @@
 /duo_workflow_service/
 /clients/
 /contract/
-/tests/duo_workflow_service/
 
 # Fix Pipeline flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
