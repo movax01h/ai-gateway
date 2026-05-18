@@ -13,6 +13,8 @@ from langgraph.types import Command
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry, InMemoryPromptRegistry
+from ai_gateway.response_schemas import InlineResponseSchemaRegistry
+from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
@@ -76,6 +78,7 @@ class UserDecision(StrEnum):
 class Flow(AbstractWorkflow):
     _config: FlowConfig
     _flow_prompt_registry: BasePromptRegistry
+    _flow_schema_registry: BaseResponseSchemaRegistry
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -91,6 +94,9 @@ class Flow(AbstractWorkflow):
         approval: Optional[contract_pb2.Approval] = None,
         prompt_registry: BasePromptRegistry = Provide[
             ContainerApplication.pkg_prompts.prompt_registry
+        ],
+        schema_registry: BaseResponseSchemaRegistry = Provide[
+            ContainerApplication.pkg_schemas.schema_registry
         ],
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
@@ -118,6 +124,13 @@ class Flow(AbstractWorkflow):
                 self._flow_prompt_registry.register_prompt(
                     prompt_id=prompt_id,
                     prompt_data=prompt_config,
+                )
+
+        self._flow_schema_registry = InlineResponseSchemaRegistry(schema_registry)
+        if self._config.response_schemas:
+            for schema_config in self._config.response_schemas:
+                self._flow_schema_registry.register_schema(
+                    schema_config.schema_id, schema_config.to_schema_dict()
                 )
 
     # pylint: enable=dangerous-default-value
@@ -303,6 +316,7 @@ class Flow(AbstractWorkflow):
         comp_params.update(
             {
                 "prompt_registry": self._flow_prompt_registry,
+                "schema_registry": self._flow_schema_registry,
                 "flow_id": self._workflow_id,
                 "flow_type": self._workflow_type,
                 "user": self._user,

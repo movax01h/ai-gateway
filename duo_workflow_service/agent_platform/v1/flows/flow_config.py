@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
+from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     ComponentRegistry,
@@ -83,6 +84,7 @@ class BaseFlowConfig(BaseModel):
     environment: str
     version: str
     prompts: Optional[list] = None
+    response_schemas: Optional[list] = None
     name: Optional[str] = None
     description: Optional[str] = None
     product_group: Optional[str] = None
@@ -211,6 +213,7 @@ class FlowConfig(BaseFlowConfig):
     environment: Literal["ambient", "chat", "chat-partial"]
     version: Literal["v1"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
+    response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
 
 
 class PartialFlowConfig(FlowConfig):

@@ -35,15 +35,44 @@ RECURSION_LIMIT = 10
 log = structlog.stdlib.get_logger("json_schema_to_pydantic")
 
 
+def _resolve_schema_title(
+    schema: dict[str, Any], title_fallback: Optional[str], depth: int
+) -> dict[str, Any]:
+    """Ensure the schema has a ``title``, injecting the fallback at the top level if needed.
+
+    Args:
+        schema: JSON Schema dictionary.
+        title_fallback: Optional fallback title, only used at depth 0.
+        depth: Current recursion depth.
+
+    Returns:
+        The original schema dict, or a shallow copy with ``title`` injected.
+
+    Raises:
+        ValueError: If the schema has no title and no fallback is available.
+    """
+    if "title" in schema:
+        # Return a shallow copy so that callers cannot mutate the original dict
+        # through the returned reference.
+        return dict(schema)
+    if title_fallback is not None and depth == 0:
+        return {**schema, "title": title_fallback}
+    raise ValueError("Schema must have 'title'")
+
+
 def json_schema_to_pydantic(
     schema: dict[str, Any],
     _depth: int = 0,
+    title_fallback: Optional[str] = None,
 ) -> Type[BaseAgentOutput]:
     """Convert JSON schema to Pydantic model.
 
     Args:
         schema: JSON Schema dictionary to convert
         _depth: Internal recursion depth counter (starts at 0)
+        title_fallback: Title to use when the schema has no ``title`` field.
+            Only applied at the top level (``_depth == 0``).  If the schema has
+            no ``title`` and no fallback is provided, a ``ValueError`` is raised.
 
     Raises:
         ValueError: If schema is invalid or nesting exceeds RECURSION_LIMIT
@@ -64,8 +93,7 @@ def json_schema_to_pydantic(
     except ValidationError as e:
         raise ValueError(f"Invalid JSON schema: {e}")
 
-    if "title" not in schema:
-        raise ValueError("Schema must have 'title'")
+    schema = _resolve_schema_title(schema, title_fallback, _depth)
     if schema.get("type") != "object":
         raise ValueError("Schema type must be 'object'")
 

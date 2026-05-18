@@ -26,6 +26,57 @@ def basic_schema_fixture():
     }
 
 
+class TestTitleFallback:
+    """Tests for the title_fallback parameter of json_schema_to_pydantic."""
+
+    def test_title_fallback_used_when_schema_has_no_title(self):
+        """Fallback title is used when the schema omits the title field."""
+        schema = {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        }
+        model = json_schema_to_pydantic(schema, title_fallback="my_component")
+        assert model.tool_title == "my_component"
+        instance = model(summary="hello")
+        assert instance.summary == "hello"
+
+    def test_schema_title_takes_precedence_over_fallback(self):
+        """Explicit schema title wins when both title and title_fallback are given."""
+        schema = {
+            "title": "explicit_tool",
+            "type": "object",
+            "properties": {"value": {"type": "integer"}},
+            "required": ["value"],
+        }
+        model = json_schema_to_pydantic(schema, title_fallback="ignored_fallback")
+        assert model.tool_title == "explicit_tool"
+
+    def test_missing_title_without_fallback_raises(self):
+        """ValueError is raised when schema has no title and no fallback is provided."""
+        schema = {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+        }
+        with pytest.raises(ValueError, match="Schema must have 'title'"):
+            json_schema_to_pydantic(schema)
+
+    def test_fallback_not_applied_to_nested_objects(self):
+        """title_fallback only applies at the top level; nested objects auto-generate titles."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "object",
+                    "properties": {"info": {"type": "string"}},
+                }
+            },
+        }
+        # With fallback: top-level succeeds; nested object gets auto-generated title
+        model = json_schema_to_pydantic(schema, title_fallback="top_level_tool")
+        assert model.tool_title == "top_level_tool"
+
+
 class TestConverter:
     """Test suits for conversion logic for Response Schema Registry."""
 

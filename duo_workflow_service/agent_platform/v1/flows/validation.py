@@ -217,6 +217,13 @@ class DryRunFlowValidator(Flow):
                 model loading occurs.
             internal_event_client: Events client (no events are emitted
                 during validation).
+
+        Note:
+            ``ResponseSchemaRegistry()`` is passed as the shared registry.
+            ``Flow.__init__`` wraps it in an ``InlineResponseSchemaRegistry``
+            and registers any inline schemas from the config — the same path
+            taken in production.  Passing a pre-wrapped registry here would
+            result in double-wrapping and inline schemas not resolving correctly.
         """
         super().__init__(
             workflow_id=_VALIDATION_WORKFLOW_ID,
@@ -225,6 +232,7 @@ class DryRunFlowValidator(Flow):
             user=VALIDATION_USER,
             config=config,
             prompt_registry=prompt_registry,
+            schema_registry=ResponseSchemaRegistry(),
             internal_event_client=internal_event_client,
         )
         # Replace the flow-scoped prompt registry with a stub that delegates
@@ -237,11 +245,8 @@ class DryRunFlowValidator(Flow):
         )
         # Enable strict variable validation so ExtraInputVariablesError is raised
         # during dry-run compilation. Production flows leave this as False.
-        # Inject schema_registry so response schema validation works without DI.
-        schema_registry = ResponseSchemaRegistry()
         for comp_config in self._config.components:
             comp_config["strict_validation"] = True
-            comp_config["schema_registry"] = schema_registry
 
     def validate(self) -> None:
         """Run dry-run compilation to validate the flow configuration.
