@@ -1,0 +1,76 @@
+name: "Resolve dependency bump"
+description: |
+  Analyze breaking changes caused by dependency version bumps.
+  Investigates the failing pipeline, gathers dependency metadata,
+  identifies breaking changes and produces a fix plan, then posts
+  the analysis as a comment on the merge request.
+product_group: agent_foundations
+version: "experimental"
+environment: ambient
+
+components:
+  - name: "resolve_dep_bump_investigate"
+    type: AgentComponent
+    prompt_id: "resolve_dep_bump_investigate"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+    toolset:
+      - get_downstream_pipelines
+      - get_pipeline_failing_jobs
+      - get_job_logs
+      - get_merge_request
+      - list_merge_request_diffs
+      - read_file
+      - find_files
+      - list_dir
+      - grep
+      - list_vulnerabilities
+      - get_vulnerability_details
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "resolve_dep_bump_comment"
+    type: AgentComponent
+    prompt_id: "resolve_dep_bump_comment"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:resolve_dep_bump_investigate.final_answer"
+        as: "investigation_results"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+    toolset: ["create_merge_request_note"]
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "resolve_dep_bump_investigate"
+    to: "resolve_dep_bump_comment"
+  - from: "resolve_dep_bump_comment"
+    to: "end"
+
+flow:
+  entry_point: "resolve_dep_bump_investigate"
+  inputs:
+    - category: agent_platform_standard_context
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
