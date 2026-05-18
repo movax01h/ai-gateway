@@ -172,12 +172,15 @@ configurable_unit_primitives:
       - "generate_code"
       - "complete_code"
     default_models:
-      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_6_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_4_6_vertex"
   - feature_setting: "glab_ask_git_command"
     unit_primitives:
       - "glab_ask_git_command"
