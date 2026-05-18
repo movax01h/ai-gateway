@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from langgraph.checkpoint.base import Checkpoint
 
+from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import checkpoint_decoder
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from lib.internal_events.event_enum import EventPropertyEnum
@@ -66,6 +67,48 @@ def uncompress_checkpoint(compressed_data: str) -> dict:
     decoded = base64.b64decode(compressed_data.encode("utf-8"))
     uncompressed = zlib.decompress(decoded)
     return json.loads(uncompressed.decode("utf-8"), object_hook=checkpoint_decoder)
+
+
+NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
+
+BILLABLE_STATUSES = frozenset(
+    [
+        WorkflowStatusEnum.FINISHED,
+        WorkflowStatusEnum.STOPPED,
+        WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+    ]
+)
+
+# Maps current checkpoint status to the rails workflow state machine's event (if applicable)
+CHECKPOINT_STATUS_TO_STATUS_EVENT = {
+    "FINISHED": WorkflowStatusEventEnum.FINISH,
+    "FAILED": WorkflowStatusEventEnum.DROP,
+    "STOPPED": WorkflowStatusEventEnum.STOP,
+    "PAUSED": WorkflowStatusEventEnum.PAUSE,
+    "INPUT_REQUIRED": WorkflowStatusEventEnum.REQUIRE_INPUT,
+    "PLAN_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+    "TOOL_CALL_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+}
+
+# Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
+# Checkpoint status represents status human-readable workflow status (displayed in the UI)
+WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
+    **{
+        WorkflowStatusEnum.EXECUTION: "RUNNING",
+        WorkflowStatusEnum.ERROR: "FAILED",
+        WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
+        WorkflowStatusEnum.PLANNING: "RUNNING",
+        WorkflowStatusEnum.PAUSED: "PAUSED",
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: "PLAN_APPROVAL_REQUIRED",
+        WorkflowStatusEnum.NOT_STARTED: "CREATED",
+        WorkflowStatusEnum.COMPLETED: "FINISHED",
+        WorkflowStatusEnum.CANCELLED: "STOPPED",
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "TOOL_CALL_APPROVAL_REQUIRED",
+    },
+    **{status: "RUNNING" for status in NOOP_WORKFLOW_STATUSES},
+}
 
 
 def add_compression_param(endpoint: str) -> str:

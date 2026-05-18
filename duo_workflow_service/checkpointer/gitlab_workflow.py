@@ -38,7 +38,11 @@ from ai_gateway.container import ContainerApplication
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    BILLABLE_STATUSES,
+    CHECKPOINT_STATUS_TO_STATUS_EVENT,
+    NOOP_WORKFLOW_STATUSES,
     STATUS_TO_EVENT_PROPERTY,
+    WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
     WorkflowStatusEventEnum,
     add_compression_param,
     compress_checkpoint,
@@ -47,7 +51,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import NotifiableException
-from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
+from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
+from duo_workflow_service.gitlab.gitlab_api import (
+    WorkflowConfig,
+)
 from duo_workflow_service.gitlab.http_client import (
     GitlabHttpClient,
     GitLabHttpResponse,
@@ -91,47 +98,6 @@ def not_implemented_sync_method(func: T) -> T:
 
     return wrapper  # type: ignore
 
-
-NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
-
-BILLABLE_STATUSES = frozenset(
-    [
-        WorkflowStatusEnum.FINISHED,
-        WorkflowStatusEnum.STOPPED,
-        WorkflowStatusEnum.INPUT_REQUIRED,
-        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
-        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-    ]
-)
-
-# Maps current checkpoint status to the rails workflow state machine's event (if applicable)
-CHECKPOINT_STATUS_TO_STATUS_EVENT = {
-    "FINISHED": WorkflowStatusEventEnum.FINISH,
-    "FAILED": WorkflowStatusEventEnum.DROP,
-    "STOPPED": WorkflowStatusEventEnum.STOP,
-    "PAUSED": WorkflowStatusEventEnum.PAUSE,
-    "INPUT_REQUIRED": WorkflowStatusEventEnum.REQUIRE_INPUT,
-    "PLAN_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
-    "TOOL_CALL_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
-}
-
-# Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
-# Checkpoint status represents status human-readable workflow status (displayed in the UI)
-WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
-    **{
-        WorkflowStatusEnum.EXECUTION: "RUNNING",
-        WorkflowStatusEnum.ERROR: "FAILED",
-        WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
-        WorkflowStatusEnum.PLANNING: "RUNNING",
-        WorkflowStatusEnum.PAUSED: "PAUSED",
-        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: "PLAN_APPROVAL_REQUIRED",
-        WorkflowStatusEnum.NOT_STARTED: "CREATED",
-        WorkflowStatusEnum.COMPLETED: "FINISHED",
-        WorkflowStatusEnum.CANCELLED: "STOPPED",
-        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "TOOL_CALL_APPROVAL_REQUIRED",
-    },
-    **{status: "RUNNING" for status in NOOP_WORKFLOW_STATUSES},
-}
 
 PROPERTY_MAX_LENGTH = 1000
 
@@ -658,6 +624,33 @@ class GitLabWorkflow(
             log_exception(e, extra={"workflow_id": self._workflow_id})
         return False
 
+    def _decode_graphql_latest_checkpoint(
+        self, checkpoint: GitLabCheckpoint
+    ) -> Optional[CheckpointTuple]:
+        """Convert a latestCheckpoint GraphQL response to a CheckpointTuple.
+
+        Handles both compressed (19.0+) and uncompressed (< 19.0) payloads.
+        """
+        if "compressedCheckpoint" in checkpoint:
+            decoded_checkpoint = uncompress_checkpoint(
+                checkpoint["compressedCheckpoint"]
+            )
+        else:
+            decoded_checkpoint = json.loads(
+                checkpoint["checkpoint"], object_hook=checkpoint_decoder
+            )
+        decoded_metadata = json.loads(
+            checkpoint["metadata"], object_hook=checkpoint_decoder
+        )
+        return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
+            {
+                "thread_ts": checkpoint["threadTs"],
+                "parent_ts": checkpoint["parentTs"],
+                "checkpoint": decoded_checkpoint,
+                "metadata": decoded_metadata,
+            }
+        )
+
     @override
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         # https://blog.langchain.dev/langgraph-v0-2/
@@ -706,18 +699,7 @@ class GitLabWorkflow(
             if self._workflow_config.get("latest_checkpoint"):
                 checkpoint = self._workflow_config["latest_checkpoint"]
                 if checkpoint:
-                    return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
-                        {
-                            "thread_ts": checkpoint["threadTs"],
-                            "parent_ts": checkpoint["parentTs"],
-                            "checkpoint": json.loads(
-                                checkpoint["checkpoint"], object_hook=checkpoint_decoder
-                            ),
-                            "metadata": json.loads(
-                                checkpoint["metadata"], object_hook=checkpoint_decoder
-                            ),
-                        }
-                    )
+                    return self._decode_graphql_latest_checkpoint(checkpoint)
 
             # If the first checkpoint is None, it means that a flow just started and checkpoints are empty anyway
             if self._workflow_config.get("first_checkpoint") is None:

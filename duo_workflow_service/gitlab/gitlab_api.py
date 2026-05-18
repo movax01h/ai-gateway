@@ -35,6 +35,7 @@ class Namespace(TypedDict):
 
 class Checkpoint(TypedDict, total=False):
     checkpoint: str
+    compressedCheckpoint: str
     threadTs: str
     parentTs: str
     metadata: str
@@ -247,10 +248,69 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
 }
 """
 
+# This query adds compressedCheckpoint to latestCheckpoint available in GitLab 19.0+.
+# See https://gitlab.com/gitlab-org/gitlab/-/merge_requests/235045
+GITLAB_19_0_OR_ABOVE_QUERY = """
+query($workflowId: AiDuoWorkflowsWorkflowID!) {
+    duoWorkflowWorkflows(workflowId: $workflowId) {
+        nodes {
+            statusName
+            projectId
+            project {
+                id
+                name
+                description
+                httpUrlToRepo
+                languages {
+                    name
+                    share
+                }
+                webUrl
+                statisticsDetailsPaths {
+                    repository
+                }
+                duoContextExclusionSettings {
+                    exclusionRules
+                }
+                namespace {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                }
+            }
+            namespaceId
+            namespace {
+                id
+                name
+                description
+                webUrl
+                aiSettings {
+                    promptInjectionProtectionLevel
+                }
+            }
+            agentPrivilegesNames
+            preApprovedAgentPrivilegesNames
+            toolCallApprovals
+            mcpEnabled
+            allowAgentToRequestUser
+            latestCheckpoint {
+                threadTs
+                parentTs
+                metadata
+                compressedCheckpoint
+            }
+            archived
+            stalled
+        }
+    }
+}
+"""
+
 version_18_2 = Version("18.2.0")
 version_18_3 = Version("18.3.0")
 version_18_8 = Version("18.8.0")
 version_18_9 = Version("18.9.0")
+version_19_0 = Version("19.0.0")
 FALLBACK_VERSION = version_18_2
 
 
@@ -265,6 +325,9 @@ def fetch_workflow_and_container_query():
     except (InvalidVersion, TypeError) as ex:
         log_exception(ex)
         gl_version = FALLBACK_VERSION
+
+    if version_19_0 <= gl_version:
+        return GITLAB_19_0_OR_ABOVE_QUERY
 
     if version_18_9 <= gl_version:
         return GITLAB_18_9_OR_ABOVE_QUERY

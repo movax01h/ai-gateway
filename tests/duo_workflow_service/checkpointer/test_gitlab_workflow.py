@@ -1690,6 +1690,54 @@ async def test_aget_tuple_with_latest_checkpoint(
 
 
 @pytest.mark.asyncio
+async def test_aget_tuple_with_compressed_latest_checkpoint(
+    http_client,
+    workflow_id,
+    workflow_type,
+    checkpoint_data,
+):
+    """Test aget_tuple decompresses compressedCheckpoint from GraphQL latestCheckpoint (19.0+)."""
+    compressed = compress_checkpoint(checkpoint_data[0]["checkpoint"])
+    latest_checkpoint = {
+        "threadTs": "latest-id",
+        "parentTs": None,
+        "compressedCheckpoint": compressed,
+        "metadata": json.dumps(checkpoint_data[0]["metadata"], cls=CustomEncoder),
+    }
+
+    workflow_config = {
+        "first_checkpoint": None,
+        "latest_checkpoint": latest_checkpoint,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert isinstance(result, CheckpointTuple)
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+    assert result.metadata == checkpoint_data[0]["metadata"]
+
+    # Should not call the API when latestCheckpoint is available
+    http_client.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_aget_tuple_returns_none_when_no_first_checkpoint_and_no_latest_checkpoint(
     http_client,
     workflow_id,
