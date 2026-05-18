@@ -6,6 +6,12 @@
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 /ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
+# Orbit-specific flows, prompts, and libs are co-owned by the Orbit team
+/duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
+/duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
+/ai_gateway/prompts/definitions/common/orbit_skill/ @gitlab-org/orbit
+/lib/context/orbit.py @gitlab-org/orbit
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/ai-gateway
@@ -19,6 +25,10 @@
 # Fix Pipeline flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
+# Orbit-specific flow configs
+/duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
+/duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
+
 [AI Gateway] @gitlab-org/maintainers/ai-gateway
 /ai_gateway/
 /tests/ai_gateway/
@@ -26,6 +36,9 @@
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 /ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+
+# Orbit-specific prompts
+/ai_gateway/prompts/definitions/common/orbit_skill/ @gitlab-org/orbit
 
 ^[Model Configuration] @gitlab-org/maintainers/ai-gateway
 /ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
