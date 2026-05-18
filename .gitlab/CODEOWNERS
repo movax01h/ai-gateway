@@ -8,7 +8,6 @@
 /duo_workflow_service/
 /clients/
 /contract/
-/tests/duo_workflow_service/
 
 [AI Gateway] @gitlab-org/maintainers/ai-gateway
 /ai_gateway/
