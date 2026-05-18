@@ -8,6 +8,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
     GITLAB_18_2_QUERY,
     GITLAB_18_3_OR_ABOVE_QUERY,
     GITLAB_18_8_OR_ABOVE_QUERY,
+    GITLAB_19_0_OR_ABOVE_QUERY,
     extract_default_branch_from_project_repository,
     extract_id_from_global_id,
     fetch_workflow_and_container_data,
@@ -653,6 +654,18 @@ class TestQueryVersionSelection:
             assert result == GITLAB_18_8_OR_ABOVE_QUERY
             assert "aiSettings" in result
 
+    def test_query_selection_gitlab_19_0_or_above(self):
+        """GitLab >= 19.0 returns GITLAB_19_0_OR_ABOVE_QUERY (with compressedCheckpoint)."""
+        with patch(
+            "duo_workflow_service.gitlab.gitlab_api.gitlab_version"
+        ) as mock_version:
+            mock_version.get.return_value = "19.0.0"
+
+            result = fetch_workflow_and_container_query()
+
+            assert result == GITLAB_19_0_OR_ABOVE_QUERY
+            assert "compressedCheckpoint" in result
+
     def test_query_selection_gitlab_below_18_3(self):
         """GitLab < 18.3 returns GITLAB_18_2_QUERY."""
         with patch(
@@ -755,6 +768,59 @@ async def test_fetch_workflow_18_3_plus_query_uses_latest_checkpoint():
         "checkpoint": "{}",
     }
     # Verify that first_checkpoint is None (not in 18.3+ response)
+    assert workflow_config["first_checkpoint"] is None
+    assert project["id"] == 123
+    assert namespace is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_19_0_plus_query_uses_compressed_latest_checkpoint():
+    """Test that GitLab 19.0+ query response includes compressedCheckpoint in latestCheckpoint."""
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                        "duoContextExclusionSettings": {"exclusionRules": []},
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": ["read_repository"],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": {
+                        "threadTs": "latest-id",
+                        "parentTs": None,
+                        "metadata": "{}",
+                        "compressedCheckpoint": "compressed-data",
+                    },
+                }
+            ]
+        }
+    }
+
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    # Verify that latest_checkpoint contains compressedCheckpoint instead of checkpoint
+    assert workflow_config["latest_checkpoint"] == {
+        "threadTs": "latest-id",
+        "parentTs": None,
+        "metadata": "{}",
+        "compressedCheckpoint": "compressed-data",
+    }
+    assert "checkpoint" not in workflow_config["latest_checkpoint"]
     assert workflow_config["first_checkpoint"] is None
     assert project["id"] == 123
     assert namespace is None
