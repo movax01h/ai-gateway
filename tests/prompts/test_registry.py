@@ -31,7 +31,16 @@ from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
-from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
+
+_SECURITY_BLOCK = "<test security block>test</test security block>"
+
+
+@pytest.fixture(autouse=True)
+def mock_render_security_block():
+    with patch(
+        "lib.prompts.utilities.render_security_block", return_value=_SECURITY_BLOCK
+    ):
+        yield
 
 
 class MockPromptTemplateClass(Runnable):
@@ -743,7 +752,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.1",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -767,7 +776,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.2-dev",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -791,7 +800,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.0",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -815,7 +824,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 0.0.1",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-haiku-20240307",
@@ -835,7 +844,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react prompt",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -861,7 +870,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Amazon Q React prompt",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -888,7 +897,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Chat react custom prompt",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -927,7 +936,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react custom prompt",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -966,7 +975,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react custom prompt",
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1002,7 +1011,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_3 prompt",  # Should map to claude_3 variant
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Template1"),
+                    ("system", _SECURITY_BLOCK + "Template1"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1033,7 +1042,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_4_5 prompt",  # Should use claude_4_5 specific prompt
                 [
-                    ("system", TOOL_OUTPUT_SECURITY_INCLUDE + "Claude 4.5 Template"),
+                    ("system", _SECURITY_BLOCK + "Claude 4.5 Template"),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1066,7 +1075,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 [
                     (
                         "system",
-                        TOOL_OUTPUT_SECURITY_INCLUDE + "Claude Vertex 4.5 Template",
+                        _SECURITY_BLOCK + "Claude Vertex 4.5 Template",
                     ),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),

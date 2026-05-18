@@ -1,16 +1,28 @@
 """Tests for lib/prompts/utilities module."""
 
+import contextvars
+import hashlib
+from unittest.mock import patch
+
+import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from lib.prompts.utilities import (
-    TOOL_OUTPUT_SECURITY_INCLUDE,
+    _security_suffix,
+    _security_suffix_var,
     prompt_template_to_messages,
+    render_security_block,
 )
 
 
 class TestPromptTemplateToMessages:
     """Tests for prompt_template_to_messages function."""
+
+    @pytest.fixture(autouse=True)
+    def mock_security_suffix(self):
+        with patch("lib.prompts.utilities._security_suffix", return_value="test"):
+            yield
 
     def test_basic_message_conversion(self):
         """Test conversion of basic role -> content mapping."""
@@ -24,7 +36,7 @@ class TestPromptTemplateToMessages:
         assert len(result) == 3
         assert result[0] == (
             "system",
-            TOOL_OUTPUT_SECURITY_INCLUDE + "You are a helpful assistant",
+            render_security_block() + "You are a helpful assistant",
         )
         assert result[1] == ("user", "Hello!")
         assert isinstance(result[2], MessagesPlaceholder)
@@ -44,7 +56,7 @@ class TestPromptTemplateToMessages:
         assert len(result) == 3
         assert result[0] == (
             "system",
-            TOOL_OUTPUT_SECURITY_INCLUDE + "You are a helpful assistant",
+            render_security_block() + "You are a helpful assistant",
         )
         assert isinstance(result[1], MessagesPlaceholder)
         assert result[1].variable_name == "history"
@@ -72,7 +84,7 @@ class TestPromptTemplateToMessages:
 
         assert result[0] == (
             "system",
-            TOOL_OUTPUT_SECURITY_INCLUDE + "You are {{ role }}",
+            render_security_block() + "You are {{ role }}",
         )
         assert result[1] == (
             "user",
@@ -93,7 +105,7 @@ class TestPromptTemplateToMessages:
         assert len(result) == 5
         assert result[0] == (
             "system",
-            TOOL_OUTPUT_SECURITY_INCLUDE + "System message",
+            render_security_block() + "System message",
         )
         assert result[1] == ("assistant", "Assistant message")
         assert result[2] == ("human", "Human message")
@@ -115,7 +127,7 @@ class TestPromptTemplateToMessages:
         assert len(result) == 4
         assert result[0] == (
             "system_static",
-            TOOL_OUTPUT_SECURITY_INCLUDE + "Static system content",
+            render_security_block() + "Static system content",
         )
         assert result[1] == ("system_dynamic", "Dynamic system content")
         assert result[2] == ("user", "Hello!")
@@ -138,6 +150,66 @@ class TestPromptTemplateToMessages:
         assert isinstance(result[2], MessagesPlaceholder)
         assert result[2].variable_name == "history"
         assert result[2].optional is True
+
+
+class TestSecuritySuffix:
+    """Tests for the _security_suffix() internal function."""
+
+    @pytest.fixture(autouse=True)
+    def reset_security_suffix_var(self):
+        """Reset the cached suffix before each test so tests are independent."""
+        _security_suffix_var.set(None)
+        yield
+
+    def test_workflow_id_branch_returns_deterministic_suffix(self):
+        """When workflow_id is present, suffix is derived deterministically from it."""
+        with patch("lib.prompts.utilities.get_workflow_id", return_value="abc-123"):
+            result = _security_suffix()
+
+        expected = hashlib.sha256(b"abc-123").hexdigest()[:16]
+        assert result == expected
+
+    def test_workflow_id_branch_is_cached_within_context(self):
+        """The derived suffix is cached so the hash is not recomputed on subsequent calls."""
+        with patch("lib.prompts.utilities.get_workflow_id", return_value="abc-123"):
+            first = _security_suffix()
+            second = _security_suffix()
+
+        assert first == second
+
+    def test_random_fallback_branch_returns_hex_string(self):
+        """When workflow_id is absent, a random 16-char hex suffix is returned."""
+        with patch("lib.prompts.utilities.get_workflow_id", return_value=None):
+            result = _security_suffix()
+
+        assert len(result) == 16
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_random_fallback_branch_is_cached_within_context(self):
+        """The random suffix is cached so it remains stable across calls in the same context."""
+        with patch("lib.prompts.utilities.get_workflow_id", return_value=None):
+            first = _security_suffix()
+            second = _security_suffix()
+
+        assert first == second
+
+    def test_context_isolation_produces_different_random_suffixes(self):
+        """Each independent context (i.e. each request) gets its own random suffix."""
+        results = []
+
+        def run():
+            # Reset the var so this context starts clean (simulates a fresh request)
+            _security_suffix_var.set(None)
+            with patch("lib.prompts.utilities.get_workflow_id", return_value=None):
+                results.append(_security_suffix())
+
+        ctx1 = contextvars.copy_context()
+        ctx2 = contextvars.copy_context()
+        ctx1.run(run)
+        ctx2.run(run)
+
+        assert len(results) == 2
+        assert results[0] != results[1]
 
 
 class TestAutoAddHistoryPlaceholder:

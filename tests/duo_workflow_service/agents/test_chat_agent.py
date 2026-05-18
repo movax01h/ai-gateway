@@ -553,7 +553,9 @@ class TestChatAgentGitLabInstanceInfo:
             )
 
         messages = result.messages
-        assert len(messages) == 3  # static system, dynamic system, user
+        assert (
+            len(messages) == 4
+        )  # static system, security system, dynamic system, user
 
         # Check static system message contains GitLab instance info
         static_system_message = messages[0]
@@ -590,7 +592,9 @@ class TestChatAgentGitLabInstanceInfo:
         )
 
         messages = result.messages
-        assert len(messages) == 3  # static system, dynamic system, user
+        assert (
+            len(messages) == 4
+        )  # static system, security system, dynamic system, user
 
         # Check static system message contains fallback "Unknown" values
         static_system_message = messages[0]

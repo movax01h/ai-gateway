@@ -66,8 +66,8 @@ from ai_gateway.structured_logging import get_request_logger
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
 from lib.prompts.utilities import (
-    TOOL_OUTPUT_SECURITY_INCLUDE,
     prompt_template_to_messages,
+    render_security_block,
 )
 
 __all__ = [
@@ -75,7 +75,7 @@ __all__ = [
     "BasePromptRegistry",
     "BasePromptCallbackHandler",
     "TemplateNotFoundError",
-    "TOOL_OUTPUT_SECURITY_INCLUDE",
+    "render_security_block",
     "jinja2_formatter",
     "prompt_template_to_messages",
 ]

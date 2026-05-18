@@ -23,8 +23,14 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from lib.guardrails import GUARDRAIL_INTERVENED_WARNING
 from lib.internal_events.event_enum import CategoryEnum
-from lib.prompts.utilities import TOOL_OUTPUT_SECURITY_INCLUDE
+from lib.prompts.utilities import render_security_block
 from tests.conftest import FakeModel
+
+
+@pytest.fixture(autouse=True)
+def mock_security_suffix():
+    with patch("lib.prompts.utilities._security_suffix", return_value="test"):
+        yield
 
 
 @pytest.fixture(name="prompt_template_factory")
@@ -90,7 +96,7 @@ class TestAgent:
             ChatPromptValue(
                 messages=[
                     SystemMessage(
-                        content=f"{TOOL_OUTPUT_SECURITY_INCLUDE}You are AGI entity capable of anything"
+                        content=f"{render_security_block()}You are AGI entity capable of anything"
                     ),
                     HumanMessage(content=f"Your goal is: {goal}"),
                 ]
@@ -128,7 +134,7 @@ Human message"""
             ChatPromptValue(
                 messages=[
                     SystemMessage(
-                        content=f"{TOOL_OUTPUT_SECURITY_INCLUDE}You are AGI entity capable of anything"
+                        content=f"{render_security_block()}You are AGI entity capable of anything"
                     ),
                     HumanMessage(
                         content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
@@ -182,7 +188,7 @@ Human message"""
             ChatPromptValue(
                 messages=[
                     SystemMessage(
-                        content=f"{TOOL_OUTPUT_SECURITY_INCLUDE}You are AGI entity capable of anything"
+                        content=f"{render_security_block()}You are AGI entity capable of anything"
                     ),
                     HumanMessage(content=f"Your goal is: {goal}"),
                     HumanMessage(content="Existing chat"),
