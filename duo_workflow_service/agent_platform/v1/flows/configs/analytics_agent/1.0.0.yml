@@ -13,6 +13,8 @@ components:
       - "run_glql_query"
       - "create_work_item_note"
       - "create_merge_request_note"
+      - "orbit_list_commands"
+      - "orbit_invoke_command"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
