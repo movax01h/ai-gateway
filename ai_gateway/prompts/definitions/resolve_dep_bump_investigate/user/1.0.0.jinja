@@ -1,0 +1,80 @@
+Investigate this failing pipeline caused by a dependency version bump and produce a fix plan.
+
+<pipeline>
+  <pipeline_url>{{pipeline_url}}</pipeline_url>
+</pipeline>
+
+Follow this two-phase procedure:
+
+<investigation_phase>
+  <step>Use `get_pipeline_failing_jobs` to retrieve failing jobs for the pipeline.
+  Capture each failing job's **name, ID, and web URL** — these are required for the
+  per-job link in the final comment (do NOT substitute the pipeline URL).</step>
+  <step>Use `get_job_logs` to retrieve logs for each failing job. Capture error
+  messages, stack traces, and **failing test names with their source `file:line`
+  locations** (e.g. `test_models.py:226` — the line is in the pytest/jest/rspec
+  output near the failure). If the job runs a test framework (pytest, jest, rspec,
+  mocha, go test, cargo test, etc.), locate its final summary line that reports
+  counts — e.g. pytest's `1 failed, 12 passed, 11 warnings in 0.10s` — and capture
+  those numbers verbatim into the `<pipeline_errors>` section.</step>
+  <step>Use `get_merge_request` to identify the merge request associated with this pipeline.</step>
+  <step>Use `list_merge_request_diffs` to see what files changed in the dependency bump MR.</step>
+  <step>Use `find_files` to locate dependency manifest files (requirements.txt, setup.py, setup.cfg,
+  pyproject.toml, Gemfile, package.json, go.mod, pom.xml, etc.), then `read_file` on them
+  to extract the dependency name, ecosystem, and old/new versions.</step>
+  <step>If vulnerability IDs are mentioned in the logs, use `list_vulnerabilities` and `get_vulnerability_details` to gather CVE context.</step>
+</investigation_phase>
+
+<analysis_phase>
+  <step>Use `grep` to find all imports of the bumped dependency. Use `find_files` to locate any other files that reference it, **including test files** (a common miss).</step>
+  <step>Use `read_file` on each match to understand the usage pattern.</step>
+  <step>Cross-reference the pipeline errors with the code locations and the changelog information gathered in the investigation phase.</step>
+  <step>For each breaking change, categorize it (API removed, function signature changed, import path moved, new required parameter, type change, behavior change) and produce a concrete fix step with old code → new code.</step>
+</analysis_phase>
+
+Present your findings and fix plan in this structured format:
+<output_format>
+  <dependency>
+    <name>Package name</name>
+    <ecosystem>python/ruby/node/go/java</ecosystem>
+    <old_version>Version before bump</old_version>
+    <new_version>Version after bump</new_version>
+  </dependency>
+  <merge_request>
+    <url>The merge request URL associated with this pipeline</url>
+  </merge_request>
+  <pipeline_errors>
+    List of error messages, stack traces, failing test names, and the final test-runner
+    summary line verbatim (e.g. `1 failed, 12 passed, 11 warnings in 0.10s`) if present.
+  </pipeline_errors>
+  <changed_files>
+    Files modified in the MR
+  </changed_files>
+  <external_dependency_info>
+    Changelog entries, breaking changes, deprecation notices, and release notes URL from
+    the package registry. Leave empty if no registry-fetch tool is available — do not
+    reconstruct from training memory.
+  </external_dependency_info>
+  <vulnerability_info>
+    CVE details if applicable
+  </vulnerability_info>
+  <root_cause>High-level description of what broke and why</root_cause>
+  <breaking_changes>
+    For each breaking change:
+    <breaking_change>
+      <category>API removed / function signature changed / import path moved / new required parameter / type change / behavior change</category>
+      <description>What specifically changed</description>
+      <affected_files>List of files and line numbers affected</affected_files>
+    </breaking_change>
+  </breaking_changes>
+  <fix_plan>
+    For each fix:
+    <step>
+      <file>Path to the file to modify</file>
+      <action>edit / create / delete / run_command</action>
+      <description>What to change and why</description>
+      <details>Specific old code -> new code, or command to run</details>
+    </step>
+  </fix_plan>
+  <confidence>high / medium / low</confidence>
+</output_format>
