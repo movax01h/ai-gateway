@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Callable, ClassVar, List, Optional
 
+from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
     ComponentRegistry,
@@ -24,6 +25,7 @@ __all__ = [
 
 class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+    response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
 
 
 class PartialFlowConfig(FlowConfig):

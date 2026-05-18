@@ -123,14 +123,23 @@ class AgentComponentBase(BaseComponent):
     def validate_and_resolve_response_schema(self) -> Self:
         """Validate response schema params and resolve the schema.
 
-        1. Validates that response_schema_id and response_schema_version are either both set or both None.
-        2. Resolves the response schema from the registry, or uses None for default text-only mode.
-        3. Validates that the schema tool name doesn't collide with existing tools.
+        Supports three mutually exclusive modes, mirroring how prompts work:
+
+        1. Registry mode: both ``response_schema_id`` and ``response_schema_version``
+            are set — the schema is loaded from the shared file-based registry.
+        2. Inline mode: ``response_schema_id`` is set but ``response_schema_version``
+            is omitted — the schema is looked up in the flow's
+            ``InlineResponseSchemaRegistry`` (keyed by ``response_schema_id``).
+        3. Default text-only mode: ``response_schema_id`` is not set.
+
+        Raises:
+            ValueError: If ``response_schema_version`` is set without
+                ``response_schema_id``, or if other validation constraints are
+                violated.
         """
-        if bool(self.response_schema_id) != bool(self.response_schema_version):
+        if self.response_schema_version and not self.response_schema_id:
             raise ValueError(
-                "response_schema_id and response_schema_version must be provided together. "
-                "Either provide both or omit both for default text-only mode."
+                "response_schema_version requires response_schema_id to be set."
             )
 
         if self.response_schema_tracking and not self.response_schema_id:
@@ -138,10 +147,10 @@ class AgentComponentBase(BaseComponent):
                 "response_schema_tracking requires response_schema_id to be set."
             )
 
-        if self.response_schema_id and self.response_schema_version:
+        if self.response_schema_id:
             response_schema = self.schema_registry.get(
                 schema_id=self.response_schema_id,
-                schema_version=self.response_schema_version,
+                schema_version=self.response_schema_version or "",
             )
             if response_schema.tool_title in self.toolset:
                 raise ValueError(

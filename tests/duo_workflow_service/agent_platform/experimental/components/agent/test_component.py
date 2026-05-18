@@ -8,7 +8,12 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-from ai_gateway.response_schemas import BaseResponseSchemaRegistry
+from ai_gateway.response_schemas import (
+    BaseResponseSchemaRegistry,
+    InlineResponseSchemaRegistry,
+)
+from ai_gateway.response_schemas.base import BaseAgentOutput
+from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
@@ -309,13 +314,13 @@ class TestAgentComponentBase:
     @pytest.mark.parametrize(
         ("schema_id", "schema_version", "should_raise"),
         [
-            ("test/schema", "^1.0.0", False),  # Both provided - valid
-            (None, None, False),  # Neither provided - valid
-            ("test/schema", None, True),  # Only ID - invalid
-            (None, "^1.0.0", True),  # Only version - invalid
+            ("test/schema", "^1.0.0", False),  # Both provided — registry mode, valid
+            (None, None, False),  # Neither provided — text-only mode, valid
+            ("test/schema", None, False),  # ID only — inline mode, valid
+            (None, "^1.0.0", True),  # Version only (no ID) — invalid
         ],
     )
-    def test_id_and_version_are_provided(
+    def test_response_schema_id_and_version_combinations(
         self,
         component_name,
         flow_id,
@@ -331,13 +336,13 @@ class TestAgentComponentBase:
         schema_version,
         should_raise,
     ):
-        """Both response_schema_id and response_schema_version must be set together or both omitted."""
+        """response_schema_id alone = inline mode; both = registry mode; version alone = invalid."""
 
         class ConcreteBase(AgentComponentBase):
             pass
 
         if should_raise:
-            with pytest.raises(ValueError, match="must be provided together"):
+            with pytest.raises(ValueError, match="requires response_schema_id"):
                 ConcreteBase(
                     name=component_name,
                     flow_id=flow_id,
@@ -353,7 +358,7 @@ class TestAgentComponentBase:
                     internal_event_client=mock_internal_event_client,
                 )
         else:
-            if schema_id and schema_version:
+            if schema_id:
                 mock_schema = mock_schema_registry.get.return_value
                 mock_toolset.__contains__ = (
                     lambda self, name: name != mock_schema.tool_title
@@ -416,6 +421,117 @@ class TestAgentComponentBase:
                 prompt_registry=mock_prompt_registry,
                 internal_event_client=mock_internal_event_client,
             )
+
+
+class TestResponseSchemaDefinition:
+    """Tests for inline response schemas via the response_schemas flow config block."""
+
+    INLINE_SCHEMA_ID = "my_inline_schema"
+
+    @pytest.fixture(name="simple_inline_schema")
+    def simple_inline_schema_fixture(self):
+        return {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "score": {"type": "integer", "minimum": 1, "maximum": 10},
+            },
+            "required": ["summary", "score"],
+        }
+
+    @pytest.fixture(name="inline_schema_registry")
+    def inline_schema_registry_fixture(self, simple_inline_schema):
+        """An InlineResponseSchemaRegistry pre-loaded with the simple inline schema."""
+        registry = InlineResponseSchemaRegistry(ResponseSchemaRegistry())
+        registry.register_schema(self.INLINE_SCHEMA_ID, simple_inline_schema)
+        return registry
+
+    def _make_component(
+        self,
+        inline_schema_registry,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        extra_kwargs=None,
+    ):
+        """Helper to construct a ConcreteBase AgentComponent."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        kwargs = {
+            "name": component_name,
+            "flow_id": flow_id,
+            "flow_type": flow_type,
+            "user": user,
+            "inputs": ["context:user_input"],
+            "prompt_id": "test_prompt",
+            "toolset": mock_toolset,
+            "prompt_registry": mock_prompt_registry,
+            "internal_event_client": mock_internal_event_client,
+            "schema_registry": inline_schema_registry,
+        }
+        if extra_kwargs:
+            kwargs.update(extra_kwargs)
+        return ConcreteBase(**kwargs)
+
+    def test_inline_schema_resolves_response_schema(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        inline_schema_registry,
+    ):
+        """response_schema_id with no version resolves an inline BaseAgentOutput subclass."""
+        inline_schema_id = self.INLINE_SCHEMA_ID
+        mock_toolset.__contains__ = lambda _self, name: name != inline_schema_id
+
+        component = self._make_component(
+            inline_schema_registry,
+            component_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            extra_kwargs={"response_schema_id": self.INLINE_SCHEMA_ID},
+        )
+        assert component._response_schema is not None
+        assert issubclass(component._response_schema, BaseAgentOutput)
+        assert component._response_schema.tool_title == self.INLINE_SCHEMA_ID
+
+    def test_no_schema_fields_gives_none_response_schema(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        inline_schema_registry,
+    ):
+        """Component with no schema fields has _response_schema = None (default text mode)."""
+        component = self._make_component(
+            inline_schema_registry,
+            component_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+        )
+        assert component._response_schema is None
 
 
 class TestAgentComponentInitialization:
