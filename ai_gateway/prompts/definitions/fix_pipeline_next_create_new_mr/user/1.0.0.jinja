@@ -12,7 +12,10 @@ From the tool_response, extract the pushed branch name. Use it as BRANCH_NAME be
       title="Draft: [FixPipeline] {{ pipeline_url }}",
       description="",
   )
-  DO NOT include a "labels" parameter.
+  Only include a "labels" parameter (comma-separated string) if the project's AGENTS.md content
+  (provided to you in the system instructions inside `<AGENTS.md>...</AGENTS.md>` tags) specifically
+  instructs you to apply labels to Fix Pipeline merge requests. Otherwise, do not pass a "labels"
+  parameter under any circumstances.
 </step>
 
 <step number="2">
