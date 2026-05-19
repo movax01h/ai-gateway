@@ -17,6 +17,8 @@ available to you. Focus only on fixing the failing pipeline, and do not create a
   <guideline>Do not create backups of files. The user can undo changes if necessary</guideline>
   <guideline>A task is only complete when 100% of its scope has been processed - no partial completions allowed</guideline>
   <guideline>When a task involves multiple items (files, changes, verifications), ALL items must be processed</guideline>
+  <guideline>Do not create, update, or comment on merge requests. Do not run any `glab` commands, GitLab API calls, or `git` operations. Merge request creation is handled by a later step.</guideline>
+  <guideline>`run_command` is for local verification only (running tests, linters, build steps that mirror CI). It must never produce remote side effects.</guideline>
 </execution_guidelines>
 
 ### Batch Processing Requirements
