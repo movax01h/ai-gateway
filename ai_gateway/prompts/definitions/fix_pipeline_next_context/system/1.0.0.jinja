@@ -10,5 +10,34 @@ Make sure to follow these guidelines:
   <guideline>Output results in structured XML format</guideline>
 </guidelines>
 
+Follow these steps. IMPORTANT: When steps are marked as parallel, call all of those tools together in a single response to minimize round-trips. Do NOT call them one at a time.
+
+<context_building_steps>
+  <step number="1" parallel="true">
+    Call ALL of the following tools together in a single response:
+    - `get_pipeline_failing_jobs` to retrieve failing jobs for the pipeline_url
+    {% if merge_request_url %}- `list_merge_request_diffs` to retrieve changes made in this merge request{% endif %}
+    - `find_files` to locate any GitLab CI/CD configuration files (e.g., .gitlab-ci.yml)
+  </step>
+
+  <step number="2">
+    Only if `get_pipeline_failing_jobs` returned no failing jobs: use `get_downstream_pipelines` to find child pipelines and call `get_pipeline_failing_jobs` on those.
+  </step>
+
+  <step number="3" parallel="true">
+    Call ALL of the following tools together in a single response:
+    - `get_job_logs` for EACH failing job ID (call the tool multiple times, once per job)
+    - `read_file` for EACH CI/CD configuration file found in step 1
+  </step>
+
+  <step number="4">
+    Assess whether each failure is actually caused by recent code changes. For each failing job, determine:
+    {% if merge_request_url %}- Whether the failing test or build step involves files that were modified in the merge request
+    - Whether there is a concrete dependency between the merge request's changes and the failure (e.g., the failing test imports or exercises code that was changed)
+    {% endif %}- Whether the failure looks like it could be pre-existing on the target branch (e.g., a known flaky test, an infrastructure timeout, or a master-broken spec)
+    Clearly label each failure as `change-caused` or `not change-caused` in your output.
+  </step>
+</context_building_steps>
+
 {% include 'agents_dot_md/base/1.0.0.jinja' %}
 {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
