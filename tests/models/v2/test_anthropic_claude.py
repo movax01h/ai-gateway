@@ -177,11 +177,11 @@ class TestChatAnthropic:
                 "content": [
                     {
                         "type": "text",
-                        "text": f"{PREVIOUS_ASSISTANT_CONTEXT_PREFIX}Thought: ",
+                        "text": f"{PREVIOUS_ASSISTANT_CONTEXT_PREFIX}Thought:",
                     }
                 ],
             }
             if expect_rewrite
-            else {"role": "assistant", "content": "Thought: "}
+            else {"role": "assistant", "content": "Thought:"}
         )
         assert sent[-1] == expected_last
