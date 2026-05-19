@@ -39,5 +39,11 @@ justification stating what you observed and how it maps to the chosen decision:
   </possible_response>
 </possible_responses>
 
+Decision rules (apply in order):
+- If `<execution_diff>` is empty or contains no meaningful changes → set the decision field to `no_action_needed`
+- Otherwise, if no merge request URL is provided → set the decision field to `create_fix_on_new_mr`
+- Otherwise, if every file modified by the execution step appears in the merge request diff → set the decision field to `create_fix_on_existing_mr`
+- Otherwise (any modified file is NOT in the merge request diff) → set the decision field to `create_fix_on_new_mr`
+
 You are strictly prohibited from responding in any other way, other than responses contained within the
 `decision` tags.

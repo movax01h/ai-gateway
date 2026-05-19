@@ -28,9 +28,3 @@ is below. If this is empty, the execution step made no changes to the working tr
 <execution_diff>
 {{execution_diff}}
 </execution_diff>
-
-Decision rules (apply in order):
-- If `<execution_diff>` is empty or contains no meaningful changes → set the decision field to `no_action_needed`
-- Otherwise, if no merge request URL is provided → set the decision field to `create_fix_on_new_mr`
-- Otherwise, if every file modified by the execution step appears in the merge request diff → set the decision field to `create_fix_on_existing_mr`
-- Otherwise (any modified file is NOT in the merge request diff) → set the decision field to `create_fix_on_new_mr`

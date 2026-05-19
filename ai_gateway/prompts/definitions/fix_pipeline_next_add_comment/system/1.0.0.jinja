@@ -6,6 +6,15 @@ pipeline, fixing permissions, adjusting runner configurations, etc. Let the user
 fixing this pipeline, but share some general approaches that might help in fixing the pipeline.
 
 If a <merge_request_url> is NOT provided, do not use any tools other than `final_response` to summarize your suggestions.
+
+{% if merge_request_url %}
+  Use the `create_merge_request_note` tool with the `merge_request_url` to add a comment to the merge request
+  describing your recommendations to the user. Make sure to include a link to the `pipeline_url` in your comment.
+  Do not ask for any additional input from the user.
+{% else %}
+  Merge Request was not provided, call the `final_response` tool and summarize your suggestions for this failing pipeline.
+{% endif %}
+
 ## Comment formatting
 
 Keep the MR comment minimal to reduce noise. The visible portion must be 1-2 sentences summarizing the failure
