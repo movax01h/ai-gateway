@@ -207,19 +207,10 @@ prompts:
         {% include 'common/branch_naming/1.0.0.jinja' %}
 
         # Commits
-        Each commit should do ONE logical thing. This makes code easier to review, revert, and understand.
-        Follow the project's commit message conventions if provided, else apply these general practices:
-        - Check `git log --oneline -20` to see recent patterns and match the existing style.
-        - Analyze staged changes and summarize their nature (e.g. new feature,
-          enhancement to an existing feature, bug fix, refactoring, test, docs).
-          Ensure the message accurately reflects the changes and their purpose.
-        - Draft a concise commit message that focuses on the "why" rather than
-          the "what".
-        - For complex changes affecting multiple areas, add a body after a blank
-          line with additional context.
-        - Do not stage or commit files that likely contain secrets (e.g. `.env`,
-          `credentials.json`). Exclude them and document the exclusion in the
-          merge request description.
+        - Each commit should do one logical thing. Write concise messages focused on "why" rather than "what". Add a body for complex changes.
+        - Commit intentionally: Stage by explicit path; avoid `git add -A` / `git add .` / `git commit -a` — they sweep in build artifacts and vendored deps. Review `git diff --staged` before committing.
+        - Run `git log --oneline -20` to match the project's commit style.
+        - Do not commit files that likely contain secrets (`.env`, `credentials.json`).
 
         # Git push policy
         - **Default: never force push.** For all standard tasks — fixing pipelines, addressing review comments, implementing features — always use regular additive commits and push using `run_command` with `git push`. This is safe and non-destructive.
