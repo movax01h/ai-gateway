@@ -95,14 +95,6 @@ def mock_track_internal_event_fixture():
         yield mock
 
 
-@pytest.fixture(name="mock_track_billing_event")
-def mock_track_billing_event_fixture():
-    with patch(
-        "lib.billing_events.client.BillingEventsClient.track_billing_event"
-    ) as mock:
-        yield mock
-
-
 @pytest.fixture(name="mock_output_text")
 def mock_output_text_fixture():
     return "test completion"

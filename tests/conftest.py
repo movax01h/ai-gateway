@@ -629,3 +629,102 @@ def mock_proxy_async_client_fixture(
 @pytest.fixture(name="selection_config")
 def selection_config_fixture():
     return ModelSelectionConfig(default_models_override={})
+
+
+@pytest.fixture(name="acompletion_non_stream_response")
+def acompletion_non_stream_response_fixture():
+    return {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "    print('Hello')",
+                },
+                "finish_reason": "stop",
+                "index": 0,
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
+
+
+@pytest.fixture(name="acompletion_non_stream_with_logprobs_response")
+def acompletion_non_stream_with_logprobs_response_fixture():
+    return {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "    print('Hello, World!')",
+                },
+                "finish_reason": "stop",
+                "index": 0,
+                "logprobs": {
+                    "token_logprobs": [-0.5, -1.2, -0.8],
+                    "tokens": ["    ", "print", "('Hello, World!')"],
+                },
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
+    }
+
+
+@pytest.fixture(name="acompletion_stream_response")
+def acompletion_stream_response_fixture():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {"role": "assistant", "content": "Hello"},
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ],
+            "usage": {},
+        },
+        {
+            "choices": [
+                {
+                    "delta": {"content": " world"},
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ],
+            "usage": {},
+        },
+        {
+            "choices": [
+                {
+                    "delta": {},
+                    "finish_reason": "stop",
+                    "index": 0,
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        },
+    ]
+
+    async def _stream_generator(*_args, **_kwargs):
+        for chunk in chunks:
+            yield chunk
+
+    return _stream_generator()
+
+
+@pytest.fixture(name="mock_acompletion_with_retry")
+def mock_acompletion_with_retry_fixture(request, acompletion_response_fixture):
+    with patch(
+        "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+        new=AsyncMock(
+            return_value=request.getfixturevalue(acompletion_response_fixture)
+        ),
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture(name="mock_track_billing_event")
+def mock_track_billing_event_fixture():
+    with patch(
+        "lib.billing_events.client.BillingEventsClient.track_billing_event"
+    ) as mock:
+        yield mock

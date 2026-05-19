@@ -23,12 +23,16 @@ from packaging.version import Version
 from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
-from contract import contract_pb2
+from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service import server as server_module
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
+from duo_workflow_service.interceptors.metadata_context_interceptor import (
+    MetadataContextInterceptor,
+)
 from duo_workflow_service.server import (
     DuoWorkflowService,
     clean_start_request,
@@ -51,6 +55,7 @@ from duo_workflow_service.workflows.type_definitions import (
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.context import client_capabilities
 from lib.events import GLReportingEventContext
+from lib.events.contextvar import X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED
 from lib.internal_events.context import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import (
     CategoryEnum,
@@ -67,13 +72,22 @@ def setup_event_loop():
     asyncio.set_event_loop(loop)
 
 
-@pytest.fixture
-def simple_flow_config():
+@pytest.fixture(name="simple_flow_config")
+def simple_flow_config_fixture():
     return {
         "version": "v1",
-        "environment": "test",
-        "components": [{"name": "test_agent", "type": "AgentComponent"}],
+        "environment": "chat",
+        "components": [
+            {
+                "name": "test_agent",
+                "type": "AgentComponent",
+                "prompt_id": "model_configuration/check",
+                "prompt_version": "^1.0.0",
+                "toolset": [],
+            }
+        ],
         "flow": {"entry_point": "test_agent"},
+        "routers": [{"from": "test_agent", "to": "end"}],
     }
 
 
@@ -506,6 +520,120 @@ async def test_list_flows_with_filters(
 
     configs_dict = [MessageToDict(config) for config in response.configs]
     assert validation_func(configs_dict)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config_values,acompletion_response_fixture",
+    [({"mock_model_responses": False}, "acompletion_stream_response")],
+)
+@pytest.mark.parametrize("self_hosted_dap_billing_enabled", ["true", "false"])
+@pytest.mark.usefixtures(
+    "mock_fetch_workflow_and_container_data",
+    "mock_gitlab_workflow_aget_tuple",
+    "mock_gitlab_workflow_aput",
+    "mock_get_event",
+    "mock_acompletion_with_retry",
+)
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater._update_workflow_status_in_remote"
+)
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater.get_workflow_status",
+    return_value=WorkflowStatusEnum.FINISHED,
+)
+@patch(
+    "duo_workflow_service.interceptors.route.usage_billing.SelfHostedBillingPromptCallbackHandler.on_before_llm_call"
+)
+async def test_execute_workflow_emits_billing_event(
+    mock_on_before_llm_call,
+    _mock_get_workflow_status,
+    _mock_update_workflow_status,
+    self_hosted_dap_billing_enabled,
+    simple_flow_config,
+    servicer,
+    auth_user,
+    mock_track_billing_event,
+):
+    auth_user.can = MagicMock(return_value=True)
+
+    mock_config = MagicMock()
+
+    server = grpc.aio.server(interceptors=[MetadataContextInterceptor(mock_config)])
+    contract_pb2_grpc.add_DuoWorkflowServicer_to_server(servicer, server)
+    port = server.add_insecure_port("[::]:0")
+    await server.start()
+
+    try:
+        channel = grpc.aio.insecure_channel(f"localhost:{port}")
+        stub = contract_pb2_grpc.DuoWorkflowStub(channel)
+
+        metadata = [
+            (
+                X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED,
+                self_hosted_dap_billing_enabled,
+            ),
+        ]
+
+        async def _request_iterator():
+            yield contract_pb2.ClientEvent(
+                startRequest=contract_pb2.StartWorkflowRequest(
+                    flowConfig=simple_flow_config,
+                    flowConfigSchemaVersion="experimental",
+                    workflowID="123",
+                )
+            )
+
+            # Keep the connection alive
+            while True:
+                yield contract_pb2.ClientEvent(
+                    heartbeat=contract_pb2.HeartbeatRequest(
+                        timestamp=int(datetime.now(timezone.utc).timestamp())
+                    )
+                )
+                await asyncio.sleep(0.1)
+
+        # Make the request and consume the response
+        async for _ in stub.ExecuteWorkflow(_request_iterator(), metadata=metadata):
+            pass
+    finally:
+        await channel.close()
+        await server.stop(grace=None)
+
+    if self_hosted_dap_billing_enabled == "true":
+        mock_on_before_llm_call.assert_called_once()
+    else:
+        mock_on_before_llm_call.assert_not_called()
+
+    mock_track_billing_event.assert_called_once_with(
+        auth_user,
+        BillingEvent.DAP_FLOW_ON_COMPLETION,
+        "GitLabWorkflow",
+        unit_of_measure="request",
+        quantity=1,
+        metadata={
+            "workflow_id": "123",
+            "feature_qualified_name": "software_development",
+            "feature_ai_catalog_item": True,
+            "execution_environment": ExecutionEnvironment.DAP.value,
+            "llm_operations": [
+                {
+                    "token_count": 15,
+                    "model_id": "claude-sonnet-4-6",
+                    "model_engine": "litellm",
+                    "model_provider": "litellm",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "agent_name": "test_agent",
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "operation_type": "standard",
+                }
+            ],
+            "tool_names": [],
+            "orbit_called": False,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -1709,10 +1837,10 @@ async def test_track_self_hosted_execute_workflow_billing_event(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "flow_config_name,flow_config_schema_version,ignore_schema_version,expected_version",
+    "flow_config_schema_version,ignore_schema_version,expected_version",
     [
-        ("simple_flow_config", "experimental", True, "v1"),
-        ("simple_flow_config", "experimental", False, "experimental"),
+        ("experimental", True, "v1"),
+        ("experimental", False, "experimental"),
     ],
 )
 @patch("duo_workflow_service.server.AbstractWorkflow")
@@ -1722,8 +1850,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     mock_language_server_version,
     mock_resolve_flow,
     mock_abstract_workflow_class,
-    request,
-    flow_config_name,
+    simple_flow_config,
     flow_config_schema_version,
     ignore_schema_version,
     expected_version,
@@ -1743,16 +1870,12 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     )
     mock_resolve_flow.return_value = mock_abstract_workflow_class
 
-    flow_config = request.getfixturevalue(flow_config_name)
-    flow_config_struct = struct_pb2.Struct()
-    flow_config_struct.update(flow_config)
-
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
             startRequest=contract_pb2.StartWorkflowRequest(
                 workflowID="#1337",
                 workflowDefinition="test",
-                flowConfig=flow_config,
+                flowConfig=simple_flow_config,
                 flowConfigSchemaVersion=flow_config_schema_version,
             )
         )
@@ -1769,7 +1892,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
         await anext(result)
 
     expected_struct = struct_pb2.Struct()
-    expected_struct.update(flow_config)
+    expected_struct.update(simple_flow_config)
     mock_resolve_flow.assert_called_once_with(
         InlineFlowRequest(
             config_struct=expected_struct,
