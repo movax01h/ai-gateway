@@ -93,11 +93,6 @@ name = "gitlab_cloud_connector"
 url = "https://gitlab.com/api/v4/projects/58733651/packages/pypi/simple"
 priority = "supplemental"
 
-[[tool.poetry.source]]
-name = "litellm"
-url = "https://gitlab.com/api/v4/projects/78063949/packages/pypi/simple"
-priority = "primary"
-
 [tool.poetry.group.test]
 optional = true
 
