@@ -9,6 +9,22 @@ Additionally, we use several Pytest plugins to enhance our testing capabilities:
 - `pytest-watcher`: For running tests in watch mode.
 - `pytest-xdist`: For running tests in parallel.
 
+## Testing guide
+
+Every code change must be accompanied by unit tests. If 100% coverage of the code change is not practical, this must be
+justified by the author.
+
+For code changes that introduce or affect the interface between the Duo Workflow Service and external components there
+must be at least one test that demonstrates the entire flow involving the code change. This includes changes that
+introduce new API endpoints or gRPC methods, or code that interacts with critical components of the GitLab
+infrastructure, like internal events and billing events. These "request" tests should aim to use mocks as minimally as
+possible to exercise as much of the code stack involved as possible. Using mocks to simulate interactions with external
+components (like calls to LLM providers or to Snowplow) is acceptable. As an example, see these tests that assert that
+billing events are emitted from
+[HTTP API calls](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/d1cbc37924cf2e1ddb614b64cd297d98767033d2/tests/api/v1/proxy/test_anthropic.py#L94-153)
+and
+[gRPC calls](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/6d461a8f888e2fdf980907213abb0c9056287b09/tests/duo_workflow_service/test_server.py#L527-638).
+
 ## Unit test
 
 To run the entire unit test suite, you can use the following command:
