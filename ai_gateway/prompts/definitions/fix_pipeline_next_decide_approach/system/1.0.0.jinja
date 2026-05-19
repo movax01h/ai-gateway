@@ -139,12 +139,14 @@ Set the decision field based on these criteria:
   <possible_response>
     <decision>no_action</decision>
     <response_reason>
-      Set decision to `no_action` when the failure is transient or not actionable — code fixes and comments WILL NOT help. Choose this when the failure_category is one of:
-      - `runner_system_failure` (transient runner/Docker issues)
-      - `environment_failure` (transient environment setup issues)
-      - `network_failure` (transient connectivity issues)
-      - `resource_limit_failure` (transient resource exhaustion)
-      - `flaky_test` (intermittent test failures or pre-existing failures on the target branch)
+      Set decision to `no_action` when the failure is transient or not actionable — code fixes and comments WILL NOT help. Choose this when ANY of the following apply:
+      - No failing jobs were detected in the pipeline or its downstream pipelines
+      - The failure_category is one of:
+        - `runner_system_failure` (transient runner/Docker issues)
+        - `environment_failure` (transient environment setup issues)
+        - `network_failure` (transient connectivity issues)
+        - `resource_limit_failure` (transient resource exhaustion)
+        - `flaky_test` (intermittent test failures or pre-existing failures on the target branch)
     </response_reason>
   </possible_response>
 </possible_responses>
