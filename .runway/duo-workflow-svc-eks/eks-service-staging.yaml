@@ -20,7 +20,6 @@ duo-workflow-svc-eks:
       LANGSMITH_PROJECT: "duo-workflow-staging"
       DUO_WORKFLOW_SERVICE_ENVIRONMENT: "staging"
       AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-dev"
-      AIGW_AUDIT_EVENT__ENABLED: "true"
     scalability:
       min_instances: 1
       max_instances: 8
