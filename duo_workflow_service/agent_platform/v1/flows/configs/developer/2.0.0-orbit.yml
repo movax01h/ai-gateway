@@ -29,6 +29,13 @@ components:
       - from: "if git rev-parse --is-shallow-repository | grep -q true; then git fetch --unshallow; fi"
         as: "command"
         literal: true
+      # Large repos can take several minutes to unshallow; override the default
+      # 120 s timeout to avoid premature failures on big repositories.
+      # This version (2.0.0+) requires clients that support the command_timeout
+      # capability, so the timeout will not be silently ignored.
+      - from: "600"
+        as: "timeout"
+        literal: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
