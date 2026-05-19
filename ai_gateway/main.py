@@ -1,6 +1,6 @@
 import uvicorn
 
-from ai_gateway.app import get_config
+from ai_gateway.config import get_config
 
 
 def run_app():

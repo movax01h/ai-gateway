@@ -2,7 +2,7 @@ import json
 
 import grpc
 
-from ai_gateway.app import get_config
+from ai_gateway.config import get_config
 from ai_gateway.model_metadata import (
     ModelMetadataBySize,
     build_default_feature_setting_metadata,

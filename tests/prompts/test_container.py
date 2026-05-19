@@ -52,7 +52,10 @@ def config_values_fixture(assets_dir):
     }
 
 
-def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
+def test_container(
+    mock_ai_gateway_container: containers.DeclarativeContainer,
+    selection_config: ModelSelectionConfig,
+):
     prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
     registry = cast(LocalPromptRegistry, prompts.prompt_registry())
 
@@ -68,7 +71,7 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
         }
     )
 
-    unit_primitive_config_map = ModelSelectionConfig().get_unit_primitive_config_map()
+    unit_primitive_config_map = selection_config.get_unit_primitive_config_map()
     prompts_dir = Path(
         sys.modules[LocalPromptRegistry.__module__].__file__ or ""
     ).parent

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, Json, RootModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = [
+    "get_config",
     "ConfigBedrockGuardrail",
     "Config",
     "ConfigLogging",
@@ -18,6 +19,7 @@ __all__ = [
     "ConfigInstrumentator",
     "ConfigVertexTextModel",
     "ConfigModelLimits",
+    "ConfigModelSelection",
     "ConfigCustomModels",
     "ConfigDuoChat",
     "ConfigModelKeys",
@@ -213,6 +215,17 @@ class ConfigBedrockGuardrail(BaseModel):
     )
 
 
+class ConfigModelSelection(BaseModel):
+    default_models: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description=(
+            "JSON object mapping feature_setting names to a list of model identifiers. "
+            "Overrides the default_models from unit_primitives.yml for matching keys. "
+            'Example: \'{"duo_chat": ["claude_sonnet_4_5_20250929_vertex"]}\''
+        ),
+    )
+
+
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
@@ -334,6 +347,9 @@ class Config(BaseSettings):
     model_engine_limits: Annotated[
         ConfigModelLimits, Field(default_factory=ConfigModelLimits)
     ]
+    model_selection: Annotated[
+        ConfigModelSelection, Field(default_factory=ConfigModelSelection)
+    ]
     bind_tools_cache: Annotated[
         ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)
     ]
@@ -371,6 +387,13 @@ class Config(BaseSettings):
                     continue
 
                 setattr(child, field, parent_value)
+
+
+_config = Config()
+
+
+def get_config() -> Config:
+    return _config
 
 
 def setup_litellm(config: Config):

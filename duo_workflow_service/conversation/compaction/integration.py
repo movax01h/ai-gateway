@@ -1,7 +1,7 @@
 from langchain_core.messages import BaseMessage
 from structlog import get_logger
 
-from ai_gateway.app import get_config
+from ai_gateway.config import get_config
 from duo_workflow_service.conversation.compaction.compactor import ConversationCompactor
 from duo_workflow_service.conversation.trimmer import apply_token_based_trim
 from duo_workflow_service.entities.state import get_model_max_context_token_limit

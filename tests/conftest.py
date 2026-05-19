@@ -624,3 +624,8 @@ def mock_proxy_async_client_fixture(
         return_value=http_handler,
     ):
         yield client
+
+
+@pytest.fixture(name="selection_config")
+def selection_config_fixture():
+    return ModelSelectionConfig(default_models_override={})
