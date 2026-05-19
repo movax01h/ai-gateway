@@ -283,3 +283,45 @@ improvements in Duo Workflow's problem-solving capabilities.
 
 For comprehensive instructions on adding a new tool to the Duo Workflow Service, refer to the dedicated
 guide: [Adding New Tool](adding_new_tool.md).
+
+## JWK Signing Key and Validation Key
+
+The Duo Workflow Service uses its own pair of self-signed JWT keys, separate from the AI Gateway keys, to validate incoming JWTs from the Duo Workflow Executor:
+
+- `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY`: the primary key used to validate incoming JWTs.
+- `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY`: a secondary key consulted during token validation, used to accept tokens signed with the previous signing key during and after a key rotation.
+
+Both keys are passed to `LocalAuthProvider` (from `gitlab_cloud_connector`), which uses them to validate the JWT signature on each incoming request.
+
+### JWK signing key rotation
+
+The `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` and `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` private keys should be rotated yearly.
+For a reminder issue template, see this [DWS key rotation issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2289).
+
+#### Keep already issued tokens valid during key rotation
+
+Once `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` is rotated, tokens signed with the old key would immediately stop being valid.
+To continue supporting already-issued tokens for up to their intended lifetime, set `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` to the value of the **old** signing key before deploying the new one.
+DWS will then accept tokens validated by either key during the transition period.
+
+#### Steps to rotate the key
+
+Tokens should be rotated in the following Vault paths for both staging and production environments.
+Anyone with Vault access to the `service/duo-workflow-svc` paths can perform these rotations. For additional help, contact the `#g_ai_framework` channel.
+
+| Staging | Production |
+|---------|------------|
+| [Duo Workflow Service](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/duo-workflow-svc/) | [Duo Workflow Service](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/duo-workflow-svc/) |
+
+Please start by updating staging first, then repeat the same steps for production:
+
+1. Update the `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` environment variable in the Vault with the **current** value of `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY`.
+1. Generate a new signing key: `openssl genrsa -out jwt_signing.key 2048`
+1. Update `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` in the Vault with the newly generated key.
+1. Deploy a new revision of the DWS (ask a Runway team member or an SRE, or anyone with permission to run Runway jobs in the [duo-workflow-svc deployments pipeline](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc/-/pipelines)).
+1. Confirm DWS is working correctly (for example, test Duo Agent Platform on <https://staging.gitlab.com> and verify via GCP logs).
+1. Create a Slack reminder in `#g_ai_framework` to be triggered 3 days after the signing key rotation, to rotate the validation key.
+1. Create a new issue as a reminder to rotate the keys again with a due date 1 month before the next rotation schedule.
+1. Create a Slack reminder in `#g_ai_framework` to be triggered 1 month before the next rotation schedule.
+1. After 3 days, generate a new validation key: `openssl genrsa -out jwt_validation.key 2048`
+1. Update `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` in the Vault with the newly generated key.
