@@ -25,7 +25,7 @@ def mock_model_config_fixture():
         "ai_gateway.api.v1.models.get_definitions.ModelSelectionConfig",
     ) as mock:
         mock_configs = MagicMock()
-        mock.return_value = mock_configs
+        mock.instance.return_value = mock_configs
         mock_configs.get_llm_definitions.return_value = {
             "model1": ChatLiteLLMDefinition(
                 name="Model 1",

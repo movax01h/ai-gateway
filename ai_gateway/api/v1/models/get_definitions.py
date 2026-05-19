@@ -50,7 +50,7 @@ class _GetModelResponse(BaseModel):
     description="List of available large language models powering GitLab Duo features",
 )
 async def get_models():
-    selection_config = ModelSelectionConfig()
+    selection_config = ModelSelectionConfig.instance()
     llm_definitions = selection_config.get_llm_definitions()
     unit_primitives = []
     # Collect pseudo-models to add for unit primitives with multiple default models.

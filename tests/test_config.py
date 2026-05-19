@@ -21,6 +21,7 @@ from ai_gateway.config import (
     ConfigInstrumentator,
     ConfigLogging,
     ConfigModelLimits,
+    ConfigModelSelection,
     ConfigProcessLevelFeatureFlags,
     ConfigSnowplow,
     ConfigVertexSearch,
@@ -819,6 +820,40 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
     with mock.patch.dict(os.environ, values, clear=True):
         config = Config(_env_file=None)
         assert config.bedrock_guardrail_config.guardrailIdentifier == max_id
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({}, ConfigModelSelection()),
+        (
+            {
+                "AIGW_MODEL_SELECTION__DEFAULT_MODELS": '{"duo_chat": ["claude_sonnet_4_5_20250929_vertex"]}'
+            },
+            ConfigModelSelection(
+                default_models={"duo_chat": ["claude_sonnet_4_5_20250929_vertex"]}
+            ),
+        ),
+        (
+            {
+                "AIGW_MODEL_SELECTION__DEFAULT_MODELS": (
+                    '{"duo_chat": ["model_a"], "code_generations": ["model_b", "model_c"]}'
+                )
+            },
+            ConfigModelSelection(
+                default_models={
+                    "duo_chat": ["model_a"],
+                    "code_generations": ["model_b", "model_c"],
+                }
+            ),
+        ),
+    ],
+)
+def test_config_model_selection(values: dict, expected: ConfigModelSelection):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.model_selection == expected
 
 
 # pylint: enable=direct-environment-variable-reference

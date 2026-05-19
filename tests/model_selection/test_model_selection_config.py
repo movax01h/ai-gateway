@@ -1,6 +1,6 @@
 from pathlib import Path
 from textwrap import dedent
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -88,11 +88,7 @@ def mock_fs_fixture(fs: FakeFilesystem):
 # editorconfig-checker-enable
 
 
-@pytest.fixture(name="selection_config")
-def selection_config_fixture(mock_fs):  # pylint: disable=unused-argument
-    return ModelSelectionConfig()
-
-
+@pytest.mark.usefixtures("mock_fs")
 def test_load_llm_definitions(selection_config):
     assert selection_config.get_llm_definitions() == {
         "gitlab-model-1": ChatLiteLLMDefinition(
@@ -120,6 +116,7 @@ def test_load_llm_definitions(selection_config):
     }
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_unit_primitive_config(selection_config):
     assert list(selection_config.get_unit_primitive_config()) == [
         UnitPrimitiveConfig(
@@ -143,6 +140,7 @@ def test_get_unit_primitive_config(selection_config):
     ]
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_unit_primitive_config_map(selection_config):
     assert selection_config.get_unit_primitive_config_map() == {
         "test_config": UnitPrimitiveConfig(
@@ -172,6 +170,71 @@ def test_is_singleton():
     config_instance_2 = ModelSelectionConfig.instance()
 
     assert config_instance_1 is config_instance_2
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_models_override_replaces_yaml_defaults():
+    """Test that default_models_override replaces default_models for matching feature settings."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={"test_config": ["gitlab-model-2"]}
+    )
+
+    unit_primitive_map = config.get_unit_primitive_config_map()
+
+    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-2"]
+    # Unaffected feature settings should retain their YAML defaults.
+    assert unit_primitive_map["multiple_defaults"].default_models == [
+        "gitlab-model-1",
+        "gitlab-model-2",
+    ]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_models_override_ignores_unknown_feature_settings():
+    """Test that unknown feature settings in the override are silently ignored."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={"nonexistent_feature": ["gitlab-model-1"]}
+    )
+
+    unit_primitive_map = config.get_unit_primitive_config_map()
+
+    # All feature settings should retain their YAML defaults.
+    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-1"]
+    assert unit_primitive_map["multiple_defaults"].default_models == [
+        "gitlab-model-1",
+        "gitlab-model-2",
+    ]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_models_override_empty_dict_is_noop():
+    """Test that an empty override dict leaves all defaults unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(default_models_override={})
+
+    unit_primitive_map = config.get_unit_primitive_config_map()
+
+    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-1"]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_instance_uses_get_config_for_overrides():
+    """Test that ModelSelectionConfig.instance() reads overrides from get_config()."""
+    ModelSelectionConfig._instance = None
+    mock_config = MagicMock()
+    mock_config.model_selection.default_models = {"test_config": ["gitlab-model-2"]}
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.get_config",
+        return_value=mock_config,
+    ):
+        instance = ModelSelectionConfig.instance()
+
+    assert instance._default_models_override == {"test_config": ["gitlab-model-2"]}
+    unit_primitive_map = instance.get_unit_primitive_config_map()
+    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-2"]
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -215,6 +278,7 @@ def test_singleton_caches_yaml_loading():
         assert unit_primitives2 is unit_primitives1
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_model(selection_config):
     assert selection_config.get_model("gitlab-model-1") == ChatLiteLLMDefinition(
         name="Model One",
@@ -226,11 +290,13 @@ def test_get_model(selection_config):
     )
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_model_missing_key(selection_config):
     with pytest.raises(ValueError):
         selection_config.get_model("non-existing-model")
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_model_for_feature(selection_config):
     assert selection_config.get_model_for_feature(
         "test_config"
@@ -244,6 +310,7 @@ def test_get_model_for_feature(selection_config):
     )
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_model_for_feature_with_multiple_defaults(selection_config):
     with patch("random.choice", return_value="gitlab-model-2") as mock_random_choice:
         assert selection_config.get_model_for_feature(
@@ -265,12 +332,11 @@ def test_get_model_for_feature_no_feature(selection_config):
         selection_config.get_model_for_feature("random-feature")
 
 
-@pytest.mark.usefixtures("mock_fs")
-def test_validate_without_error():
-    ModelSelectionConfig().validate()
+def test_validate_without_error(selection_config):
+    selection_config.validate()
 
 
-def test_validate_with_error(fs: FakeFilesystem):
+def test_validate_with_error(selection_config, fs: FakeFilesystem):
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
@@ -313,7 +379,7 @@ def test_validate_with_error(fs: FakeFilesystem):
     # editorconfig-checker-enable
 
     with pytest.raises(ValueError) as excinfo:
-        ModelSelectionConfig().validate()
+        selection_config.validate()
 
     error_message = str(excinfo.value)
     assert "non_existent_model" in error_message
@@ -321,7 +387,9 @@ def test_validate_with_error(fs: FakeFilesystem):
     assert "third_non_existent_model" in error_message
 
 
-def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
+def test_validate_default_model_not_in_selectable_models(
+    selection_config, fs: FakeFilesystem
+):
     """Test that validation fails when default models are not in selectable_models."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -397,7 +465,7 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
     # editorconfig-checker-enable
 
     with pytest.raises(ValueError) as excinfo:
-        ModelSelectionConfig().validate()
+        selection_config.validate()
 
     error_message = str(excinfo.value)
     expected_error = (
@@ -410,7 +478,7 @@ def test_validate_default_model_not_in_selectable_models(fs: FakeFilesystem):
     assert error_message == expected_error
 
 
-def test_get_proxy_models_for_provider(fs: FakeFilesystem):
+def test_get_proxy_models_for_provider(selection_config, fs: FakeFilesystem):
     """Test that get_proxy_models_for_provider returns models with matching proxy_provider."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -463,32 +531,29 @@ def test_get_proxy_models_for_provider(fs: FakeFilesystem):
     )
     # editorconfig-checker-enable
 
-    config = ModelSelectionConfig()
-
     # Test anthropic provider
-    anthropic_models = config.get_proxy_models_for_provider("anthropic")
+    anthropic_models = selection_config.get_proxy_models_for_provider("anthropic")
     assert set(anthropic_models) == {
         "claude-sonnet-4-5-20250929",
         "claude-opus-4-5-20251101",
     }
 
     # Test openai provider
-    openai_models = config.get_proxy_models_for_provider("openai")
+    openai_models = selection_config.get_proxy_models_for_provider("openai")
     assert set(openai_models) == {"gpt-5"}
 
     # Test unknown provider returns empty list
-    unknown_models = config.get_proxy_models_for_provider("unknown")
+    unknown_models = selection_config.get_proxy_models_for_provider("unknown")
     assert not unknown_models
 
 
-def test_selectable_models_have_required_fields():
+def test_selectable_models_have_required_fields(selection_config):
     """Test that UI-selectable models in unit_primitives.yml have a cost_indicator and description."""
-    config = ModelSelectionConfig()
-    llm_definitions = config.get_llm_definitions()
+    llm_definitions = selection_config.get_llm_definitions()
 
     missing_cost_indicator = [
         (upc.feature_setting, model_id)
-        for upc in config.get_unit_primitive_config()
+        for upc in selection_config.get_unit_primitive_config()
         for model_id in upc.selectable_models
         if model_id in llm_definitions
         and llm_definitions[model_id].cost_indicator is None
@@ -496,7 +561,7 @@ def test_selectable_models_have_required_fields():
 
     missing_description = [
         (upc.feature_setting, model_id)
-        for upc in config.get_unit_primitive_config()
+        for upc in selection_config.get_unit_primitive_config()
         for model_id in upc.selectable_models
         if model_id in llm_definitions and llm_definitions[model_id].description is None
     ]
@@ -520,10 +585,9 @@ def test_selectable_models_have_required_fields():
     assert not errors, "\n".join(errors)
 
 
-def test_fireworks_models_have_max_retries_10():
+def test_fireworks_models_have_max_retries_10(selection_config):
     """Test that all Fireworks models have max_retries set to 10 for exponential backoff."""
-    config = ModelSelectionConfig()
-    llm_definitions = config.get_llm_definitions()
+    llm_definitions = selection_config.get_llm_definitions()
 
     fireworks_models = [
         (identifier, definition)
@@ -540,6 +604,7 @@ def test_fireworks_models_have_max_retries_10():
         ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
 
 
+@pytest.mark.usefixtures("mock_fs")
 def test_get_model_for_feature_with_size_preference_config(selection_config):
     """get_model_for_feature should use default_models when models_for_size_preference is set."""
     models_config = UnitPrimitiveConfig(
@@ -561,7 +626,7 @@ def test_get_model_for_feature_with_size_preference_config(selection_config):
         assert result.gitlab_identifier == "gitlab-model-2"
 
 
-def test_validate_with_size_preference_field(fs: FakeFilesystem):
+def test_validate_with_size_preference_field(selection_config, fs: FakeFilesystem):
     """Validate() should check model IDs in models_for_size_preference."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -614,10 +679,12 @@ def test_validate_with_size_preference_field(fs: FakeFilesystem):
     )
     # editorconfig-checker-enable
 
-    ModelSelectionConfig().validate()
+    selection_config.validate()
 
 
-def test_validate_with_invalid_size_preference_field(fs: FakeFilesystem):
+def test_validate_with_invalid_size_preference_field(
+    selection_config, fs: FakeFilesystem
+):
     """Validate() should report model IDs in models_for_size_preference that don't exist."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -661,7 +728,7 @@ def test_validate_with_invalid_size_preference_field(fs: FakeFilesystem):
     # editorconfig-checker-enable
 
     with pytest.raises(ValueError) as excinfo:
-        ModelSelectionConfig().validate()
+        selection_config.validate()
 
     assert "non-existent-small" in str(excinfo.value)
 
@@ -708,6 +775,7 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
 
 
 def test_validate_size_preference_without_selectable_models_passes(
+    selection_config,
     size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
@@ -736,10 +804,11 @@ def test_validate_size_preference_without_selectable_models_passes(
     )
     # editorconfig-checker-enable
 
-    ModelSelectionConfig().validate()  # must not raise
+    selection_config.validate()  # must not raise
 
 
 def test_validate_size_preference_models_not_required_in_selectable(
+    selection_config,
     size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
@@ -769,4 +838,4 @@ def test_validate_size_preference_models_not_required_in_selectable(
     )
     # editorconfig-checker-enable
 
-    ModelSelectionConfig().validate()  # must not raise
+    selection_config.validate()  # must not raise

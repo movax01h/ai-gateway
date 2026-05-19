@@ -7,6 +7,7 @@ import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from ai_gateway.config import get_config
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ChatAmazonQParams,
@@ -131,9 +132,10 @@ class UnitPrimitiveConfig(BaseModel):
 class ModelSelectionConfig:
     _instance: Optional["ModelSelectionConfig"] = None
 
-    def __init__(self) -> None:
+    def __init__(self, default_models_override: dict[str, list[str]]) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
+        self._default_models_override: dict[str, list[str]] = default_models_override
 
     @classmethod
     def instance(cls) -> "ModelSelectionConfig":
@@ -143,7 +145,10 @@ class ModelSelectionConfig:
             The singleton ModelSelectionConfig instance.
         """
         if cls._instance is None:
-            cls._instance = cls()
+            cfg = get_config()
+            cls._instance = cls(
+                default_models_override=cfg.model_selection.default_models
+            )
         return cls._instance
 
     def get_llm_definitions(self) -> dict[str, LLMDefinition]:
@@ -170,6 +175,12 @@ class ModelSelectionConfig:
                 data["feature_setting"]: UnitPrimitiveConfig(**data)
                 for data in config_data["configurable_unit_primitives"]
             }
+
+            for feature_setting, models in self._default_models_override.items():
+                if feature_setting in self._unit_primitive_configs:
+                    self._unit_primitive_configs[feature_setting].default_models = (
+                        models
+                    )
 
         return self._unit_primitive_configs
 

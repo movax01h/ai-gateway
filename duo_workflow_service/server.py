@@ -25,8 +25,7 @@ from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 import duo_workflow_service.workflows.registry as flow_registry
-from ai_gateway.app import get_config
-from ai_gateway.config import Config, setup_litellm
+from ai_gateway.config import Config, get_config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
