@@ -3,6 +3,16 @@ The git push output is provided in the tool_response tag below:
 
 From the tool_response, extract the pushed branch name. Use it as BRANCH_NAME below.
 
+<fix_pipeline_source>
+{%- if merge_request_url %}
+  merge_request
+{%- elif source_branch == default_branch %}
+  default_branch
+{%- else %}
+  branch
+{%- endif %}
+</fix_pipeline_source>
+
 <step number="1">
   Use the `create_merge_request` tool to open a new merge request:
   create_merge_request(
@@ -13,9 +23,10 @@ From the tool_response, extract the pushed branch name. Use it as BRANCH_NAME be
       description="",
   )
   Only include a "labels" parameter (comma-separated string) if the project's AGENTS.md content
-  (provided to you in the system instructions inside `<AGENTS.md>...</AGENTS.md>` tags) specifically
-  instructs you to apply labels to Fix Pipeline merge requests. Otherwise, do not pass a "labels"
-  parameter under any circumstances.
+  (inside `<AGENTS.md>...</AGENTS.md>` tags in the system instructions) instructs you to apply labels
+  to Fix Pipeline merge requests. When those rules condition on the source of the Fix Pipeline run,
+  read the `<fix_pipeline_source>` block above — it contains exactly one of: `merge_request`,
+  `default_branch`, or `branch`. Otherwise, do not pass a "labels" parameter.
 </step>
 
 <step number="2">
