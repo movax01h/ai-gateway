@@ -649,21 +649,38 @@ class WorkItemBaseTool(DuoBaseTool):
         return json.dumps(result)
 
     async def _get_work_item_data(
-        self, resolved: ResolvedWorkItem
+        self,
+        resolved: ResolvedWorkItem,
+        mr_page_size: Optional[int] = None,
+        mr_pagination_cursor: Optional[str] = None,
     ) -> Union[dict, None]:
         """Get work item data from resolved work item info.
 
-        Returns work item dict or None if not found.
+        Args:
+            resolved: Resolved work item information.
+            mr_page_size: Number of related MRs to return per page (1–100).
+                Defaults to None (server default).
+            mr_pagination_cursor: Cursor for paginating related MRs.
+                Use ``endCursor`` from the DEVELOPMENT widget's
+                ``relatedMergeRequests.pageInfo`` in a previous response.
+
+        Returns:
+            Work item dict or None if not found.
         """
         query, root_key = self._GET_WORK_ITEM_QUERIES[resolved.parent.type]
 
-        query_variables = {
+        query_variables: Dict[str, Any] = {
             "fullPath": resolved.parent.full_path,
             "iid": str(resolved.work_item_iid),
             **get_query_variables_for_version(
                 "includeHierarchyWidget", "includeDevelopmentWidget"
             ),
         }
+
+        if mr_page_size is not None:
+            query_variables["mrPageSize"] = mr_page_size
+        if mr_pagination_cursor is not None:
+            query_variables["mrEndCursor"] = mr_pagination_cursor
 
         response = await self.gitlab_client.graphql(query, query_variables)
 

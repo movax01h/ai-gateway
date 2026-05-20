@@ -5,6 +5,8 @@ query GetProjectWorkItem(
     $childrenEndCursor: String
     $pageSize: Int
     $endCursor: String
+    $mrPageSize: Int
+    $mrEndCursor: String
     $includeHierarchyWidget: Boolean!
     $includeDevelopmentWidget: Boolean!
 ) {
@@ -35,7 +37,11 @@ query GetProjectWorkItem(
                 widgets {
                     ... on WorkItemWidgetDevelopment @include(if: $includeDevelopmentWidget) {
                         type
-                        relatedMergeRequests {
+                        relatedMergeRequests(first: $mrPageSize, after: $mrEndCursor) {
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
                             nodes {
                                 title
                                 webUrl
