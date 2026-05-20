@@ -402,30 +402,29 @@ class TestMaybeCompactHistorySelfHosted:
         "duo_workflow_service.conversation.compaction.integration.apply_token_based_trim"
     )
     @patch(
-        "duo_workflow_service.conversation.compaction.integration.get_model_max_context_token_limit"
-    )
-    @patch(
         "duo_workflow_service.conversation.compaction.integration.is_feature_enabled"
     )
     @patch(
         "duo_workflow_service.conversation.compaction.integration.get_config",
         return_value=_mock_config(custom_models_enabled=True),
     )
-    async def test_self_hosted_mode_disables_compaction(
+    async def test_self_hosted_mode_allows_compaction(
         self,
         _mock_get_config,
         mock_is_feature_enabled,
-        mock_get_max_context,
         mock_trim,
         _mock_is_gitlab_team_member,
     ):
-        """When custom_models.enabled=True, compaction is skipped even with FF on and compactor provided."""
+        """When custom_models.enabled=True, compaction runs normally with FF on and compactor provided."""
         messages = [HumanMessage(content="test")]
+        compacted_messages = [HumanMessage(content="compacted")]
         mock_is_feature_enabled.return_value = True
-        mock_get_max_context.return_value = 400_000
-        mock_trim.return_value = TrimResult(messages=messages, was_trimmed=False)
 
         mock_compactor = AsyncMock()
+        mock_compactor.compact.return_value = CompactionResult(
+            messages=compacted_messages,
+            was_compacted=True,
+        )
 
         result = await maybe_compact_history(
             compactor=mock_compactor,
@@ -433,13 +432,9 @@ class TestMaybeCompactHistorySelfHosted:
             agent_name="test_agent",
         )
 
-        assert result == messages
-        mock_compactor.compact.assert_not_called()
-        mock_trim.assert_called_once_with(
-            messages=messages,
-            component_name="test_agent",
-            max_context_tokens=400_000,
-        )
+        assert result == compacted_messages
+        mock_compactor.compact.assert_called_once_with(messages=messages)
+        mock_trim.assert_not_called()
 
     @pytest.mark.asyncio
     @patch(

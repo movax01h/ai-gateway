@@ -44,6 +44,7 @@ def mock_prompt_registry_fixture(
     registry.model_limits = model_limits
     mock_prompt = MagicMock(spec=Prompt)
     mock_prompt.internal_callbacks = []
+    mock_prompt.internal_event_extra = {}
     registry.get.return_value = mock_prompt
     return registry
 
@@ -52,6 +53,7 @@ def mock_prompt_registry_fixture(
 def mock_prompt_fixture():
     prompt = MagicMock(spec=Prompt)
     prompt.internal_callbacks = []
+    prompt.internal_event_extra = {}
     return prompt
 
 
@@ -210,6 +212,77 @@ class TestPromptRegistrySelfHostedBillingSupport:
         )
         assert result == mock_prompt
 
+    def test_get_skips_callback_for_compaction_auto(
+        self,
+        mock_prompt_registry,
+        workflow_id,
+        gl_reporting_event_context,
+        mock_outbox,
+        mock_prompt,
+    ):
+        """Test that get() skips billing callback for compaction_auto operation_type."""
+        mock_prompt.internal_event_extra = {"operation_type": "compaction_auto"}
+        mock_prompt_registry.get.return_value = mock_prompt
+
+        wrapper = PromptRegistrySelfHostedBillingSupport(
+            mock_prompt_registry, workflow_id, gl_reporting_event_context, mock_outbox
+        )
+
+        result = wrapper.get("test_prompt", "1.0.0")
+
+        # Callback should NOT be registered for compaction calls
+        assert len(mock_prompt.internal_callbacks) == 0
+        assert result == mock_prompt
+
+    def test_get_registers_callback_for_standard_operation(
+        self,
+        mock_prompt_registry,
+        workflow_id,
+        gl_reporting_event_context,
+        mock_outbox,
+        mock_prompt,
+    ):
+        """Test that get() registers billing callback for standard operation_type."""
+        mock_prompt.internal_event_extra = {"operation_type": "standard"}
+        mock_prompt_registry.get.return_value = mock_prompt
+
+        wrapper = PromptRegistrySelfHostedBillingSupport(
+            mock_prompt_registry, workflow_id, gl_reporting_event_context, mock_outbox
+        )
+
+        result = wrapper.get("test_prompt", "1.0.0")
+
+        assert len(mock_prompt.internal_callbacks) == 1
+        assert isinstance(
+            mock_prompt.internal_callbacks[0], SelfHostedBillingPromptCallbackHandler
+        )
+        assert result == mock_prompt
+
+    def test_get_registers_callback_when_no_operation_type(
+        self,
+        mock_prompt_registry,
+        workflow_id,
+        gl_reporting_event_context,
+        mock_outbox,
+        mock_prompt,
+    ):
+        """Test that get() registers billing callback when operation_type is absent."""
+        mock_prompt.internal_event_extra = {}
+        mock_prompt_registry.get.return_value = mock_prompt
+
+        wrapper = PromptRegistrySelfHostedBillingSupport(
+            mock_prompt_registry, workflow_id, gl_reporting_event_context, mock_outbox
+        )
+
+        result = wrapper.get("test_prompt", "1.0.0")
+
+        # Should default to standard and register callback
+        assert len(mock_prompt.internal_callbacks) == 1
+        assert isinstance(
+            mock_prompt.internal_callbacks[0], SelfHostedBillingPromptCallbackHandler
+        )
+        assert result == mock_prompt
+
 
 class TestSupportSelfHostedBillingDecorator:
     """Test support_self_hosted_billing decorator."""
@@ -354,6 +427,7 @@ class TestIntegrationScenarios:
         # Create a mock prompt
         mock_prompt = MagicMock(spec=Prompt)
         mock_prompt.internal_callbacks = []
+        mock_prompt.internal_event_extra = {}
         mock_prompt_registry.get.return_value = mock_prompt
 
         @support_self_hosted_billing(class_schema="legacy")

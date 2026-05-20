@@ -21,8 +21,7 @@ async def maybe_compact_history(
     """Compact or trim conversation history.
 
     Uses compaction (LLM summarization) when enabled, otherwise falls back to legacy token-based trimming. Compaction is
-    disabled in self-hosted mode (AIGW_CUSTOM_MODELS__ENABLED=true) to avoid billing self-hosted model customers until
-    billing is validated for them.
+    available for both cloud-hosted and self-hosted deployments.
     """
     config = get_config()
     is_self_hosted = config.custom_models.enabled
@@ -30,7 +29,7 @@ async def maybe_compact_history(
     # Compact history if enabled and ff is true otherwise fallback
     is_ff_on = is_feature_enabled(FeatureFlag.AI_CONTEXT_COMPACTION)
 
-    if compactor and is_ff_on and not is_self_hosted:
+    if compactor and is_ff_on:
         log.info(
             "Start trying context compaction",
             compactor_enable=compactor is not None,

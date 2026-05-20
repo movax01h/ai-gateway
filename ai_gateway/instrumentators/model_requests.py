@@ -12,6 +12,7 @@ from prometheus_client import Counter, Gauge, Histogram
 from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.config import ModelLimits
 from ai_gateway.tracking.errors import log_exception
+from lib.billing_events.service import LLMOperationType
 from lib.context import (
     METADATA_LABELS,
     LLMFinishReason,
@@ -251,7 +252,7 @@ class ModelRequestInstrumentator:
 
             extra = internal_event_extra or {}
             agent_name = extra.get("agent_name")
-            operation_type = extra.get("operation_type", "standard")
+            operation_type: LLMOperationType = extra.get("operation_type", "standard")
             self._update_llm_operations(model, usage, agent_name, operation_type)
             self._track_usage(model, usage, extra)
 
@@ -369,7 +370,7 @@ class ModelRequestInstrumentator:
             model: str,
             usage: UsageMetadata,
             agent_name: str | None = None,
-            operation_type: str = "standard",
+            operation_type: LLMOperationType = "standard",
         ) -> None:
             current_llm_operations = llm_operations.get()
 

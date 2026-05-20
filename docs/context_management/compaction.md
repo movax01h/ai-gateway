@@ -235,6 +235,7 @@ Compaction integrates with state management differently depending on the workflo
 Compaction makes an LLM call to summarize older messages. These calls are tagged with `operation_type="compaction_auto"` in the `LLMOperation` metadata, which affects billing differently depending on the deployment type:
 
 - **Cloud-hosted**: Compaction LLM calls are emitted in the billing event with `operation_type="compaction_auto"`. CustomersDot uses this field to decide whether to exclude compaction operations from credit calculation.
+- **Self-hosted**: Compaction LLM calls are excluded from billing entirely. The `PromptRegistrySelfHostedBillingSupport` wrapper in `duo_workflow_service/interceptors/route/usage_billing.py` skips registering the billing callback when `operation_type == "compaction_auto"`, so the `TrackLlmCallForSelfHosted` gRPC action is never invoked for compaction calls.
 
 ## Feature Flag
 
