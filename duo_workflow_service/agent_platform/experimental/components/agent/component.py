@@ -55,6 +55,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.component import (  # noqa: F401
     RoutingError,
 )
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
@@ -238,6 +239,7 @@ class AgentComponent(AgentComponentBase):
     # Overridden by bind_to_supervisor when used as a subagent.
     _conversation_history_key: RuntimeIOKey = PrivateAttr()
     _output_key: RuntimeIOKey = PrivateAttr()
+    _session_id_key: BaseIOKey = PrivateAttr()
     _is_bound_to_supervisor: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
@@ -258,6 +260,10 @@ class AgentComponent(AgentComponentBase):
             factory=lambda _: static_output_key,
         )
 
+        # Default session_id_key is a no-op key; overridden by bind_to_supervisor
+        # when used as a subagent to attribute tool calls to subsessions in UI logs.
+        self._session_id_key = NoneIOKey(alias="session_id")
+
         return self
 
     def bind_to_supervisor(
@@ -266,6 +272,7 @@ class AgentComponent(AgentComponentBase):
         conversation_history_key: RuntimeIOKey,
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
+        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
     ) -> None:
         """Bind this agent to a supervisor.
 
@@ -286,6 +293,9 @@ class AgentComponent(AgentComponentBase):
                 ``context:goal`` input so the subagent reads the delegation
                 prompt written by ``DelegationNode`` rather than the shared
                 flow goal.
+            session_id_key: ``BaseIOKey`` that resolves the subsession ID at
+                runtime.  Used to attribute tool calls to subsessions in UI
+                logs.  Defaults to a no-op key when not provided.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -296,6 +306,7 @@ class AgentComponent(AgentComponentBase):
             )
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
+        self._session_id_key = session_id_key
         self._is_bound_to_supervisor = True
 
         # Ensure subagent does not read shared `context:goal` directly
@@ -496,6 +507,7 @@ class AgentComponent(AgentComponentBase):
                 events=self.ui_log_events, writer_class=UILogWriterAgentTools
             ),
             tracker=tracker,
+            session_id_key=self._session_id_key,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}#final_response",
