@@ -43,6 +43,9 @@ mutation updateWorkItem($input: WorkItemUpdateInput!) {
                         }
                     }
                 }
+                ... on WorkItemWidgetAgentPlan {
+                    content
+                }
             }
         }
         errors

@@ -154,6 +154,16 @@ def update_response_fixture_func():
             {"clear_weight": True},
             {"weightWidget": {"weight": None}},
         ),
+        (
+            {
+                "agent_plan": "## Why\n\nReason\n\n## What\n\nSolution\n\n## How\n\nApproach"
+            },
+            {
+                "agentPlanWidget": {
+                    "content": "## Why\n\nReason\n\n## What\n\nSolution\n\n## How\n\nApproach"
+                }
+            },
+        ),
     ],
     ids=[
         "title",
@@ -169,6 +179,7 @@ def update_response_fixture_func():
         "weight_set",
         "weight_zero_literal",
         "weight_clear",
+        "agent_plan",
     ],
 )
 async def test_update_work_item_variants(

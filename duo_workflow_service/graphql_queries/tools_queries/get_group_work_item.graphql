@@ -114,6 +114,9 @@ query GetGroupWorkItem(
                             }
                         }
                     }
+                    ... on WorkItemWidgetAgentPlan {
+                        content
+                    }
                     ... on WorkItemWidgetHierarchy {
                         parent {
                             id

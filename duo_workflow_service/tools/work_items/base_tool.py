@@ -271,6 +271,9 @@ class WorkItemBaseTool(DuoBaseTool):
         if todo_widget:
             input_data["currentUserTodosWidget"] = todo_widget
 
+        if kwargs.get("agent_plan") is not None:
+            input_data["agentPlanWidget"] = {"content": kwargs["agent_plan"]}
+
         return input_data, warnings
 
     @staticmethod
