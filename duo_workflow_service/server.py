@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-statements
+# pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-lines,too-many-statements
 import asyncio
 import functools
 import json
@@ -89,6 +89,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
 )
 from lib.billing_events import (
+    BILL_ONCE_PER_WORKFLOW_FEATURES,
     BillingEvent,
     BillingEventService,
     ExecutionEnvironment,
@@ -740,6 +741,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         log.info("Starting self-hosted workflow execution tracking")
 
+        # Some features (e.g. code_review/v1) are billed at most once per workflow
+        # even though they make multiple LLM calls. Membership is keyed on the
+        # feature name prefix (everything before the first "/") so different
+        # versions of the same feature share the once-per-workflow budget.
+        billed_once_features: set[str] = set()
+
         async for client_event in request_iterator:
             log.info(
                 "Received self-hosted client event",
@@ -752,33 +759,51 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 is_ai_catalog_item=client_event.featureAiCatalogItem,
             )
 
-            try:
-                billing_service.track_billing(
-                    user,
-                    gl_context,
-                    workflow_id=client_event.workflowID,
-                    event=BillingEvent.DAP_FLOW_ON_COMPLETION,
-                    execution_env=ExecutionEnvironment.DAP,
-                    category=self.__class__.__name__,
-                    unit_of_measure="request",
-                    quantity=1,
-                    llm_ops=SelfHostedLLMOperations.get_operations(),
-                )
+            feature = client_event.featureQualifiedName
+            feature_prefix = feature.split("/", 1)[0] if feature else ""
+            is_bill_once_feature = feature_prefix in BILL_ONCE_PER_WORKFLOW_FEATURES
+            skip_billing = (
+                is_bill_once_feature and feature_prefix in billed_once_features
+            )
 
+            if skip_billing:
                 log.info(
-                    "Successfully sent billing event for self-hosted LLM auth",
+                    "Skipping billing event for once-per-workflow feature already billed",
                     request_id=client_event.requestID,
                     workflow_id=client_event.workflowID,
+                    feature=feature,
                 )
-            except Exception as e:
-                log_exception(
-                    e,
-                    extra={
-                        "context": "Error sending billing event for self-hosted LLM auth",
-                        "request_id": client_event.requestID,
-                        "workflow_id": client_event.workflowID,
-                    },
-                )
+            else:
+                try:
+                    billing_service.track_billing(
+                        user,
+                        gl_context,
+                        workflow_id=client_event.workflowID,
+                        event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+                        execution_env=ExecutionEnvironment.DAP,
+                        category=self.__class__.__name__,
+                        unit_of_measure="request",
+                        quantity=1,
+                        llm_ops=SelfHostedLLMOperations.get_operations(),
+                    )
+
+                    if is_bill_once_feature:
+                        billed_once_features.add(feature_prefix)
+
+                    log.info(
+                        "Successfully sent billing event for self-hosted LLM auth",
+                        request_id=client_event.requestID,
+                        workflow_id=client_event.workflowID,
+                    )
+                except Exception as e:
+                    log_exception(
+                        e,
+                        extra={
+                            "context": "Error sending billing event for self-hosted LLM auth",
+                            "request_id": client_event.requestID,
+                            "workflow_id": client_event.workflowID,
+                        },
+                    )
 
             action = contract_pb2.TrackSelfHostedAction(
                 requestID=client_event.requestID

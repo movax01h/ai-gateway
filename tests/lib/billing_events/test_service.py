@@ -4,10 +4,28 @@ import pytest
 
 from lib.billing_events import BillingEvent
 from lib.billing_events.service import (
+    BILL_ONCE_PER_WORKFLOW_FEATURES,
     ExecutionEnvironment,
     LLMOperation,
 )
 from lib.events import GLReportingEventContext
+
+
+def test_bill_once_per_workflow_features_matches_expected_prefixes():
+    """Lock in the feature prefixes that are billed at most once per workflow.
+
+    These are matched against the prefix of `featureQualifiedName` (everything
+    before the first '/'), so adding or removing an entry here changes
+    customer-visible billing behaviour.
+    """
+    assert BILL_ONCE_PER_WORKFLOW_FEATURES == frozenset(
+        {
+            "code_review",
+            "sast_fp_detection",
+            "secrets_fp_detection",
+            "resolve_sast_vulnerability",
+        }
+    )
 
 
 @pytest.fixture(name="gl_context")

@@ -14,7 +14,18 @@ __all__ = [
     "ExecutionEnvironment",
     "LLMOperation",
     "BillingEventService",
+    "BILL_ONCE_PER_WORKFLOW_FEATURES",
 ]
+
+
+BILL_ONCE_PER_WORKFLOW_FEATURES: frozenset[str] = frozenset(
+    {
+        "code_review",
+        "sast_fp_detection",
+        "secrets_fp_detection",
+        "resolve_sast_vulnerability",
+    }
+)
 
 
 class ExecutionEnvironment(StrEnum):
