@@ -11,6 +11,15 @@ class NotifiableException(Exception):
     pass
 
 
+class NamespaceLevelWorkflowNotSupportedException(NotifiableException):
+    """Raised when a workflow doesn't support namespace-level execution."""
+
+    def __init__(self):
+        super().__init__(
+            "This feature is only available at the project level. Please try again from within a specific project."
+        )
+
+
 class TierAccessDeniedException(ToolException):
     """User's GitLab tier is insufficient for the requested feature."""
 

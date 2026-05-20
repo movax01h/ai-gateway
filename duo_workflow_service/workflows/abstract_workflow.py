@@ -39,6 +39,7 @@ from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEn
 from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
+    NamespaceLevelWorkflowNotSupportedException,
     NotifiableException,
 )
 from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
@@ -347,9 +348,7 @@ class AbstractWorkflow(ABC):
                 )
 
             if self._namespace and self._support_namespace_level_workflow() is False:
-                raise NotImplementedError(
-                    f"This workflow {self._workflow_type.value} does not support namespace-level workflow"
-                )
+                raise NamespaceLevelWorkflowNotSupportedException()
 
             tools_registry = await ToolsRegistry.configure(
                 outbox=self._outbox,

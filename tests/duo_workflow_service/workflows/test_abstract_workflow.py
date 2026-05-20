@@ -441,7 +441,7 @@ async def test_namespace_level_workflow(
     assert isinstance(exc_info.value.original_exception, Exception)
     assert (
         str(exc_info.value.original_exception)
-        == "This workflow software_development does not support namespace-level workflow"
+        == "This feature is only available at the project level. Please try again from within a specific project."
     )
 
 
