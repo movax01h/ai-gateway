@@ -27,6 +27,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 
@@ -265,6 +266,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert isinstance(input, expected_type)
             assert input["context"]["goal"] == goal
             assert input["context"]["project_id"] == project["id"]
+            assert input["context"]["namespace"] is None
             assert input["status"] == WorkflowStatusEnum.NOT_STARTED
             assert "conversation_history" in input
             assert "ui_chat_log" in input
@@ -274,6 +276,60 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert "context" in input
         else:
             assert input is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_graph_input_namespace_level(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_checkpointer,
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_state_graph,
+        flow_type: GLReportingEventContext,
+    ):
+        """Test get_workflow_state includes namespace and handles missing project at namespace level."""
+        namespace = Namespace(
+            id=42,
+            description="Test namespace",
+            name="test-group",
+            web_url="https://gitlab.com/groups/test-group",
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch(
+                "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data",
+                return_value=(None, namespace, mock_state_graph.compile.return_value),
+            ),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-namespace",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
+            goal = "namespace-level goal"
+            await flow.run(goal)
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input_data = kwargs.get("input")
+
+            assert isinstance(input_data, dict)
+            assert input_data["context"]["goal"] == goal
+            assert input_data["context"]["project_id"] is None
+            assert input_data["context"]["project_http_url_to_repo"] is None
+            assert input_data["context"]["project_default_branch"] is None
+            assert input_data["context"]["namespace"] == namespace
+
+    def test_support_namespace_level_workflow(self, flow_instance):
+        """Test that Flow supports namespace-level workflows."""
+        assert flow_instance._support_namespace_level_workflow() is True
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
