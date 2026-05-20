@@ -426,6 +426,18 @@ configurable_unit_primitives:
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
 
+  - feature_setting: "review_merge_request_dap"
+    unit_primitives: []
+    default_models:
+      - "claude_sonnet_4_6_vertex"
+    selectable_models:
+      - "claude_sonnet_4_20250514"
+      - "claude_sonnet_4_20250514_bedrock"
+      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+
   - feature_setting: "sast_vulnerability_fp_detection"
     unit_primitives: []
     default_models:
