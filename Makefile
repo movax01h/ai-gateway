@@ -270,6 +270,14 @@ test-coverage-ci: install-test-deps
 	@echo "Running tests with coverage on CI..."
 	@poetry run pytest --cov --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto
 
+UNDERCOVERAGE_COMPARE_BRANCH ?= origin/main
+UNDERCOVERAGE_DIFF_RANGE_NOTATION ?= ...
+
+.PHONY: test-undercoverage
+test-undercoverage: install-test-deps
+	@echo "Checking test coverage of changed lines..."
+	@poetry run diff-cover .test-reports/coverage.xml --compare-branch=$(UNDERCOVERAGE_COMPARE_BRANCH) --diff-range-notation=$(UNDERCOVERAGE_DIFF_RANGE_NOTATION) --show-uncovered --fail-under=100
+
 .PHONY: test-integration
 test-integration: install-test-deps
 	@echo "Running integration tests..."

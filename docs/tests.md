@@ -11,8 +11,8 @@ Additionally, we use several Pytest plugins to enhance our testing capabilities:
 
 ## Testing guide
 
-Every code change must be accompanied by unit tests. If 100% coverage of the code change is not practical, this must be
-justified by the author.
+Every code change must be accompanied by unit tests that cover 100% of the changes. This is verified by the
+`tests:undercoverage` CI job.
 
 For code changes that introduce or affect the interface between the Duo Workflow Service and external components there
 must be at least one test that demonstrates the entire flow involving the code change. This includes changes that
