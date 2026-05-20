@@ -1,0 +1,38 @@
+name: "GitLabDuo Mention Assistant"
+description: |
+  Lightweight read-only agent for responding to @GitLabDuo mentions in
+  GitLab merge request and issue comments. Answers questions and provides
+  context-aware responses using GitLab API access without cloning the
+  repository.
+product_group: agent_foundations
+version: "v1"
+environment: ambient
+
+components:
+  - name: "mention_agent"
+    type: AgentComponent
+    prompt_id: "gitlab_duo_mention_agent_prompt"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset:
+      - "gitlab_api_get"
+      - "gitlab_graphql"
+      - "get_merge_request"
+      - "get_issue"
+      - "list_merge_request_diffs"
+      - "list_all_merge_request_notes"
+      - "get_repository_file"
+      - "gitlab_blob_search"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "mention_agent"
+    to: "end"
+
+flow:
+  entry_point: "mention_agent"
