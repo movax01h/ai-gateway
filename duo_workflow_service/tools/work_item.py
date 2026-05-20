@@ -26,6 +26,8 @@ from duo_workflow_service.tools.work_items.version_compatibility import (
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
 ALL_TYPES = {"Issue", "Task", *GROUP_ONLY_TYPES}
 
+DEFAULT_MR_PAGE_SIZE = 20
+
 FILTER_KEY_MAPPING = {
     "state": "state",
     "search": "search",
@@ -302,11 +304,32 @@ class WorkItemResourceInput(ParentResourceInput):
             + ", ".join(sorted(type.upper().replace(" ", "_") for type in ALL_TYPES))
         ),
     )
+    mr_page_size: Optional[int] = Field(
+        default=DEFAULT_MR_PAGE_SIZE,
+        description=f"Number of related merge requests to return per page (1–100, default: {DEFAULT_MR_PAGE_SIZE}).",
+        le=100,
+        ge=1,
+    )
+    mr_pagination_cursor: Optional[str] = Field(
+        default=None,
+        description=(
+            "Cursor for paginating related merge requests. "
+            "Use the `endCursor` value from the `relatedMergeRequests.pageInfo` "
+            "in the DEVELOPMENT widget of a previous response to fetch the next page."
+        ),
+    )
 
 
 class GetWorkItem(WorkItemBaseTool):
     name: str = "get_work_item"
     description: str = f"""Get a single work item in a GitLab group or project.
+
+    Related merge requests are paginated. By default, the first {DEFAULT_MR_PAGE_SIZE} are returned.
+    Use 'mr_pagination_cursor' with the 'endCursor' from the DEVELOPMENT widget's
+    'relatedMergeRequests.pageInfo' in a previous response to fetch subsequent pages.
+    If you have not viewed all the merge requests, clearly state this to the user with
+    a message similar to "I have not viewed all the MRs for this item"
+
 
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
@@ -319,6 +342,8 @@ class GetWorkItem(WorkItemBaseTool):
         get_work_item(url="https://gitlab.com/groups/namespace/group/-/work_items/42")
     - Given the URL https://gitlab.com/namespace/project/-/work_items/42, the tool call would be:
         get_work_item(url="https://gitlab.com/namespace/project/-/work_items/42")
+    - To fetch the next page of related MRs using a cursor from a previous response:
+        get_work_item(project_id='namespace/project', work_item_iid=42, mr_pagination_cursor="<endCursor>")
     """
     args_schema: Type[BaseModel] = WorkItemResourceInput
 
@@ -330,7 +355,14 @@ class GetWorkItem(WorkItemBaseTool):
             work_item_iid=kwargs.get("work_item_iid"),
         )
 
-        work_item = await self._get_work_item_data(resolved)
+        mr_page_size = kwargs.get("mr_page_size", DEFAULT_MR_PAGE_SIZE)
+        mr_pagination_cursor = kwargs.get("mr_pagination_cursor")
+
+        work_item = await self._get_work_item_data(
+            resolved,
+            mr_page_size=mr_page_size,
+            mr_pagination_cursor=mr_pagination_cursor,
+        )
 
         if work_item is None:
             raise ToolException("Work item not found")

@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.work_item import GetWorkItem, WorkItemResourceInput
+from duo_workflow_service.tools.work_item import (
+    GetWorkItem,
+    WorkItemResourceInput,
+)
 from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedParent,
     ResolvedWorkItem,
@@ -240,6 +243,50 @@ async def test_get_work_item_returns_current_user_todos(gitlab_client_mock, meta
         todo_node["targetUrl"] == "https://gitlab.com/namespace/project/-/work_items/42"
     )
     assert todo_node["action"] == "assigned"
+
+
+@pytest.mark.asyncio
+async def test_get_work_item_passes_mr_pagination_params(
+    gitlab_client_mock, metadata, work_item_data
+):
+    """Ensure mr_page_size and mr_pagination_cursor are forwarded to the GraphQL query."""
+    graphql_response = {"project": {"workItems": {"nodes": [work_item_data]}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = GetWorkItem(description="get work item", metadata=metadata)
+
+    await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        mr_page_size=5,
+        mr_pagination_cursor="abc123",
+    )
+
+    gitlab_client_mock.graphql.assert_called_once()
+    call_variables = gitlab_client_mock.graphql.call_args[0][1]
+    assert call_variables["mrPageSize"] == 5
+    assert call_variables["mrEndCursor"] == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_get_work_item_mr_pagination_defaults(
+    gitlab_client_mock, metadata, work_item_data
+):
+    """Ensure mr_page_size defaults to DEFAULT_MR_PAGE_SIZE and mr_pagination_cursor defaults to None."""
+    graphql_response = {"project": {"workItems": {"nodes": [work_item_data]}}}
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = GetWorkItem(description="get work item", metadata=metadata)
+
+    # Call without specifying mr_page_size or mr_pagination_cursor
+    await tool._arun(project_id="namespace/project", work_item_iid=42)
+
+    gitlab_client_mock.graphql.assert_called_once()
+    call_variables = gitlab_client_mock.graphql.call_args[0][1]
+    # Default page size should be forwarded to the GraphQL query
+    assert call_variables["mrPageSize"] == 20
+    # Default cursor of None means no mrEndCursor key is sent (omitted when None)
+    assert "mrEndCursor" not in call_variables
 
 
 @pytest.mark.parametrize(
