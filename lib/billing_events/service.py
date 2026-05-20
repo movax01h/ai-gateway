@@ -15,11 +15,22 @@ __all__ = [
     "LLMOperation",
     "LLMOperationType",
     "BillingEventService",
+    "BILL_ONCE_PER_WORKFLOW_FEATURES",
 ]
 
 # Literal type for all valid operation types.
 # When a new operation type is needed, add it here.
 LLMOperationType = Literal["standard", "compaction_auto"]
+
+
+BILL_ONCE_PER_WORKFLOW_FEATURES: frozenset[str] = frozenset(
+    {
+        "code_review",
+        "sast_fp_detection",
+        "secrets_fp_detection",
+        "resolve_sast_vulnerability",
+    }
+)
 
 
 class ExecutionEnvironment(StrEnum):

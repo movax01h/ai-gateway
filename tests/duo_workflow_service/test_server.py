@@ -1837,6 +1837,250 @@ async def test_track_self_hosted_execute_workflow_billing_event(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "feature_qualified_name",
+    [
+        "code_review/v1",
+        "sast_fp_detection/v1",
+        "secrets_fp_detection/v1",
+        "resolve_sast_vulnerability/v1",
+    ],
+)
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_bills_once_per_workflow_feature_only_once(
+    _mock_container,
+    feature_qualified_name,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+):
+    """Repeated client events for a once-per-workflow feature emit only one billing event, but every LLM call is still
+    acknowledged so the call proceeds."""
+    auth_user.can = MagicMock(return_value=True)
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        for request_id in ("req-1", "req-2", "req-3"):
+            yield contract_pb2.TrackSelfHostedClientEvent(
+                requestID=request_id,
+                workflowID="#1337",
+                featureQualifiedName=feature_qualified_name,
+                featureAiCatalogItem=True,
+            )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
+    assert billing_event_client.track_billing_event.call_count == 1
+    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    assert metadata["feature_qualified_name"] == feature_qualified_name
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_bills_per_call_for_other_features(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+):
+    """Features not in BILL_ONCE_PER_WORKFLOW_FEATURES still bill per LLM call (regression guard)."""
+    auth_user.can = MagicMock(return_value=True)
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        for request_id in ("req-1", "req-2", "req-3"):
+            yield contract_pb2.TrackSelfHostedClientEvent(
+                requestID=request_id,
+                workflowID="#1337",
+                featureQualifiedName="software_development/v1",
+                featureAiCatalogItem=True,
+            )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
+    assert billing_event_client.track_billing_event.call_count == 3
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_mixes_bill_once_and_per_call_features(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+):
+    """A stream containing once-per-workflow + standard features bills 1 + N.
+
+    Each once-per-workflow prefix has its own budget, so code_review and sast_fp_detection each emit once even though
+    both are in the bill-once set.
+    """
+    auth_user.can = MagicMock(return_value=True)
+
+    events = [
+        ("req-1", "code_review/v1"),
+        ("req-2", "code_review/v1"),
+        ("req-3", "software_development/v1"),
+        ("req-4", "software_development/v1"),
+        ("req-5", "sast_fp_detection/v1"),
+        ("req-6", "sast_fp_detection/v1"),
+    ]
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        for request_id, feature in events:
+            yield contract_pb2.TrackSelfHostedClientEvent(
+                requestID=request_id,
+                workflowID="#1337",
+                featureQualifiedName=feature,
+                featureAiCatalogItem=True,
+            )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == [
+        "req-1",
+        "req-2",
+        "req-3",
+        "req-4",
+        "req-5",
+        "req-6",
+    ]
+    # 1 (code_review) + 2 (software_development per call) + 1 (sast_fp_detection)
+    assert billing_event_client.track_billing_event.call_count == 4
+    billed_features = [
+        c.kwargs["metadata"]["feature_qualified_name"]
+        for c in billing_event_client.track_billing_event.call_args_list
+    ]
+    assert billed_features == [
+        "code_review/v1",
+        "software_development/v1",
+        "software_development/v1",
+        "sast_fp_detection/v1",
+    ]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_dedups_across_feature_versions(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+):
+    """Different versions of the same once-per-workflow feature share the budget.
+
+    Dedup is keyed on the prefix (everything before the first '/'), matching Ruby's
+    `feature_qualified_name&.split('/')&.first`.
+    """
+    auth_user.can = MagicMock(return_value=True)
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        for request_id, feature in [
+            ("req-1", "code_review/v1"),
+            ("req-2", "code_review/v2"),
+            ("req-3", "code_review"),
+        ]:
+            yield contract_pb2.TrackSelfHostedClientEvent(
+                requestID=request_id,
+                workflowID="#1337",
+                featureQualifiedName=feature,
+                featureAiCatalogItem=True,
+            )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
+    assert billing_event_client.track_billing_event.call_count == 1
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_failure_does_not_consume_once_budget(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+):
+    """A failed emission must not mark the once-per-workflow feature as billed.
+
+    Otherwise a transient Snowplow/quota failure on the first LLM call would silently drop the entire workflow's bill.
+    """
+    auth_user.can = MagicMock(return_value=True)
+    # First emission raises; the second one succeeds and consumes the budget;
+    # the third would be suppressed and never hits the client.
+    billing_event_client.track_billing_event.side_effect = [
+        RuntimeError("snowplow down"),
+        None,
+    ]
+
+    async def mock_request_iterator() -> (
+        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
+    ):
+        for request_id in ("req-1", "req-2", "req-3"):
+            yield contract_pb2.TrackSelfHostedClientEvent(
+                requestID=request_id,
+                workflowID="#1337",
+                featureQualifiedName="code_review/v1",
+                featureAiCatalogItem=True,
+            )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    actions = [action async for action in result]
+
+    # Every LLM call is acknowledged, even the one whose billing call raised.
+    assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
+    # Two attempts: req-1 raised (budget not consumed), req-2 succeeded
+    # (budget consumed), req-3 was suppressed.
+    assert billing_event_client.track_billing_event.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "flow_config_schema_version,ignore_schema_version,expected_version",
     [
         ("experimental", True, "v1"),
