@@ -28,7 +28,7 @@ from tests.duo_workflow_service.agent_platform.experimental.components.agent.con
 def mock_prompt_security_fixture():
     """Fixture for mocking apply_security_scanning."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.apply_security_scanning"
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning"
     ) as mock_security:
         mock_security.return_value = "Sanitized response"
         yield mock_security
@@ -38,7 +38,7 @@ def mock_prompt_security_fixture():
 def mock_logger_fixture():
     """Fixture for mocking structlog logger."""
     with patch(
-        "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.structlog"
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.structlog"
     ) as mock_structlog:
         mock_logger = Mock()
         mock_structlog.stdlib.get_logger.return_value = mock_logger
@@ -50,7 +50,7 @@ def mock_tool_monitoring_fixture():
     """Fixture for mocking duo_workflow_metrics for tool operations."""
     with (
         patch(
-            "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.duo_workflow_metrics"
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.duo_workflow_metrics"
         ) as mock_metrics,
         patch(
             "duo_workflow_service.agent_platform.utils.tool_event_tracker.duo_workflow_metrics",
@@ -149,6 +149,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
             tool_response="Tool execution result",
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -278,6 +279,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response="Invalid argument type",
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -337,6 +339,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response=ANY,
+            subsession_id=None,
         )
 
         assert ui_history.log.error.call_args.kwargs["tool_response"].startswith(
@@ -397,6 +400,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response="Generic error",
+            subsession_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -484,7 +488,7 @@ class TestToolNodeSecurity:
         security_error = SecurityException("Security validation failed")
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.apply_security_scanning"
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning"
         ) as mock_security:
             mock_security.side_effect = security_error
 
@@ -518,7 +522,7 @@ class TestToolNodeSecurity:
     ):
         """Test run with successful security sanitization."""
         with patch(
-            "duo_workflow_service.agent_platform.experimental.components.agent.nodes.tool_node.apply_security_scanning"
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning"
         ) as mock_security:
             mock_security.return_value = "Sanitized safe response"
 
