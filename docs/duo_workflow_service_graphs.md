@@ -505,6 +505,25 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `gitlab_duo_mention_assistant 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> mention_agent;
+    mention_agent(mention_agent<br>#91;AgentComponent#93;);
+    mention_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `orbit_agent 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
