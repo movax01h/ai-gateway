@@ -12,6 +12,8 @@ tests:unit:
   artifacts:
     when: always
     expire_in: 1 weeks
+    paths:
+      - .test-reports/coverage.xml
     reports:
       junit:
         - .test-reports/*.xml
@@ -23,6 +25,24 @@ tests:unit:
     # - asyncio checks for coroutines that were not awaited and logs them; this mitigates the “forgotten await” pitfall.
     # - Many non-threadsafe asyncio APIs (such as loop.call_soon() and loop.call_at() methods) raise an exception if they are called from a wrong thread.
     PYTHONASYNCIODEBUG: "True"
+
+tests:undercoverage:
+  extends: .poetry
+  stage: test
+  needs:
+    - job: tests:unit
+      artifacts: true
+  script:
+    - if [[ ",${CI_MERGE_REQUEST_LABELS}," == *",pipeline:skip-undercoverage,"* ]]; then
+        echo "The 'pipeline:skip-undercoverage' label is set on the MR, exiting early.";
+        exit 0;
+      else
+        echo "The 'pipeline:skip-undercoverage' label is not set on the MR, proceeding.";
+      fi
+    - git fetch origin $CI_MERGE_REQUEST_DIFF_BASE_SHA --depth=1
+    - make test-undercoverage UNDERCOVERAGE_COMPARE_BRANCH=$CI_MERGE_REQUEST_DIFF_BASE_SHA UNDERCOVERAGE_DIFF_RANGE_NOTATION=..
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 tests:integration:
   extends: .poetry
