@@ -117,7 +117,7 @@ optional = true
 [tool.poetry.group.lint.dependencies]
 flake8 = "^7.0.0"
 isort = "^8.0.0"
-black = "^25.0.0"
+black = "^26.0.0"
 pylint = "^4.0.5"
 astroid = "^4.0.4"
 mypy = "^1.9.0"
