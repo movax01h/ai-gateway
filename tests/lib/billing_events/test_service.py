@@ -1,11 +1,14 @@
 from unittest.mock import patch
 
+import pydantic
 import pytest
 
 from lib.billing_events import BillingEvent
 from lib.billing_events.service import (
     ExecutionEnvironment,
     LLMOperation,
+    LLMOperationType,
+    SelfHostedLLMOperations,
 )
 from lib.events import GLReportingEventContext
 
@@ -500,3 +503,73 @@ class TestBillingEventService:
         }
         op = LLMOperation.model_validate(raw_dict)
         assert op.operation_type == "standard"
+
+
+class TestLLMOperationType:
+    """Test suite for LLMOperationType Literal type."""
+
+    def test_llm_operation_accepts_standard(self):
+        """Test that LLMOperation accepts 'standard' as operation_type."""
+        op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=100,
+            prompt_tokens=80,
+            completion_tokens=20,
+            operation_type="standard",
+        )
+        assert op.operation_type == "standard"
+
+    def test_llm_operation_accepts_compaction_auto(self):
+        """Test that LLMOperation accepts 'compaction_auto' as operation_type."""
+        op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=100,
+            prompt_tokens=80,
+            completion_tokens=20,
+            operation_type="compaction_auto",
+        )
+        assert op.operation_type == "compaction_auto"
+
+    def test_llm_operation_type_is_exported(self):
+        """Test that LLMOperationType is importable from lib.billing_events.service."""
+        # If this import works, the type is properly exported
+        assert LLMOperationType is not None
+
+    def test_llm_operation_rejects_invalid_operation_type(self):
+        """Test that LLMOperation rejects unknown operation_type values via Pydantic validation."""
+        with pytest.raises(pydantic.ValidationError):
+            LLMOperation(
+                model_id="claude-3-5-sonnet",
+                model_engine="anthropic",
+                model_provider="anthropic",
+                token_count=100,
+                prompt_tokens=80,
+                completion_tokens=20,
+                operation_type="unknown_type",
+            )
+
+
+class TestSelfHostedLLMOperations:
+    """Test suite for SelfHostedLLMOperations class."""
+
+    def test_get_operations_defaults_to_standard(self):
+        """Test that get_operations defaults operation_type to 'standard'."""
+        ops = SelfHostedLLMOperations.get_operations()
+        assert len(ops) == 1
+        assert ops[0].operation_type == "standard"
+
+    def test_get_operations_returns_placeholder_metadata(self):
+        """Test that get_operations returns expected placeholder values."""
+        ops = SelfHostedLLMOperations.get_operations()
+        assert len(ops) == 1
+        op = ops[0]
+        assert op.model_id == "self-hosted-model"
+        assert op.model_engine == "litellm"
+        assert op.model_provider == "litellm"
+        assert op.token_count == 1
+        assert op.prompt_tokens == 1
+        assert op.completion_tokens == 1

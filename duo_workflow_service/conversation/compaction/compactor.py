@@ -21,6 +21,7 @@ from duo_workflow_service.conversation.compaction.utils import (
 from duo_workflow_service.conversation.token_estimator import count_tokens
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, is_gitlab_team_member
 from lib.context.model import get_model_metadata
 from lib.internal_events.client import InternalEventsClient
@@ -49,7 +50,7 @@ class ConversationCompactor:
     of conversation history.
     """
 
-    OPERATION_TYPE = "compaction_auto"
+    OPERATION_TYPE: LLMOperationType = "compaction_auto"
 
     def __init__(
         self,
