@@ -1,6 +1,6 @@
 # see docs/model_selection for documentation
 models:
-  - name: "Kimi K2.6 - Fireworks"
+  - name: "Kimi K2.6"
     provider: "Fireworks"
     gitlab_identifier: "kimi_k2_6_fireworks"
     description: "Open-source 1T MoE multimodal model with strong coding, visual reasoning, and agentic capabilities."
@@ -13,7 +13,7 @@ models:
       temperature: 0.0
       max_tokens: 32_768
 
-  - name: "Minimax M2.7 - Fireworks"
+  - name: "Minimax M2.7"
     provider: "Fireworks"
     gitlab_identifier: "minimax_m2_7_fireworks"
     description: "Open-source MoE model for coding, agentic tasks, and reasoning."
@@ -26,7 +26,7 @@ models:
       temperature: 0.0
       max_tokens: 65_536
 
-  - name: "GLM 5.1 - Fireworks"
+  - name: "GLM 5.1"
     provider: "Fireworks"
     gitlab_identifier: "glm_5_1_fireworks"
     description: "Open-source MoE model for agentic coding and long-horizon engineering tasks."
@@ -39,7 +39,7 @@ models:
       temperature: 0.0
       max_tokens: 8_192
 
-  - name: "Devstral 2 - Mistral"
+  - name: "Devstral 2"
     provider: "Mistral"
     gitlab_identifier: "devstral_2_mistral"
     description: "Mistral AI's frontier coding agent for complex software engineering tasks across codebases."
