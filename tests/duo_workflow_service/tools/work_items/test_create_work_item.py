@@ -445,8 +445,63 @@ def test_create_work_item_format_display_message(input_data, expected_message):
     assert message == expected_message
 
 
+@pytest.mark.asyncio
+async def test_create_work_item_with_agent_plan(
+    gitlab_client_mock,
+    metadata,
+    created_work_item_data_fixture,
+    work_item_type_data_fixture,
+):
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        work_item_type_data_fixture,
+        {"workItemCreate": {"workItem": created_work_item_data_fixture, "errors": []}},
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    agent_plan_content = "## Why\n\nReason\n\n## What\n\nSolution\n\n## How\n\nApproach"
+    response = await tool._arun(
+        group_id="namespace/group",
+        title="Planned Work Item",
+        type_name="Issue",
+        agent_plan=agent_plan_content,
+    )
+
+    response_json = json.loads(response)
+    assert "work_item" in response_json
+
+    gql_input = gitlab_client_mock.graphql.call_args_list[1][0][1]["input"]
+    assert gql_input["agentPlanWidget"] == {"content": agent_plan_content}
+
+
 class TestBuildWorkItemInputFields:
     """Test the _build_work_item_input_fields static method integration with hierarchy widget."""
+
+    def test_build_work_item_input_fields_with_agent_plan(self):
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+            "agent_plan": "## Why\n\nReason\n\n## What\n\nSolution\n\n## How\n\nApproach",
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert input_data["title"] == "Test Work Item"
+        assert "agentPlanWidget" in input_data
+        assert input_data["agentPlanWidget"]["content"] == kwargs["agent_plan"]
+        assert not warnings
+
+    def test_build_work_item_input_fields_without_agent_plan(self):
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert "agentPlanWidget" not in input_data
+        assert not warnings
 
     def test_build_work_item_input_fields_with_hierarchy_widget(self):
         """Test that _build_work_item_input_fields includes hierarchy widget."""

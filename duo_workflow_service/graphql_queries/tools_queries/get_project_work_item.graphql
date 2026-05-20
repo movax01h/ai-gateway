@@ -195,6 +195,9 @@ query GetProjectWorkItem(
                             }
                         }
                     }
+                    ... on WorkItemWidgetAgentPlan {
+                        content
+                    }
                 }
             }
         }

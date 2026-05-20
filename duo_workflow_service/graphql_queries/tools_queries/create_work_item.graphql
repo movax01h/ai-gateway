@@ -35,6 +35,9 @@ mutation createWorkItem($input: WorkItemCreateInput!) {
                     dueDate
                     isFixed
                 }
+                ... on WorkItemWidgetAgentPlan {
+                    content
+                }
             }
         }
         errors

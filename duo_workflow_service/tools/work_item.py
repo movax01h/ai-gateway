@@ -495,6 +495,11 @@ class CreateWorkItemInput(ParentResourceInput):
         description="""Creates a parent–child relationship by setting parent_id. Must contain 'parent_id' with
         work item global ID in the format: gid://gitlab/WorkItem/<id>""",
     )
+    agent_plan: Optional[str] = Field(
+        default=None,
+        description="""A plan on how the work should be implemented.
+        Expects markdown with ## Why, ## What, and ## How sections""",
+    )
 
 
 class CreateWorkItem(WorkItemBaseTool):
@@ -597,6 +602,11 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         description="Global ID of the to-do item to mark as done (e.g., 'gid://gitlab/Todo/123'). "
         "Optional when todo_action is 'mark_as_done'. If omitted, all to-dos for the work item are marked as done.",
     )
+    agent_plan: Optional[str] = Field(
+        default=None,
+        description="""A plan on how the work should be implemented.
+        Expects markdown with ## Why, ## What, and ## How sections""",
+    )
 
 
 class UpdateWorkItem(WorkItemBaseTool):
@@ -608,7 +618,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     Supports updating title, description, assignees, labels, state, health status,
-    weight, dates, hierarchy, and to-do items.
+    weight, dates, hierarchy, to-do items and agent plan.
 
     For example:
     - update_work_item(group_id='parent/child', work_item_iid=42, title="Updated title")
@@ -617,6 +627,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", title="Updated title")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="add")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="mark_as_done", todo_id="gid://gitlab/Todo/123")
+    - update_work_item(project_id='namespace/project', work_item_iid=42, agent_plan="## Why\nFoo can't bar.\n## What\nMake Foo bar.\n## How\nAdd `Foo#bar` calling `Baz.qux`.")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput
 
