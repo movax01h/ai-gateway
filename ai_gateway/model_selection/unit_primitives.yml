@@ -279,6 +279,7 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
+        - "gemini_3_5_flash_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
@@ -328,6 +329,7 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
+        - "gemini_3_5_flash_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
