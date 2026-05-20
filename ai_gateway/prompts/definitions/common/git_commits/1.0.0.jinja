@@ -1,0 +1,4 @@
+- Each commit should do one logical thing. Write concise messages focused on "why" rather than "what". Add a body for complex changes.
+- Commit intentionally: Stage by explicit path; avoid `git add -A` / `git add .` / `git commit -a` — they sweep in build artifacts and vendored deps. Review `git diff --staged` before committing.
+- Run `git log --oneline -20` to match the project's commit style.
+- Do not commit files that likely contain secrets (`.env`, `credentials.json`).
