@@ -534,6 +534,22 @@ models:
       thinking_level: "low"
       streaming: "true"
 
+  - name: "Gemini 3.5 Flash"
+    provider: "Vertex"
+    gitlab_identifier: "gemini_3_5_flash_vertex"
+    description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
+    cost_indicator: "$" # To be confirmed
+    max_context_tokens: 1_000_000
+    model_class_provider: google_genai
+    family:
+      - gemini
+    params:
+      model: "gemini-3.5-flash"
+      temperature: 1
+      max_tokens: 65_536
+      thinking_level: "low"
+      streaming: "true"
+
   - name: "GPT-5.5"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_5"
