@@ -141,8 +141,6 @@ prompts:
 
         The checked-out project is your local workspace — your task may target any project on this GitLab instance.
 
-        {% include 'common/glab_skill/1.0.0.jinja' %}
-
         {% include 'common/merge_request_guidelines/1.0.0.jinja' %}
 
         {% include 'agents_dot_md/base/1.0.0.jinja' %}
