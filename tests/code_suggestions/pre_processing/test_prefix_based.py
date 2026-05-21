@@ -23,9 +23,7 @@ _TEST_TEMPLATE_1 = """
 start
 {prefix}
 end
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 # This template takes 4 tokens (ignore placeholders)
 # with the Salesforce/codegen2-16B tokenizer
@@ -33,9 +31,7 @@ _TEST_TEMPLATE_2 = """
 start {lang}
 {prefix}
 end
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 
 class TestPromptBuilderPrefixBased:

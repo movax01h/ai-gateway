@@ -7,31 +7,23 @@ from ai_gateway.code_suggestions.processing.post.ops import clean_model_reflecti
 PREFIX_JAVASCRIPT_1 = """
 // This code has a filename of test-2.js and is written in JavaScript.
 testing
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_JAVASCRIPT_1_1 = """
 only
 // This code has a filename of test-2.js and is written in JavaScript.
 testingonly
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_JAVASCRIPT_1_2 = """
 only
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_JAVASCRIPT_1_3 = """
 only
 
 const another_function = () => {}
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 PREFIX_JAVASCRIPT_2 = """
 // this will be a function to read an address
@@ -47,9 +39,7 @@ const readAddress = (address) => {
       });
     });
 };
-""".lstrip(
-    "\n"
-)
+""".lstrip("\n")
 
 COMPLETION_JAVASCRIPT_2_1 = """
 
@@ -84,9 +74,7 @@ COMPLETION_JAVASCRIPT_3_1 = """
 
 // This code has a filename of test.js and is written in JavaScript.
 import testing;
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 PREFIX_JAVASCRIPT_4 = """
  // This code has a filename of test.js and is written in JavaScript.
@@ -103,15 +91,11 @@ const writeStringBackwards = (inpStr) => {
     outStr += inpStr[i];
   }
   return outSt
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_JAVASCRIPT_4_1 = """
 r;\n}\n\nconst maskXYZ = (inpStr) => {\n  let outStr = '';
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 
 PREFIX_PYTHON_1 = """
@@ -119,9 +103,7 @@ PREFIX_PYTHON_1 = """
 def print_hello_world():
     print("Hello World!")
 \t
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_PYTHON_1_1 = """
 # This code has a filename of app.py and is written in Python.
@@ -133,16 +115,12 @@ PREFIX_PYTHON_2 = """
 # This code has a filename of app.py and is written in Python.
 def print_hello_world():
 \t
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_PYTHON_2_1 = """
 # This code has a filename of app.py and is written in Python.
 \tprint("hello world")
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 
 PREFIX_RUBY_1 = """

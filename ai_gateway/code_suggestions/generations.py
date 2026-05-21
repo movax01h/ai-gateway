@@ -45,9 +45,7 @@ TPL_GENERATION_BASE = """
 ```{lang}
 {prefix}
 ```
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 
 class CodeGenerations:

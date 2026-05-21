@@ -107,13 +107,11 @@ class GitlabDocumentation(BaseRemoteTool):
         epics, work items, milestones, labels, CI/CD pipelines, git repositories, and more."""
     )
 
-    example: str = dedent(
-        """\
+    example: str = dedent("""\
         Question: How do I set up a new project?
         Thought: Question is about inner working of GitLab. "gitlab_documentation" tool is the right one for the job.
         Action: gitlab_documentation
-        Action Input: How do I set up a new project?"""
-    )
+        Action Input: How do I set up a new project?""")
 
 
 class SelfHostedGitlabDocumentation(BaseRemoteTool):
@@ -173,15 +171,13 @@ class EpicReader(BaseRemoteTool):
         # editorconfig-checker-enable
     )
 
-    example: str = dedent(
-        """\
+    example: str = dedent("""\
         Question: Please identify the author of &123 epic.
         Thought: You have access to the same resources as user who asks a question.
             The question is about an epic, so you need to use "epic_reader" tool.
             Based on this information you can present final answer.
         Action: epic_reader
-        Action Input: Please identify the author of &123 epic."""
-    )
+        Action Input: Please identify the author of &123 epic.""")
 
 
 class CommitReader(BaseRemoteTool):
@@ -211,16 +207,14 @@ class CommitReader(BaseRemoteTool):
         # editorconfig-checker-enable
     )
 
-    example: str = dedent(
-        """\
+    example: str = dedent("""\
         Question: Please identify the author of #123 commit
         Thought: You have access to the same resources as user who asks a question.
             Question is about the content of a commit, so you need to use "commit_reader" tool to retrieve
             and read commit.
             Based on this information you can present final answer about commit.
         Action: commit_reader
-        Action Input: Please identify the author of #123 commit"""
-    )
+        Action Input: Please identify the author of #123 commit""")
 
 
 class BuildReader(BaseRemoteTool):
@@ -290,13 +284,11 @@ class MergeRequestReader(BaseRemoteTool):
         # editorconfig-checker-enable
     )
 
-    example: str = dedent(
-        """\
+    example: str = dedent("""\
         Question: Please identify the author of #123 merge request
         Thought: You have access to the same resources as user who asks a question.
             Question is about the content of a merge request, so you need to use "merge_request_reader" tool to retrieve
             and read merge request.
             Based on this information you can present final answer about merge request.
         Action: merge_request_reader
-        Action Input: Please identify the author of #123 merge request"""
-    )
+        Action Input: Please identify the author of #123 merge request""")

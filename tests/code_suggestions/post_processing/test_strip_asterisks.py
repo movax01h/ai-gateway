@@ -9,9 +9,7 @@ COMPLETION_RUBY_1_1 = """
 ****************************
     expect(person.fullname).to eq('First')
   end
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 # a completion only has asterisks (ignoring leading spaces)
 COMPLETION_RUBY_1_2 = "\n\t\t    ****************************\nend"
@@ -22,9 +20,7 @@ COMPLETION_RUBY_1_2 = "\n\t\t    ****************************\nend"
 COMPLETION_RUBY_1_3 = """
     expect(person.fullname).to eq('First')
     ****************************
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 # a completion has no asterisks
 COMPLETION_RUBY_1_4 = "expect(person.fullname).to eq('First')"
@@ -32,9 +28,7 @@ COMPLETION_RUBY_1_4 = "expect(person.fullname).to eq('First')"
 COMPLETION_VUE_1 = """
       ***********="true"
     >
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 COMPLETION_VUE_2 = "\n\t\t    *****************>"
 
