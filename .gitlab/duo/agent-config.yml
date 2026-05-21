@@ -6,9 +6,11 @@ image: python:3.12.13-slim
 
 setup_script:
   # Install system dependencies
+  # Note: These cannot be cached in a Docker executor (container is fresh each
+  # run). To eliminate this step, consider switching to a custom image.
+  # npm is NOT installed via apt — mise-installed nodejs provides it.
   - export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends
     git
-    npm
     build-essential
     libsqlite3-dev
     curl
@@ -24,9 +26,17 @@ setup_script:
   - apt-get clean
   - rm -rf /var/lib/apt/lists/*
 
-  # Install Poetry
+  # Redirect tool caches into the project directory so they can be cached
+  # between runs. GitLab Runner only caches paths relative to the project dir.
   - export POETRY_VERSION=2.3.1
   - export POETRY_VIRTUALENVS_IN_PROJECT=true
+  - export POETRY_CACHE_DIR="$CI_PROJECT_DIR/.cache/pypoetry"
+  - export PIP_CACHE_DIR="$CI_PROJECT_DIR/.cache/pip"
+  - export MISE_DATA_DIR="$CI_PROJECT_DIR/.cache/mise/data"
+  - export MISE_CACHE_DIR="$CI_PROJECT_DIR/.cache/mise/cache"
+  - export NPM_CONFIG_CACHE="$CI_PROJECT_DIR/.cache/npm"
+
+  # Install Poetry
   - pip install "poetry==$POETRY_VERSION"
 
   # Install Python dependencies
@@ -35,8 +45,9 @@ setup_script:
   # Install mise and tools from .tool-versions needed for lefthook hooks.
   # Only the minimum set is installed here; extend as needed (e.g. gcloud, ruby)
   # if the agent requires more functionality like running the AI Gateway locally.
+  # Mise and its tool installations are cached between runs (see cache section).
   - curl -sSL https://mise.run | sh
-  - export PATH="$HOME/.local/bin:$PATH"
+  - export PATH="$HOME/.local/bin:$MISE_DATA_DIR/shims:$PATH"
   - mise install vale markdownlint-cli2 lefthook nodejs
   - eval "$(mise env)"
 
@@ -59,11 +70,11 @@ cache:
     files:
       - poetry.lock
       - pyproject.toml
+      - .tool-versions
   paths:
     - .venv/
     - node_modules/
-    - /root/.cache/pypoetry
-    - /usr/local/lib/node_modules
+    - .cache/
 
 network_policy:
   include_recommended_allowed: true
