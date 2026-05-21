@@ -199,12 +199,12 @@ class TestCodeGeneration:
         [
             (
                 [
-                    TextGenModelChunk(text="hello "),
-                    TextGenModelChunk(text="world!"),
+                    TextGenModelChunk(text="hello\n"),
+                    TextGenModelChunk(text="world!\n"),
                 ],
                 [
-                    "hello ",
-                    "world!",
+                    "hello\n",
+                    "world!\n",
                 ],
             ),
         ],
@@ -248,6 +248,71 @@ class TestCodeGeneration:
                 "",
                 stream=True,
             )
+
+    @pytest.mark.parametrize(
+        ("model_chunks"),
+        [
+            # Bug case: leading fence + lang tag split across chunks, trailing fence alone
+            [
+                TextGenModelChunk(text="```"),
+                TextGenModelChunk(text="cpp"),
+                TextGenModelChunk(text="\n"),
+                TextGenModelChunk(text="void"),
+                TextGenModelChunk(text=" f() {}\n"),
+                TextGenModelChunk(text="```"),
+            ],
+            # Leading fence in single chunk
+            [
+                TextGenModelChunk(text="```cpp\n"),
+                TextGenModelChunk(text="int main() { return 0; }\n"),
+                TextGenModelChunk(text="```"),
+            ],
+            # Both fences inline in a single chunk
+            [
+                TextGenModelChunk(text="```\nint x = 1;\n```"),
+            ],
+            # Leading fence with no language identifier
+            [
+                TextGenModelChunk(text="```\n"),
+                TextGenModelChunk(text="code\n"),
+                TextGenModelChunk(text="```"),
+            ],
+        ],
+    )
+    async def test_execute_stream_strips_markdown_fences(
+        self,
+        use_case: CodeGenerations,
+        model_chunks: list[TextGenModelChunk],
+    ):
+        async def _stream_generator(
+            prefix: str, suffix: str, stream: bool
+        ) -> AsyncIterator[TextGenModelChunk]:
+            for chunk in model_chunks:
+                yield chunk
+
+        with patch.object(
+            use_case.model, "generate", new_callable=AsyncMock
+        ) as mock_generate:
+            mock_generate.side_effect = _stream_generator
+
+            actual = await use_case.execute(
+                prefix="any",
+                file_name="foo.cpp",
+                editor_lang="C++",
+                model_provider=ModelProvider.ANTHROPIC,
+                stream=True,
+            )
+
+            chunks: List[str] = []
+            assert isinstance(actual, AsyncIterator)
+            async for content in actual:
+                chunks.append(content.text)
+
+            full_output = "".join(chunks)
+
+            assert (
+                "```" not in full_output
+            ), f"Streamed generation leaked markdown fences: {full_output!r}"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -375,8 +440,10 @@ class TestCodeGeneration:
 
             assert result is not None
             if isinstance(result, AsyncIterator):
+                chunks: List[str] = []
                 async for res in result:
-                    assert res.text == expected_output
+                    chunks.append(res.text)
+                assert "".join(chunks) == expected_output
             else:
                 assert result.text == expected_output
 
@@ -560,7 +627,7 @@ class TestCodeGeneration:
         async for chunk in result:
             chunks.append(chunk.text)
 
-        assert chunks == ["hello ", "world!"]
+        assert "".join(chunks) == "hello world!"
         mock_billing_client.track_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
@@ -682,7 +749,7 @@ class TestCodeGeneration:
         async for chunk in result:
             chunks.append(chunk.text)
 
-        assert chunks == ["hello ", "world!"]
+        assert "".join(chunks) == "hello world!"
 
         mock_billing_client.track_billing_event.assert_called_once_with(
             mock_user,
