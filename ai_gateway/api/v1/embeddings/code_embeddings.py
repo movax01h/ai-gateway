@@ -95,6 +95,8 @@ async def _generate_code_embeddings(
         input: dict[str, Any] = {"contents": payload.contents}
         if payload.dimensions:
             input["dimensions"] = payload.dimensions
+        if payload.litellm_drop_params:
+            input["drop_params"] = payload.litellm_drop_params
         message = await prompt.ainvoke(input=input)
     except EmbeddingBadRequestError as e:
         raise HTTPException(
