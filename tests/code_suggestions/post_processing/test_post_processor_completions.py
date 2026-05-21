@@ -147,6 +147,27 @@ class TestPostProcessorCompletions:
         mock_fix_truncation.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_process_skips_parser_ops_when_lang_id_is_none(
+        self,
+        mock_remove_comment_only_completion: Mock,
+        mock_trim_by_min_allowed_context: Mock,
+        mock_fix_end_block_errors: Mock,
+        mock_clean_model_reflection: Mock,
+        mock_strip_whitespaces: Mock,
+        mock_clean_irrelevant_keywords: Mock,
+    ):
+        post_processor = PostProcessorCompletions("ctx", lang_id=None, suffix="s")
+        await post_processor.process("test completion")
+
+        mock_remove_comment_only_completion.assert_not_called()
+        mock_trim_by_min_allowed_context.assert_not_called()
+        mock_fix_end_block_errors.assert_not_called()
+
+        mock_clean_irrelevant_keywords.assert_called_once()
+        mock_clean_model_reflection.assert_called_once()
+        mock_strip_whitespaces.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_process_with_custom_operations(
         self,
         mock_remove_comment_only_completion: Mock,

@@ -54,6 +54,17 @@ ORDERED_POST_PROCESSORS = [
     PostProcessorOperation.STRIP_WHITESPACES,
 ]
 
+# Ops that invoke the tree-sitter parser and need a lang_id to do anything useful.
+OPS_REQUIRING_LANG_ID = frozenset(
+    {
+        PostProcessorOperation.REMOVE_COMMENTS,
+        PostProcessorOperation.TRIM_BY_MINIMUM_CONTEXT,
+        PostProcessorOperation.FIX_END_BLOCK_ERRORS,
+        PostProcessorOperation.FIX_END_BLOCK_ERRORS_LEGACY,
+        PostProcessorOperation.FIX_TRUNCATION,
+    }
+)
+
 
 class PostProcessor(PostProcessorBase):
     def __init__(
@@ -122,6 +133,8 @@ class PostProcessor(PostProcessorBase):
 
         for processor in self._ordered_post_processors():
             if str(processor) in self.exclude:
+                continue
+            if self.lang_id is None and processor in OPS_REQUIRING_LANG_ID:
                 continue
 
             completion = await self._apply_post_processor(
