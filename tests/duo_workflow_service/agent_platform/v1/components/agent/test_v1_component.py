@@ -1,5 +1,6 @@
 # pylint: disable=too-many-lines,file-naming-for-tests
 """Test suite for AgentComponent class."""
+
 from typing import ClassVar, Literal
 from unittest.mock import Mock, patch
 

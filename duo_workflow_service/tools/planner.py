@@ -200,11 +200,9 @@ class GetPlan(PlannerTool):
 
 class SetTaskStatusInput(BaseModel):
     task_id: str = Field(description="The ID of the task to update")
-    status: str = Field(
-        description="""The status of the task.
+    status: str = Field(description="""The status of the task.
                         The status can be `Not Started`, `In Progress`,
-                        `Completed` or `Cancelled`"""
-    )
+                        `Completed` or `Cancelled`""")
     description: str = Field(description="A description of the task for context")
 
 

@@ -41,8 +41,7 @@ def _add_truncation_instruction(
 ) -> str:
     """Create a formatted truncation notice message."""
     percentage = (truncated_token_size / original_token_size) * 100
-    return dedent(
-        f"""
+    return dedent(f"""
         <{TRUNCATION_NOTICE_TAG}>
         IMPORTANT: This tool output has been truncated due to size limits.
 
@@ -64,8 +63,7 @@ def _add_truncation_instruction(
         2. Use alternative approaches to gather the necessary information
         </instructions>
         </{TRUNCATION_NOTICE_TAG}>
-        """
-    )
+        """)
 
 
 def truncate_string(

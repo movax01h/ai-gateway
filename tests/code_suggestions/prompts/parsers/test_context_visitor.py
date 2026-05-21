@@ -529,9 +529,7 @@ Cypress.on("before:run", () => { // don't care
     </div>
   );
 };
-"""[
-                1:-1
-            ],
+"""[1:-1],
         ),
         (  # Test context class level
             LanguageId.JS,

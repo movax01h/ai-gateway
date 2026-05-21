@@ -25,8 +25,7 @@ def mock_fs_fixture(fs: FakeFilesystem):
     )
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Model One
                 gitlab_identifier: gitlab-model-1
@@ -52,14 +51,12 @@ def mock_fs_fixture(fs: FakeFilesystem):
                 params:
                   custom_llm_provider: openai
                   model: embedding-model-001
-            """
-        ),
+            """),
     )
 
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_config"
                 unit_primitives:
@@ -80,8 +77,7 @@ def mock_fs_fixture(fs: FakeFilesystem):
                 selectable_models:
                   - "gitlab-model-1"
                   - "gitlab-model-2"
-            """
-        ),
+            """),
     )
 
 
@@ -344,8 +340,7 @@ def test_validate_with_error(selection_config, fs: FakeFilesystem):
     # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_config"
                 unit_primitives:
@@ -357,15 +352,13 @@ def test_validate_with_error(selection_config, fs: FakeFilesystem):
                   - "another_non_existent_model"
                 beta_models:
                   - "third_non_existent_model"
-            """
-        ),
+            """),
     )
 
     # Create a models.yml file with valid models
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Model One
                 gitlab_identifier: model_1
@@ -373,8 +366,7 @@ def test_validate_with_error(selection_config, fs: FakeFilesystem):
                 model_class_provider: anthropic
                 params:
                   model: provider-model-1
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -398,8 +390,7 @@ def test_validate_default_model_not_in_selectable_models(
     # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Model One
                 gitlab_identifier: model_1
@@ -425,14 +416,12 @@ def test_validate_default_model_not_in_selectable_models(
                 description: "Model three description."
                 params:
                   model: provider-model-3
-            """
-        ),
+            """),
     )
 
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_config"
                 unit_primitives:
@@ -459,8 +448,7 @@ def test_validate_default_model_not_in_selectable_models(
                 selectable_models:
                   - "model_1"
                   - "model_3"
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -487,8 +475,7 @@ def test_get_proxy_models_for_provider(selection_config, fs: FakeFilesystem):
     # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Claude Sonnet
                 gitlab_identifier: claude_sonnet
@@ -517,17 +504,14 @@ def test_get_proxy_models_for_provider(selection_config, fs: FakeFilesystem):
                 model_class_provider: anthropic
                 params:
                   model: some-model
-            """
-        ),
+            """),
     )
 
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives: []
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -635,8 +619,7 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
     # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Small Model
                 gitlab_identifier: small-model
@@ -654,14 +637,12 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
                 description: "Large model description."
                 params:
                   model: claude-sonnet
-            """
-        ),
+            """),
     )
 
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_model_size"
                 unit_primitives:
@@ -674,8 +655,7 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
                 selectable_models:
                   - "small-model"
                   - "large-model"
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -693,8 +673,7 @@ def test_validate_with_invalid_size_preference_field(
     # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Large Model
                 gitlab_identifier: large-model
@@ -702,14 +681,12 @@ def test_validate_with_invalid_size_preference_field(
                 model_class_provider: anthropic
                 params:
                   model: claude-sonnet
-            """
-        ),
+            """),
     )
 
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_model_size"
                 unit_primitives:
@@ -722,8 +699,7 @@ def test_validate_with_invalid_size_preference_field(
                 selectable_models:
                   - "non-existent-small"
                   - "large-model"
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -747,8 +723,7 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
     # editorconfig-checker-disable
     fs.create_file(
         model_selection_dir / "models.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             models:
               - name: Small Model
                 gitlab_identifier: small-model
@@ -766,8 +741,7 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
                 description: "Large model description."
                 params:
                   model: claude-sonnet
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -788,8 +762,7 @@ def test_validate_size_preference_without_selectable_models_passes(
     # editorconfig-checker-disable
     fs.create_file(
         size_preference_model_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_model_size"
                 unit_primitives:
@@ -799,8 +772,7 @@ def test_validate_size_preference_without_selectable_models_passes(
                 models_for_size_preference:
                   small: "small-model"
                   large: "large-model"
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 
@@ -821,8 +793,7 @@ def test_validate_size_preference_models_not_required_in_selectable(
     # large-model is selectable; small-model is only used for size routing
     fs.create_file(
         size_preference_model_dir / "unit_primitives.yml",
-        contents=dedent(
-            """
+        contents=dedent("""
             configurable_unit_primitives:
               - feature_setting: "test_model_size"
                 unit_primitives:
@@ -833,8 +804,7 @@ def test_validate_size_preference_models_not_required_in_selectable(
                   small: "small-model"
                 selectable_models:
                   - "large-model"
-            """
-        ),
+            """),
     )
     # editorconfig-checker-enable
 

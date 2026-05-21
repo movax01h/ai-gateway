@@ -329,8 +329,7 @@ class BlobSearchInput(BaseModel):
 
 class BlobSearch(GitLabSearchBase):
     name: str = "gitlab_blob_search"
-    description: str = dedent(
-        """
+    description: str = dedent("""
         Search file content in remote GitLab projects.
         SCOPE: Project-level only (group and instance-wide search not supported).
 
@@ -344,8 +343,7 @@ class BlobSearch(GitLabSearchBase):
 
         Invalid examples (DO NOT USE):
         - await run filename:*server* (WRONG - contains wildcards)
-        """
-    )
+        """)
     args_schema: Type[BaseModel] = BlobSearchInput
 
     def _filter_blob_results(self, results: list) -> list:
@@ -417,8 +415,7 @@ class AdvanceBlobSearchInput(BaseModel):
 
 class AdvanceBlobSearch(GitLabSearchBase):
     name: str = "gitlab_blob_search"
-    description: str = dedent(
-        """
+    description: str = dedent("""
         Search file content in remote GitLab projects.
 
         Syntax for `search` parameter: keyword [filename:pattern] [path:dir/] [extension:type]
@@ -431,8 +428,7 @@ class AdvanceBlobSearch(GitLabSearchBase):
 
         Invalid examples (DO NOT USE):
         - await run filename:*server* (WRONG - contains wildcards)
-        """
-    )
+        """)
     args_schema: Type[BaseModel] = AdvanceBlobSearchInput
 
     supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = BlobSearch

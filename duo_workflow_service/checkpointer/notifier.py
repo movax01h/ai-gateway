@@ -89,7 +89,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             return
 
         if type == "messages":
-            (message, _) = state
+            message, _ = state
 
             self._append_chunk_to_ui_chat_log(message)
 
