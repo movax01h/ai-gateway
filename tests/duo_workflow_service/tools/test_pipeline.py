@@ -516,7 +516,7 @@ async def test_get_pipeline_failing_jobs_includes_allow_failure_jobs_by_default(
 async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
     gitlab_client_mock, metadata
 ):
-    """Test that pipelines with no failed jobs raise ToolException."""
+    """Test that pipelines with no failed jobs return an informational response."""
     # API returns empty list when scope[]=failed is passed and there are no failures
     jobs_response: list = []
 
@@ -529,16 +529,53 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
 
     tool = GetPipelineFailingJobs(metadata=metadata)
 
-    with pytest.raises(ToolException) as exc_info:
-        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
+    result = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(result)
 
-    assert "No Failing Jobs Found" in str(exc_info.value)
+    assert response_json == {
+        "pipeline_id": 123,
+        "failed_jobs": "No failing jobs found in this pipeline.",
+    }
 
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs",
         params={"page": "1", "per_page": 100, "scope[]": "failed"},
         parse_json=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_failing_jobs_with_merge_request_url_no_failed_jobs(
+    gitlab_client_mock, metadata
+):
+    """Test that merge request pipelines with no failed jobs return an informational response with MR context."""
+    responses = [
+        GitLabHttpResponse(status_code=200, body={"id": 1, "title": "Merge Request 1"}),
+        GitLabHttpResponse(
+            status_code=200,
+            body=[{"id": 10, "status": "success"}],
+        ),
+        GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps([]),
+            headers={"X-Next-Page": ""},
+        ),
+    ]
+
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses)
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+
+    result = await tool._arun(project_id="1", merge_request_iid="1")
+    response_json = json.loads(result)
+
+    assert response_json == {
+        "merge_request": {"id": 1, "title": "Merge Request 1"},
+        "pipeline_id": 10,
+        "failed_jobs": "No failing jobs found in this pipeline.",
+    }
 
 
 @pytest.mark.asyncio
