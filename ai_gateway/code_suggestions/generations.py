@@ -16,6 +16,7 @@ from ai_gateway.code_suggestions.processing import LanguageId, Prompt, TokenStra
 from ai_gateway.code_suggestions.processing.post.generations import (
     PostProcessor,
     PostProcessorAnthropic,
+    StreamingPostProcessor,
 )
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.prompts import PromptTemplate
@@ -195,12 +196,13 @@ class CodeGenerations:
         response: AsyncIterator[TextGenModelChunk],
         user: Optional[CloudConnectorUser] = None,
     ) -> AsyncIterator[CodeSuggestionsChunk]:
-        chunks = []
-        try:
+        async def _texts() -> AsyncIterator[str]:
             async for chunk in response:
-                chunk_content = CodeSuggestionsChunk(text=chunk.text)
-                chunks.append(chunk.text)
-                yield chunk_content
+                yield chunk.text
+
+        try:
+            async for text in StreamingPostProcessor().process(_texts()):
+                yield CodeSuggestionsChunk(text=text)
         finally:
             # Track billing event for streaming response
             self._track_billing_event(user)
