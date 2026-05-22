@@ -61,6 +61,9 @@ components:
     inputs:
       - from: "context:secret_vulnerability_report_component.final_answer"
         as: vulnerability_details
+      - from: "context:inputs.secret_detection_context.secret_value"
+        as: raw_secret_value
+        optional: true
     toolset:
       - "read_file"
       - "get_repository_file"
@@ -102,3 +105,9 @@ routers:
     to: "end"
 flow:
   entry_point: "secret_vulnerability_details_component"
+  inputs:
+    - category: secret_detection_context
+      input_schema:
+        secret_value:
+          type: string
+          description: Raw secret value from the scanner finding, used solely for pattern analysis by the FP detection agent prompt. Tool outputs remain redacted by `DuoBaseTool._arun`.
