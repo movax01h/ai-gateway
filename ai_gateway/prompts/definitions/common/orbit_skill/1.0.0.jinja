@@ -1,41 +1,44 @@
 <orbit_skill>
-You have access to **GitLab Orbit (Knowledge Graph)** via REST endpoints under
-`/api/v4/orbit/*`. Orbit answers code-structure, cross-project, and SDLC
-questions by traversing GitLab's unified entity graph (projects, users, MRs,
-issues, pipelines, files, definitions, vulnerabilities) more directly than
-browsing REST resources one item at a time.
+You have access to **GitLab Orbit (Knowledge Graph)** — a unified graph of code
+structure, SDLC entities (projects, MRs, issues, pipelines, users), and
+cross-project relationships. Use it when the question is about **relationships**
+between entities, not a single resource lookup.
 
-Use `glab api` (already pre-configured for the current project) to call Orbit.
-The endpoints are user-scoped — do **not** pass `-R owner/repo`.
+# When to use which tool
 
-# Endpoints
+| Situation | Tool |
+|-----------|------|
+| Code-structure questions about the **current branch** — callers, definitions, blast radius of an edit | **Local Orbit** (`glab orbit local query`) |
+| Cross-project questions, anything about `main` as ground truth, SDLC entities (MRs, issues, pipelines, users) not in the local graph | **Remote Orbit** (`glab orbit remote query`) |
+| Narrow lookup with a known path or symbol — graph would be overkill | **Default tools** (`grep`, `find_files`, `read_file`) |
 
-| Endpoint                    | Method | Purpose                                                  |
-|-----------------------------|--------|----------------------------------------------------------|
-| `orbit/status`              | GET    | Cluster health.                                          |
-| `orbit/schema`              | GET    | Graph ontology: domains, nodes, edges.                   |
-| `orbit/schema?expand=A,B`   | GET    | Drill into nodes for properties and relationships.       |
-| `orbit/tools`               | GET    | MCP tool manifest with the full query DSL JSON Schema.   |
-| `orbit/query`               | POST   | Execute a query. **Requires `Content-Type` header.**     |
+# Discover the schema and DSL first
 
-# Discovery first
-
-Before writing queries, discover the live ontology and DSL — names and edges
-evolve, do not guess from REST/API terminology:
+Before writing queries, discover the live ontology — node names and edges
+evolve, do not guess:
 
 ```bash
-glab api orbit/status
-glab api orbit/schema
-glab api "orbit/schema?expand=MergeRequest,Project"
-glab api orbit/tools
+# Remote schema (node types and properties)
+glab orbit remote schema
+
+# Remote DSL — always fetch this before writing a remote query.
+# It is the source of truth for the query body shape.
+glab orbit remote dsl
+
+# Local schema (after indexing — see orbit_local_index step)
+glab orbit local schema
 ```
 
 Budget ≤ 1 discovery call per new entity type per session.
 
+**When using `remote`:** always run `glab orbit remote dsl` first. It hits
+`/api/v4/orbit/schema/dsl` and returns the authoritative JSON Schema for the
+query body. Do not rely on memory or examples — the DSL evolves.
+
 # Running a query
 
-`POST /api/v4/orbit/query` requires an explicit `Content-Type: application/json`
-header. Without it you get `HTTP 415`.
+Write the query to a file, then pass it with `--query-file`. Both transports
+use the same DSL.
 
 ```bash
 cat > /tmp/q.json <<'JSON'
@@ -49,42 +52,28 @@ cat > /tmp/q.json <<'JSON'
 }
 JSON
 
-glab api --method POST orbit/query \
-  --header "Content-Type: application/json" \
-  --input /tmp/q.json
+# Local (current-branch code structure)
+glab orbit local query --query-file /tmp/q.json
+
+# Remote (cross-project / SDLC / main-branch ground truth)
+glab orbit remote query --query-file /tmp/q.json
 ```
 
-Set `"response_format": "llm"` for compact agent-friendly output. Use `"raw"`
-when you need to pipe to `jq`.
+Set `"response_format": "llm"` for compact agent-friendly output.
 
-# When to use Orbit
+# Query DSL rules
 
-- "Who calls this function?" / "Where is this symbol defined?" — code traversal
-- Cross-project dependency / blast-radius analysis
-- "Find MRs touching file X" / "Issues linked to commit Y"
-- Anything answerable by traversing relationships across projects, users, MRs,
-  issues, pipelines, files
-
-Prefer Orbit over multiple REST calls when the question is about **relationships**
-between entities, not a single resource lookup.
-
-# Rules
-
-1. **Discover before querying.** Validate node names, edge types, property
-   names with `orbit/schema` / `orbit/tools`. Do not guess.
-2. **Set `Content-Type: application/json` on POST.** Missing → 415.
-3. **No `-R owner/repo`.** Orbit endpoints are user-scoped.
-4. **Keep `limit` small while iterating** (5–10). Queries can fan out across
-   many namespaces.
-5. **`query_type` dictates the top-level key:** `neighbors` and single-node
+1. **Discover before querying.** Validate node names, edge types, and property
+   names with `schema`. Do not guess.
+2. **Keep `limit` small while iterating** (5–10). Queries can fan out.
+3. **`query_type` dictates the top-level key:** `neighbors` and single-node
    `traversal` → `node` (singular); multi-node `traversal` / `aggregation` /
    `path_finding` → `nodes` (array).
-6. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
+4. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
-7. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
-8. **`path_finding` with `filters` or `id_range` endpoints requires `rel_types`.**
+5. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
+6. **`path_finding` with `filters` or `id_range` endpoints requires `rel_types`.**
    When both endpoints use `node_ids`, `rel_types` is optional.
-9. **Read-only.** All endpoints are idempotent queries.
-10. **Sequential.** `orbit/query` is rate-limited. Prefer one aggregation/
-    traversal over N separate queries.
+7. **Read-only.** All queries are idempotent.
+8. **Sequential.** Prefer one aggregation/traversal over N separate queries.
 </orbit_skill>
