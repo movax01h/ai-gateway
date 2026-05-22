@@ -12,6 +12,12 @@ components:
     type: AgentComponent
     prompt_id: "fix_pipeline_next_context"
     prompt_version: "^1.0.0"
+    response_schema_id: "fix_pipeline_next_context"
+    response_schema_version: "^1.0.0"
+    response_schema_tracking: true
+    response_schema_tracking_context:
+      project_id: "context:project_id"
+      merge_request_url: "context:inputs.merge_request.url"
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
@@ -37,29 +43,6 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_next_decide_approach"
-    type: AgentComponent
-    prompt_id: "fix_pipeline_next_decide_approach"
-    prompt_version: "^1.0.0"
-    response_schema_id: "fix_pipeline_next_decide_approach"
-    response_schema_version: "^1.0.0"
-    response_schema_tracking: true
-    response_schema_tracking_context:
-      project_id: "context:project_id"
-      merge_request_url: "context:inputs.merge_request.url"
-    inputs:
-      - from: "context:fix_pipeline_next_context.final_answer"
-        as: "fix_pipeline_context_results"
-      - from: "context:inputs.merge_request.url"
-        as: "merge_request_url"
-        optional: True
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: True
-    toolset: []
-    ui_log_events:
-      - "on_agent_final_answer"
-
   - name: "fix_pipeline_next_decide_fix"
     type: AgentComponent
     prompt_id: "fix_pipeline_next_decide_fix"
@@ -67,7 +50,7 @@ components:
     response_schema_id: "fix_pipeline_next_decide_fix"
     response_schema_version: "^1.0.0"
     inputs:
-      - from: "context:fix_pipeline_next_context.final_answer"
+      - from: "context:fix_pipeline_next_context.final_answer.summary"
         as: "fix_pipeline_context_results"
       - from: "context:fix_pipeline_next_execution.final_answer"
         as: "execution_results"
@@ -112,7 +95,7 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-      - from: "context:fix_pipeline_next_context.final_answer"
+      - from: "context:fix_pipeline_next_context.final_answer.summary"
         as: "fix_pipeline_context_results"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
@@ -143,7 +126,7 @@ components:
         as: "ref"
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
-      - from: "context:fix_pipeline_next_context.final_answer"
+      - from: "context:fix_pipeline_next_context.final_answer.summary"
         as: "naming_context"
       - from: "context:workflow_id"
         as: "workflow_id"
@@ -193,7 +176,7 @@ components:
     prompt_id: "fix_pipeline_next_execution"
     prompt_version: "^1.0.0"
     inputs:
-      - from: "context:fix_pipeline_next_context.final_answer"
+      - from: "context:fix_pipeline_next_context.final_answer.summary"
         as: "fix_pipeline_context_results"
       - from: "context:inputs.pipeline.source_branch"
         as: "source_branch"
@@ -293,10 +276,8 @@ components:
 
 routers:
   - from: "fix_pipeline_next_context"
-    to: "fix_pipeline_next_decide_approach"
-  - from: "fix_pipeline_next_decide_approach"
     condition:
-      input: "context:fix_pipeline_next_decide_approach.final_answer.decision"
+      input: "context:fix_pipeline_next_context.final_answer.decision"
       routes:
         "add_comment": "fix_pipeline_add_comment"
         "create_plan": "fix_pipeline_next_checkout_existing_branch"
