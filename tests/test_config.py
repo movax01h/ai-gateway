@@ -1,6 +1,7 @@
 import os
 from unittest import mock
 
+import litellm
 import pytest
 from pydantic import ValidationError
 
@@ -26,6 +27,7 @@ from ai_gateway.config import (
     ConfigSnowplow,
     ConfigVertexSearch,
     ConfigVertexTextModel,
+    setup_litellm,
 )
 
 # pylint: disable=direct-environment-variable-reference
@@ -854,6 +856,25 @@ def test_config_model_selection(values: dict, expected: ConfigModelSelection):
         config = Config(_env_file=None)
 
         assert config.model_selection == expected
+
+
+@pytest.mark.parametrize(
+    ("env", "expected_location"),
+    [
+        ({}, "global"),
+        ({"VERTEXAI_LOCATION": "europe-west1"}, "europe-west1"),
+        ({"VERTEXAI_LOCATION": ""}, "global"),
+    ],
+)
+def test_setup_litellm_vertex_location(env: dict, expected_location: str):
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        mock.patch.object(litellm, "vertex_location", None),
+        mock.patch.object(litellm, "vertex_project", None),
+    ):
+        setup_litellm(Config(_env_file=None))
+
+        assert litellm.vertex_location == expected_location
 
 
 # pylint: enable=direct-environment-variable-reference
