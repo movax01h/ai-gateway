@@ -1,25 +1,17 @@
-from enum import StrEnum
-from typing import (
-    Annotated,
-    Any,
-    AsyncIterator,
-    List,
-    Literal,
-    Optional,
-    Protocol,
-    Union,
-)
+from typing import Annotated, Any, List, Literal, Optional, Union
 
 from fastapi import Body
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sse_starlette.sse import EventSourceResponse
-from starlette.responses import StreamingResponse
 
-from ai_gateway.code_suggestions import (
-    CodeCompletions,
-    CodeGenerations,
-    CodeSuggestionsChunk,
-    ModelProvider,
+from ai_gateway.code_suggestions import ModelProvider
+from ai_gateway.code_suggestions.handler import (
+    CodeEditorComponents,
+    CompletionResponse,
+    ModelMetadata,
+    ResponseMetadataBase,
+    StreamHandler,
+    StreamModelEngine,
+    StreamSuggestionsResponse,
 )
 from ai_gateway.models import Message
 from ai_gateway.models.base import KindModelProvider
@@ -31,14 +23,12 @@ __all__ = [
     "CompletionResponse",
     "EditorContentCompletionPayload",
     "EditorContentGenerationPayload",
+    "ModelMetadata",
+    "ResponseMetadataBase",
+    "StreamHandler",
+    "StreamModelEngine",
     "StreamSuggestionsResponse",
 ]
-
-
-class CodeEditorComponents(StrEnum):
-    COMPLETION = "code_editor_completion"
-    GENERATION = "code_editor_generation"
-    CONTEXT = "code_context"
 
 
 class MetadataBase(BaseModel):
@@ -122,43 +112,3 @@ class CompletionRequest(BaseModel):
     prompt_components: Annotated[
         List[PromptComponent], Field(min_length=1, max_length=100)
     ]
-
-
-class ModelMetadata(BaseModel):
-    engine: Optional[str] = None
-    name: Optional[str] = None
-    lang: Optional[str] = None
-
-
-class ResponseMetadataBase(BaseModel):
-    model: Optional[ModelMetadata] = None
-    timestamp: int
-    enabled_feature_flags: Optional[list[str]] = None
-    region: Optional[str] = None
-
-
-class CompletionResponse(BaseModel):
-    class Choice(BaseModel):
-        text: str
-        index: int = 0
-        finish_reason: str = "length"
-
-    choices: list[Choice]
-    metadata: Optional[ResponseMetadataBase] = None
-
-
-class StreamSuggestionsResponse(StreamingResponse):
-    pass
-
-
-# Only includes engines that support streaming
-StreamModelEngine = Union[CodeCompletions, CodeGenerations]
-
-
-class StreamHandler(Protocol):
-    async def __call__(
-        self,
-        stream: AsyncIterator[CodeSuggestionsChunk],
-        metadata: ResponseMetadataBase,
-    ) -> Union[StreamSuggestionsResponse, EventSourceResponse]:
-        pass
