@@ -17,7 +17,13 @@ from duo_workflow_service.interceptors.authentication_interceptor import (
 from lib.context import gitlab_version
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.internal_events.context import current_event_context
-from lib.usage_quota import InsufficientCredits, UsageQuotaEvent, UsageQuotaService
+from lib.usage_quota import (
+    InsufficientCredits,
+    InsufficientEntitlements,
+    UsageQuotaCheckUnavailable,
+    UsageQuotaEvent,
+    UsageQuotaService,
+)
 from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 
@@ -46,6 +52,19 @@ async def abort_route_interceptor(
     context: ServicerContext, code: StatusCode, message: str
 ):
     await context.abort(code, message)
+
+
+async def _abort_for_quota_denied(grpc_context: ServicerContext, e: Exception):
+    """Abort the gRPC call with PERMISSION_DENIED for quota-related denials.
+
+    Handles both InsufficientEntitlements (permanent) and UsageQuotaCheckUnavailable (transient) by aborting with the
+    same status code and error string, since the gRPC caller only observes PERMISSION_DENIED.
+    """
+    await abort_route_interceptor(
+        grpc_context,
+        StatusCode.PERMISSION_DENIED,
+        f"{str(e).rstrip('.')}. Error code: USAGE_QUOTA_NOT_ENTITLED",
+    )
 
 
 def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
@@ -90,6 +109,8 @@ def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
             async for item in func(obj, _chained(), grpc_context, *args, **kwargs):
                 yield item
 
+        except (InsufficientEntitlements, UsageQuotaCheckUnavailable) as e:
+            await _abort_for_quota_denied(grpc_context, e)
         except InsufficientCredits as e:
             await abort_route_interceptor(
                 grpc_context,
@@ -139,6 +160,8 @@ def _process_track_self_hosted_execute_workflow_stream(
             async for item in func(obj, _chained(), grpc_context, *args, **kwargs):
                 yield item
 
+        except (InsufficientEntitlements, UsageQuotaCheckUnavailable) as e:
+            await _abort_for_quota_denied(grpc_context, e)
         except InsufficientCredits as e:
             await abort_route_interceptor(
                 grpc_context,
@@ -208,6 +231,14 @@ def _process_generate_token_unary(func: Callable, event: UsageQuotaEvent):
                 await service.execute(gl_events_context, event)
 
             return await func(obj, request, grpc_context, *args, **kwargs)
+        except (InsufficientEntitlements, UsageQuotaCheckUnavailable) as e:
+            # NOTE: For SaaS, `deprecated_quota_check=True` is always set (since
+            # realm != "self-managed"), so `service.execute` is never called above.
+            # This except block is therefore dead code for SaaS GenerateToken
+            # requests — Rails handles the quota check via the /direct_access
+            # endpoint. The block only fires for self-managed instances running
+            # GitLab < 18.9 where the interceptor performs the check itself.
+            await _abort_for_quota_denied(grpc_context, e)
         except InsufficientCredits as e:
             await abort_route_interceptor(
                 grpc_context,
