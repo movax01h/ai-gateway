@@ -8,12 +8,18 @@ from pydantic_core import ValidationError
 
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+    UILogWriterAgentTools,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     IOKey,
     RuntimeIOKey,
     get_vars_from_state,
+    merge_nested_dict,
 )
+from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.compaction import (
     ConversationCompactor,
     maybe_compact_history,
@@ -66,7 +72,7 @@ class AgentFinalOutput(BaseAgentOutput):
         return self.final_response
 
 
-class AgentNode:
+class AgentNode:  # pylint: disable=too-many-instance-attributes
     """LangGraph node that invokes an LLM and appends the completion to conversation history.
 
     All state interactions are performed exclusively through ``IOKey`` instances,
@@ -78,6 +84,11 @@ class AgentNode:
     wrapped in a ``RuntimeIOKey`` by the caller) and the supervisor case where
     the key is only known at runtime.
 
+    When ``ui_history`` is provided and ``ON_AGENT_REASONING`` is included in its
+    event list, a ``MessageTypeEnum.AGENT`` entry is emitted for every ``AIMessage``
+    whose text content is non-empty (even when the message also contains tool calls).
+    This surfaces the LLM's reasoning commentary in the session view.
+
     Args:
         flow_id: Identifier of the current flow execution.
         flow_type: Reporting context used for internal events and metrics.
@@ -88,6 +99,9 @@ class AgentNode:
         conversation_history_key: ``RuntimeIOKey`` that resolves the
             conversation-history ``IOKey`` at runtime.
         internal_event_client: Client for tracking internal telemetry events.
+        ui_history: Optional UI log history writer.  When provided, reasoning
+            text from mid-loop ``AIMessage``s is emitted as
+            ``ON_AGENT_REASONING`` entries (if that event is enabled).
     """
 
     name: str
@@ -103,6 +117,7 @@ class AgentNode:
     _flow_type: GLReportingEventContext
     _error_handler: ModelErrorHandler
     _compactor: ConversationCompactor | None
+    _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
 
     def __init__(
         self,
@@ -115,6 +130,7 @@ class AgentNode:
         conversation_history_key: RuntimeIOKey,
         compactor: ConversationCompactor | None = None,
         response_schema: Optional[Type[BaseAgentOutput]] = None,
+        ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -126,6 +142,7 @@ class AgentNode:
         self._compactor = compactor
         self._conversation_history_key = conversation_history_key
         self._response_schema = response_schema
+        self._ui_history = ui_history
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
@@ -133,6 +150,50 @@ class AgentNode:
     )
 
     _MAX_TRUNCATION_RETRIES: int = 5
+
+    @staticmethod
+    def _extract_text(completion: AIMessage) -> str:
+        """Extract plain text from an ``AIMessage``, handling both string and list content.
+
+        Args:
+            completion: The ``AIMessage`` to extract text from.
+
+        Returns:
+            The text content of the message, or an empty string if none.
+        """
+        content = completion.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            return "".join(parts)
+        return ""
+
+    def _emit_reasoning(self, completion: AIMessage) -> None:
+        """Emit an ``ON_AGENT_REASONING`` log entry if the completion has non-empty text.
+
+        Only emits when ``ui_history`` is set and ``ON_AGENT_REASONING`` is in its
+        event list.  Empty or whitespace-only content is silently skipped.
+
+        Args:
+            completion: The ``AIMessage`` returned by the LLM.
+        """
+        if self._ui_history is None:
+            return
+        if UILogEventsAgent.ON_AGENT_REASONING not in self._ui_history.events:
+            return
+        text = self._extract_text(completion).strip()
+        if not text:
+            return
+        self._ui_history.log.warning(
+            text,
+            event=UILogEventsAgent.ON_AGENT_REASONING,
+        )
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -183,10 +244,20 @@ class AgentNode:
                     history = [*history, *updates]
                     continue
 
+                # Only emit reasoning if there are tool calls (i.e. omit for text-only messages)
+                if completion.tool_calls:
+                    self._emit_reasoning(completion)
+
                 # Append new completion to existing history for replace-based reducer.
                 # The reducer will replace this component's conversation history with
                 # the complete list returned here.
-                return history_iokey.to_nested_dict(history + [completion])
+                ui_updates = (
+                    self._ui_history.pop_state_updates() if self._ui_history else {}
+                )
+                return merge_nested_dict(
+                    ui_updates,
+                    history_iokey.to_nested_dict(history + [completion]),
+                )
             except APIStatusError as e:
                 error_message = str(e)
                 status_code = e.response.status_code

@@ -29,6 +29,7 @@ __all__ = [
 
 class UILogEventsAgent(BaseUILogEvents):
     ON_AGENT_FINAL_ANSWER = auto()
+    ON_AGENT_REASONING = auto()
     ON_TOOL_EXECUTION_SUCCESS = auto()
     ON_TOOL_EXECUTION_FAILED = auto()
     ON_TOOL_APPROVAL_REQUEST = auto()
@@ -115,6 +116,37 @@ class UILogWriterAgentTools(BaseUILogWriter):
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=tool.name,
             message_id=None,
+            component_name=self._component_name,
+            subsession_id=kwargs.get("subsession_id"),
+        )
+
+    def _log_warning(
+        self,
+        message: str,
+        **kwargs,
+    ) -> UiChatLog:
+        """Log agent reasoning text emitted alongside tool calls.
+
+        Produces a ``MessageTypeEnum.AGENT`` entry so the session view can
+        display the LLM's commentary between tool invocations.
+
+        Args:
+            message: The reasoning text extracted from the ``AIMessage``.
+            **kwargs: Optional keyword arguments:
+                - ``correlation_id``: Correlation ID for the log entry.
+                - ``message_id``: ID of the originating ``AIMessage``.
+                - ``subsession_id``: Active subsession ID (subagent mode only).
+        """
+        return UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            content=message,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=None,
+            correlation_id=kwargs.get("correlation_id"),
+            tool_info=None,
+            additional_context=kwargs.get("context_elements", []),
+            message_sub_type="reasoning",
+            message_id=kwargs.get("message_id"),
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )

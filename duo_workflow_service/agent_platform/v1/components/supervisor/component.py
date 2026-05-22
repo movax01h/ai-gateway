@@ -558,6 +558,13 @@ class SupervisorAgentComponent(AgentComponentBase):
         )
         supervisor_history_key = self._default_conversation_history_key
 
+        # Filter supervisor events to only those compatible with UILogEventsAgent
+        # (AgentNode and ToolNode use UILogWriterAgentTools which requires UILogEventsAgent)
+        agent_events = [
+            UILogEventsAgent[e.name]
+            for e in self.ui_log_events
+            if e.name in UILogEventsAgent.__members__
+        ]
         node_agent = AgentNode(
             name=self.__entry_hook__(),
             conversation_history_key=supervisor_history_key,
@@ -583,14 +590,13 @@ class SupervisorAgentComponent(AgentComponentBase):
                 else None
             ),
             response_schema=self._response_schema,
+            ui_history=UIHistory(
+                events=agent_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
+            ),
         )
-        # Filter supervisor events to only those compatible with UILogEventsAgent
-        # (ToolNode uses UILogWriterAgentTools which requires UILogEventsAgent)
-        tool_events = [
-            UILogEventsAgent[e.name]
-            for e in self.ui_log_events
-            if e.name in UILogEventsAgent.__members__
-        ]
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
             flow_type=self.flow_type,
@@ -601,7 +607,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             conversation_history_key=supervisor_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
-                events=tool_events,
+                events=agent_events,
                 writer_class=agent_tools_ui_log_writer_class(
                     component_name=self.name,
                 ),

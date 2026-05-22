@@ -170,6 +170,41 @@ class TestUILogWriterAgentTools:
         assert args.record["component_name"] == "researcher"
         assert args.record["subsession_id"] == "1"
 
+    def test_log_reasoning(self, mock_callback):
+        """Test the warning method emits an AGENT reasoning entry."""
+        writer = UILogWriterAgentTools(mock_callback, component_name="developer")
+        reasoning_text = (
+            "Now let me look at the existing schema to understand the structure:"
+        )
+
+        writer.warning(
+            reasoning_text,
+            event=UILogEventsAgent.ON_AGENT_REASONING,
+            subsession_id="42",
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.event == UILogEventsAgent.ON_AGENT_REASONING
+        assert args.record["content"] == reasoning_text
+        assert args.record["message_type"] == MessageTypeEnum.AGENT
+        assert args.record["status"] is None
+        assert args.record["tool_info"] is None
+        assert args.record["message_sub_type"] == "reasoning"
+        assert args.record["component_name"] == "developer"
+        assert args.record["subsession_id"] == "42"
+
+    def test_log_reasoning_without_component_name(self, mock_callback):
+        """Test that reasoning log works without component_name."""
+        writer = UILogWriterAgentTools(mock_callback)
+        writer.warning(
+            "Some reasoning",
+            event=UILogEventsAgent.ON_AGENT_REASONING,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["component_name"] is None
+        assert args.record["subsession_id"] is None
+
     def test_agent_tools_ui_log_writer_class_factory(self, mock_callback, mock_tool):
         """Test that agent_tools_ui_log_writer_class returns a factory that creates UILogWriterAgentTools."""
         factory_fn = agent_tools_ui_log_writer_class(component_name="my_agent")

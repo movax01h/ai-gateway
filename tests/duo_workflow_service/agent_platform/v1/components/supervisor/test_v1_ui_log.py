@@ -1,9 +1,10 @@
-"""Test suite for UILogEventsSupervisor enum."""
+# pylint: disable=file-naming-for-tests
+"""Test suite for UILogEventsSupervisor enum (v1)."""
 
-from duo_workflow_service.agent_platform.experimental.components.supervisor.ui_log import (
+from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
     UILogEventsSupervisor,
 )
-from duo_workflow_service.agent_platform.experimental.ui_log import BaseUILogEvents
+from duo_workflow_service.agent_platform.v1.ui_log import BaseUILogEvents
 
 
 class TestUILogEventsSupervisor:
