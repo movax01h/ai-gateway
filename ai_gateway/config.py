@@ -398,4 +398,11 @@ def get_config() -> Config:
 
 def setup_litellm(config: Config):
     litellm.vertex_project = config.google_cloud_platform.project
-    litellm.vertex_location = "global"
+    # GitLab's AIGW deployment uses "global", but self-hosted Duo customers may use
+    # a different location for vertex. Since the initialization path for vertex via litellm is
+    # this method, we need to consider both cases.
+    # Presence of VERTEXAI_LOCATION will take precedence (and hence work for self-hosted customers)
+    # while "global" works for GitLab's AIGW deployments.
+    # pylint: disable=direct-environment-variable-reference
+    litellm.vertex_location = os.getenv("VERTEXAI_LOCATION") or "global"
+    # pylint: enable=direct-environment-variable-reference
