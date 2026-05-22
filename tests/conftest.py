@@ -127,7 +127,16 @@ def mock_client_fixture(
         customersdot_api_token=None,
     )
 
-    with patch.object(stub_auth_provider, "authenticate", return_value=auth_user):
+    # Patch check_quota_available at the class level so the DI container's singleton
+    # also gets the mock. Tests that exercise quota denial should override this.
+    with (
+        patch.object(stub_auth_provider, "authenticate", return_value=auth_user),
+        patch(
+            "lib.usage_quota.client.UsageQuotaClient.check_quota_available",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
         yield test_client
 
 

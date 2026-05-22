@@ -8,11 +8,18 @@ from lib.billing_events.context import UsageQuotaEventContext
 from lib.events.base import GLReportingEventContext
 from lib.internal_events import current_event_context
 from lib.usage_quota.client import UsageQuotaClient
-from lib.usage_quota.errors import UsageQuotaError
+from lib.usage_quota.errors import (
+    InsufficientEntitlements,
+    UsageQuotaCheckUnavailable,
+    UsageQuotaError,
+    UsageQuotaHTTPError,
+)
 
 __all__ = [
     "UsageQuotaEvent",
     "InsufficientCredits",
+    "InsufficientEntitlements",
+    "UsageQuotaCheckUnavailable",
     "ModelMetadata",
     "UsageQuotaService",
 ]
@@ -91,35 +98,68 @@ class UsageQuotaService:
             correlation_id=getattr(event_context, "correlation_id", None),
         )
 
+        realm = usage_quota_event_context.realm
+
         try:
             is_quota_available = await self.usage_quota_client.check_quota_available(
                 extended_context
             )
-        except UsageQuotaError as e:
-            USAGE_QUOTA_CHECK_TOTAL.labels(
-                result="fail_open", realm=usage_quota_event_context.realm
-            ).inc()
+        except UsageQuotaHTTPError as e:
+            # Fail-close for SaaS and unknown/missing realms; fail-open only for
+            # known non-SaaS realms (self-managed, dedicated).
+            if realm not in ("self-managed", "dedicated"):
+                USAGE_QUOTA_CHECK_TOTAL.labels(result="deny", realm=realm).inc()
+                log.warning(
+                    "Usage quota HTTP error on SaaS, denying request",
+                    realm=realm,
+                    error_status_code=e.status_code,
+                    error_type=type(e).__name__,
+                    correlation_id=getattr(event_context, "correlation_id", None),
+                )
+                if e.status_code == 403:
+                    raise InsufficientEntitlements() from e
 
+                raise UsageQuotaCheckUnavailable() from e
+            USAGE_QUOTA_CHECK_TOTAL.labels(result="fail_open", realm=realm).inc()
             log.warning(
                 "Usage quota check failed, failing open to allow request",
-                realm=usage_quota_event_context.realm,
+                realm=realm,
+                error_message=e.message,
+                error_type=type(e).__name__,
+                error_status_code=e.status_code,
+                correlation_id=getattr(event_context, "correlation_id", None),
+            )
+            return
+        except UsageQuotaError as e:
+            # Fail-close for SaaS and unknown/missing realms.
+            # Fail-open only for known non-SaaS realms.
+            if realm not in ("self-managed", "dedicated"):
+                USAGE_QUOTA_CHECK_TOTAL.labels(result="deny", realm=realm).inc()
+                log.warning(
+                    "Usage quota check failed on SaaS, denying request",
+                    realm=realm,
+                    error_message=e.message,
+                    error_type=type(e).__name__,
+                    correlation_id=getattr(event_context, "correlation_id", None),
+                )
+                raise UsageQuotaCheckUnavailable() from e
+
+            USAGE_QUOTA_CHECK_TOTAL.labels(result="fail_open", realm=realm).inc()
+            log.warning(
+                "Usage quota check failed, failing open to allow request",
+                realm=realm,
                 error_message=e.message,
                 error_type=type(e).__name__,
                 correlation_id=getattr(event_context, "correlation_id", None),
             )
-
             return
 
         if not is_quota_available:
-            USAGE_QUOTA_CHECK_TOTAL.labels(
-                result="deny", realm=usage_quota_event_context.realm
-            ).inc()
+            USAGE_QUOTA_CHECK_TOTAL.labels(result="deny", realm=realm).inc()
 
             raise InsufficientCredits()
 
-        USAGE_QUOTA_CHECK_TOTAL.labels(
-            result="allow", realm=usage_quota_event_context.realm
-        ).inc()
+        USAGE_QUOTA_CHECK_TOTAL.labels(result="allow", realm=realm).inc()
 
     async def aclose(self):
         """Cleanup underlying client resources."""

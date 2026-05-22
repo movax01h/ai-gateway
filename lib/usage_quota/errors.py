@@ -42,3 +42,17 @@ class UsageQuotaConnectionError(UsageQuotaError):
             "Failed to connect to Usage Quota API",
             original_error=original_error,
         )
+
+
+class InsufficientEntitlements(UsageQuotaError):
+    """Raised when the consumer does not have entitlements to use a feature."""
+
+    def __init__(self):
+        super().__init__("Consumer does not have entitlements to use this feature.")
+
+
+class UsageQuotaCheckUnavailable(UsageQuotaError):
+    """Raised when the usage quota check service is temporarily unavailable."""
+
+    def __init__(self):
+        super().__init__("Usage quota check is temporarily unavailable.")

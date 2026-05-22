@@ -1,4 +1,5 @@
 # pylint: disable=unused-argument
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -8,7 +9,12 @@ from starlette.responses import JSONResponse
 
 from ai_gateway.api.middleware.route.usage_quota import has_sufficient_usage_quota
 from lib.events import FeatureQualifiedNameStatic
-from lib.usage_quota import InsufficientCredits, UsageQuotaEvent
+from lib.usage_quota import (
+    InsufficientCredits,
+    InsufficientEntitlements,
+    UsageQuotaCheckUnavailable,
+    UsageQuotaEvent,
+)
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 from lib.usage_quota.service import UsageQuotaService
 
@@ -141,6 +147,56 @@ class TestDecoratorBasics:
         content = response.body.decode()
         assert "insufficient_credits" in content
         assert "USAGE_QUOTA_EXCEEDED" in content
+
+    @pytest.mark.asyncio
+    async def test_decorator_maps_usage_quota_check_unavailable_to_403(
+        self, mock_request, mock_usage_quota_service
+    ):
+        """Test that UsageQuotaCheckUnavailable results in a 403 fail-close response."""
+
+        async def test_handler(request, *args, **kwargs):
+            return JSONResponse({"status": "ok"})
+
+        decorated = has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+        )(test_handler)
+
+        mock_usage_quota_service.execute = AsyncMock(
+            side_effect=UsageQuotaCheckUnavailable()
+        )
+
+        response = await decorated(mock_request)
+
+        assert response.status_code == 403
+        content = json.loads(response.body.decode())
+        assert content["error"] == "not_entitled"
+        assert content["error_code"] == "USAGE_QUOTA_NOT_ENTITLED"
+
+    @pytest.mark.asyncio
+    async def test_decorator_maps_insufficient_entitlements_to_403(
+        self, mock_request, mock_usage_quota_service
+    ):
+        """Test that InsufficientEntitlements results in a 403 not-entitled response."""
+
+        async def test_handler(request, *args, **kwargs):
+            return JSONResponse({"status": "ok"})
+
+        decorated = has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+        )(test_handler)
+
+        mock_usage_quota_service.execute = AsyncMock(
+            side_effect=InsufficientEntitlements()
+        )
+
+        response = await decorated(mock_request)
+
+        assert response.status_code == 403
+        content = json.loads(response.body.decode())
+        assert content["error"] == "not_entitled"
+        assert content["error_code"] == "USAGE_QUOTA_NOT_ENTITLED"
 
 
 class TestEventTypeResolution:

@@ -12,7 +12,11 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.server import DuoWorkflowService
 from lib.context import gitlab_version
 from lib.internal_events.context import EventContext, current_event_context
-from lib.usage_quota import UsageQuotaEvent
+from lib.usage_quota import (
+    InsufficientEntitlements,
+    UsageQuotaCheckUnavailable,
+    UsageQuotaEvent,
+)
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 
@@ -444,3 +448,135 @@ class TestGenerateTokenVersionBasedQuotaCheck:
         finally:
             current_event_context.reset(event_token)
             gitlab_version.reset(version_token)
+
+
+class TestQuotaExceptionHandlingGrpc:
+    """Tests for gRPC interceptor exception handling on quota denials."""
+
+    @pytest.fixture(name="regular_user_quota")
+    def regular_user_quota_fixture(self):
+        return CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(extra={}),
+        )
+
+    @pytest.fixture(autouse=True)
+    def setup_user(self, regular_user_quota):
+        token = current_user.set(regular_user_quota)
+        yield
+        current_user.reset(token)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "exc_class", [InsufficientEntitlements, UsageQuotaCheckUnavailable]
+    )
+    async def test_execute_workflow_aborts_with_permission_denied_on_quota_denial(
+        self,
+        mock_context,
+        mock_usage_quota_service,
+        exc_class,
+    ):
+        """ExecuteWorkflow should abort with PERMISSION_DENIED on quota denial."""
+        from duo_workflow_service.interceptors.route.usage_quota import (
+            has_sufficient_usage_quota,
+        )
+
+        mock_usage_quota_service.execute = AsyncMock(side_effect=exc_class())
+
+        inner = MagicMock()
+        inner.__name__ = "ExecuteWorkflow"
+        inner.__qualname__ = "DuoWorkflowServicer.ExecuteWorkflow"
+
+        decorated = has_sufficient_usage_quota(
+            event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE
+        )(inner)
+
+        async for _ in decorated(
+            None,
+            mock_request_generator(),
+            mock_context,
+            service=mock_usage_quota_service,
+        ):
+            pass
+
+        mock_context.abort.assert_called_once()
+        call_args = mock_context.abort.call_args[0]
+        assert call_args[0] == grpc.StatusCode.PERMISSION_DENIED
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "exc_class", [InsufficientEntitlements, UsageQuotaCheckUnavailable]
+    )
+    async def test_track_self_hosted_execute_workflow_aborts_with_permission_denied_on_quota_denial(
+        self,
+        mock_context,
+        mock_usage_quota_service,
+        exc_class,
+    ):
+        """TrackSelfHostedExecuteWorkflow should abort with PERMISSION_DENIED on quota denial."""
+        from duo_workflow_service.interceptors.route.usage_quota import (
+            has_sufficient_usage_quota,
+        )
+
+        mock_usage_quota_service.execute = AsyncMock(side_effect=exc_class())
+
+        inner = MagicMock()
+        inner.__name__ = "TrackSelfHostedExecuteWorkflow"
+        inner.__qualname__ = "DuoWorkflowServicer.TrackSelfHostedExecuteWorkflow"
+
+        decorated = has_sufficient_usage_quota(
+            event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE
+        )(inner)
+
+        async for _ in decorated(
+            None,
+            mock_track_self_hosted_request_generator(),
+            mock_context,
+            service=mock_usage_quota_service,
+        ):
+            pass
+
+        mock_context.abort.assert_called_once()
+        call_args = mock_context.abort.call_args[0]
+        assert call_args[0] == grpc.StatusCode.PERMISSION_DENIED
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "exc_class", [InsufficientEntitlements, UsageQuotaCheckUnavailable]
+    )
+    async def test_generate_token_aborts_with_permission_denied_on_quota_denial(
+        self,
+        mock_context,
+        mock_usage_quota_service,
+        exc_class,
+    ):
+        """GenerateToken should abort with PERMISSION_DENIED on quota denial (self-managed path)."""
+        from duo_workflow_service.interceptors.route.usage_quota import (
+            has_sufficient_usage_quota,
+        )
+
+        mock_usage_quota_service.execute = AsyncMock(side_effect=exc_class())
+
+        inner = AsyncMock(return_value="ok")
+        inner.__name__ = "GenerateToken"
+        inner.__qualname__ = "DuoWorkflowServicer.GenerateToken"
+
+        decorated = has_sufficient_usage_quota(
+            event=UsageQuotaEvent.DAP_FLOW_ON_GENERATE_TOKEN
+        )(inner)
+
+        request = contract_pb2.GenerateTokenRequest(workflowDefinition="test_workflow")
+
+        event_token = current_event_context.set(EventContext(realm="self-managed"))
+        version_token = gitlab_version.set("18.8.0")
+        try:
+            await decorated(
+                None, request, mock_context, service=mock_usage_quota_service
+            )
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+        mock_context.abort.assert_called_once()
+        call_args = mock_context.abort.call_args[0]
+        assert call_args[0] == grpc.StatusCode.PERMISSION_DENIED
