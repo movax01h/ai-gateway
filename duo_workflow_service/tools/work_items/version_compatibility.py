@@ -76,10 +76,10 @@ def supports_development_widget() -> bool:
 
 
 def supports_agent_plan_widget() -> bool:
-    """Check if the current GitLab version exposes the WorkItemWidgetAgentPlan type.
+    """Check if the current GitLab version supports the agent plan widget.
 
     Returns:
-        True if the agent plan widget is supported, False otherwise.
+        True if the agent plan widget is supported (GitLab >= 19.0), False otherwise.
     """
     return get_gitlab_version() >= AGENT_PLAN_WIDGET_VERSION
 
@@ -109,6 +109,33 @@ def get_query_variables_for_version(*requested_keys: str) -> dict:
             filtered_variables[key] = all_variables[key]
 
     return filtered_variables
+
+
+_AGENT_PLAN_WIDGET_PLACEHOLDER = "# AGENT_PLAN_WIDGET_PLACEHOLDER"
+_AGENT_PLAN_WIDGET_FRAGMENT = (
+    "... on WorkItemWidgetAgentPlan {\n                    content\n                }"
+)
+
+
+def get_query_with_agent_plan_widget(base_query: str) -> str:
+    """Return the query with the WorkItemWidgetAgentPlan fragment injected when supported.
+
+    On GitLab < 19.0 the type does not exist and including it in the query causes a schema
+    validation error even when guarded with ``@include(if: false)``.  Each affected
+    ``.graphql`` file contains a ``# AGENT_PLAN_WIDGET_PLACEHOLDER`` comment that this
+    function replaces with the fragment on GitLab >= 19.0, or removes on older versions.
+
+    Args:
+        base_query: The base GraphQL query/mutation string containing the placeholder comment.
+
+    Returns:
+        The query string with the placeholder replaced by the fragment or removed.
+    """
+    if supports_agent_plan_widget():
+        replacement = _AGENT_PLAN_WIDGET_FRAGMENT
+    else:
+        replacement = ""
+    return base_query.replace(_AGENT_PLAN_WIDGET_PLACEHOLDER, replacement)
 
 
 def supports_licensed_feature_availability() -> bool:
