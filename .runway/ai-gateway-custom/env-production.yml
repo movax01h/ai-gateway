@@ -17,5 +17,6 @@ AIGW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
 AIGW_FEATURE_FLAGS__FIREWORKS_SCORE_THRESHOLD: '{"qwen2p5-coder-7b": -1.5}'
 AIGW_AMAZON_Q__REGION: "us-west-2"
 AIGW_AMAZON_Q__ENDPOINT_URL: "https://us-west-2.gamma.integration.qdev.ai.aws.dev"
+AIGW_PROCESS_LEVEL_FEATURE_FLAGS__DUO_CLASSIC_CHAT_DUO_CORE_CUTOFF: "true"
 # Disable DWS explicitly as it's enabled in self-hosted Docker image
 ENABLE_DUO_WORKFLOW_SERVICE: ""
