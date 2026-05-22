@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(poetry run:*)",
-      "Bash(make format:*)",
-      "Bash(make test:*)"
-    ]
-  }
-}
