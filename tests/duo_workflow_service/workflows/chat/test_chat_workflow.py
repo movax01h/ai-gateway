@@ -185,6 +185,7 @@ async def test_workflow_initialization(mock_uuid, workflow_with_project):
     assert len(initial_state["ui_chat_log"][0]["additional_context"]) == 1
     assert initial_state["ui_chat_log"][0]["additional_context"][0].category == "file"
     assert initial_state["project"]["name"] == "test-project"
+    assert initial_state["denied_tools"] == []
 
 
 @pytest.mark.asyncio
@@ -334,6 +335,7 @@ def test_are_tools_called_with_various_content(
         "namespace": None,
         "approval": None,
         "preapproved_tools": None,
+        "denied_tools": None,
     }
     assert workflow._are_tools_called(state) == expected_result
 
@@ -369,6 +371,7 @@ def test_are_tools_called_with_tool_use(workflow_with_project):
         "namespace": None,
         "approval": None,
         "preapproved_tools": None,
+        "denied_tools": None,
     }
     assert workflow._are_tools_called(state) == Routes.TOOL_USE
 
@@ -609,6 +612,7 @@ async def test_get_graph_input_start(mock_uuid, workflow_with_project):
     )
     assert len(result["ui_chat_log"][0]["additional_context"]) == 1
     assert result["ui_chat_log"][0]["additional_context"][0].category == "file"
+    assert result["denied_tools"] == []
 
 
 @pytest.mark.asyncio
@@ -1034,6 +1038,19 @@ async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project
         "tool_2",
         "tool_3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_agent_resume_with_updated_denied_tools(workflow_with_project):
+    workflow_with_project._denied_tools = ["create_merge_request"]
+
+    result = await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, None
+    )
+
+    assert result.goto == "agent"
+    assert "denied_tools" in result.update
+    assert result.update["denied_tools"] == ["create_merge_request"]
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchai
 )
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
+from pydantic import BaseModel, ConfigDict
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
@@ -83,6 +84,13 @@ MAX_TOKENS_TO_SAMPLE = 8192
 RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
+
+
+class ToolAccessPolicies(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    allow: list[str] = []
+    deny: list[str] = []
 
 
 class AbstractWorkflow(ABC):
@@ -155,6 +163,7 @@ class AbstractWorkflow(ABC):
         self._internal_event_client = internal_event_client
         self._language_server_version = language_server_version
         self._preapproved_tools = preapproved_tools
+        self._denied_tools: list[str] = []
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -248,6 +257,26 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _merge_jwt_governance_claims(self) -> None:
+        if self._user.claims and self._user.claims.extra:
+            raw = self._user.claims.extra.get("tool_access_policies")
+            if raw:
+                try:
+                    policies = (
+                        ToolAccessPolicies.model_validate_json(raw)
+                        if isinstance(raw, str)
+                        else ToolAccessPolicies.model_validate(raw)
+                    )
+                except Exception:
+                    return
+                if policies.allow:
+                    existing = self._preapproved_tools or []
+                    self._preapproved_tools = list(set(existing) | set(policies.allow))
+                if policies.deny:
+                    self._denied_tools = list(
+                        set(self._denied_tools) | set(policies.deny)
+                    )
+
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
 
@@ -333,6 +362,8 @@ class AbstractWorkflow(ABC):
                 )
             )
 
+            self._merge_jwt_governance_claims()
+
             # Update monitoring context with prompt injection protection level
             monitoring_context = current_monitoring_context.get()
             monitoring_context.prompt_injection_protection_level = (
@@ -361,6 +392,7 @@ class AbstractWorkflow(ABC):
                     else []
                 ),
                 language_server_version=self._language_server_version,
+                denied_tools=self._denied_tools,
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):

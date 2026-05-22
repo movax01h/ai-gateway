@@ -57,6 +57,7 @@ def sample_chat_workflow_state_fixture(project, namespace) -> ChatWorkflowState:
         namespace=namespace,
         approval=None,
         preapproved_tools=None,
+        denied_tools=None,
     )
 
 
@@ -770,6 +771,7 @@ class TestPromptAdapterFriendlyName:
             "goal": "Test goal",
             "approval": None,
             "preapproved_tools": None,
+            "denied_tools": None,
         }
 
         with patch(
@@ -862,6 +864,7 @@ class TestPromptAdapterFriendlyName:
             "goal": "Test goal",
             "approval": None,
             "preapproved_tools": None,
+            "denied_tools": None,
         }
 
         with patch(

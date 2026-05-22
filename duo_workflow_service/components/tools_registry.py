@@ -215,6 +215,7 @@ class ToolsRegistry:
         project: Optional[Project],
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
+        denied_tools: Optional[list[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -243,6 +244,7 @@ class ToolsRegistry:
             mcp_tools=mcp_tools,
             language_server_version=language_server_version,
             tool_call_approvals=workflow_config.get("tool_call_approvals", {}),
+            denied_tools=denied_tools or [],
         )
 
     def __init__(
@@ -253,6 +255,7 @@ class ToolsRegistry:
         tool_metadata: ToolMetadata,
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
+        denied_tools: Optional[list[str]] = None,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
@@ -268,6 +271,7 @@ class ToolsRegistry:
         }
 
         self._preapproved_tool_names = set(self._enabled_tools.keys())
+        self._denied_tools: set[str] = set(denied_tools or [])
         self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
 
         self._tool_call_approvals = tool_call_approvals
@@ -329,6 +333,8 @@ class ToolsRegistry:
 
             # replace the superseded tool with this tool instance
             # pre-approval status will not be changed
+            # deny status is inherited implicitly: if the superseded tool name is in
+            # _denied_tools, toolset() will strip it regardless of which instance is active
             self._enabled_tools[tool_cls.model_fields["name"].default] = tool_cls(
                 metadata=tool_metadata
             )
@@ -423,6 +429,9 @@ class ToolsRegistry:
 
         # MCP tools if there are any are added to toolset
         tool_names += self._mcp_tool_names
+
+        if self._denied_tools:
+            tool_names = [t for t in tool_names if t not in self._denied_tools]
 
         all_tools = {}
         for tool_name in tool_names:

@@ -228,6 +228,7 @@ class Workflow(AbstractWorkflow):
             namespace=self._namespace,
             approval=None,
             preapproved_tools=self._preapproved_tools or [],
+            denied_tools=self._denied_tools or [],
         )
 
     async def get_graph_input(
@@ -246,6 +247,7 @@ class Workflow(AbstractWorkflow):
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
                     "preapproved_tools": self._preapproved_tools or [],
+                    "denied_tools": self._denied_tools or [],
                 }
                 next_step = "agent"
                 new_chat_message = goal

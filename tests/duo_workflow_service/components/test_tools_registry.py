@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.tools import BaseTool
 
+from contract import contract_pb2
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
     _DEFAULT_TOOLS,
@@ -737,6 +738,26 @@ def test_approval_required(tool_metadata):
     assert registry.approval_required("nonexistent_tool")
 
 
+def test_approval_required_returns_true_for_enabled_but_not_preapproved_tool(
+    tool_metadata,
+):
+    """Tools that are enabled but not pre-approved should require user approval."""
+    registry = ToolsRegistry(
+        enabled_tools=["read_only_gitlab", "read_write_gitlab"],
+        preapproved_tools=["read_only_gitlab"],  # only read tools pre-approved
+        tool_call_approvals={},
+        tool_metadata=tool_metadata,
+    )
+
+    # read_only_gitlab tools should not require approval
+    assert not registry.approval_required("list_issues")
+    assert not registry.approval_required("get_issue")
+
+    # read_write_gitlab tools should require approval (ask)
+    assert registry.approval_required("create_issue")
+    assert registry.approval_required("create_merge_request")
+
+
 @pytest.mark.asyncio
 async def test_registry_configuration_with_preapproved_tools(
     gl_http_client, project_mock
@@ -875,6 +896,86 @@ def test_toolset_method(
             tool_options={},
         )
         assert toolset == mock_toolset
+
+
+def test_toolset_filters_denied_tools(tool_metadata):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=[],
+        tool_call_approvals={},
+        tool_metadata=tool_metadata,
+        denied_tools=["read_file", "list_issues"],
+    )
+
+    toolset = registry.toolset(["read_file", "list_issues", "edit_file"])
+
+    assert "read_file" not in toolset._all_tools
+    assert "list_issues" not in toolset._all_tools
+    assert "edit_file" in toolset._all_tools
+
+
+def test_toolset_filters_denied_mcp_tools(tool_metadata, mcp_tools):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "run_mcp_tools"],
+        preapproved_tools=[],
+        tool_call_approvals={},
+        tool_metadata=tool_metadata,
+        mcp_tools=mcp_tools,
+        denied_tools=["extra_tool"],
+    )
+
+    toolset = registry.toolset(["read_file"])
+
+    assert "extra_tool" not in toolset._all_tools
+    assert "read_file" in toolset._all_tools
+
+
+@pytest.mark.asyncio
+async def test_registry_configuration_with_denied_tools(gl_http_client, project_mock):
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        denied_tools=["read_file"],
+    )
+
+    assert registry._denied_tools == {"read_file"}
+
+
+@pytest.mark.asyncio
+async def test_registry_configuration_jwt_deny_overrides_workflow_config_preapproval(
+    gl_http_client, project_mock
+):
+    """JWT deny list should override pre-approvals set via workflow_config."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": ["read_write_files"],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        denied_tools=["read_file"],
+    )
+
+    # read_file is pre-approved via workflow_config but denied via JWT
+    assert not registry.approval_required(
+        "edit_file"
+    )  # other pre-approved tool unaffected
+    toolset = registry.toolset(["read_file", "edit_file"])
+    assert "read_file" not in toolset._all_tools
+    assert "edit_file" in toolset._all_tools
 
 
 # Tests for Generic GitLab API Tools
@@ -1064,6 +1165,29 @@ class TestCapabilityDependentTools:
         assert "run_command" in registry._enabled_tools
         assert "run_command" in registry._preapproved_tool_names
         assert isinstance(registry._enabled_tools["run_command"], ShellCommand)
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_denied_superseded_tool_also_denies_superseding_tool(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """Denying a tool name should deny both superseded and superseding tool instances."""
+        mock_is_client_capable.return_value = True
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_commands"],
+            preapproved_tools=[],
+            tool_call_approvals={},
+            tool_metadata=tool_metadata,
+            denied_tools=["run_command"],
+        )
+
+        # ShellCommand supersedes RunCommand under the same name
+        assert isinstance(registry._enabled_tools["run_command"], ShellCommand)
+
+        toolset = registry.toolset(["run_command"])
+
+        # Denied tool should be stripped even though ShellCommand is the active instance
+        assert "run_command" not in toolset._all_tools
 
 
 class TestToolCallApprovals:
@@ -1271,3 +1395,76 @@ class TestToolCallApprovals:
         assert registry.approval_required("read_file", {"path": "/tmp/other.txt"})
         assert not registry.approval_required("edit_file", edit_file_args)
         assert registry.approval_required("list_dir", {"path": "/tmp"})
+
+
+class TestMcpToolApprovals:
+    """Tests for MCP tool approval and deny functionality."""
+
+    def test_mcp_tool_preapproval_not_broken_by_unrelated_deny(
+        self, tool_metadata, mcp_tools
+    ):
+        """MCP tool pre-approvals should still work when unrelated tools are denied."""
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=["run_mcp_tools"],
+            tool_call_approvals={},
+            tool_metadata=tool_metadata,
+            mcp_tools=mcp_tools,
+            denied_tools=["create_issue"],  # unrelated deny
+        )
+
+        assert not registry.approval_required("extra_tool")
+
+    def test_mcp_tool_denied_even_when_preapproved(self, tool_metadata, mcp_tools):
+        """Deny should win over MCP pre-approval for the same tool."""
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=["run_mcp_tools"],
+            tool_call_approvals={},
+            tool_metadata=tool_metadata,
+            mcp_tools=mcp_tools,
+            denied_tools=["extra_tool"],
+        )
+
+        toolset = registry.toolset(["extra_tool"])
+
+        assert "extra_tool" not in toolset._all_tools
+
+    def test_mcp_tool_server_prefixed_name_preapproval(self, tool_metadata):
+        """MCP tools using mcp__SERVER__TOOL naming format should be pre-approvable."""
+
+        mcp_tool = contract_pb2.McpTool(
+            name="mcp__context7__get_docs", description="Get docs from context7"
+        )
+        mcp_tools = convert_mcp_tools_to_configs(mcp_tools=[mcp_tool])
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=["run_mcp_tools"],
+            tool_call_approvals={},
+            tool_metadata=tool_metadata,
+            mcp_tools=mcp_tools,
+        )
+
+        assert not registry.approval_required("mcp__context7__get_docs")
+
+    def test_mcp_tool_server_prefixed_name_denied(self, tool_metadata):
+        """MCP tools using mcp__SERVER__TOOL naming format should be deniable."""
+
+        mcp_tool = contract_pb2.McpTool(
+            name="mcp__context7__get_docs", description="Get docs from context7"
+        )
+        mcp_tools = convert_mcp_tools_to_configs(mcp_tools=[mcp_tool])
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=["run_mcp_tools"],
+            tool_call_approvals={},
+            tool_metadata=tool_metadata,
+            mcp_tools=mcp_tools,
+            denied_tools=["mcp__context7__get_docs"],
+        )
+
+        toolset = registry.toolset(["mcp__context7__get_docs"])
+
+        assert "mcp__context7__get_docs" not in toolset._all_tools
