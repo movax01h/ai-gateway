@@ -1,6 +1,7 @@
 # pylint: disable=import-outside-toplevel
+import asyncio
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.tools import ToolException
@@ -398,3 +399,115 @@ async def test_executor_gitlab_http_client_http_connection_error(
         await client.aget("/api/v4/test")
 
     monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_on_timeout_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call retries when the executor returns a timeout ToolException."""
+    success_response = contract_pb2.ActionResponse()
+    success_response.httpResponse.statusCode = 200
+    success_response.httpResponse.body = '{"key": "value"}'
+
+    monkeypatch_execute_http_response.side_effect = [
+        ToolException("HTTP action error: request timed out"),
+        success_response,
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_http_call_exhausts_retries_on_repeated_timeouts(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call raises after all retry attempts are exhausted."""
+    monkeypatch_execute_http_response.side_effect = ToolException(
+        "HTTP action error: request timed out"
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(ToolException, match="request timed out"):
+            await client.aget("/api/v4/test")
+
+    assert monkeypatch_execute_http_response.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_http_call_does_not_retry_non_timeout_errors(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call does NOT retry for non-timeout errors."""
+    monkeypatch_execute_http_response.side_effect = ToolException("Permission denied")
+
+    with pytest.raises(ToolException, match="Permission denied"):
+        await client.aget("/api/v4/test")
+
+    monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_on_asyncio_timeout_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call retries when the executor raises asyncio.TimeoutError directly."""
+    success_response = contract_pb2.ActionResponse()
+    success_response.httpResponse.statusCode = 200
+    success_response.httpResponse.body = '{"key": "value"}'
+
+    monkeypatch_execute_http_response.side_effect = [
+        asyncio.TimeoutError(),
+        success_response,
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graphql_retries_on_timeout_and_succeeds(
+    client, monkeypatch_execute_action
+):
+    """Test that graphql retries when asyncio.TimeoutError is raised."""
+    success_response = json.dumps({"data": {"currentUser": {"username": "alice"}}})
+
+    call_count = 0
+
+    async def side_effect(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise asyncio.TimeoutError()
+        return success_response
+
+    monkeypatch_execute_action.side_effect = side_effect
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.graphql("{ currentUser { username } }")
+
+    assert result["currentUser"]["username"] == "alice"
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graphql_exhausts_retries_on_repeated_timeouts(
+    client, monkeypatch_execute_action
+):
+    """Test that graphql raises after all retry attempts are exhausted."""
+    monkeypatch_execute_action.side_effect = asyncio.TimeoutError()
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(Exception, match="GraphQL request timed out"):
+            await client.graphql("{ currentUser { username } }")
+
+    assert monkeypatch_execute_action.call_count == 3
