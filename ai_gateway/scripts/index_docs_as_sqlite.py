@@ -12,7 +12,7 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 from shutil import rmtree
-from typing import Any
+from typing import Any, Optional
 from zipfile import ZipFile
 
 import requests
@@ -20,6 +20,8 @@ from langchain_community.docstore.document import Document
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(-\w+)?$")
 
 
 # Function to parse command-line arguments
@@ -41,23 +43,84 @@ def execution_error(error_message: str):
     sys.exit(1)
 
 
-# Function to fetch documents from GitLab
-def fetch_documents(version_tag: str):
+def candidate_version_tags(version_tag: str) -> list[str]:
+    """Return the requested tag followed by earlier patches in the same minor.
+
+    When a patch tag (e.g. ``v19.0.1-ee``) is requested but not yet published
+    on gitlab-org/gitlab, earlier patches within the same minor are safe
+    substitutes because docs rarely change across patches. Non-versioned
+    inputs (e.g. ``master``) are returned unchanged with no fallback list.
+
+    Args:
+        version_tag: A GitLab version tag such as ``v19.0.1-ee``, or a
+            branch name.
+
+    Returns:
+        A list of candidate tags ordered from the requested patch down to
+        patch 0, or a single-element list when the tag is not versioned.
+    """
+    match = VERSION_TAG_RE.match(version_tag)
+    if not match:
+        return [version_tag]
+    major, minor, patch = (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+    )
+    suffix = match.group(4) or ""
+    return [f"v{major}.{minor}.{p}{suffix}" for p in range(patch, -1, -1)]
+
+
+def _download_docs_archive(version_tag: str) -> Optional[bytes]:
     docs_url = f"https://gitlab.com/gitlab-org/gitlab/-/archive/{version_tag}/gitlab-{version_tag}.zip?path=doc"
-    print(docs_url)
-
+    logger.info("Fetching documents from %s", docs_url)
     response = requests.get(docs_url, timeout=100)
+    if response.status_code == 200:
+        return response.content
+    logger.warning(
+        "Failed to download documents for %s. Status code: %d",
+        version_tag,
+        response.status_code,
+    )
+    return None
 
-    if response.status_code != 200:
+
+def fetch_documents(version_tag: str) -> Path:
+    """Download and extract the GitLab docs archive for ``version_tag``.
+
+    Tries the requested tag first, then earlier patch tags within the same
+    minor via :func:`candidate_version_tags`. Exits the process via
+    :func:`execution_error` if no candidate returns HTTP 200.
+
+    Args:
+        version_tag: A GitLab version tag such as ``v19.0.1-ee``, or
+            ``master``.
+
+    Returns:
+        Path to the directory containing the extracted documentation files.
+    """
+    content: Optional[bytes] = None
+    for candidate in candidate_version_tags(version_tag):
+        content = _download_docs_archive(candidate)
+        if content is not None:
+            if candidate != version_tag:
+                logger.warning(
+                    "Docs for %s were unavailable; falling back to %s.",
+                    version_tag,
+                    candidate,
+                )
+            break
+
+    if content is None:
         return execution_error(
-            f"Failed to download documents. Status code: {response.status_code}"
+            f"Failed to download documents for {version_tag} and all fallback tags."
         )
 
     tmpdirname = tempfile.mkdtemp()
     zip_path = Path(tmpdirname) / "docs.zip"
 
     with open(zip_path, "wb") as f:
-        f.write(response.content)
+        f.write(content)
     with ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(tmpdirname)
 
