@@ -34,8 +34,8 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
     UPDATE_WORK_ITEM_MUTATION,
 )
 from duo_workflow_service.tools.work_items.version_compatibility import (
-    AGENT_PLAN_WIDGET_VERSION,
     get_query_variables_for_version,
+    get_query_with_agent_plan_widget,
     supports_agent_plan_widget,
 )
 
@@ -273,10 +273,8 @@ class WorkItemBaseTool(DuoBaseTool):
         if todo_widget:
             input_data["currentUserTodosWidget"] = todo_widget
 
-        agent_plan_widget = WorkItemBaseTool._build_agent_plan_widget(kwargs, warnings)
-
-        if agent_plan_widget is not None:
-            input_data["agentPlanWidget"] = agent_plan_widget
+        if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
+            input_data["agentPlanWidget"] = {"content": kwargs["agent_plan"]}
 
         return input_data, warnings
 
@@ -324,35 +322,6 @@ class WorkItemBaseTool(DuoBaseTool):
             return None
 
         return {"weight": weight}
-
-    @staticmethod
-    def _build_agent_plan_widget(
-        kwargs: Dict[str, Any], warnings: List[str]
-    ) -> Optional[Dict[str, Any]]:
-        """Build agentPlanWidget input, gated on GitLab version.
-
-        Args:
-            kwargs: Input parameters that may contain ``agent_plan``.
-            warnings: List to collect validation warnings.
-
-        Returns:
-            Dictionary with ``{"content": <str>}`` when ``agent_plan`` is
-            provided and the GitLab instance supports the agent plan widget,
-            or ``None`` otherwise. When the instance is too old, a warning is
-            appended and the field is dropped.
-        """
-        if kwargs.get("agent_plan") is None:
-            return None
-
-        if not supports_agent_plan_widget():
-            warnings.append(
-                "agent_plan was provided but the GitLab instance does not support "
-                f"the agent plan widget (requires GitLab {AGENT_PLAN_WIDGET_VERSION} or newer); "
-                "the agent plan was dropped from this request."
-            )
-            return None
-
-        return {"content": kwargs["agent_plan"]}
 
     @staticmethod
     def _build_assignees_widget(
@@ -547,17 +516,19 @@ class WorkItemBaseTool(DuoBaseTool):
     async def _fetch_work_item_data(
         self, resolved: ResolvedWorkItem
     ) -> ResolvedWorkItem:
-        query = (
+        base_query = (
             GET_GROUP_WORK_ITEM_QUERY
             if resolved.parent.type == "group"
             else GET_PROJECT_WORK_ITEM_QUERY
         )
+        query = get_query_with_agent_plan_widget(base_query)
 
         variables = {
             "fullPath": resolved.parent.full_path,
             "iid": str(resolved.work_item_iid),
             **get_query_variables_for_version(
-                "includeHierarchyWidget", "includeDevelopmentWidget"
+                "includeHierarchyWidget",
+                "includeDevelopmentWidget",
             ),
         }
 
@@ -620,11 +591,11 @@ class WorkItemBaseTool(DuoBaseTool):
                 "namespacePath": namespace_path,
                 "workItemTypeId": type_id,
                 **input_fields,
-            }
+            },
         }
 
         response = await self.gitlab_client.graphql(
-            CREATE_WORK_ITEM_MUTATION, variables
+            get_query_with_agent_plan_widget(CREATE_WORK_ITEM_MUTATION), variables
         )
 
         if "errors" in response:
@@ -665,11 +636,11 @@ class WorkItemBaseTool(DuoBaseTool):
             "input": {
                 "id": work_item_id,
                 **input_fields,
-            }
+            },
         }
 
         response = await self.gitlab_client.graphql(
-            UPDATE_WORK_ITEM_MUTATION, variables
+            get_query_with_agent_plan_widget(UPDATE_WORK_ITEM_MUTATION), variables
         )
 
         if "errors" in response:
@@ -700,7 +671,8 @@ class WorkItemBaseTool(DuoBaseTool):
         Returns:
             Work item dict or None if not found.
         """
-        query, root_key = self._GET_WORK_ITEM_QUERIES[resolved.parent.type]
+        base_query, root_key = self._GET_WORK_ITEM_QUERIES[resolved.parent.type]
+        query = get_query_with_agent_plan_widget(base_query)
 
         query_variables: Dict[str, Any] = {
             "fullPath": resolved.parent.full_path,

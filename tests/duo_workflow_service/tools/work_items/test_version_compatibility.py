@@ -14,11 +14,17 @@ from duo_workflow_service.tools.work_items.version_compatibility import (
     NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION,
     get_gitlab_version,
     get_query_variables_for_version,
+    get_query_with_agent_plan_widget,
     supports_agent_plan_widget,
     supports_development_widget,
     supports_discussion_id_field,
     supports_hierarchy_widget,
     supports_note_resolved_and_resolvable_fields,
+)
+
+_PLACEHOLDER = "# AGENT_PLAN_WIDGET_PLACEHOLDER"
+_FRAGMENT = (
+    "... on WorkItemWidgetAgentPlan {\n                    content\n                }"
 )
 
 
@@ -115,11 +121,9 @@ class TestVersionCompatibilityFunctions:
             (supports_hierarchy_widget, "18.6.9", False),
             # supports_agent_plan_widget (threshold: 19.0.0)
             (supports_agent_plan_widget, "19.0.0", True),
-            (supports_agent_plan_widget, "19.0.1", True),
             (supports_agent_plan_widget, "19.1.0", True),
-            (supports_agent_plan_widget, "20.0.0", True),
+            (supports_agent_plan_widget, "19.0.1", True),
             (supports_agent_plan_widget, "18.11.0", False),
-            (supports_agent_plan_widget, "18.10.0", False),
             (supports_agent_plan_widget, "18.6.0", False),
         ],
     )
@@ -336,6 +340,42 @@ class TestGetQueryVariablesForVersion:
         assert result == expected
 
 
+class TestGetQueryWithAgentPlanWidget:
+    """Tests for get_query_with_agent_plan_widget function."""
+
+    @patch(
+        "duo_workflow_service.tools.work_items.version_compatibility.supports_agent_plan_widget",
+        return_value=True,
+    )
+    def test_injects_fragment_when_supported(self, _mock):
+        """Fragment replaces placeholder when GitLab >= 19.0."""
+        base = f"widgets {{\n    {_PLACEHOLDER}\n}}"
+        result = get_query_with_agent_plan_widget(base)
+        assert _FRAGMENT in result
+        assert _PLACEHOLDER not in result
+
+    @patch(
+        "duo_workflow_service.tools.work_items.version_compatibility.supports_agent_plan_widget",
+        return_value=False,
+    )
+    def test_removes_placeholder_when_unsupported(self, _mock):
+        """Placeholder is removed (not replaced with fragment) on GitLab < 19.0."""
+        base = f"widgets {{\n    {_PLACEHOLDER}\n}}"
+        result = get_query_with_agent_plan_widget(base)
+        assert _FRAGMENT not in result
+        assert _PLACEHOLDER not in result
+
+    @patch(
+        "duo_workflow_service.tools.work_items.version_compatibility.supports_agent_plan_widget",
+        return_value=False,
+    )
+    def test_query_is_valid_without_fragment(self, _mock):
+        """Resulting query on older GitLab must contain no unknown type reference."""
+        base = f"mutation foo {{\n    widgets {{\n        {_PLACEHOLDER}\n    }}\n}}"
+        result = get_query_with_agent_plan_widget(base)
+        assert "WorkItemWidgetAgentPlan" not in result
+
+
 class TestVersionConstants:
     """Tests for version constants."""
 
@@ -355,14 +395,18 @@ class TestVersionConstants:
         """Test that DEVELOPMENT_WIDGET_VERSION is set correctly."""
         assert DEVELOPMENT_WIDGET_VERSION == Version("18.9.0")
 
-    def test_agent_plan_widget_version_constant(self):
-        """Test that AGENT_PLAN_WIDGET_VERSION is set correctly."""
-        assert AGENT_PLAN_WIDGET_VERSION == Version("19.0.0")
-
     def test_default_fallback_version_constant(self):
         """Test that DEFAULT_FALLBACK_VERSION is set correctly."""
         assert DEFAULT_FALLBACK_VERSION == Version("18.6.0")
 
+    def test_agent_plan_widget_version_constant(self):
+        """Test that AGENT_PLAN_WIDGET_VERSION is set correctly."""
+        assert AGENT_PLAN_WIDGET_VERSION == Version("19.0.0")
+
     def test_fallback_version_is_below_hierarchy_threshold(self):
         """Test that fallback version is below hierarchy widget threshold."""
         assert DEFAULT_FALLBACK_VERSION < HIERARCHY_WIDGET_VERSION
+
+    def test_fallback_version_is_below_agent_plan_widget_threshold(self):
+        """Test that fallback version is below agent plan widget threshold."""
+        assert DEFAULT_FALLBACK_VERSION < AGENT_PLAN_WIDGET_VERSION

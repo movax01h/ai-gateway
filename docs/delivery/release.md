@@ -32,20 +32,6 @@ Tl;dr;
 - We keep the API interfaces backward-compatible for the last 2 major versions.
 - If a breaking change happens where we don't have a control (e.g. a depended 3rd party model was removed), we try to find a backward-compatible solution otherwise we bump a major version.
 
-### Referencing new GraphQL types from older GitLab versions
-
-When a GraphQL response selection references a type that does not exist on older GitLab versions (for example, a newly introduced `WorkItemWidget*` type), annotate the inline fragment with `@gl_introduced(version: "X.Y.Z")`:
-
-```graphql
-... on WorkItemWidgetAgentPlan @gl_introduced(version: "19.0.0") {
-    content
-}
-```
-
-The Rails GraphQL schema's `IntroducedTracer` strips such nodes from the AST before validation, so older instances accept the query without seeing the unknown type.
-
-`@gl_introduced` only applies to fields and inline fragments. It does not work on mutation input fields. For input objects whose type does not exist on older versions, keep version-gating on the AI Gateway side: check `supports_*_widget()` in `duo_workflow_service/tools/work_items/version_compatibility.py` before adding the corresponding key to the GraphQL `variables["input"]` payload, and emit a warning when the field is dropped so the calling agent can react.
-
 ## View released versions of AI Gateway
 
 To view released versions of AI Gateway, visit the following links:

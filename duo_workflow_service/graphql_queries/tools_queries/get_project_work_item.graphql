@@ -201,9 +201,7 @@ query GetProjectWorkItem(
                             }
                         }
                     }
-                    ... on WorkItemWidgetAgentPlan @gl_introduced(version: "19.0.0") {
-                        content
-                    }
+                    # AGENT_PLAN_WIDGET_PLACEHOLDER
                 }
             }
         }
