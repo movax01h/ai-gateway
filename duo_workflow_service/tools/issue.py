@@ -16,18 +16,26 @@ from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInpu
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
 - project_id parameter, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
   - https://gitlab.com/namespace/project
   - https://gitlab.com/namespace/project/-/issues
   - https://gitlab.com/group/subgroup/project
   - https://gitlab.com/group/subgroup/project/-/issues
+- A self-managed GitLab URL like:
+  - https://gitlab.example.com/namespace/project
+  - https://gitlab.example.com/namespace/project/-/issues
+  - https://gitlab.example.com/group/subgroup/project
+  - https://gitlab.example.com/group/subgroup/project/-/issues
 """
 
 ISSUE_IDENTIFICATION_DESCRIPTION = """To identify an issue you must provide either:
 - project_id and issue_iid, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
   - https://gitlab.com/namespace/project/-/issues/42
   - https://gitlab.com/group/subgroup/project/-/issues/42
+- A self-managed GitLab URL like:
+  - https://gitlab.example.com/namespace/project/-/issues/42
+  - https://gitlab.example.com/group/subgroup/project/-/issues/42
 """
 # editorconfig-checker-enable
 

@@ -268,9 +268,12 @@ class ListProjectAuditEvents(BaseAuditEventsTool):
 
     To identify the project you must provide either:
     - project_id parameter, or
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
         - https://gitlab.com/namespace/project
         - https://gitlab.com/group/subgroup/project
+    - A self-managed GitLab URL like:
+        - https://gitlab.example.com/namespace/project
+        - https://gitlab.example.com/group/subgroup/project
 
     Examples:
     - List audit events for project with ID 7:

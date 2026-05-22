@@ -1,13 +1,14 @@
 # pylint: disable=file-naming-for-tests
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.merge_request import (
+from duo_workflow_service.tools.duo_base_tool import MergeRequestValidationResult
+from duo_workflow_service.tools.merge_request_notes import (
     CreateMergeRequestDiffNote,
     CreateMergeRequestDiffNoteInput,
 )
@@ -245,6 +246,27 @@ async def test_create_diff_note_with_renamed_file(
     payload = json.loads(call_args.kwargs["body"])
     assert payload["position"]["old_path"] == "src/old_name.py"
     assert payload["position"]["new_path"] == "src/new_name.py"
+
+
+@pytest.mark.asyncio
+async def test_create_diff_note_missing_identifiers(metadata):
+    """Test the defensive guard when validation returns no errors but empty ids."""
+    tool = CreateMergeRequestDiffNote(metadata=metadata)
+
+    empty_result = MergeRequestValidationResult(
+        project_id=None, merge_request_iid=None, errors=[]
+    )
+    with patch.object(tool, "_validate_merge_request_url", return_value=empty_result):
+        with pytest.raises(
+            ToolException, match="Missing required identifiers after validation"
+        ):
+            await tool._execute(
+                body="note",
+                old_path="src/main.py",
+                new_path="src/main.py",
+                project_id=1,
+                merge_request_iid=9,
+            )
 
 
 @pytest.mark.asyncio
@@ -835,3 +857,20 @@ async def test_create_diff_note_paginates_diffs(
         if c.kwargs["path"].endswith("/diffs")
     ]
     assert len(diffs_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_file_diff_returns_none_when_no_matching_file(metadata):
+    """Test that _fetch_file_diff returns None when no diff entry matches the requested paths."""
+    tool = CreateMergeRequestDiffNote(metadata=metadata)
+
+    unmatched_diffs = [
+        "not-a-dict",
+        {"old_path": "other/file.py", "new_path": "other/file.py", "diff": "x"},
+    ]
+    with patch.object(tool, "_paginate_get", return_value=unmatched_diffs):
+        result = await tool._fetch_file_diff(
+            "1", 9, old_path="src/main.py", new_path="src/main.py"
+        )
+
+    assert result is None

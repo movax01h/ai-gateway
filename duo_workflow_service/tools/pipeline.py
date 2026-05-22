@@ -53,9 +53,12 @@ class GetPipelineFailingJobs(DuoBaseTool):
     {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
     To identify a pipeline you must provide:
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
         - https://gitlab.com/namespace/project/-/pipelines/33
         - https://gitlab.com/group/subgroup/project/-/pipelines/42
+    - A self-managed GitLab URL like:
+        - https://gitlab.example.com/namespace/project/-/pipelines/33
+        - https://gitlab.example.com/group/subgroup/project/-/pipelines/42
 
     For example:
     - Given project_id 13 and merge_request_iid 9, the tool call would be:
@@ -183,9 +186,12 @@ class GetDownstreamPipelines(DuoBaseTool):
     Be careful to differentiate between a pipeline_id and a job_id when using this tool.
 
     To identify a pipeline you must provide:
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
         - https://gitlab.com/namespace/project/-/pipelines/33
         - https://gitlab.com/group/subgroup/project/-/pipelines/42
+    - A self-managed GitLab URL like:
+        - https://gitlab.example.com/namespace/project/-/pipelines/33
+        - https://gitlab.example.com/group/subgroup/project/-/pipelines/42
 
     For example:
     - Given a pipeline URL https://gitlab.com/namespace/project/-/pipelines/33, the tool call would be:

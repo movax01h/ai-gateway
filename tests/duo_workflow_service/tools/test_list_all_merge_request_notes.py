@@ -7,10 +7,8 @@ from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.merge_request import (
-    ListAllMergeRequestNotes,
-    MergeRequestResourceInput,
-)
+from duo_workflow_service.tools.merge_request import MergeRequestResourceInput
+from duo_workflow_service.tools.merge_request_notes import ListAllMergeRequestNotes
 
 URL_ERROR_CASES = [
     # URL and project_id both given, but don't match

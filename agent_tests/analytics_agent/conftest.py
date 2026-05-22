@@ -66,7 +66,7 @@ def work_item_note_tool(mock_gitlab_client):
 @pytest.fixture
 def merge_request_note_tool(mock_gitlab_client):
     """CreateMergeRequestNote tool with mocked GitLab client."""
-    from duo_workflow_service.tools.merge_request import CreateMergeRequestNote
+    from duo_workflow_service.tools.merge_request_notes import CreateMergeRequestNote
 
     return CreateMergeRequestNote(
         metadata={"gitlab_client": mock_gitlab_client, "gitlab_host": "gitlab.com"}
