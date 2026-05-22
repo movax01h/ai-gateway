@@ -6,6 +6,7 @@ import pytest
 from packaging.version import Version
 
 from duo_workflow_service.tools.work_items.version_compatibility import (
+    AGENT_PLAN_WIDGET_VERSION,
     BASE_DISCUSSION_ID_FIELD_VERSION,
     DEFAULT_FALLBACK_VERSION,
     DEVELOPMENT_WIDGET_VERSION,
@@ -13,6 +14,7 @@ from duo_workflow_service.tools.work_items.version_compatibility import (
     NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION,
     get_gitlab_version,
     get_query_variables_for_version,
+    supports_agent_plan_widget,
     supports_development_widget,
     supports_discussion_id_field,
     supports_hierarchy_widget,
@@ -111,6 +113,14 @@ class TestVersionCompatibilityFunctions:
             (supports_hierarchy_widget, "18.6.0", False),
             (supports_hierarchy_widget, "17.0.0", False),
             (supports_hierarchy_widget, "18.6.9", False),
+            # supports_agent_plan_widget (threshold: 19.0.0)
+            (supports_agent_plan_widget, "19.0.0", True),
+            (supports_agent_plan_widget, "19.0.1", True),
+            (supports_agent_plan_widget, "19.1.0", True),
+            (supports_agent_plan_widget, "20.0.0", True),
+            (supports_agent_plan_widget, "18.11.0", False),
+            (supports_agent_plan_widget, "18.10.0", False),
+            (supports_agent_plan_widget, "18.6.0", False),
         ],
     )
     def test_version_compatibility(
@@ -344,6 +354,10 @@ class TestVersionConstants:
     def test_development_widget_version_constant(self):
         """Test that DEVELOPMENT_WIDGET_VERSION is set correctly."""
         assert DEVELOPMENT_WIDGET_VERSION == Version("18.9.0")
+
+    def test_agent_plan_widget_version_constant(self):
+        """Test that AGENT_PLAN_WIDGET_VERSION is set correctly."""
+        assert AGENT_PLAN_WIDGET_VERSION == Version("19.0.0")
 
     def test_default_fallback_version_constant(self):
         """Test that DEFAULT_FALLBACK_VERSION is set correctly."""

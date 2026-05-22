@@ -201,7 +201,7 @@ query GetProjectWorkItem(
                             }
                         }
                     }
-                    ... on WorkItemWidgetAgentPlan {
+                    ... on WorkItemWidgetAgentPlan @gl_introduced(version: "19.0.0") {
                         content
                     }
                 }

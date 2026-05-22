@@ -1,11 +1,21 @@
 # pylint: disable=file-naming-for-tests
 """Integration tests for version compatibility in work item tools."""
 
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from duo_workflow_service.tools.work_item import GetWorkItem, ListWorkItems
+from duo_workflow_service.tools.work_item import (
+    CreateWorkItem,
+    GetWorkItem,
+    ListWorkItems,
+    UpdateWorkItem,
+)
+from duo_workflow_service.tools.work_items.base_tool import (
+    ResolvedParent,
+    ResolvedWorkItem,
+)
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -320,3 +330,178 @@ class TestVersionCompatibilityEdgeCases:
         call_args = gitlab_client_mock.graphql.call_args[0]
         variables = call_args[1]
         assert variables["includeHierarchyWidget"] is True
+
+
+@pytest.fixture(name="work_item_type_data")
+def work_item_type_data_fixture():
+    """Fixture for work item type data used by CreateWorkItem resolution."""
+    return {
+        "namespace": {
+            "workItemTypes": {
+                "nodes": [
+                    {
+                        "id": "gid://gitlab/WorkItems::Type/1",
+                        "name": "Issue",
+                    },
+                ]
+            }
+        }
+    }
+
+
+@pytest.fixture(name="resolved_work_item")
+def resolved_work_item_fixture(work_item_data):
+    return ResolvedWorkItem(
+        id="gid://gitlab/WorkItem/123",
+        full_data={**work_item_data, "workItemType": {"name": "Issue"}},
+        parent=ResolvedParent(type="project", full_path="namespace/project"),
+    )
+
+
+class TestCreateWorkItemAgentPlanVersionCompatibility:
+    """Tests for CreateWorkItem version compatibility around AgentPlan."""
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    async def test_create_work_item_passes_agent_plan_on_new_version(
+        self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_type_data
+    ):
+        """On 19.0.0+, agentPlanWidget is included in the mutation input."""
+        mock_gitlab_version.get.return_value = "19.0.0"
+        gitlab_client_mock.graphql = AsyncMock(
+            side_effect=[
+                work_item_type_data,
+                {
+                    "workItemCreate": {
+                        "workItem": {
+                            "id": "gid://gitlab/WorkItem/1",
+                            "title": "New Work Item",
+                        },
+                        "errors": [],
+                    }
+                },
+            ]
+        )
+
+        tool = CreateWorkItem(description="create work item", metadata=metadata)
+        await tool._arun(
+            group_id="namespace/group",
+            title="New Work Item",
+            type_name="Issue",
+            agent_plan="## Why\n\nReason",
+        )
+
+        mutation_call = gitlab_client_mock.graphql.call_args_list[1][0]
+        variables = mutation_call[1]
+        assert variables["input"]["agentPlanWidget"] == {"content": "## Why\n\nReason"}
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    async def test_create_work_item_drops_agent_plan_on_old_version(
+        self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_type_data
+    ):
+        """On <19.0.0, agentPlanWidget is dropped from the input and a warning is returned."""
+        mock_gitlab_version.get.return_value = "18.11.0"
+        gitlab_client_mock.graphql = AsyncMock(
+            side_effect=[
+                work_item_type_data,
+                {
+                    "workItemCreate": {
+                        "workItem": {
+                            "id": "gid://gitlab/WorkItem/1",
+                            "title": "New Work Item",
+                        },
+                        "errors": [],
+                    }
+                },
+            ]
+        )
+
+        tool = CreateWorkItem(description="create work item", metadata=metadata)
+        result = await tool._arun(
+            group_id="namespace/group",
+            title="New Work Item",
+            type_name="Issue",
+            agent_plan="## Why\n\nReason",
+        )
+
+        mutation_call = gitlab_client_mock.graphql.call_args_list[1][0]
+        variables = mutation_call[1]
+        assert "agentPlanWidget" not in variables["input"]
+
+        warnings = json.loads(result)["warnings"]
+        assert any("agent_plan" in w for w in warnings)
+
+
+class TestUpdateWorkItemAgentPlanVersionCompatibility:
+    """Tests for UpdateWorkItem version compatibility around AgentPlan."""
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    async def test_update_work_item_passes_agent_plan_on_new_version(
+        self, mock_gitlab_version, gitlab_client_mock, metadata, resolved_work_item
+    ):
+        """On 19.0.0+, agentPlanWidget is included in the mutation input."""
+        mock_gitlab_version.get.return_value = "19.0.0"
+        gitlab_client_mock.graphql = AsyncMock(
+            return_value={
+                "data": {
+                    "workItemUpdate": {
+                        "workItem": {
+                            "id": "gid://gitlab/WorkItem/123",
+                            "title": "Updated",
+                            "state": "opened",
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = UpdateWorkItem(description="update", metadata=metadata)
+        tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            agent_plan="## Why\n\nReason",
+        )
+
+        mutation, variables = gitlab_client_mock.graphql.call_args[0]
+        assert "workItemUpdate" in mutation
+        assert variables["input"]["agentPlanWidget"] == {"content": "## Why\n\nReason"}
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    async def test_update_work_item_drops_agent_plan_on_old_version(
+        self, mock_gitlab_version, gitlab_client_mock, metadata, resolved_work_item
+    ):
+        """On <19.0.0, agentPlanWidget is dropped from the input and a warning is returned."""
+        mock_gitlab_version.get.return_value = "18.10.0"
+        gitlab_client_mock.graphql = AsyncMock(
+            return_value={
+                "data": {
+                    "workItemUpdate": {
+                        "workItem": {
+                            "id": "gid://gitlab/WorkItem/123",
+                            "title": "Updated",
+                            "state": "opened",
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = UpdateWorkItem(description="update", metadata=metadata)
+        tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item)
+
+        result = await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            agent_plan="## Why\n\nReason",
+        )
+
+        _, variables = gitlab_client_mock.graphql.call_args[0]
+        assert "agentPlanWidget" not in variables["input"]
+
+        warnings = json.loads(result)["warnings"]
+        assert any("agent_plan" in w for w in warnings)
