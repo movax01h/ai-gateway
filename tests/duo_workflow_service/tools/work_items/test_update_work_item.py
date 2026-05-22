@@ -1,6 +1,6 @@
 # pylint: disable=file-naming-for-tests
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
@@ -14,6 +14,19 @@ from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedParent,
     ResolvedWorkItem,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_gitlab_version_at_supported_default():
+    """Default GitLab version to a value that supports every gated widget.
+
+    Individual tests can override by patching the same attribute.
+    """
+    with patch(
+        "duo_workflow_service.tools.work_items.version_compatibility.gitlab_version"
+    ) as mock:
+        mock.get.return_value = "19.0.0"
+        yield mock
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -215,6 +228,35 @@ async def test_update_work_item_variants(
     input_data = variables["input"]
     for key, value in expected_fields.items():
         assert input_data[key] == value
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_agent_plan_skipped_on_old_version(
+    _stub_gitlab_version_at_supported_default,
+    gitlab_client_mock,
+    metadata,
+    resolved_work_item_fixture,
+    update_response_fixture,
+):
+    """agent_plan must be dropped from input and reported as a warning on pre-19.0 instances."""
+    _stub_gitlab_version_at_supported_default.get.return_value = "18.10.0"
+
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response_fixture)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        agent_plan="## Why\n\nReason",
+    )
+
+    _, variables = gitlab_client_mock.graphql.call_args[0]
+    assert "agentPlanWidget" not in variables["input"]
+
+    response_json = json.loads(result)
+    assert "warnings" in response_json
+    assert any("agent_plan" in w for w in response_json["warnings"])
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,9 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
     UPDATE_WORK_ITEM_MUTATION,
 )
 from duo_workflow_service.tools.work_items.version_compatibility import (
+    AGENT_PLAN_WIDGET_VERSION,
     get_query_variables_for_version,
+    supports_agent_plan_widget,
 )
 
 log = structlog.stdlib.get_logger(__name__)
@@ -271,8 +273,10 @@ class WorkItemBaseTool(DuoBaseTool):
         if todo_widget:
             input_data["currentUserTodosWidget"] = todo_widget
 
-        if kwargs.get("agent_plan") is not None:
-            input_data["agentPlanWidget"] = {"content": kwargs["agent_plan"]}
+        agent_plan_widget = WorkItemBaseTool._build_agent_plan_widget(kwargs, warnings)
+
+        if agent_plan_widget is not None:
+            input_data["agentPlanWidget"] = agent_plan_widget
 
         return input_data, warnings
 
@@ -320,6 +324,35 @@ class WorkItemBaseTool(DuoBaseTool):
             return None
 
         return {"weight": weight}
+
+    @staticmethod
+    def _build_agent_plan_widget(
+        kwargs: Dict[str, Any], warnings: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build agentPlanWidget input, gated on GitLab version.
+
+        Args:
+            kwargs: Input parameters that may contain ``agent_plan``.
+            warnings: List to collect validation warnings.
+
+        Returns:
+            Dictionary with ``{"content": <str>}`` when ``agent_plan`` is
+            provided and the GitLab instance supports the agent plan widget,
+            or ``None`` otherwise. When the instance is too old, a warning is
+            appended and the field is dropped.
+        """
+        if kwargs.get("agent_plan") is None:
+            return None
+
+        if not supports_agent_plan_widget():
+            warnings.append(
+                "agent_plan was provided but the GitLab instance does not support "
+                f"the agent plan widget (requires GitLab {AGENT_PLAN_WIDGET_VERSION} or newer); "
+                "the agent plan was dropped from this request."
+            )
+            return None
+
+        return {"content": kwargs["agent_plan"]}
 
     @staticmethod
     def _build_assignees_widget(

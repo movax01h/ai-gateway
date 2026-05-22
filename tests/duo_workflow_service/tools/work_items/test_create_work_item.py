@@ -1,6 +1,6 @@
 # pylint: disable=file-naming-for-tests
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
@@ -446,12 +446,15 @@ def test_create_work_item_format_display_message(input_data, expected_message):
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
 async def test_create_work_item_with_agent_plan(
+    mock_gitlab_version,
     gitlab_client_mock,
     metadata,
     created_work_item_data_fixture,
     work_item_type_data_fixture,
 ):
+    mock_gitlab_version.get.return_value = "19.0.0"
     gitlab_client_mock.graphql = AsyncMock()
     gitlab_client_mock.graphql.side_effect = [
         work_item_type_data_fixture,
@@ -475,10 +478,48 @@ async def test_create_work_item_with_agent_plan(
     assert gql_input["agentPlanWidget"] == {"content": agent_plan_content}
 
 
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+async def test_create_work_item_with_agent_plan_unsupported_version(
+    mock_gitlab_version,
+    gitlab_client_mock,
+    metadata,
+    created_work_item_data_fixture,
+    work_item_type_data_fixture,
+):
+    """agent_plan must be dropped and a warning returned on a pre-19.0 instance."""
+    mock_gitlab_version.get.return_value = "18.11.0"
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        work_item_type_data_fixture,
+        {"workItemCreate": {"workItem": created_work_item_data_fixture, "errors": []}},
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    response = await tool._arun(
+        group_id="namespace/group",
+        title="Planned Work Item",
+        type_name="Issue",
+        agent_plan="## Why\n\nReason",
+    )
+
+    gql_input = gitlab_client_mock.graphql.call_args_list[1][0][1]["input"]
+    assert "agentPlanWidget" not in gql_input
+
+    response_json = json.loads(response)
+    assert "warnings" in response_json
+    assert any("agent_plan" in w for w in response_json["warnings"])
+
+
 class TestBuildWorkItemInputFields:
     """Test the _build_work_item_input_fields static method integration with hierarchy widget."""
 
-    def test_build_work_item_input_fields_with_agent_plan(self):
+    @patch("duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_widget")
+    def test_build_work_item_input_fields_with_agent_plan(
+        self, mock_supports_agent_plan
+    ):
+        mock_supports_agent_plan.return_value = True
         kwargs = {
             "title": "Test Work Item",
             "type_name": "Issue",
@@ -492,7 +533,11 @@ class TestBuildWorkItemInputFields:
         assert input_data["agentPlanWidget"]["content"] == kwargs["agent_plan"]
         assert not warnings
 
-    def test_build_work_item_input_fields_without_agent_plan(self):
+    @patch("duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_widget")
+    def test_build_work_item_input_fields_without_agent_plan(
+        self, mock_supports_agent_plan
+    ):
+        mock_supports_agent_plan.return_value = True
         kwargs = {
             "title": "Test Work Item",
             "type_name": "Issue",
@@ -502,6 +547,23 @@ class TestBuildWorkItemInputFields:
 
         assert "agentPlanWidget" not in input_data
         assert not warnings
+
+    @patch("duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_widget")
+    def test_build_work_item_input_fields_with_agent_plan_unsupported_version(
+        self, mock_supports_agent_plan
+    ):
+        """When the GitLab instance is older than 19.0, agent_plan must be dropped with a warning."""
+        mock_supports_agent_plan.return_value = False
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+            "agent_plan": "## Why\n\nReason",
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert "agentPlanWidget" not in input_data
+        assert any("agent_plan" in w for w in warnings)
 
     def test_build_work_item_input_fields_with_hierarchy_widget(self):
         """Test that _build_work_item_input_fields includes hierarchy widget."""

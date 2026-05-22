@@ -35,7 +35,7 @@ mutation createWorkItem($input: WorkItemCreateInput!) {
                     dueDate
                     isFixed
                 }
-                ... on WorkItemWidgetAgentPlan {
+                ... on WorkItemWidgetAgentPlan @gl_introduced(version: "19.0.0") {
                     content
                 }
             }

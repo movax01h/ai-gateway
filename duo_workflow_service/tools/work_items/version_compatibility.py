@@ -14,6 +14,7 @@ NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION = Version("18.9.0")
 BASE_DISCUSSION_ID_FIELD_VERSION = Version("18.9.0")
 DEVELOPMENT_WIDGET_VERSION = Version("18.9.0")
 LICENSED_FEATURE_AVAILABILITY_VERSION = Version("18.11.0")
+AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 DEFAULT_FALLBACK_VERSION = Version("18.6.0")
 
 
@@ -72,6 +73,15 @@ def supports_development_widget() -> bool:
         True if development widget is supported, False otherwise.
     """
     return get_gitlab_version() >= DEVELOPMENT_WIDGET_VERSION
+
+
+def supports_agent_plan_widget() -> bool:
+    """Check if the current GitLab version exposes the WorkItemWidgetAgentPlan type.
+
+    Returns:
+        True if the agent plan widget is supported, False otherwise.
+    """
+    return get_gitlab_version() >= AGENT_PLAN_WIDGET_VERSION
 
 
 def get_query_variables_for_version(*requested_keys: str) -> dict:
