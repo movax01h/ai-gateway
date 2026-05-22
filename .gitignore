@@ -321,3 +321,5 @@ tmp/
 !.gitlab/duo/mr-review-instructions.yaml
 
 .llm_cache.db
+
+/.claude
