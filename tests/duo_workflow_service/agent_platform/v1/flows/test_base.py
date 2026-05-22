@@ -28,6 +28,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.gitlab_api import Namespace
+from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 
@@ -330,6 +331,58 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     def test_support_namespace_level_workflow(self, flow_instance):
         """Test that Flow supports namespace-level workflows."""
         assert flow_instance._support_namespace_level_workflow() is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_get_workflow_state_injects_gitlab_service_context(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """Test that get_workflow_state injects GitLabServiceContext variables into context."""
+        mock_instance_info = GitLabInstanceInfo(
+            instance_type="GitLab.com (SaaS)",
+            instance_url="https://gitlab.com",
+            instance_version="17.0.0",
+        )
+
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.GitLabServiceContext.get_current_instance_info",
+            return_value=mock_instance_info,
+        ):
+            await flow_instance.run("test goal")
+
+        kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        context = kwargs["input"]["context"]
+
+        assert context["gitlab_instance_type"] == "GitLab.com (SaaS)"
+        assert context["gitlab_instance_url"] == "https://gitlab.com"
+        assert context["gitlab_instance_version"] == "17.0.0"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_get_workflow_state_falls_back_to_unknown_when_no_context(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """Test that get_workflow_state falls back to 'Unknown' when GitLabServiceContext is unavailable."""
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.GitLabServiceContext.get_current_instance_info",
+            return_value=None,
+        ):
+            await flow_instance.run("test goal")
+
+        kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        context = kwargs["input"]["context"]
+
+        assert context["gitlab_instance_type"] == "Unknown"
+        assert context["gitlab_instance_url"] == "Unknown"
+        assert context["gitlab_instance_version"] == "Unknown"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

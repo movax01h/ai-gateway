@@ -43,6 +43,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.errors.typing import GENERIC_WORKFLOW_ERROR_MESSAGE
+from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import (
@@ -193,6 +194,23 @@ class Flow(AbstractWorkflow):
             message_sub_type=None,
         )
 
+        gitlab_instance_info = GitLabServiceContext.get_current_instance_info()
+        gitlab_service_context = {
+            "gitlab_instance_type": (
+                gitlab_instance_info.instance_type
+                if gitlab_instance_info
+                else "Unknown"
+            ),
+            "gitlab_instance_url": (
+                gitlab_instance_info.instance_url if gitlab_instance_info else "Unknown"
+            ),
+            "gitlab_instance_version": (
+                gitlab_instance_info.instance_version
+                if gitlab_instance_info
+                else "Unknown"
+            ),
+        }
+
         return FlowState(
             status=WorkflowStatusEnum.NOT_STARTED,
             conversation_history={},
@@ -213,6 +231,7 @@ class Flow(AbstractWorkflow):
                 "inputs": self._process_additional_context(
                     self._additional_context or []
                 ),
+                **gitlab_service_context,
             },
         )
 
