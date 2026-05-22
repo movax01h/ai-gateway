@@ -1,0 +1,15 @@
+---
+name: Generate Session Title
+model:
+  params:
+    max_retries: 3
+    max_tokens: 40
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'generate_session_title/system/1.0.0.jinja' %}
+  user: |
+    {% include 'generate_session_title/user/1.0.0.jinja' %}
+params:
+  timeout: 30
+
