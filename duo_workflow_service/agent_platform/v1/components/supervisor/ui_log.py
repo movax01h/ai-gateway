@@ -11,6 +11,7 @@ class UILogEventsSupervisor(BaseUILogEvents):
     """UI log events for the SupervisorAgentComponent."""
 
     ON_AGENT_FINAL_ANSWER = auto()
+    ON_AGENT_REASONING = auto()
     ON_TOOL_EXECUTION_SUCCESS = auto()
     ON_TOOL_EXECUTION_FAILED = auto()
     ON_DELEGATION = auto()

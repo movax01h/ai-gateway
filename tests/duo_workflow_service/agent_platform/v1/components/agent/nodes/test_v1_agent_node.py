@@ -12,12 +12,18 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentNode,
     AgentStuckError,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+    agent_tools_ui_log_writer_class,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowStateKeys,
     IOKey,
     RuntimeIOKey,
 )
+from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.compaction import ConversationCompactor
+from duo_workflow_service.entities import MessageTypeEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -682,3 +688,284 @@ class TestAgentNodeTruncation:
 
         result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
         assert result_history[-1] == normal_message
+
+
+class TestAgentNodeReasoning:
+    """Test suite for AgentNode reasoning log emission."""
+
+    @pytest.fixture(name="ui_history_with_reasoning")
+    def ui_history_with_reasoning_fixture(self):
+        """Fixture for UIHistory with ON_AGENT_REASONING enabled."""
+        return UIHistory(
+            events=[UILogEventsAgent.ON_AGENT_REASONING],
+            writer_class=agent_tools_ui_log_writer_class(component_name="test_agent"),
+        )
+
+    @pytest.fixture(name="agent_node_with_ui_history")
+    def agent_node_with_ui_history_fixture(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        ui_history_with_reasoning,
+    ):
+        """Fixture for AgentNode with ui_history enabled."""
+        return AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            ui_history=ui_history_with_reasoning,
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_for_text_only_message(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that a text-only AIMessage (no tool calls) produces no ON_AGENT_REASONING entry.
+
+        Text-only completions are routed to FinalResponseNode which emits ON_AGENT_FINAL_ANSWER. Emitting
+        ON_AGENT_REASONING here too would duplicate the text in the session view.
+        """
+        text_message = AIMessage(content="I will now look at the codebase.")
+        mock_prompt.ainvoke = AsyncMock(return_value=text_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result.get(FlowStateKeys.UI_CHAT_LOG, [])
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_reasoning_emitted_for_mixed_content_and_tool_calls(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that an AIMessage with text AND tool calls produces a reasoning log entry."""
+        mixed_message = AIMessage(
+            content="Now let me look at the existing schema to understand the structure:",
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "gitlab_api_get",
+                    "args": {"endpoint": "/api/v4/projects/123/repository/tree"},
+                }
+            ],
+        )
+        mock_prompt.ainvoke = AsyncMock(return_value=mixed_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        assert FlowStateKeys.UI_CHAT_LOG in result
+        reasoning_logs = [
+            log
+            for log in result[FlowStateKeys.UI_CHAT_LOG]
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 1
+        assert (
+            reasoning_logs[0]["content"]
+            == "Now let me look at the existing schema to understand the structure:"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_emitted_for_tool_calls_only(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that an AIMessage with tool calls but no text produces no reasoning log."""
+        tool_only_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "read_file",
+                    "args": {"file_path": "README.md"},
+                }
+            ],
+        )
+        mock_prompt.ainvoke = AsyncMock(return_value=tool_only_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result.get(FlowStateKeys.UI_CHAT_LOG, [])
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_emitted_for_whitespace_only_content(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that whitespace-only content produces no reasoning log."""
+        whitespace_message = AIMessage(content="   \n\t  ")
+        mock_prompt.ainvoke = AsyncMock(return_value=whitespace_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result.get(FlowStateKeys.UI_CHAT_LOG, [])
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_reasoning_emitted_for_list_content_with_text_block(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that list-of-blocks content with a text block produces a reasoning log."""
+        list_content_message = AIMessage(
+            content=[
+                {"type": "text", "text": "Let me analyze the code structure."},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_01",
+                    "name": "read_file",
+                    "input": {},
+                },
+            ],
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "read_file",
+                    "args": {"file_path": "README.md"},
+                }
+            ],
+        )
+        mock_prompt.ainvoke = AsyncMock(return_value=list_content_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        assert FlowStateKeys.UI_CHAT_LOG in result
+        reasoning_logs = [
+            log
+            for log in result[FlowStateKeys.UI_CHAT_LOG]
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 1
+        assert reasoning_logs[0]["content"] == "Let me analyze the code structure."
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_without_ui_history(
+        self,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that no reasoning log is emitted when ui_history is not provided."""
+        text_message = AIMessage(content="I will now look at the codebase.")
+        mock_prompt.ainvoke = AsyncMock(return_value=text_message)
+
+        result = await agent_node.run(base_flow_state)
+
+        # No UI_CHAT_LOG key should be present when ui_history is None
+        assert FlowStateKeys.UI_CHAT_LOG not in result
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_when_event_not_in_ui_history(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that no reasoning log is emitted when ON_AGENT_REASONING is not in ui_history events."""
+        ui_history_no_reasoning = UIHistory(
+            events=[UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS],
+            writer_class=agent_tools_ui_log_writer_class(component_name="test_agent"),
+        )
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            ui_history=ui_history_no_reasoning,
+        )
+
+        # Message must have tool_calls so _emit_reasoning is entered; the early
+        # return at the "event not in events" check is then what we're covering.
+        text_message = AIMessage(
+            content="I will now look at the codebase.",
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "read_file",
+                    "args": {"file_path": "README.md"},
+                }
+            ],
+        )
+        mock_prompt.ainvoke = AsyncMock(return_value=text_message)
+
+        result = await node.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result.get(FlowStateKeys.UI_CHAT_LOG, [])
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 0
+
+
+class TestExtractText:
+    """Unit tests for AgentNode._extract_text covering all content branches."""
+
+    def test_str_block_inside_list(self):
+        """A plain str entry inside a list content block is included in extracted text."""
+        message = AIMessage(
+            content=["plain string block", {"type": "text", "text": " and dict block"}]
+        )
+        assert AgentNode._extract_text(message) == "plain string block and dict block"
+
+    def test_non_str_non_list_content_returns_empty(self):
+        """Content that is neither str nor list returns an empty string."""
+        message = AIMessage(content="placeholder")
+        # Bypass the normal str path by directly setting content to an unexpected type
+        message.content = 42
+        assert AgentNode._extract_text(message) == ""

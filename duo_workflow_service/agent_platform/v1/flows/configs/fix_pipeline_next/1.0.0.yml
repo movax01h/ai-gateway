@@ -39,6 +39,7 @@ components:
       - find_files
       - list_dir
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -196,6 +197,7 @@ components:
       - read_file
       - run_command
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"

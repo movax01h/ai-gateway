@@ -529,6 +529,12 @@ class AgentComponent(AgentComponentBase):
                 else None
             ),
             response_schema=self._response_schema,
+            ui_history=UIHistory(
+                events=self.ui_log_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
+            ),
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
