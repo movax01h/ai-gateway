@@ -9,7 +9,7 @@ from duo_workflow_service.tools import (
     ToolType,
     UnknownToolError,
 )
-from duo_workflow_service.tools.merge_request import CreateMergeRequestNote
+from duo_workflow_service.tools.merge_request_notes import CreateMergeRequestNote
 
 
 class MockBaseTool(BaseTool):

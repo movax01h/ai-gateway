@@ -107,9 +107,12 @@ class GetRepositoryFile(RepositoryFileBaseTool):
 
     To identify a file you must provide either:
     - project_id, ref, and file_path parameters, or
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
       - https://gitlab.com/namespace/project/-/blob/master/README.md
       - https://gitlab.com/group/subgroup/project/-/blob/main/src/file.py
+    - A self-managed GitLab URL like:
+      - https://gitlab.example.com/namespace/project/-/blob/master/README.md
+      - https://gitlab.example.com/group/subgroup/project/-/blob/main/src/file.py
 
     For large files, use offset and limit to read in chunks:
     - offset: starting line number (0-indexed).
@@ -250,9 +253,12 @@ class ListRepositoryTree(DuoBaseTool):
 
     To identify a project you must provide either:
     - project_id parameter, or
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
         - https://gitlab.com/namespace/project
         - https://gitlab.com/group/subgroup/project
+    - A self-managed GitLab URL like:
+        - https://gitlab.example.com/namespace/project
+        - https://gitlab.example.com/group/subgroup/project
 
     You can specify a path to get contents of a subdirectory, a specific ref (branch/tag),
     and whether to get a recursive tree.

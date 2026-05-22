@@ -51,11 +51,16 @@ FILTER_KEY_MAPPING = {
 PARENT_IDENTIFICATION_DESCRIPTION = """To identify the parent (group or project) you must provide either:
 - group_id parameter, or
 - project_id parameter, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
     - https://gitlab.com/namespace/group
     - https://gitlab.com/groups/namespace/group
     - https://gitlab.com/namespace/project
     - https://gitlab.com/namespace/group/project
+- A self-managed GitLab URL like:
+    - https://gitlab.example.com/namespace/group
+    - https://gitlab.example.com/groups/namespace/group
+    - https://gitlab.example.com/namespace/project
+    - https://gitlab.example.com/namespace/group/project
 """
 
 
@@ -64,9 +69,12 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
     - group_id can be either a numeric ID (e.g., 42) or a path string (e.g., 'my-group' or 'namespace/subgroup')
     - project_id can be either a numeric ID (e.g., 13) or a path string (e.g., 'namespace/project')
     - work_item_iid is always a numeric value (e.g., 7)
-- or a GitLab URL like:
+- or a GitLab SaaS URL like:
     - https://gitlab.com/groups/namespace/group/-/work_items/42
     - https://gitlab.com/namespace/project/-/work_items/42
+- or a self-managed GitLab URL like:
+    - https://gitlab.example.com/groups/namespace/group/-/work_items/42
+    - https://gitlab.example.com/namespace/project/-/work_items/42
 """
 
 DateString = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]

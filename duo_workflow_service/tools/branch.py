@@ -31,9 +31,12 @@ class CreateBranch(DuoBaseTool):
 
     To identify the project you must provide either:
     - project_id parameter, or
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
         - https://gitlab.com/namespace/project
         - https://gitlab.com/group/subgroup/project
+    - A self-managed GitLab URL like:
+        - https://gitlab.example.com/namespace/project
+        - https://gitlab.example.com/group/subgroup/project
 
     For example:
     - Given project_id 13, branch name "feature-branch", and ref "main", the tool call would be:

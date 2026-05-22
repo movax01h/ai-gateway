@@ -19,18 +19,26 @@ logger = structlog.stdlib.get_logger(__name__)
 # editorconfig-checker-disable
 PROJECT_IDENTIFICATION_DESCRIPTION = """To identify the project you must provide either:
 - project_id parameter, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
   - https://gitlab.com/namespace/project
   - https://gitlab.com/namespace/project/-/commits
   - https://gitlab.com/group/subgroup/project
   - https://gitlab.com/group/subgroup/project/-/commits
+- A self-managed GitLab URL like:
+  - https://gitlab.example.com/namespace/project
+  - https://gitlab.example.com/namespace/project/-/commits
+  - https://gitlab.example.com/group/subgroup/project
+  - https://gitlab.example.com/group/subgroup/project/-/commits
 """
 
 COMMIT_IDENTIFICATION_DESCRIPTION = """To identify a commit you must provide either:
 - project_id and commit_sha, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
   - https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6
   - https://gitlab.com/group/subgroup/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6
+- A self-managed GitLab URL like:
+  - https://gitlab.example.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6
+  - https://gitlab.example.com/group/subgroup/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6
 """
 # editorconfig-checker-enable
 
@@ -562,11 +570,16 @@ class CreateCommit(CommitBaseTool):
 
     To identify the project you must provide either:
     - project_id parameter, or
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
       - https://gitlab.com/namespace/project
       - https://gitlab.com/namespace/project/-/commits
       - https://gitlab.com/group/subgroup/project
       - https://gitlab.com/group/subgroup/project/-/commits
+    - A self-managed GitLab URL like:
+      - https://gitlab.example.com/namespace/project
+      - https://gitlab.example.com/namespace/project/-/commits
+      - https://gitlab.example.com/group/subgroup/project
+      - https://gitlab.example.com/group/subgroup/project/-/commits
 
     Actions can include creating, updating, deleting, moving, or changing file permissions.
     Each action requires at minimum an 'action' type and 'file_path'.

@@ -19,15 +19,20 @@ logger = structlog.stdlib.get_logger(__name__)
 # editorconfig-checker-disable
 GROUP_IDENTIFICATION_DESCRIPTION = """To identify the group you must provide either:
 - group_id parameter, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
   - https://gitlab.com/namespace/group
   - https://gitlab.com/groups/namespace/group
+- A self-managed GitLab URL like:
+  - https://gitlab.example.com/namespace/group
+  - https://gitlab.example.com/groups/namespace/group
 """
 
 EPIC_IDENTIFICATION_DESCRIPTION = """To identify an epic you must provide either:
 - group_id and epic_iid, or
-- A GitLab URL like:
+- A GitLab SaaS URL like:
   - https://gitlab.com/groups/namespace/group/-/epics/42
+- A self-managed GitLab URL like:
+  - https://gitlab.example.com/groups/namespace/group/-/epics/42
 """
 # editorconfig-checker-enable
 

@@ -13,11 +13,19 @@ logger = structlog.stdlib.get_logger(__name__)
 
 # editorconfig-checker-disable
 WIKI_IDENTIFICATION_DESCRIPTION = """If you encounter a GitLab URL, extract the parameters as follows:
+GitLab SaaS URLs:
 - https://gitlab.com/namespace/project/-/wikis/home
   > project_id="namespace/project", slug="home"
 - https://gitlab.com/groups/namespace/group/-/wikis/home
   > group_id="namespace/group", slug="home"
 - https://gitlab.com/namespace/project/-/wikis/dir/page_name
+  > project_id="namespace/project", slug="dir/page_name"
+Self-managed GitLab URLs:
+- https://gitlab.example.com/namespace/project/-/wikis/home
+  > project_id="namespace/project", slug="home"
+- https://gitlab.example.com/groups/namespace/group/-/wikis/home
+  > group_id="namespace/group", slug="home"
+- https://gitlab.example.com/namespace/project/-/wikis/dir/page_name
   > project_id="namespace/project", slug="dir/page_name"
 """
 

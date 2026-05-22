@@ -49,9 +49,12 @@ class GetLogsFromJob(DuoBaseTool):
 
     To identify a job you must provide either:
     - project_id and job_id, or
-    - A GitLab URL like:
+    - A GitLab SaaS URL like:
       - https://gitlab.com/namespace/project/-/jobs/42
       - https://gitlab.com/group/subgroup/project/-/jobs/42
+    - A self-managed GitLab URL like:
+      - https://gitlab.example.com/namespace/project/-/jobs/42
+      - https://gitlab.example.com/group/subgroup/project/-/jobs/42
 
     For example:
     - Given project_id 13 and job_id 9, the tool call would be:
