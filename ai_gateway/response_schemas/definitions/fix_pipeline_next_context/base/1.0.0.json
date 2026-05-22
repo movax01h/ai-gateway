@@ -1,7 +1,7 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
-    "title": "fix_pipeline_next_decide_approach_response",
-    "description": "Response schema for the fix_pipeline_next_decide_approach agent that classifies pipeline failures and decides the approach for fixing a pipeline.",
+    "title": "fix_pipeline_next_context_response",
+    "description": "Response schema for the fix_pipeline_next_context agent that gathers pipeline failure context, classifies the failure, and decides whether a fix can be attempted.",
     "type": "object",
     "properties": {
         "failure_category": {
@@ -41,7 +41,11 @@
             "description": "Use 'create_plan' when confident a fix can be created. Use 'add_comment' when not confident or unable to create a fix. Use 'no_action' when the failure is a flaky test or infrastructure issue that requires no intervention.",
             "enum": ["add_comment", "create_plan", "no_action"],
             "examples": ["add_comment", "create_plan", "no_action"]
+        },
+        "summary": {
+            "type": "string",
+            "description": "Self-contained description of the failing job(s), the observed error(s), the identified root cause, and any files or lines implicated. Downstream components rely on this summary instead of the gathered context, so it must include every detail needed to plan, explain, or execute the fix."
         }
     },
-    "required": ["failure_category", "suggested_fix_type", "decision"]
+    "required": ["failure_category", "suggested_fix_type", "decision", "summary"]
 }
