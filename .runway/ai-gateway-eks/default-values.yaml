@@ -18,6 +18,7 @@ spec:
     AIGW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-ai-gateway"
     AIGW_AMAZON_Q__REGION: "${region}"
     AIGW_AMAZON_Q__ENDPOINT_URL: "https://${region}.prod.integration.qdev.ai.aws.dev"
+    AIGW_PROCESS_LEVEL_FEATURE_FLAGS__DUO_CLASSIC_CHAT_DUO_CORE_CUTOFF: "true"
   container_port: 5052
   protocol: http
   scalability:
