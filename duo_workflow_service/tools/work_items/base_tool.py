@@ -22,6 +22,9 @@ from pydantic import StringConstraints
 from duo_workflow_service.gitlab.resource_resolver import resolve_identifier_to_path
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.version_compatibility import (
+    supports_agent_plan_widget,
+)
 from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_WORK_ITEM_MUTATION,
     GET_GROUP_WORK_ITEM_NOTES_QUERY,
@@ -36,7 +39,6 @@ from duo_workflow_service.tools.work_items.queries.work_items import (
 from duo_workflow_service.tools.work_items.version_compatibility import (
     get_query_variables_for_version,
     get_query_with_agent_plan_widget,
-    supports_agent_plan_widget,
 )
 
 log = structlog.stdlib.get_logger(__name__)

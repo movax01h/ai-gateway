@@ -9,7 +9,7 @@ from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.gitlab.resource_resolver import resolve_identifier_to_path
-from duo_workflow_service.tools.work_items.version_compatibility import (
+from duo_workflow_service.tools.version_compatibility import (
     supports_licensed_feature_availability,
 )
 from duo_workflow_service.tracking.errors import log_exception

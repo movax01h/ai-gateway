@@ -41,7 +41,7 @@ class TestGetWorkItemVersionCompatibility:
     """Tests for GetWorkItem with version compatibility."""
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_get_work_item_includes_hierarchy_widget_on_new_version(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
@@ -60,7 +60,7 @@ class TestGetWorkItemVersionCompatibility:
         assert variables["includeHierarchyWidget"] is True
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_get_work_item_excludes_hierarchy_widget_on_old_version(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
@@ -79,7 +79,7 @@ class TestGetWorkItemVersionCompatibility:
         assert variables["includeHierarchyWidget"] is False
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_get_work_item_with_group_id_on_new_version(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
@@ -96,7 +96,7 @@ class TestGetWorkItemVersionCompatibility:
         assert variables["includeHierarchyWidget"] is True
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_get_work_item_fallback_when_version_unavailable(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
@@ -118,7 +118,7 @@ class TestListWorkItemsVersionCompatibility:
     """Tests for ListWorkItems with version compatibility."""
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_list_work_items_includes_hierarchy_widget_on_new_version(
         self, mock_gitlab_version, gitlab_client_mock, metadata
     ):
@@ -145,7 +145,7 @@ class TestListWorkItemsVersionCompatibility:
         assert variables["includeHierarchyWidget"] is True
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_list_work_items_excludes_hierarchy_widget_on_old_version(
         self, mock_gitlab_version, gitlab_client_mock, metadata
     ):
@@ -172,7 +172,7 @@ class TestListWorkItemsVersionCompatibility:
         assert variables["includeHierarchyWidget"] is False
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_list_work_items_with_group_id_on_new_version(
         self, mock_gitlab_version, gitlab_client_mock, metadata
     ):
@@ -197,7 +197,7 @@ class TestListWorkItemsVersionCompatibility:
         assert variables["includeHierarchyWidget"] is True
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_list_work_items_with_filters_and_version_compatibility(
         self, mock_gitlab_version, gitlab_client_mock, metadata
     ):
@@ -241,7 +241,7 @@ class TestListWorkItemsVersionCompatibility:
         assert variables["labelName"] == ["bug"]
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_list_work_items_fallback_when_version_invalid(
         self, mock_gitlab_version, gitlab_client_mock, metadata
     ):
@@ -271,7 +271,7 @@ class TestVersionCompatibilityEdgeCases:
     """Tests for edge cases in version compatibility."""
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_exact_threshold_version_supports_hierarchy(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
@@ -288,7 +288,7 @@ class TestVersionCompatibilityEdgeCases:
         assert variables["includeHierarchyWidget"] is True
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_just_below_threshold_does_not_support_hierarchy(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
@@ -305,7 +305,7 @@ class TestVersionCompatibilityEdgeCases:
         assert variables["includeHierarchyWidget"] is False
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.tools.work_items.version_compatibility.gitlab_version")
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
     async def test_patch_version_above_threshold_supports_hierarchy(
         self, mock_gitlab_version, gitlab_client_mock, metadata, work_item_data
     ):
