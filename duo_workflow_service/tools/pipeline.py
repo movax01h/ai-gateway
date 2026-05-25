@@ -129,7 +129,18 @@ class GetPipelineFailingJobs(DuoBaseTool):
             failing_jobs = failing_jobs[:MAX_JOBS_RETURNED]
 
         if len(failing_jobs) == 0:
-            raise ToolException("No Failing Jobs Found.")
+            no_failures_msg = "No failing jobs found in this pipeline."
+            if merge_request:
+                return json.dumps(
+                    {
+                        "merge_request": merge_request,
+                        "pipeline_id": pipeline_id,
+                        "failed_jobs": no_failures_msg,
+                    }
+                )
+            return json.dumps(
+                {"pipeline_id": pipeline_id, "failed_jobs": no_failures_msg}
+            )
 
         xml_root = etree.Element("jobs")
         for job in failing_jobs:
