@@ -948,3 +948,32 @@ async def test_compile_and_run_graph_parses_tool_access_policies_object_format(
     assert "create_issue" in workflow._preapproved_tools
     assert "create_merge_request" in workflow._denied_tools
     assert "create_merge_request" not in workflow._preapproved_tools
+
+
+class TestInitAuditEvents:
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.workflows.abstract_workflow.AuditEventClient")
+    @patch("duo_workflow_service.workflows.abstract_workflow.AuditEventCollector")
+    async def test_does_not_pass_ip_address_to_collector(
+        self, mock_collector_cls, mock_client_cls, user
+    ):
+        mock_collector = MagicMock()
+        mock_collector.start = AsyncMock()
+        mock_collector.capture = MagicMock()
+        mock_collector_cls.return_value = mock_collector
+
+        workflow = MockWorkflow(
+            "test-workflow-id",
+            {},
+            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            user,
+            audit_event_enabled=True,
+            audit_event_buffer_size=100,
+            audit_event_flush_interval=10.0,
+            audit_event_max_retries=3,
+        )
+
+        await workflow._init_audit_events("test goal")
+
+        _, kwargs = mock_collector_cls.call_args
+        assert "ip_address" not in kwargs

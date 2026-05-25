@@ -172,3 +172,22 @@ class TestCloudEventSerialization:
         assert ce["data"]["completion_token_count"] is None
         assert ce["data"]["finish_reason"] is None
         assert ce["data"]["latency_ms"] is None
+
+    def test_ip_address_appears_in_cloudevent_data(self):
+        event = SessionStartedEvent(
+            workflow_id="wf-1",
+            workflow_type="duo_chat",
+            goal="example",
+            ip_address="203.0.113.7",
+        )
+        ce = event.to_cloudevent()
+        assert ce["data"]["ip_address"] == "203.0.113.7"
+
+    def test_ip_address_defaults_to_none_in_cloudevent_data(self):
+        event = SessionStartedEvent(
+            workflow_id="wf-1",
+            workflow_type="duo_chat",
+            goal="example",
+        )
+        ce = event.to_cloudevent()
+        assert ce["data"]["ip_address"] is None
