@@ -1,4 +1,4 @@
-# pylint: disable=comparison-with-callable,import-outside-toplevel,line-too-long,no-else-raise,no-else-return,too-many-lines,unused-argument
+# pylint: disable=comparison-with-callable,import-outside-toplevel,line-too-long,no-else-raise,no-else-return,too-many-lines
 import asyncio
 import json
 from asyncio import CancelledError
@@ -46,7 +46,7 @@ class CustomRunnableConfig(TypedDict):
 
 @pytest.fixture(name="http_client_for_retry")
 def http_client_for_retry_fixture(http_client, workflow_id):
-    async def mock_aget(path, **kwargs):
+    async def mock_aget(path, **_kwargs):
         if (
             path
             == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1"
@@ -124,7 +124,9 @@ def mock_llm_operations_fixture():
 
 
 @pytest.fixture(autouse=True)
-def prepare_container(mock_duo_workflow_service_container):
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
     pass
 
 
@@ -245,7 +247,7 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
     )
     gitlab_workflow._internal_event_client = internal_event_client
 
-    async def mock_aget(path, **kwargs):
+    async def mock_aget(path, **_kwargs):
         if (
             path
             == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1"
@@ -259,7 +261,9 @@ async def test_workflow_event_tracking_for_cancelled_workflow(
             )  # Workflow was cancelled
         raise ValueError(f"Unexpected path: {path}")
 
-    async def mock_apatch(path, **kwargs):
+    async def mock_apatch(  # pylint: disable=unused-argument  # http_client.apatch callback signature
+        path, **kwargs
+    ):
         return GitLabHttpResponse(status_code=200, body={})
 
     http_client.aget.side_effect = mock_aget
@@ -338,7 +342,7 @@ async def test_workflow_context_manager_success(
     )
     gitlab_workflow._internal_event_client = internal_event_client
 
-    async def mock_aget(path, **kwargs):
+    async def mock_aget(path, **_kwargs):
         if (
             path
             == f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints?per_page=1"
@@ -350,7 +354,9 @@ async def test_workflow_context_manager_success(
             return GitLabHttpResponse(status_code=200, body={"status": "finished"})
         raise ValueError(f"Unexpected path: {path}")
 
-    async def mock_apatch(path, **kwargs):
+    async def mock_apatch(  # pylint: disable=unused-argument  # http_client.apatch callback signature
+        path, **kwargs
+    ):
         return GitLabHttpResponse(status_code=200, body={})
 
     http_client.aget.side_effect = mock_aget
@@ -424,7 +430,9 @@ async def test_workflow_context_manager_startup_error(
     # but succeed on the second call (DROP status)
     call_count = 0
 
-    async def mock_apatch(path, **kwargs):
+    async def mock_apatch(  # pylint: disable=unused-argument  # http_client.apatch callback signature
+        path, **kwargs
+    ):
         nonlocal call_count
         call_count += 1
 
@@ -504,7 +512,9 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
     # Create a specific instance of the error to use in both the mock and assertion
     status_error = ConnectionError("Status update failed")
 
-    async def mock_apatch(path, **kwargs):
+    async def mock_apatch(  # pylint: disable=unused-argument  # http_client.apatch callback signature
+        path, **kwargs
+    ):
         nonlocal call_count
         call_count += 1
 
@@ -518,7 +528,7 @@ async def test_workflow_context_manager_startup_error_with_status_update_failure
     http_client.apatch.side_effect = mock_apatch
 
     # Set up aget to return empty checkpoints (for a new workflow)
-    async def mock_aget(path, **kwargs):
+    async def mock_aget(path, **_kwargs):
         if "checkpoints" in path:
             return GitLabHttpResponse(status_code=200, body=[])
         else:
@@ -818,7 +828,7 @@ async def test_workflow_context_manager_error(
     gitlab_workflow._internal_event_client = internal_event_client
 
     # Mock different responses for different API calls
-    def mock_aget(path, **kwargs):
+    def mock_aget(path, **_kwargs):
         if "checkpoints" in path:
             return GitLabHttpResponse(status_code=200, body=[])
         else:
@@ -1098,12 +1108,12 @@ async def test_aput(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id")
 async def test_aput_includes_model_metadata_json_when_context_is_set(
     gitlab_workflow,
     http_client,
     checkpoint_data,
     checkpoint_metadata,
-    workflow_id,
     model_metadata,
 ):
     """Test that aput() includes model_metadata_json in the HTTP POST payload when the context is set."""
@@ -1155,9 +1165,8 @@ async def test_aput_omits_model_metadata_json_when_context_is_not_set(
     assert "model_metadata_json" not in post_call_body
 
 
+@pytest.mark.usefixtures("checkpoint_data", "checkpoint_metadata")
 def test_aput_with_no_status_update(
-    checkpoint_data,
-    checkpoint_metadata,
     http_client,
     workflow_id,
     workflow_type,
@@ -1558,8 +1567,9 @@ class TestGetOrbitToolCalls:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id")
 async def test_aput_sets_orbit_called_when_orbit_tool_present(
-    gitlab_workflow, http_client, checkpoint_metadata, workflow_id
+    gitlab_workflow, http_client, checkpoint_metadata
 ):
     """Test that aput sets _orbit_called when checkpoint contains orbit tool calls."""
     config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
@@ -1579,8 +1589,9 @@ async def test_aput_sets_orbit_called_when_orbit_tool_present(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id")
 async def test_aput_does_not_reset_orbit_called_once_set(
-    gitlab_workflow, http_client, checkpoint_metadata, workflow_id
+    gitlab_workflow, http_client, checkpoint_metadata
 ):
     """Test that _orbit_called stays True once set, even if subsequent checkpoints have no orbit tools."""
     config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
@@ -1600,10 +1611,9 @@ async def test_aput_does_not_reset_orbit_called_once_set(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id", "workflow_type")
 async def test_track_workflow_completion_includes_duration_seconds(
     gitlab_workflow,
-    workflow_id,
-    workflow_type,
     internal_event_client: Mock,
 ):
     """Test that completion events include duration_seconds when _flow_start_time is set."""

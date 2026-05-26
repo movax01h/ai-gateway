@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines,unused-argument
+# pylint: disable=too-many-lines
 import base64
 import json
 from unittest.mock import AsyncMock
@@ -208,9 +208,8 @@ async def test_get_file_success(
     ],
 )
 @pytest.mark.asyncio
-async def test_get_file_errors(
-    tool, gitlab_client_mock, input_params, mock_setup, expected_error_contains
-):
+@pytest.mark.usefixtures("gitlab_client_mock")
+async def test_get_file_errors(tool, input_params, mock_setup, expected_error_contains):
     if mock_setup["mock_type"] == "validate_error":
         tool._validate_repository_file_url = (
             lambda url, project_id, ref, file_path: mock_setup["mock_value"]
@@ -698,8 +697,9 @@ async def test_list_repository_tree_success(
     ],
 )
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("gitlab_client_mock")
 async def test_list_repository_tree_errors(
-    tree_tool, gitlab_client_mock, input_params, mock_setup, expected_error_contains
+    tree_tool, input_params, mock_setup, expected_error_contains
 ):
     if mock_setup["mock_type"] == "validate_error":
         tree_tool._validate_project_url = lambda url, project_id: mock_setup[

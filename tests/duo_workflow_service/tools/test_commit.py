@@ -1,4 +1,4 @@
-# pylint: disable=line-too-long,too-many-lines,unnecessary-lambda,unused-argument
+# pylint: disable=line-too-long,too-many-lines,unnecessary-lambda
 import base64
 import json
 from datetime import datetime
@@ -1727,8 +1727,9 @@ async def test_create_commit_nonexistent_branch_uses_default_branch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("file_content_response")
 async def test_merge_duplicate_update_actions_multiple_partials(
-    gitlab_client_mock, metadata, file_content_response
+    gitlab_client_mock, metadata
 ):
     """Test merging multiple partial edits (old_str/new_str) on the same file."""
     initial_content = "# Title\n\nLine 1\nLine 2\nLine 3\n"

@@ -61,14 +61,15 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
     @pytest.fixture(name="mock_state_graph")
     def mock_state_graph_fixture(
-        self, mock_fetch_workflow_and_container_data
-    ):  # pylint: disable=unused-argument
+        self,
+        mock_fetch_workflow_and_container_data,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    ):
         # Create mock StateGraph and compiled graph
         mock_state_graph = Mock(spec=StateGraph)
         mock_compiled_graph = Mock()
 
         # Mock the compiled graph's astream method
-        async def mock_astream(*args, **kwargs):  # pylint: disable=unused-argument
+        async def mock_astream(*_args, **_kwargs):
             yield ("values", {"status": "running"})
             yield ("updates", [{"step": "agent_processing"}])
 
@@ -202,7 +203,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
     @pytest.fixture(name="flow_instance")
-    def flow_instance_fixture(
+    def flow_instance_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
         self,
         mock_flow_metadata,
         user,
@@ -211,7 +212,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_tools_registry,
         mock_state_graph,
         flow_type: GLReportingEventContext,
-    ):  # pylint: disable=unused-argument
+    ):
         """Fixture providing a Flow instance with mocked dependencies."""
         with (
             self.mock_components(["AgentComponent"]),
@@ -295,6 +296,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "user_response",
         ],
     )
+    @pytest.mark.usefixtures("mock_tools_registry")
     async def test_resume_command_with_approval_decision(
         self,
         mock_flow_metadata,
@@ -302,7 +304,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         sample_flow_config,
         mock_state_graph,
         mock_checkpointer,
-        mock_tools_registry,  # pylint: disable=unused-argument
         approval_decision,
         expected_event_type,
         expected_message,
@@ -354,6 +355,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_checkpointer", "mock_tools_registry")
     async def test_graph_input_with_additional_context(
         self,
         goal,
@@ -362,8 +364,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         sample_flow_config,
         mock_state_graph,
         flow_type,
-        mock_checkpointer,  # pylint: disable=unused-argument
-        mock_tools_registry,  # pylint: disable=unused-argument
     ):
         """Test get_graph_input returns appropriate input based on status event."""
         with (
@@ -398,14 +398,13 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             }
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry", "mock_checkpointer")
     async def test_flow_config_validation_duplicate_component_names(
         self,
         mock_flow_metadata,
         user,
         mock_state_graph,
         flow_type,
-        mock_tools_registry,  # pylint: disable=unused-argument
-        mock_checkpointer,  # pylint: disable=unused-argument
     ):
         """Test that duplicate component names are detected during compilation."""
         # Create config with duplicate component names
@@ -631,15 +630,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert flow.is_done
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_state_graph", "mock_tools_registry")
     async def test_resume_command_with_invalid_approval_decision(
         self,
         mock_flow_metadata,
         user,
         sample_flow_config,
         flow_type: GLReportingEventContext,
-        mock_state_graph,  # pylint: disable=unused-argument
         mock_checkpointer,
-        mock_tools_registry,  # pylint: disable=unused-argument
     ):
         """Test _resume_command raises ValueError for invalid approval decision."""
         # Create approval mock with invalid decision
@@ -696,6 +694,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "no_toolset_or_tool_name",
         ],
     )
+    @pytest.mark.usefixtures("mock_checkpointer", "mock_state_graph")
     async def test_flow_config_tool_name(
         self,
         toolset,
@@ -705,8 +704,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         user,
         mock_tools_registry,
         flow_type: GLReportingEventContext,
-        mock_checkpointer,  # pylint: disable=unused-argument
-        mock_state_graph,  # pylint: disable=unused-argument
     ):
         """Test that tool_names can be used without explicit toolsets."""
 
@@ -867,11 +864,11 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
         assert "agent-skills-instructions" not in result
 
+    @pytest.mark.usefixtures("mock_state_graph")
     def test_build_routers_always_passes_tracking_params_for_conditional_routers(
         self,
         mock_flow_metadata,
         user,
-        mock_state_graph,  # pylint: disable=unused-argument
         flow_type: GLReportingEventContext,
     ):
         """Test _build_routers always passes instrumentation params for conditional routers."""

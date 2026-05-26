@@ -1,4 +1,4 @@
-# pylint: disable=unnecessary-lambda,file-naming-for-tests,unused-argument
+# pylint: disable=unnecessary-lambda,file-naming-for-tests
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -48,7 +48,7 @@ def flow_type_fixture() -> GLReportingEventContext:
 
 
 @pytest.fixture(name="workflow")
-def workflow_fixture(
+def workflow_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     mock_duo_workflow_service_container: Mock,
     flow_type: GLReportingEventContext,
     user: CloudConnectorUser,
@@ -156,9 +156,9 @@ def test_get_source_branch_with_different_category(workflow):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_agent")
 async def test_git_push_with_source_branch(
     mock_run_tool_node_class,
-    mock_agent,
     mock_tools_registry,
     mock_checkpointer,
     workflow_with_source_branch,
@@ -182,9 +182,9 @@ async def test_git_push_with_source_branch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_agent")
 async def test_git_push_without_source_branch(
     mock_run_tool_node_class,
-    mock_agent,
     mock_tools_registry,
     mock_checkpointer,
     workflow,
@@ -244,8 +244,9 @@ def _get_push_command(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("anthropic_env")
 async def test_translation_tools(
-    anthropic_env, tools_registry_with_all_privileges, mock_checkpointer, workflow
+    tools_registry_with_all_privileges, mock_checkpointer, workflow
 ):
     """Test that all tools used by the gitlab ci translator agent are available in the tools registry."""
 
@@ -402,10 +403,10 @@ async def test_workflow_run(
 @pytest.mark.usefixtures(
     "mock_tools_registry_cls", "mock_fetch_workflow_and_container_data"
 )
+@pytest.mark.usefixtures("mock_agent")
 async def test_workflow_run_with_file_not_found(
     mock_log_exception,
     mock_run_tool_node_class,
-    mock_agent,
     mock_checkpoint_notifier,
     mock_git_lab_workflow_instance,
     workflow,

@@ -1,7 +1,6 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 import json
 from typing import Optional
-from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,10 +33,10 @@ def scopes_fixture():
 
 
 class TestEditorContentCompletionStream:
+    @pytest.mark.usefixtures("mock_completions_stream")
     def test_successful_stream_response(
         self,
         mock_client: TestClient,
-        mock_completions_stream: Mock,
         mock_suggestions_output_text: str,
         route: str,
     ):
@@ -128,10 +127,10 @@ class TestEditorContentGenerationStream:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_generations_stream")
     def test_successful_stream_response(
         self,
         mock_client: TestClient,
-        mock_generations_stream: Mock,
         mock_suggestions_output_text: str,
         route: str,
         prompt_id: Optional[str],

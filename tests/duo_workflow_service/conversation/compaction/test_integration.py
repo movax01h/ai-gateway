@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 """Tests for integration.py maybe_compact_history function."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -181,7 +180,7 @@ class TestMaybeCompactHistory:
     )
     async def test_empty_history_with_compactor_none(
         self,
-        mock_is_feature_enabled,
+        _mock_is_feature_enabled,
         mock_get_max_context,
         mock_trim,
         _mock_get_config,
@@ -366,7 +365,7 @@ class TestMaybeCompactHistory:
     )
     async def test_no_event_when_compactor_is_none(
         self,
-        mock_is_feature_enabled,
+        _mock_is_feature_enabled,
         mock_get_max_context,
         mock_trim,
         _mock_get_config,

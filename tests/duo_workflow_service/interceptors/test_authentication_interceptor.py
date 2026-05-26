@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference,unused-argument
+# pylint: disable=direct-environment-variable-reference
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -165,7 +165,7 @@ async def test_intercept_service_auth_disabled(
 @pytest.mark.asyncio
 async def test_intercept_service_auth_enabled(
     mock_cloud_connector_ready,
-    mock_authenticate,
+    _mock_authenticate,
     mock_continuation,
     handler_call_details,
 ):

@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
@@ -284,10 +283,10 @@ class TestUsageQuotaWithModelName:
             "claude-3-opus-20240229",
         ],
     )
+    @pytest.mark.usefixtures("mock_track_internal_event")
     def test_passes_model_name_to_usage_quota_service(
         self,
         mock_client,
-        mock_track_internal_event,
         proxy_headers,
         unit_primitive,
         model_name,

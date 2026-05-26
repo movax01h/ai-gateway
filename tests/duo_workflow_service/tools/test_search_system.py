@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -107,7 +106,12 @@ class TestGrep:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("params,expected_output,expected_args", valid_test_cases)
-    async def test_grep_arun(self, params, expected_output, expected_args):
+    async def test_grep_arun(
+        self,
+        params,
+        expected_output,
+        expected_args,  # pylint: disable=unused-argument  # parametrize value
+    ):
         grep_tool = self._setup_grep_tool_with_mocks(expected_output)
 
         result = await grep_tool._arun(

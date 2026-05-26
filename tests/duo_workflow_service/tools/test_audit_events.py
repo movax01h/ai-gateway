@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, Mock
 
@@ -196,9 +195,8 @@ async def test_list_instance_audit_events_with_filters(
 
 
 @pytest.mark.asyncio
-async def test_list_instance_audit_events_entity_id_without_type(
-    gitlab_client_mock, metadata
-):
+@pytest.mark.usefixtures("gitlab_client_mock")
+async def test_list_instance_audit_events_entity_id_without_type(metadata):
     """Test that validation error for entity_id without entity_type raises ToolException."""
     tool = ListInstanceAuditEvents(metadata=metadata)
 
@@ -389,7 +387,8 @@ async def test_list_group_audit_events_with_path(
 
 
 @pytest.mark.asyncio
-async def test_list_group_audit_events_no_identifier(gitlab_client_mock, metadata):
+@pytest.mark.usefixtures("gitlab_client_mock")
+async def test_list_group_audit_events_no_identifier(metadata):
     """Test that missing group identifier raises ToolException."""
     tool = ListGroupAuditEvents(metadata=metadata)
 

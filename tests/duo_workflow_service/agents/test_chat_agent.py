@@ -670,9 +670,7 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_to
     mock_tools_registry = Mock(spec=ToolsRegistry)
 
     # Configure approval_required to return different values for different tools
-    def approval_side_effect(
-        tool_name, tool_args=None
-    ):  # pylint: disable=unused-argument
+    def approval_side_effect(tool_name, _tool_args=None):
         # preapproved_tool: no approval needed
         # tool_requiring_approval: approval needed
         # another_preapproved_tool: no approval needed

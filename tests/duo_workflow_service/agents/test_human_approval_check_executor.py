@@ -19,9 +19,9 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
 
 @pytest.fixture(autouse=True)
-def prepare_container(
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     mock_duo_workflow_service_container,
-):  # pylint: disable=unused-argument
+):
     pass
 
 

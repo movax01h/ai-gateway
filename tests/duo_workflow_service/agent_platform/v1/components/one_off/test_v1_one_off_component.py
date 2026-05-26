@@ -856,7 +856,6 @@ class TestOneOffComponentCompaction:
         assert component.compaction.max_recent_messages == 20
         assert component.compaction.trim_threshold == 0.8
 
-    # pylint: disable=unused-argument
     @pytest.mark.parametrize(
         ("compaction_value", "should_create_compactor"),
         [
@@ -866,6 +865,7 @@ class TestOneOffComponentCompaction:
         ],
         ids=["disabled", "enabled_bool", "enabled_config"],
     )
+    @pytest.mark.usefixtures("mock_tool_node_cls")
     def test_attach_creates_compactor_based_on_config(
         self,
         component_name,
@@ -878,7 +878,6 @@ class TestOneOffComponentCompaction:
         mock_internal_event_client,
         mock_state_graph,
         mock_router,
-        mock_tool_node_cls,
         compaction_value,
         should_create_compactor,
     ):

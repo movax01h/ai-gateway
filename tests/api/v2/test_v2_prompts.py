@@ -1,4 +1,4 @@
-# pylint: disable=unused-argument,line-too-long,file-naming-for-tests
+# pylint: disable=line-too-long,file-naming-for-tests
 from typing import Any, List, Optional
 from unittest.mock import patch
 
@@ -204,7 +204,10 @@ class TestPrompt:
         inputs: dict[str, str],
         prompt_version: Optional[str],
         input_model_metadata: Optional[TypeModelMetadata],
-        token_usage: TokenUsage | None,
+        # pylint: disable-next=unused-argument
+        token_usage: (
+            TokenUsage | None
+        ),  # routed to mock_get_usage_metadata via parametrize
         expected_get_args: dict,
         expected_status: int,
         expected_response: Any,
@@ -296,9 +299,8 @@ class TestUnauthorizedScopes:
             claims=UserClaims(scopes=["unauthorized_scope"]),
         )
 
-    def test_failed_authorization_scope(
-        self, mock_ai_gateway_container, mock_client, mock_registry_get
-    ):
+    @pytest.mark.usefixtures("mock_ai_gateway_container", "mock_registry_get")
+    def test_failed_authorization_scope(self, mock_client):
         response = mock_client.post(
             "/prompts/test",
             headers={
@@ -322,9 +324,8 @@ class TestMisdirectedRequest:
 
             yield mock
 
-    def test_misdirected_request(
-        self, mock_registry_get, mock_model_misdirection, mock_client, model_metadata
-    ):
+    @pytest.mark.usefixtures("mock_model_misdirection")
+    def test_misdirected_request(self, mock_registry_get, mock_client, model_metadata):
         response = mock_client.post(
             "/prompts/test",
             headers={

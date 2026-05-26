@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -37,10 +36,11 @@ def interceptor_fixture():
     return FeatureFlagInterceptor()
 
 
+@pytest.mark.usefixtures("reset_context")
 class TestFeatureFlagInterceptor:
     @pytest.mark.asyncio
     async def test_intercept_service_no_feature_flags(
-        self, reset_context, mock_handler_call_details, mock_continuation
+        self, mock_handler_call_details, mock_continuation
     ):
         """Test interceptor with no feature flags in metadata."""
         # Setup
@@ -57,7 +57,7 @@ class TestFeatureFlagInterceptor:
 
     @pytest.mark.asyncio
     async def test_intercept_service_with_feature_flags(
-        self, reset_context, mock_handler_call_details, mock_continuation
+        self, mock_handler_call_details, mock_continuation
     ):
         """Test interceptor with feature flags in metadata."""
         # Setup
@@ -77,7 +77,7 @@ class TestFeatureFlagInterceptor:
 
     @pytest.mark.asyncio
     async def test_intercept_service_with_disallowed_flags(
-        self, reset_context, mock_handler_call_details, mock_continuation
+        self, mock_handler_call_details, mock_continuation
     ):
         """Test interceptor with disallowed feature flags."""
         # Setup
@@ -99,7 +99,7 @@ class TestFeatureFlagInterceptor:
 
     @pytest.mark.asyncio
     async def test_intercept_service_with_unknown_realm(
-        self, reset_context, mock_handler_call_details, mock_continuation
+        self, mock_handler_call_details, mock_continuation
     ):
         """Test interceptor with unknown realm."""
         # Setup
@@ -121,7 +121,7 @@ class TestFeatureFlagInterceptor:
 
     @pytest.mark.asyncio
     async def test_intercept_service_with_empty_feature_flags(
-        self, reset_context, mock_handler_call_details, mock_continuation
+        self, mock_handler_call_details, mock_continuation
     ):
         """Test interceptor with empty feature flags string."""
         # Setup
@@ -141,7 +141,7 @@ class TestFeatureFlagInterceptor:
 
     @pytest.mark.asyncio
     async def test_intercept_service_metadata_conversion(
-        self, reset_context, mock_handler_call_details, mock_continuation
+        self, mock_handler_call_details, mock_continuation
     ):
         """Test that metadata tuples are correctly converted to a dict."""
         # Setup

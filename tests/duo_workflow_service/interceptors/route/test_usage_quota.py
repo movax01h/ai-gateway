@@ -1,4 +1,4 @@
-# pylint: disable=import-outside-toplevel,unused-variable,unused-argument
+# pylint: disable=import-outside-toplevel,unused-variable
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
@@ -125,11 +125,10 @@ async def test_execute_workflow_returns_early_when_stream_closed_before_first_me
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("duo_service", "mock_context")
 async def test_execute_workflow_for_user_with_skip_usage_cutoff_extra_claim(
     mock_usage_quota_service,
     mock_user_with_skip_usage_cutoff,
-    duo_service,
-    mock_context,
 ) -> None:
     """Test ExecuteWorkflow decorator skips quota check for users with skip claim."""
     current_user.set(mock_user_with_skip_usage_cutoff)
@@ -142,8 +141,9 @@ async def test_execute_workflow_for_user_with_skip_usage_cutoff_extra_claim(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("duo_service", "mock_context")
 async def test_execute_workflow_calls_usage_quota_service(
-    mock_usage_quota_service, duo_service, mock_context
+    mock_usage_quota_service,
 ) -> None:
     """Test ExecuteWorkflow decorator calls usage quota service."""
     regular_user = CloudConnectorUser(
@@ -164,8 +164,9 @@ async def test_execute_workflow_calls_usage_quota_service(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("duo_service", "mock_context")
 async def test_generate_token_calls_usage_quota_service(
-    mock_usage_quota_service, duo_service, mock_context
+    mock_usage_quota_service,
 ) -> None:
     """Test GenerateToken decorator calls usage quota service for regular users."""
     regular_user = CloudConnectorUser(
@@ -179,8 +180,9 @@ async def test_generate_token_calls_usage_quota_service(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("duo_service")
 async def test_generate_token_skips_quota_for_skip_users(
-    mock_usage_quota_service, mock_user_with_skip_usage_cutoff, duo_service
+    mock_usage_quota_service, mock_user_with_skip_usage_cutoff
 ) -> None:
     """Test GenerateToken decorator skips quota check for users with skip claim."""
     current_user.set(mock_user_with_skip_usage_cutoff)
@@ -189,8 +191,9 @@ async def test_generate_token_skips_quota_for_skip_users(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("duo_service", "mock_context")
 async def test_track_self_hosted_execute_workflow_calls_usage_quota_service(
-    mock_usage_quota_service, duo_service, mock_context
+    mock_usage_quota_service,
 ) -> None:
     """Test TrackSelfHostedExecuteWorkflow decorator calls usage quota service."""
     regular_user = CloudConnectorUser(
@@ -204,8 +207,9 @@ async def test_track_self_hosted_execute_workflow_calls_usage_quota_service(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("duo_service")
 async def test_track_self_hosted_skips_quota_for_skip_users(
-    mock_usage_quota_service, mock_user_with_skip_usage_cutoff, duo_service
+    mock_usage_quota_service, mock_user_with_skip_usage_cutoff
 ) -> None:
     """Test TrackSelfHostedExecuteWorkflow decorator skips quota check for skip users."""
     current_user.set(mock_user_with_skip_usage_cutoff)
@@ -214,9 +218,10 @@ async def test_track_self_hosted_skips_quota_for_skip_users(
 
 
 @pytest.mark.asyncio
-async def test_decorator_extracts_correct_context_from_execute_workflow_request(
-    mock_usage_quota_service,
-) -> None:
+@pytest.mark.usefixtures("mock_usage_quota_service")
+async def test_decorator_extracts_correct_context_from_execute_workflow_request() -> (
+    None
+):
     """Test that decorator extracts correct GL context from ExecuteWorkflow requests."""
     request_event = contract_pb2.ClientEvent(
         startRequest=contract_pb2.StartWorkflowRequest(
@@ -229,9 +234,10 @@ async def test_decorator_extracts_correct_context_from_execute_workflow_request(
 
 
 @pytest.mark.asyncio
-async def test_decorator_extracts_correct_context_from_track_self_hosted_request(
-    mock_usage_quota_service,
-) -> None:
+@pytest.mark.usefixtures("mock_usage_quota_service")
+async def test_decorator_extracts_correct_context_from_track_self_hosted_request() -> (
+    None
+):
     """Test that decorator extracts correct GL context from TrackSelfHostedExecuteWorkflow requests."""
     request_event = contract_pb2.TrackSelfHostedClientEvent(
         requestID="test-request-id",

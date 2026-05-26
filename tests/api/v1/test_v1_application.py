@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,line-too-long,use-dict-literal,unused-argument
+# pylint: disable=file-naming-for-tests,line-too-long,use-dict-literal
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, call, patch
 
@@ -166,7 +166,7 @@ def mock_q_boto3_fixture():
 
 
 @pytest.fixture(name="auth_user")
-def auth_user_fixture(self):
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         global_user_id="1",
@@ -209,6 +209,7 @@ class TestUnauthorizedScopes:
         assert response.json() == {"detail": "Unauthorized to perform action"}
 
 
+@pytest.mark.usefixtures("mock_boto3", "mock_glgo")
 class TestApplication:
     @pytest.fixture(name="auth_user")
     def auth_user_fixture(self):
@@ -240,9 +241,7 @@ class TestApplication:
     def test_failed_aws_creds(
         self,
         mock_client,
-        mock_boto3,
         mock_sts_client,
-        mock_glgo,
         boto_error,
         expected_status,
         expected_msg,
@@ -276,9 +275,7 @@ class TestApplication:
     def test_failed_delete_aws_creds(
         self,
         mock_client,
-        mock_boto3,
         mock_sts_client,
-        mock_glgo,
         boto_error,
         expected_status,
         expected_msg,
@@ -290,13 +287,11 @@ class TestApplication:
         assert response.status_code == expected_status
         assert response.json() == {"detail": expected_msg}
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_successful_oauth_application(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         mock_track_internal_event,
         credentials,
     ):
@@ -325,13 +320,11 @@ class TestApplication:
             redirectUrl="https://example.com",
         )
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_successful_delete_oauth_application(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         mock_track_internal_event,
         credentials,
     ):
@@ -355,13 +348,11 @@ class TestApplication:
 
         mock_delete_o_auth_app_connection.assert_called_once_with()
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_successful_oauth_application_with_conflict(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         credentials,
     ):
         mock_create_o_auth_app_connection = MagicMock(
@@ -397,13 +388,11 @@ class TestApplication:
 
         mock_delete_o_auth_app_connection.assert_called_once()
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_successful_delete_oauth_application_with_conflict(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         credentials,
     ):
         mock_delete_o_auth_app_connection = MagicMock(
@@ -423,13 +412,11 @@ class TestApplication:
         mock_q_boto3.client.assert_called_once_with("q", **credentials)
         mock_delete_o_auth_app_connection.assert_called_once_with()
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_validate_auth_app_successful(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         mock_track_internal_event,
         credentials,
     ):
@@ -479,13 +466,11 @@ class TestApplication:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_validate_auth_app_aws_exception(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         credentials,
         error_response,
         expected_code,

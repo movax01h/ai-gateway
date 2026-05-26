@@ -1,4 +1,4 @@
-# pylint: disable=import-outside-toplevel,too-many-lines,unused-argument
+# pylint: disable=import-outside-toplevel,too-many-lines
 import json
 from unittest.mock import AsyncMock, Mock, call
 
@@ -145,7 +145,12 @@ async def test_get_pipeline_failing_jobs_pipelines_not_found(
     ],
 )
 async def test_get_pipeline_failing_jobs_with_url_success(
-    url, project_id, merge_request_iid, expected_path, gitlab_client_mock, metadata
+    url,
+    project_id,
+    merge_request_iid,
+    expected_path,  # pylint: disable=unused-argument  # parametrize value, unused in body
+    gitlab_client_mock,
+    metadata,
 ):
     merge_request_response = {"id": 1, "title": "Merge Request 1"}
     pipelines_response = [

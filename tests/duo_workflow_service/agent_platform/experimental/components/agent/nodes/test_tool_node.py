@@ -1,4 +1,4 @@
-# pylint: disable=inconsistent-return-statements,no-else-return,unused-argument
+# pylint: disable=inconsistent-return-statements,no-else-return
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
@@ -65,7 +65,7 @@ def mock_tool_monitoring_fixture():
 
 
 @pytest.fixture(name="tool_node")
-def tool_node_fixture(
+def tool_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
     conversation_history_key,
     mock_toolset,
     flow_id,
@@ -97,6 +97,7 @@ class TestToolNode:
     """Test suite for ToolNode class focusing on the run method."""
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring")
     async def test_run_success_single_tool_call(
         self,
         tool_node,
@@ -104,7 +105,6 @@ class TestToolNode:
         component_name,
         mock_tool,
         mock_tool_call,
-        mock_tool_monitoring,
         mock_prompt_security,
         ui_history,
     ):
@@ -204,6 +204,7 @@ class TestToolNode:
         mock_tool_2.ainvoke.assert_called_once_with({"param2": "value2"})
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
     async def test_run_tool_not_found(
         self,
         tool_node,
@@ -211,7 +212,6 @@ class TestToolNode:
         component_name,
         mock_toolset,
         mock_prompt_security,
-        mock_tool_call,
     ):
         """Test run when tool is not found in toolset."""
         # Configure toolset to not contain the tool

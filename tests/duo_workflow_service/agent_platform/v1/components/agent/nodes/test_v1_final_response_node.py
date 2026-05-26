@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,import-outside-toplevel,unused-argument
+# pylint: disable=file-naming-for-tests,import-outside-toplevel
 import json
 from unittest.mock import Mock, patch
 
@@ -532,7 +532,7 @@ class TestResponseSchemaTracking:
     async def test_tracking_context_included_in_log(
         self,
         mock_log,
-        mock_metrics,
+        _mock_metrics,
         component_name,
         simple_output,
         flow_state_with_message,
@@ -594,7 +594,7 @@ class TestResponseSchemaTracking:
     async def test_tracking_context_missing_values_resolve_to_none(
         self,
         mock_log,
-        mock_metrics,
+        _mock_metrics,
         component_name,
         simple_output,
         flow_state_with_message,

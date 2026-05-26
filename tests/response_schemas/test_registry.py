@@ -155,7 +155,9 @@ def mock_fs_fixture(fs: FakeFilesystem):
 
 
 @pytest.fixture(name="registry")
-def registry_fixture(mock_fs):  # pylint: disable=unused-argument
+def registry_fixture(
+    mock_fs,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+):
     """Create ResponseSchemaRegistry instance."""
     return ResponseSchemaRegistry()
 

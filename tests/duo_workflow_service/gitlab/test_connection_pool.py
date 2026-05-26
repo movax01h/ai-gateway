@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 """Tests for the connection pool manager."""
 
 import ssl
@@ -131,7 +130,10 @@ async def test_multiple_context_entries():
 )
 @pytest.mark.asyncio
 async def test_ssl_context_default_verification(
-    pool_manager, monkeypatch, env_setup, test_description
+    pool_manager,
+    monkeypatch,
+    env_setup,
+    test_description,  # pylint: disable=unused-argument  # parametrize value
 ):
     """Test SSL behavior when falling back to default verification."""
     env_setup(monkeypatch)

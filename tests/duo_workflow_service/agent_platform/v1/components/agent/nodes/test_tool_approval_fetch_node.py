@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 """Test suite for v1 ToolApprovalFetchNode class."""
 
 from unittest.mock import Mock, patch
@@ -99,12 +98,12 @@ class TestToolApprovalFetchNodeReject:
     """Test suite for REJECT event handling."""
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("conversation_history_key")
     async def test_reject_adds_rejection_tool_messages(
         self,
         tool_approval_fetch_node,
         base_flow_state,
         component_name,
-        conversation_history_key,
         mock_ai_message_with_tool_calls,
     ):
         """Test that REJECT event adds rejection ToolMessages to conversation history."""
@@ -167,12 +166,12 @@ class TestToolApprovalFetchNodeModify:
     """Test suite for MODIFY event handling."""
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("conversation_history_key")
     async def test_modify_adds_rejection_messages_and_user_feedback(
         self,
         tool_approval_fetch_node,
         base_flow_state,
         component_name,
-        conversation_history_key,
         mock_ai_message_with_tool_calls,
     ):
         """Test that MODIFY event adds rejection ToolMessages + HumanMessage with feedback."""

@@ -29,8 +29,9 @@ def gl_version_18_7_fixture():
 
 @pytest.fixture(name="checkpoint_notifier")
 def checkpoint_notifier_fixture(
-    outbox, gl_version_18_7
-):  # pylint: disable=unused-argument
+    outbox,
+    gl_version_18_7,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+):
     client_capabilities.set({"incremental_streaming"})
     return UserInterface(outbox=outbox, goal="test_goal")
 

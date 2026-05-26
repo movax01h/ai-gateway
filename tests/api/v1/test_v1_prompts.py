@@ -1,4 +1,4 @@
-# pylint: disable=unused-argument,line-too-long,file-naming-for-tests
+# pylint: disable=line-too-long,file-naming-for-tests
 from typing import Any, List, Optional
 from unittest.mock import patch
 
@@ -164,10 +164,10 @@ class TestPrompt:
             ),
         ],
     )
+    @pytest.mark.usefixtures("frozen_datetime_now")
     def test_request(
         self,
         mock_registry_get,
-        frozen_datetime_now,
         mock_client,
         mock_track_internal_event,
         unit_primitive: GitLabUnitPrimitive,
@@ -215,11 +215,11 @@ class TestPrompt:
             mock_track_internal_event.assert_not_called()
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("frozen_datetime_now")
     async def test_streaming_request(
         self,
         mock_client,
         mock_registry_get,
-        frozen_datetime_now,
     ):
         response = mock_client.post(
             "/prompts/test",
@@ -250,9 +250,8 @@ class TestUnauthorizedScopes:
             claims=UserClaims(scopes=["unauthorized_scope"]),
         )
 
-    def test_failed_authorization_scope(
-        self, mock_ai_gateway_container, mock_client, mock_registry_get
-    ):
+    @pytest.mark.usefixtures("mock_ai_gateway_container", "mock_registry_get")
+    def test_failed_authorization_scope(self, mock_client):
         response = mock_client.post(
             "/prompts/test",
             headers={
@@ -276,9 +275,8 @@ class TestMisdirectedRequest:
 
             yield mock
 
-    def test_misdirected_request(
-        self, mock_registry_get, mock_model_misdirection, mock_client, model_metadata
-    ):
+    @pytest.mark.usefixtures("mock_model_misdirection")
+    def test_misdirected_request(self, mock_registry_get, mock_client, model_metadata):
         response = mock_client.post(
             "/prompts/test",
             headers={

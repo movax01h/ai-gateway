@@ -33,7 +33,7 @@ async def test_verify_project_namespace_metadata_saas_project_mismatch(mock_requ
     current_event_context.set(event_context)
 
     @verify_project_namespace_metadata()
-    async def dummy_func(request, *args, **kwargs):  # pylint: disable=unused-argument
+    async def dummy_func(_request, *_args, **_kwargs):
         return Response(content=b'{"message": "success"}', status_code=200)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -69,7 +69,7 @@ async def test_verify_project_namespace_metadata_saas_namespace_mismatch(mock_re
     current_event_context.set(event_context)
 
     @verify_project_namespace_metadata()
-    async def dummy_func(request, *args, **kwargs):  # pylint: disable=unused-argument
+    async def dummy_func(_request, *_args, **_kwargs):
         return Response(content=b'{"message": "success"}', status_code=200)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -107,7 +107,7 @@ async def test_verify_project_namespace_metadata_saas_root_namespace_mismatch(
     current_event_context.set(event_context)
 
     @verify_project_namespace_metadata()
-    async def dummy_func(request, *args, **kwargs):  # pylint: disable=unused-argument
+    async def dummy_func(_request, *_args, **_kwargs):
         return Response(content=b'{"message": "success"}', status_code=200)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -136,7 +136,7 @@ async def test_verify_project_namespace_metadata_self_managed_success(mock_reque
     current_event_context.set(event_context)
 
     @verify_project_namespace_metadata()
-    async def dummy_func(request, *args, **kwargs):  # pylint: disable=unused-argument
+    async def dummy_func(_request, *_args, **_kwargs):
         return Response(content=b'{"message": "success"}', status_code=200)
 
     response = await dummy_func(mock_request)
@@ -164,7 +164,7 @@ async def test_verify_project_namespace_metadata_self_managed_instance_mismatch(
     current_event_context.set(event_context)
 
     @verify_project_namespace_metadata()
-    async def dummy_func(request, *args, **kwargs):  # pylint: disable=unused-argument
+    async def dummy_func(_request, *_args, **_kwargs):
         return Response(content=b'{"message": "success"}', status_code=200)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -205,7 +205,7 @@ async def test_verify_project_namespace_metadata_self_managed_ignores_project_id
     current_event_context.set(event_context)
 
     @verify_project_namespace_metadata()
-    async def dummy_func(request, *args, **kwargs):  # pylint: disable=unused-argument
+    async def dummy_func(_request, *_args, **_kwargs):
         return Response(content=b'{"message": "success"}', status_code=200)
 
     # Should succeed because self-managed only checks instance_uid

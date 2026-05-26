@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 """Unit tests for bind_tools_cache module.
 
 Tests cover:
@@ -63,7 +62,7 @@ class WriteFileTool(BaseTool):
     description: str = "Write content to a file"
     args_schema: type[BaseModel] = WriteFileArgs
 
-    def _run(self, path: str, content: str) -> str:
+    def _run(self, path: str, _content: str) -> str:
         return f"Wrote to {path}"
 
 

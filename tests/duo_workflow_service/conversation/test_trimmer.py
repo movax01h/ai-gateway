@@ -1,4 +1,4 @@
-# pylint: disable=line-too-long,too-many-lines,use-implicit-booleaness-not-comparison,unused-argument
+# pylint: disable=line-too-long,too-many-lines,use-implicit-booleaness-not-comparison
 from typing import List, cast
 from unittest.mock import patch
 
@@ -264,7 +264,7 @@ def test_restore_message_consistency_tool_message_before_tool_call():
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
 def test_apply_token_based_trim_preserves_tool_messages(
-    mock_count_tokens,
+    _mock_count_tokens,
     mock_trim_messages,
 ):
     """Test that apply_token_based_trim passes tool messages through unchanged.
@@ -389,7 +389,7 @@ def test_apply_token_based_trim_single_message_too_large():
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
-def test_apply_token_based_trim_error_handling(mock_count_tokens, mock_trim_messages):
+def test_apply_token_based_trim_error_handling(_mock_count_tokens, mock_trim_messages):
     """Test fallback mechanism when trim_messages raises an exception."""
 
     mock_trim_messages.side_effect = ValueError("Simulated error in trim_messages")
@@ -751,7 +751,7 @@ def test_restore_message_consistency_drops_blank_ai_messages(
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
 def test_apply_token_based_trim_empty_result_handling(
-    mock_count_tokens, mock_trim_messages
+    _mock_count_tokens, mock_trim_messages
 ):
     """Test fallback when trim_messages returns empty list."""
 
@@ -889,7 +889,7 @@ def test_apply_token_based_trim_skips_when_under_budget(mock_logger):
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 def test_apply_token_based_trim_trims_when_over_threshold(
     mock_trim_messages,
-    mock_count_tokens,
+    _mock_count_tokens,
 ):
     """Verify full trimming kicks in when token utilization exceeds TRIM_THRESHOLD."""
 

@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -41,6 +40,7 @@ class TestGlgoAuthority:
 
         assert glgo_authority.kid == kid
 
+    @pytest.mark.usefixtures("kid")
     @patch("requests.post")
     def test_token_success(
         self,
@@ -49,7 +49,6 @@ class TestGlgoAuthority:
         signing_key,
         endpoint,
         public_key,
-        kid,
     ):
         glgo_authority = GlgoAuthority(signing_key=signing_key, glgo_base_url=base_url)
 
@@ -83,8 +82,9 @@ class TestGlgoAuthority:
         assert jwt_token["nbf"] <= current_time_posix
         assert jwt_token["iat"] <= current_time_posix
 
+    @pytest.mark.usefixtures("endpoint")
     @patch("requests.post")
-    def test_token_failure(self, requests_mock, base_url, signing_key, endpoint):
+    def test_token_failure(self, requests_mock, base_url, signing_key):
         glgo_authority = GlgoAuthority(signing_key=signing_key, glgo_base_url=base_url)
 
         mock_response = MagicMock()
@@ -98,8 +98,9 @@ class TestGlgoAuthority:
 
         requests_mock.assert_called_once()
 
+    @pytest.mark.usefixtures("endpoint")
     @patch("requests.post")
-    def test_token_network_error(self, requests_mock, signing_key, base_url, endpoint):
+    def test_token_network_error(self, requests_mock, signing_key, base_url):
         glgo_authority = GlgoAuthority(signing_key=signing_key, glgo_base_url=base_url)
 
         requests_mock.side_effect = requests.exceptions.ConnectionError
@@ -111,10 +112,9 @@ class TestGlgoAuthority:
 
         requests_mock.assert_called_once()
 
+    @pytest.mark.usefixtures("endpoint")
     @patch("requests.post")
-    def test_token_invalid_response(
-        self, requests_mock, signing_key, base_url, endpoint
-    ):
+    def test_token_invalid_response(self, requests_mock, signing_key, base_url):
         glgo_authority = GlgoAuthority(signing_key=signing_key, glgo_base_url=base_url)
 
         mock_response = MagicMock()

@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -130,7 +130,9 @@ class TestExecutorComponent:
 
     @pytest.fixture(name="executor_component")
     def executor_component_fixture(
-        self, mock_dependencies, mock_duo_workflow_service_container
+        self,
+        mock_dependencies,
+        mock_duo_workflow_service_container,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     ):
         return ExecutorComponent(**mock_dependencies)
 
@@ -369,17 +371,17 @@ class TestExecutorComponent:
             ]
         ],
     )
+    @pytest.mark.usefixtures(
+        "approval_component", "executor_component", "mock_tool_registry"
+    )
     async def test_component_run_with_approval_component(
         self,
         mock_handover_agent,
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        approval_component,
-        executor_component,
         graph_input,
         graph_config,
-        mock_tool_registry,
         compiled_graph,
     ):
         mock_tools_executor.return_value.run.return_value = {
@@ -436,13 +438,13 @@ class TestExecutorComponent:
             ]
         ],
     )
+    @pytest.mark.usefixtures("executor_component")
     async def test_component_run_with_error(
         self,
         mock_handover_agent,
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        executor_component,
         graph_input,
         graph_config,
         mock_tool_registry,

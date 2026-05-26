@@ -1,4 +1,4 @@
-# pylint: disable=pointless-statement,unused-argument
+# pylint: disable=pointless-statement
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import grpc
@@ -140,7 +140,7 @@ async def test_interceptor_methods(
 async def test_streaming_interceptor_methods(
     mock_client_type,
     mock_language_server_version,
-    mock_monitoring_context,
+    _mock_monitoring_context,
     service_name,
     method_name,
     grpc_type,

@@ -124,7 +124,7 @@ async def test_feature_categories(
             DummyGitLabUnitPrimitive.AWESOME_FEATURE_2: DummyGitLabFeatureCategory.AWESOME_CATEGORY_2,
         }
     )
-    async def to_be_decorated(request: Request):  # pylint: disable=unused-argument
+    async def to_be_decorated(_request: Request):
         pass
 
     request = Mock(spec=Request)
@@ -132,10 +132,10 @@ async def test_feature_categories(
 
     if expected_error:
         with pytest.raises(HTTPException, match=expected_error):
-            await to_be_decorated(request=request)
+            await to_be_decorated(request)
     else:
         with patch("ai_gateway.api.feature_category.context") as mock_context:
-            await to_be_decorated(request=request)
+            await to_be_decorated(request)
 
             mock_context.__setitem__.assert_has_calls(
                 [
@@ -184,13 +184,13 @@ async def test_track_metadata(
     expected_context: dict,
 ):
     @track_metadata(path_param, path_param_unit_primitive_map)
-    async def to_be_decorated(request: Request):  # pylint: disable=unused-argument
+    async def to_be_decorated(_request: Request):
         pass
 
     request = Mock(spec=Request)
     request.path_params = path_params
 
     with request_cycle_context({}):
-        await to_be_decorated(request=request)
+        await to_be_decorated(request)
 
         assert dict(context) == expected_context

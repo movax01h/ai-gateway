@@ -71,16 +71,16 @@ def mock_tool_monitoring_fixture():
 
 
 @pytest.fixture(name="tool_node")
-def tool_node_fixture(
+def tool_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
     component_name,
     mock_toolset,
     flow_id,
     flow_type,
     ui_history,
     mock_internal_event_client,
-    mock_tool_monitoring,  # pylint: disable=unused-argument
-    mock_prompt_security,  # pylint: disable=unused-argument
-    mock_logger,  # pylint: disable=unused-argument
+    mock_tool_monitoring,
+    mock_prompt_security,
+    mock_logger,
 ):
     """Fixture for ToolNode instance."""
     tracker = ToolEventTracker(
@@ -201,6 +201,7 @@ class TestToolNode:
         mock_tool_2.ainvoke.assert_called_once_with({"param2": "value2"})
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
     async def test_run_tool_not_found(
         self,
         tool_node,
@@ -208,7 +209,6 @@ class TestToolNode:
         component_name,
         mock_toolset,
         mock_prompt_security,
-        mock_tool_call,  # pylint: disable=unused-argument
         mock_ai_message_with_tool_calls,
     ):
         """Test run when tool is not found in toolset."""
@@ -514,13 +514,13 @@ class TestToolNodeSecurity:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
     async def test_run_security_sanitization_success(
         self,
         tool_node,
         flow_state_with_tool_calls,
         component_name,
         mock_tool,
-        mock_tool_call,  # pylint: disable=unused-argument
         mock_ai_message_with_tool_calls,
     ):
         """Test run with successful security sanitization."""
@@ -684,6 +684,9 @@ class TestToolNodeComponentIdentity:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_tool_monitoring", "mock_prompt_security", "mock_logger"
+    )
     async def test_component_name_embedded_in_writer(
         self,
         component_name,
@@ -691,9 +694,6 @@ class TestToolNodeComponentIdentity:
         flow_id,
         flow_type,
         mock_internal_event_client,
-        mock_tool_monitoring,  # pylint: disable=unused-argument
-        mock_prompt_security,  # pylint: disable=unused-argument
-        mock_logger,  # pylint: disable=unused-argument
         flow_state_with_tool_calls,
     ):
         """Test that component_name set in the writer is embedded in UiChatLog entries."""
@@ -715,6 +715,9 @@ class TestToolNodeComponentIdentity:
         assert logs[0]["subsession_id"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_tool_monitoring", "mock_prompt_security", "mock_logger"
+    )
     async def test_session_id_resolved_from_state_on_success(
         self,
         component_name,
@@ -722,9 +725,6 @@ class TestToolNodeComponentIdentity:
         flow_id,
         flow_type,
         mock_internal_event_client,
-        mock_tool_monitoring,  # pylint: disable=unused-argument
-        mock_prompt_security,  # pylint: disable=unused-argument
-        mock_logger,  # pylint: disable=unused-argument
         flow_state_with_tool_calls,
     ):
         """Test that subsession_id is resolved from state via session_id_key and embedded in log entries."""
@@ -760,6 +760,9 @@ class TestToolNodeComponentIdentity:
         assert logs[0]["subsession_id"] == "3"
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_tool_monitoring", "mock_prompt_security", "mock_logger"
+    )
     async def test_component_name_embedded_in_error_log(
         self,
         component_name,
@@ -767,9 +770,6 @@ class TestToolNodeComponentIdentity:
         flow_id,
         flow_type,
         mock_internal_event_client,
-        mock_tool_monitoring,  # pylint: disable=unused-argument
-        mock_prompt_security,  # pylint: disable=unused-argument
-        mock_logger,  # pylint: disable=unused-argument
         mock_tool,
         flow_state_with_tool_calls,
     ):
@@ -793,6 +793,9 @@ class TestToolNodeComponentIdentity:
         assert logs[0]["subsession_id"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_tool_monitoring", "mock_prompt_security", "mock_logger"
+    )
     async def test_session_id_none_when_no_session_id_key(
         self,
         component_name,
@@ -800,9 +803,6 @@ class TestToolNodeComponentIdentity:
         flow_id,
         flow_type,
         mock_internal_event_client,
-        mock_tool_monitoring,  # pylint: disable=unused-argument
-        mock_prompt_security,  # pylint: disable=unused-argument
-        mock_logger,  # pylint: disable=unused-argument
         flow_state_with_tool_calls,
     ):
         """Test that subsession_id is None when no session_id_key is provided (standalone mode)."""

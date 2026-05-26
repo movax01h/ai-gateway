@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines,import-outside-toplevel,unused-argument
+# pylint: disable=too-many-lines,import-outside-toplevel
 import json
 from unittest.mock import AsyncMock
 
@@ -24,7 +24,7 @@ from duo_workflow_service.tools.search import (
 def create_mock_aget(response_data):
     """Create a mock aget function that returns GitLabHttpResponse."""
 
-    async def mock_aget(*args, **kwargs):
+    async def mock_aget(*_args, **_kwargs):
         return GitLabHttpResponse(
             status_code=200,
             body=response_data,

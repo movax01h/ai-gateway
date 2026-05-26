@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 from json import JSONDecodeError
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -360,9 +360,9 @@ class BaseTestCodeEmbeddings:
         assert response.status_code == 422
         assert response.json() == {"detail": expected_error_message}
 
+    @pytest.mark.usefixtures("config_values_custom_models_disabled")
     def test_endpoint_provided_with_custom_models_disabled(
         self,
-        config_values_custom_models_disabled,
         mock_client: TestClient,
     ):
         params = self._build_params(
@@ -506,11 +506,12 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
     def _route(self):
         return "/embeddings/code_embeddings/index"
 
+    @pytest.mark.usefixtures(
+        "mock_litellm_aembedding", "mock_litellm_aembedding_response"
+    )
     def test_successful_response_base_route(
         self,
         mock_client: TestClient,
-        mock_litellm_aembedding: AsyncMock,
-        mock_litellm_aembedding_response: AsyncMock,
     ):
         params = self._build_params(
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"

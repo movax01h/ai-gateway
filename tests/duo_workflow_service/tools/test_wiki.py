@@ -329,9 +329,8 @@ class TestGetWikiPage:
         assert error_message.startswith("Failed to parse wiki page response as JSON:")
 
     @pytest.mark.asyncio
-    async def test_validation_error_no_resource_id(
-        self, gitlab_client_mock, metadata
-    ):  # pylint: disable=unused-argument
+    @pytest.mark.usefixtures("gitlab_client_mock")
+    async def test_validation_error_no_resource_id(self, metadata):
         """Test validation error when neither project_id nor group_id is provided."""
         tool = GetWikiPage(description="Get wiki page", metadata=metadata)
 
@@ -343,9 +342,8 @@ class TestGetWikiPage:
         )
 
     @pytest.mark.asyncio
-    async def test_validation_error_both_project_and_group_id(
-        self, gitlab_client_mock, metadata
-    ):  # pylint: disable=unused-argument
+    @pytest.mark.usefixtures("gitlab_client_mock")
+    async def test_validation_error_both_project_and_group_id(self, metadata):
         """Test validation error when both project_id and group_id are provided."""
         tool = GetWikiPage(description="Get wiki page", metadata=metadata)
 

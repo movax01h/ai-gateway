@@ -680,7 +680,7 @@ class TestAgentComponentAttachNodes:
             # Custom values
         ],
     )
-    # pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def test_attach_creates_nodes_with_correct_parameters(
         self,
         mock_final_response_node_cls,
@@ -700,7 +700,7 @@ class TestAgentComponentAttachNodes:
         prompt_id,
         prompt_version,
         ui_log_events,
-        ui_role_as,
+        ui_role_as,  # pylint: disable=unused-argument  # parametrize value
     ):
         """Test that nodes are created with correct parameters."""
         agent_component.attach(mock_state_graph, mock_router)
@@ -764,20 +764,18 @@ class TestAgentComponentAttachNodes:
         assert final_call_kwargs["ui_history"].events == ui_log_events
 
 
+@pytest.mark.usefixtures(
+    "mock_agent_node_cls", "mock_tool_node_cls", "mock_final_response_node_cls"
+)
 class TestAgentComponentAttachEdges:
     """Test suite for AgentComponent routing behavior through graph execution."""
 
-    # pylint: disable=unused-argument
     def test_routing_with_custom_schema_tool_call_goes_to_final_response(
         self,
-        request,
         mock_state_graph,
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         mock_custom_schema_tool_call,
         agent_component_with_custom_schema,
     ):
@@ -801,7 +799,6 @@ class TestAgentComponentAttachEdges:
         result = router_function(state_with_final_tool)
         assert result == f"{component_name}#final_response"
 
-    # pylint: disable=unused-argument
     @pytest.mark.parametrize(
         "component_fixture",
         ["agent_component", "agent_component_with_custom_schema"],
@@ -815,9 +812,6 @@ class TestAgentComponentAttachEdges:
         base_flow_state,
         component_name,
         mock_other_tool_call,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         component_fixture,
     ):
         """Test that non-final tool calls route to tools node."""
@@ -842,7 +836,6 @@ class TestAgentComponentAttachEdges:
         result = router_function(state_with_other_tool)
         assert result == f"{component_name}#tools"
 
-    # pylint: disable=unused-argument
     def test_routing_with_mixed_tool_calls_prioritizes_final_response(
         self,
         mock_state_graph,
@@ -851,9 +844,6 @@ class TestAgentComponentAttachEdges:
         component_name,
         mock_other_tool_call,
         mock_custom_schema_tool_call,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         agent_component_with_custom_schema,
     ):
         """Test that mixed tool calls prioritize final response routing (custom schema)."""
@@ -876,7 +866,6 @@ class TestAgentComponentAttachEdges:
         result = router_function(state_with_mixed_tools)
         assert result == f"{component_name}#final_response"
 
-    # pylint: disable=unused-argument
     def test_routing_with_without_conversation_history(
         self,
         agent_component,
@@ -886,9 +875,6 @@ class TestAgentComponentAttachEdges:
         component_name,
         mock_final_tool_call,
         mock_other_tool_call,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that mixed tool calls prioritize final response routing."""
         # Create state with mixed tool calls
@@ -913,7 +899,6 @@ class TestAgentComponentAttachEdges:
         ):
             router_function(base_flow_state)
 
-    # pylint: disable=unused-argument
     def test_routing_with_non_ai_message_raises_error(
         self,
         agent_component,
@@ -921,9 +906,6 @@ class TestAgentComponentAttachEdges:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that non-AIMessage raises RoutingError."""
         # Create state with non-AIMessage
@@ -950,7 +932,6 @@ class TestAgentComponentAttachEdges:
         ):
             router_function(state_with_non_ai_message)
 
-    # pylint: disable=unused-argument
     def test_routing_with_no_tool_calls_goes_to_final_response(
         self,
         agent_component,
@@ -958,9 +939,6 @@ class TestAgentComponentAttachEdges:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that messages with no tool calls route to final_response."""
         # Create state with AIMessage but no tool calls
@@ -988,7 +966,6 @@ class TestAgentComponentAttachEdges:
 class TestAgentComponentResponseSchema:
     """Test suite for custom response schema functionality."""
 
-    # pylint: disable=unused-argument
     @pytest.mark.parametrize(
         ("component_fixture", "use_custom_schema"),
         [
@@ -1091,6 +1068,7 @@ class TestAgentComponentResponseSchema:
             assert component.response_schema_id == schema_id
             assert component.response_schema_version == schema_version
 
+    @pytest.mark.usefixtures("mock_state_graph", "mock_router")
     def test_tool_name_collision_with_response_schema(
         self,
         component_name,
@@ -1103,8 +1081,6 @@ class TestAgentComponentResponseSchema:
         mock_prompt_registry,
         mock_schema_registry,
         mock_internal_event_client,
-        mock_state_graph,
-        mock_router,
     ):
         """Test that response schema colliding with tool name raises error."""
         # Create a mock tool with name "colliding_response_tool"
@@ -1418,7 +1394,6 @@ class TestAgentComponentCompaction:
         assert component.compaction.max_recent_messages == 20
         assert component.compaction.trim_threshold == 0.8
 
-    # pylint: disable=unused-argument
     @pytest.mark.parametrize(
         ("compaction_value", "should_create_compactor"),
         [
@@ -1428,6 +1403,7 @@ class TestAgentComponentCompaction:
         ],
         ids=["disabled", "enabled_bool", "enabled_config"],
     )
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
     def test_attach_creates_compactor_based_on_config(
         self,
         component_name,
@@ -1440,8 +1416,6 @@ class TestAgentComponentCompaction:
         mock_internal_event_client,
         mock_state_graph,
         mock_router,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         compaction_value,
         should_create_compactor,
     ):

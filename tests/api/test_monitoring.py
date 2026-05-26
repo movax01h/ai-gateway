@@ -34,6 +34,7 @@ def fastapi_server_app_fixture(mock_config: Config) -> FastAPI:
 @pytest.fixture(name="client")
 def client_fixture(
     fastapi_server_app: FastAPI,
+    # Fixture-on-fixture: requested for side-effect overrides only.
     mock_ai_gateway_container: containers.Container,  # pylint: disable=unused-argument
 ) -> TestClient:
     return TestClient(fastapi_server_app)
@@ -94,10 +95,10 @@ def test_ready(
     mock_searcher.search.assert_called_once()
 
 
+@pytest.mark.usefixtures("mock_llm_text")
 def test_ready_failure(
     client: TestClient,
     mock_validate_default_models: Mock,
-    mock_llm_text: Mock,  # pylint: disable=unused-argument
 ):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):
         mock_validate_default_models.side_effect = ModelAPIError("test error")
@@ -122,10 +123,9 @@ def test_ready_cloud_connector_failure_from_library(client: TestClient):
     assert response.status_code == 503
 
 
+@pytest.mark.usefixtures("mock_validate_default_models", "mock_llm_text")
 def test_ready_doc_search_failure(
     client: TestClient,
-    mock_validate_default_models: Mock,  # pylint: disable=unused-argument
-    mock_llm_text: Mock,  # pylint: disable=unused-argument
     mock_searcher: Mock,
 ):
     with patch("ai_gateway.api.monitoring.cloud_connector_ready", return_value=True):

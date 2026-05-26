@@ -504,6 +504,7 @@ class TestAgentCompaction:
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_get_event")
     @patch("duo_workflow_service.agents.agent.maybe_compact_history")
+    @pytest.mark.usefixtures("mock_ainvoke")
     async def test_agent_run_calls_maybe_compact_history(
         self,
         mock_maybe_compact,
@@ -512,7 +513,6 @@ class TestAgentCompaction:
         workflow_type: CategoryEnum,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
-        mock_ainvoke: Mock,  # pylint: disable=unused-argument
     ):
         mock_compactor = Mock(spec=ConversationCompactor)
         original_messages = [HumanMessage(content="test message")]
@@ -543,6 +543,7 @@ class TestAgentCompaction:
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_get_event")
     @patch("duo_workflow_service.agents.agent.maybe_compact_history")
+    @pytest.mark.usefixtures("mock_ainvoke")
     async def test_agent_run_without_compactor_still_calls_maybe_compact(
         self,
         mock_maybe_compact,
@@ -551,7 +552,6 @@ class TestAgentCompaction:
         workflow_type: CategoryEnum,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
-        mock_ainvoke: Mock,  # pylint: disable=unused-argument
     ):
         original_messages = [HumanMessage(content="test message")]
         mock_maybe_compact.return_value = original_messages
@@ -578,6 +578,7 @@ class TestAgentCompaction:
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_get_event")
     @patch("duo_workflow_service.agents.agent.maybe_compact_history")
+    @pytest.mark.usefixtures("mock_ainvoke")
     async def test_agent_run_calls_compaction_with_empty_history(
         self,
         mock_maybe_compact,
@@ -586,7 +587,6 @@ class TestAgentCompaction:
         workflow_type: CategoryEnum,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
-        mock_ainvoke: Mock,  # pylint: disable=unused-argument
     ):
         mock_maybe_compact.return_value = []
         workflow_state["conversation_history"] = {}

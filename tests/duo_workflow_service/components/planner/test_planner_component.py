@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -145,13 +145,13 @@ class TestPlannerComponent:
         assert component.project == mock_dependencies["project"]
         assert component.http_client == mock_dependencies["http_client"]
 
+    @pytest.mark.usefixtures("compiled_graph")
     def test_attach_creates_nodes_and_edges(
         self,
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
         planner_component,
-        compiled_graph,
     ):
         """Test that attach method creates all necessary nodes and edges."""
         # Setup mocks
@@ -283,15 +283,14 @@ class TestPlannerComponent:
             ]
         ],
     )
+    @pytest.mark.usefixtures("planner_component", "mock_tool_registry")
     async def test_component_run_with_no_approval_component(
         self,
         mock_supervisor_agent,
         mock_tools_executor,
         mock_agent,
-        planner_component,
         graph_input,
         graph_config,
-        mock_tool_registry,
         compiled_graph,
     ):
         response = await compiled_graph.ainvoke(input=graph_input, config=graph_config)
@@ -350,15 +349,14 @@ class TestPlannerComponent:
             ]
         ],
     )
+    @pytest.mark.usefixtures("planner_component", "mock_tool_registry")
     async def test_component_run_with_approval_component(
         self,
         mock_tools_executor,
         mock_agent,
         approval_component,
-        planner_component,
         graph_input,
         graph_config,
-        mock_tool_registry,
         compiled_graph,
     ):
         response = await compiled_graph.ainvoke(input=graph_input, config=graph_config)
