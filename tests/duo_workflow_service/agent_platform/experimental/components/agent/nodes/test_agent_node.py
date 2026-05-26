@@ -82,6 +82,12 @@ def mock_get_vars_from_state_fixture(prompt_variables):
         yield mock_get_vars_from_state
 
 
+@pytest.fixture(autouse=True)
+def mock_predefined_runtime_variables():
+    with patch.object(AgentNode, "_predefined_runtime_variables", return_value={}):
+        yield
+
+
 class TestAgentNode:
     """Test suite for AgentNode class focusing on the run method."""
 

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import ClassVar, Optional, Sequence, Type, cast
 
 import structlog
@@ -207,6 +208,16 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             event=UILogEventsAgent.ON_AGENT_REASONING,
         )
 
+    @staticmethod
+    def _predefined_runtime_variables() -> dict[str, str]:
+        now = datetime.now()
+
+        return {
+            "current_date": now.strftime("%Y-%m-%d"),
+            "current_time": now.strftime("%H:%M:%S"),
+            "current_timezone": now.tzname() or "",
+        }
+
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
@@ -222,7 +233,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             try:
                 completion: AIMessage = cast(
                     AIMessage,
-                    await self._prompt.ainvoke(input={**variables, "history": history}),
+                    await self._prompt.ainvoke(
+                        input={
+                            **variables,
+                            "history": history,
+                            **self._predefined_runtime_variables(),
+                        }
+                    ),
                 )
                 finish_reason = extract_finish_reason(completion.response_metadata)
                 if finish_reason in LLMFinishReason.truncation_values():
