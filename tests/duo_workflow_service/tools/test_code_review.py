@@ -550,7 +550,8 @@ async def test_build_review_context_only_diffs_with_custom_instructions(
 
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     with patch(
-        "duo_workflow_service.tools.code_review.is_feature_enabled", return_value=True
+        "duo_workflow_service.tools.code_review.supports_group_level_custom_instructions",
+        return_value=True,
     ):
         response = await tool._arun(
             project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
@@ -620,7 +621,8 @@ async def test_build_review_context_with_custom_instructions(
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     with patch(
-        "duo_workflow_service.tools.code_review.is_feature_enabled", return_value=True
+        "duo_workflow_service.tools.code_review.supports_group_level_custom_instructions",
+        return_value=True,
     ):
         response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
 
@@ -742,7 +744,8 @@ async def test_build_review_context_multiple_custom_instructions(
     )
     tool = BuildReviewMergeRequestContext(metadata=metadata)
     with patch(
-        "duo_workflow_service.tools.code_review.is_feature_enabled", return_value=True
+        "duo_workflow_service.tools.code_review.supports_group_level_custom_instructions",
+        return_value=True,
     ):
         response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
 
@@ -913,14 +916,14 @@ class TestFetchAllCustomInstructions:
 
 
 class TestGetCustomInstructions:
-    """Tests for _get_custom_instructions feature-flag routing."""
+    """Tests for _get_custom_instructions version-based routing."""
 
     @pytest.mark.asyncio
-    async def test_calls_fetch_all_when_flag_enabled(self, metadata):
-        """When DUO_CODE_REVIEW_GROUP_LEVEL_INSTRUCTIONS is enabled, delegates to _fetch_all_custom_instructions."""
+    async def test_calls_fetch_all_when_version_19_or_greater(self, metadata):
+        """When instance version >= 19.0.0, delegates to _fetch_all_custom_instructions."""
         tool = BuildReviewMergeRequestContext(metadata=metadata)
         with patch(
-            "duo_workflow_service.tools.code_review.is_feature_enabled",
+            "duo_workflow_service.tools.code_review.supports_group_level_custom_instructions",
             return_value=True,
         ):
             with (
@@ -942,12 +945,11 @@ class TestGetCustomInstructions:
                 mock_project.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_calls_fetch_project_only_when_flag_disabled(self, metadata):
-        """When DUO_CODE_REVIEW_GROUP_LEVEL_INSTRUCTIONS is disabled, delegates to
-        _fetch_project_only_custom_instructions."""
+    async def test_calls_fetch_project_only_when_version_below_19(self, metadata):
+        """When instance version < 19.0.0, delegates to _fetch_project_only_custom_instructions."""
         tool = BuildReviewMergeRequestContext(metadata=metadata)
         with patch(
-            "duo_workflow_service.tools.code_review.is_feature_enabled",
+            "duo_workflow_service.tools.code_review.supports_group_level_custom_instructions",
             return_value=False,
         ):
             with (
@@ -1036,7 +1038,7 @@ class TestBuildReviewMergeRequestContextLightweight:
 
         tool = BuildReviewMergeRequestContext(metadata=metadata)
         with patch(
-            "duo_workflow_service.tools.code_review.is_feature_enabled",
+            "duo_workflow_service.tools.code_review.supports_group_level_custom_instructions",
             return_value=True,
         ):
             result = await tool._arun(

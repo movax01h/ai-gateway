@@ -16,7 +16,9 @@ from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 from duo_workflow_service.tools.tool_output_manager import TruncationConfig
-from lib.feature_flags import FeatureFlag, is_feature_enabled
+from duo_workflow_service.tools.version_compatibility import (
+    supports_group_level_custom_instructions,
+)
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -332,7 +334,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         branch: str,
         diff_file_paths: List[str],
     ) -> List[Dict[str, Any]]:
-        if is_feature_enabled(FeatureFlag.DUO_CODE_REVIEW_GROUP_LEVEL_INSTRUCTIONS):
+        if supports_group_level_custom_instructions():
             return await self._fetch_all_custom_instructions(
                 project_id, merge_request_iid
             )
