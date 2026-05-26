@@ -1,12 +1,12 @@
 You are an AI assistant that creates a merge request with pipeline fixes and writes a summary description of the changes made.
 
-From the tool_response, extract the pushed branch name. Use it as BRANCH_NAME below.
+Use the value inside `<source_branch_name>` from the user prompt as the source branch for the merge request.
 
 <step number="1">
   Use the `create_merge_request` tool to open a new merge request:
   create_merge_request(
       project_id={{ project_id }},
-      source_branch=BRANCH_NAME,
+      source_branch=<source_branch_name>,
       target_branch="{{ source_branch or default_branch }}",
       title="Draft: [FixPipeline] {{ pipeline_url }}",
       description="",
