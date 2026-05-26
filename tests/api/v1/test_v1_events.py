@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,line-too-long,unused-argument
+# pylint: disable=file-naming-for-tests,line-too-long
 import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, call, patch
@@ -149,7 +149,7 @@ def mock_q_boto3_fixture():
 
 
 @pytest.fixture(name="auth_user")
-def auth_user_fixture(self):
+def auth_user_fixture():
     return CloudConnectorUser(
         authenticated=True,
         global_user_id="1",
@@ -186,6 +186,7 @@ class TestUnauthorizedScopes:
         assert response.json() == {"detail": "Unauthorized to perform action"}
 
 
+@pytest.mark.usefixtures("mock_boto3", "mock_glgo")
 class TestEvents:
     @pytest.fixture(name="auth_user")
     def auth_user_fixture(self):
@@ -198,9 +199,7 @@ class TestEvents:
     def test_failed_aws_creds(
         self,
         mock_client,
-        mock_boto3,
         mock_sts_client,
-        mock_glgo,
     ):
 
         boto_error = make_boto_client_exception(
@@ -218,12 +217,10 @@ class TestEvents:
             "detail": "An error occurred (AccessDeniedException) when calling the SendEvent operation: Credentials expired"
         }
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_wrong_payload_format(
         self,
         mock_client,
-        mock_boto3,
-        mock_sts_client,
-        mock_glgo,
     ):
         payload = issue_event_payload()
         payload.pop("issue_id")
@@ -247,13 +244,11 @@ class TestEvents:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_failed_events_call_due_to_access_denied(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         credentials,
         payload,
         reason,
@@ -291,14 +286,11 @@ class TestEvents:
         mock_send_event.assert_has_calls([send_event_call, send_event_call])
         mock_auth_grant.assert_called_once_with(code="code-123")
 
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_failed_events_call_due_to_other_error(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
-        credentials,
     ):
         other_error = make_boto_client_exception(
             error_code="ValidationException",
@@ -321,13 +313,11 @@ class TestEvents:
     @pytest.mark.parametrize(
         "payload", [merge_request_event_payload(), issue_event_payload()]
     )
+    @pytest.mark.usefixtures("mock_sts_client")
     def test_successful_events_call(
         self,
         mock_client,
-        mock_boto3,
         mock_q_boto3,
-        mock_sts_client,
-        mock_glgo,
         mock_track_internal_event,
         credentials,
         payload,

@@ -1,4 +1,4 @@
-# pylint: disable=direct-environment-variable-reference,unused-argument
+# pylint: disable=direct-environment-variable-reference
 """Tests for ToolsApprovalComponent."""
 
 import os
@@ -203,12 +203,12 @@ class TestToolsApprovalComponent:
                 mock_termination_node.assert_not_called()
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool")
     async def test_tools_approval_with_both_valid_and_invalid_tool_calls(
         self,
         component: ToolsApprovalComponent,
         graph_config,
         graph_input: WorkflowState,
-        mock_tool,
         mock_toolset,
         mock_check_executor,
     ):

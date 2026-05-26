@@ -488,7 +488,7 @@ def disable_streaming_fixture():
 
 @pytest.fixture(name="registry")
 def registry_fixture(
-    mock_fs: None,  # pylint: disable=unused-argument
+    mock_fs: None,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     model_factories: dict[ModelClassProvider, TypeModelFactory],
     internal_event_client: Mock,
     model_limits: ConfigModelLimits,

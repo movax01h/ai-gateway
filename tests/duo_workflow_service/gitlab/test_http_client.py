@@ -1,4 +1,4 @@
-# pylint: disable=line-too-long,unused-argument
+# pylint: disable=line-too-long
 from typing import Any, Optional
 from unittest.mock import AsyncMock
 
@@ -193,7 +193,7 @@ async def test_gitlab_http_client_with_object_hook(client):
     }
 
     # Configure the mock to actually apply the object_hook to the returned data
-    def side_effect(path, method, parse_json, data, params, object_hook):
+    def side_effect(_path, _method, _parse_json, _data, _params, object_hook):
         if object_hook:
             return object_hook(checkpoint_json)
         return checkpoint_json

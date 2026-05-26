@@ -1,4 +1,10 @@
-# pylint: disable=file-naming-for-tests, unused-argument, redefined-outer-name
+# Kept unused-argument because most tests in this file take a large set
+# of patch-based mock fixtures (mock_agent, mock_handover_agent, ...)
+# purely for their side effects (patching globals), and converting each
+# call site to @pytest.mark.usefixtures would balloon the diff without
+# changing behaviour. Future cleanup can hoist the shared set to a
+# class-level usefixtures decorator.
+# pylint: disable=file-naming-for-tests, redefined-outer-name, unused-argument
 import asyncio
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch

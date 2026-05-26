@@ -1,4 +1,4 @@
-# pylint: disable=unused-argument,file-naming-for-tests
+# pylint: disable=file-naming-for-tests
 from typing import Optional
 from unittest.mock import Mock
 
@@ -119,10 +119,10 @@ class TestEditorContentCompletionStream:
 
 
 class TestEditorContentGenerationStream:
+    @pytest.mark.usefixtures("mock_generations_stream")
     def test_successful_stream_response(
         self,
         mock_client: TestClient,
-        mock_generations_stream: Mock,
         mock_suggestions_output_text: str,
         route: str,
     ):
@@ -279,11 +279,11 @@ class TestAmazonQIntegrationV3:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_suggestions_output_text")
     def test_code_generation_successful_response(
         self,
         mock_client: TestClient,
         mock_generations: Mock,
-        mock_suggestions_output_text: str,
         role_arn: str,
         model_metadata: Optional[TypeModelMetadata],
         expected_response: dict,
@@ -420,11 +420,10 @@ class TestAmazonQIntegrationV3:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_completions", "mock_suggestions_output_text")
     def test_code_completion_successful_response(
         self,
         mock_client: TestClient,
-        mock_completions: Mock,
-        mock_suggestions_output_text: str,
         role_arn: str,
         model_metadata: Optional[TypeModelMetadata],
         expected_response: dict,
@@ -548,11 +547,10 @@ class TestCodeSuggestionTypeLogged:
             "code_editor_generation",
         ],
     )
+    @pytest.mark.usefixtures("mock_completions", "mock_generations")
     def test_code_suggestion_type_in_access_log(
         self,
         mock_client: TestClient,
-        mock_completions: Mock,
-        mock_generations: Mock,
         component_type: str,
         route: str,
     ):

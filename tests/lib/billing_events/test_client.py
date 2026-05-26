@@ -351,8 +351,9 @@ class TestBillingEventsClient:
             except Exception as e:
                 pytest.fail(f"Failed to send billing event: {e}")
 
+    @pytest.mark.usefixtures("mock_dependencies")
     def test_internal_events_client_track_event_called_with_correct_parameters(
-        self, client, user, mock_dependencies  # pylint: disable=unused-argument
+        self, client, user
     ):
         """Test that internal_events_client.track_event is called with correct parameters."""
         event = BillingEvent.AIGW_PROXY_USE

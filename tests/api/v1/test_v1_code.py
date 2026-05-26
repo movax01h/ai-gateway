@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -65,7 +65,7 @@ def fast_api_router_fixture():
 
 
 @pytest.fixture(name="auth_user")
-def auth_user_fixture(request):
+def auth_user_fixture():
     claims = UserClaims(
         scopes=["complete_code", "ai_gateway_model_provider_proxy"],
         gitlab_realm="self-managed",
@@ -286,9 +286,8 @@ class TestBothPermissions:
         )
         return CloudConnectorUser(authenticated=True, claims=claims)
 
-    def test_user_access_token_with_both_permissions(
-        self, mock_client: TestClient, mock_track_internal_event
-    ):
+    @pytest.mark.usefixtures("mock_track_internal_event")
+    def test_user_access_token_with_both_permissions(self, mock_client: TestClient):
         headers = {
             "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
             "Authorization": "Bearer 12345",

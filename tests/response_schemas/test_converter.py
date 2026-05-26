@@ -337,8 +337,11 @@ class TestConverter:
             (RECURSION_LIMIT + 10, False, "far_exceeds_limit"),
         ],
     )
-    def test_schema_depth_limits(  # pylint: disable=unused-argument
-        self, depth, should_succeed, test_id
+    def test_schema_depth_limits(
+        self,
+        depth,
+        should_succeed,
+        test_id,  # pylint: disable=unused-argument  # parametrize value
     ):
         """Test that schema recursion limits prevent DoS while allowing legitimate nesting."""
 

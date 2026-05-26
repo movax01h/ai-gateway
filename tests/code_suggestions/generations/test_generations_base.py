@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, List
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
@@ -215,7 +215,7 @@ class TestCodeGeneration:
         model_chunks: list[TextGenModelChunk],
         expected_chunks: list[str],
     ):
-        async def _stream_generator(
+        async def _stream_generator(  # pylint: disable=unused-argument  # model.generate() signature
             prefix: str, suffix: str, stream: bool
         ) -> AsyncIterator[TextGenModelChunk]:
             for chunk in model_chunks:
@@ -284,7 +284,7 @@ class TestCodeGeneration:
         use_case: CodeGenerations,
         model_chunks: list[TextGenModelChunk],
     ):
-        async def _stream_generator(
+        async def _stream_generator(  # pylint: disable=unused-argument  # model.generate() signature
             prefix: str, suffix: str, stream: bool
         ) -> AsyncIterator[TextGenModelChunk]:
             for chunk in model_chunks:
@@ -409,7 +409,7 @@ class TestCodeGeneration:
     ):
         """Test generation with AmazonQModel with various input combinations."""
 
-        async def _stream_generator(
+        async def _stream_generator(  # pylint: disable=unused-argument  # model.generate() signature
             prefix: str,
             suffix: str,
             file_name: str,

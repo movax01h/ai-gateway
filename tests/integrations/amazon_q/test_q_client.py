@@ -41,8 +41,8 @@ class TestAmazonQClientFactory:
             yield mock_boto3
 
     @pytest.fixture(name="amazon_q_client_factory")
-    def amazon_q_client_factory_fixture(
-        self, mock_glgo_authority, mock_boto3  # pylint: disable=unused-argument
+    def amazon_q_client_factory_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
+        self, mock_glgo_authority, mock_boto3
     ):
         return AmazonQClientFactory(
             glgo_authority=mock_glgo_authority,
@@ -241,8 +241,8 @@ class TestAmazonQClient:
             yield mock_client.return_value
 
     @pytest.fixture(name="q_client")
-    def q_client_fixture(
-        self, mock_credentials, mock_q_client  # pylint: disable=unused-argument
+    def q_client_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
+        self, mock_credentials, mock_q_client
     ):
         return AmazonQClient(
             url="https://q-api.example.com",

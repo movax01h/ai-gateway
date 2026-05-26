@@ -1,4 +1,4 @@
-# pylint: disable=dangerous-default-value,direct-environment-variable-reference,file-naming-for-tests,unused-variable,unused-argument
+# pylint: disable=dangerous-default-value,direct-environment-variable-reference,file-naming-for-tests,unused-variable
 import os
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,7 +35,7 @@ class HumanApprovalComponentTestProxy(HumanApprovalComponent):
 
 
 class HumanApprovalComponentReturnToTheAgentTestProxy(HumanApprovalComponentTestProxy):
-    def _build_approval_request(self, state):
+    def _build_approval_request(self, _state):
         return result.Error(RuntimeError("Error building approval request"))
 
 

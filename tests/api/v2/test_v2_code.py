@@ -1,4 +1,4 @@
-# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments,unused-variable,unused-argument
+# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments,unused-variable
 
 import time
 from typing import Any, Dict, List, Union
@@ -315,12 +315,12 @@ class TestCodeCompletions:
             **code_completions_kwargs,
         )
 
+    @pytest.mark.usefixtures("mock_completions")
     @pytest.mark.parametrize("prompt_version", [1])
     def test_request_latency(
         self,
         prompt_version: int,
         mock_client: TestClient,
-        mock_completions: Mock,
     ):
         current_file = {
             "file_name": "main.py",
@@ -799,6 +799,7 @@ class TestCodeCompletions:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_config")
     def test_non_stream_response(
         self,
         mock_client,
@@ -806,7 +807,6 @@ class TestCodeCompletions:
         mock_agent_model: Mock,
         mock_amazon_q_model: Mock,
         mock_track_internal_event: Mock,
-        mock_config,
         prompt_version,
         prompt,
         context,
@@ -1021,12 +1021,11 @@ class TestCodeCompletions:
             )
         ],
     )
+    @pytest.mark.usefixtures("mock_completions", "auth_user")
     def test_snowplow_tracking(
         self,
         mock_client: TestClient,
         mock_ai_gateway_container: containers.Container,
-        mock_completions: Mock,
-        auth_user: CloudConnectorUser,
         telemetry: List[Dict[str, Union[str, int, None]]],
         current_file: Dict[str, str],
         expected_language: str,
@@ -1123,11 +1122,10 @@ class TestCodeCompletions:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_completions", "auth_user")
     def test_successful_response_with_correct_issuers(
         self,
         mock_client: TestClient,
-        mock_completions: Mock,
-        auth_user: CloudConnectorUser,
         extra_headers: Dict[str, str],
         expected_status_code: int,
     ):
@@ -1265,11 +1263,11 @@ class TestCodeCompletions:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_post_processor")
     def test_gitlab_model_provider_code_completions(
         self,
         mock_client: Mock,
         mock_prompt_ainvoke: Mock,
-        mock_post_processor: Mock,
         gitlab_model_identifier: str,
         expected_model_name: str,
         expected_model_engine: str,
@@ -1382,14 +1380,17 @@ class TestCodeCompletions:
             ),
         ],
     )
+    @pytest.mark.usefixtures(
+        "mock_litellm_acompletion", "mock_litellm_atext_completion"
+    )
     def test_code_completion_in_asia(
         self,
         mock_client: Mock,
-        mock_litellm_acompletion: Mock,
-        mock_litellm_atext_completion: Mock,
         model_details: Dict[str, str],
-        expected_model: str,
-        expected_content: str,
+        # pylint: disable-next=unused-argument
+        expected_model: str,  # parametrize-injected; not referenced in test body
+        # pylint: disable-next=unused-argument
+        expected_content: str,  # parametrize-injected; not referenced in test body
         mock_prompt_ainvoke: Mock,
     ):
         params = {
@@ -1576,7 +1577,7 @@ class TestGitLabModelProvider:
             engine=expected_engine, name=expected_model_name
         )
 
-        def _mock_build_side_effect(*args, **kwargs):
+        def _mock_build_side_effect(*args, **_kwargs):
             internal_event_client = args[6]
 
             _track_code_suggestions_event(
@@ -1639,9 +1640,8 @@ class TestGitLabModelProvider:
             assert body["model"]["name"] == expected_model_name
             assert body["choices"][0]["text"] == "test completion"
 
-    def test_gitlab_model_provider_without_model_name(
-        self, mock_client, mock_track_internal_event: Mock
-    ):
+    @pytest.mark.usefixtures("mock_track_internal_event")
+    def test_gitlab_model_provider_without_model_name(self, mock_client):
         """Test that v2/completions works with 'gitlab' as the model_provider when no model name is provided."""
 
         test_model = ChatLiteLLMDefinition(
@@ -1704,9 +1704,8 @@ class TestGitLabModelProvider:
             assert body["model"]["name"] == "codestral-2508"
             assert body["choices"][0]["text"] == "test completion"
 
-    def test_gitlab_model_provider_with_invalid_model_name(
-        self, mock_client, mock_track_internal_event: Mock
-    ):
+    @pytest.mark.usefixtures("mock_track_internal_event")
+    def test_gitlab_model_provider_with_invalid_model_name(self, mock_client):
         """Test that v2/completions works with 'gitlab' as the model_provider when an invalid model name is provided."""
 
         test_model = ChatLiteLLMDefinition(
@@ -1768,11 +1767,11 @@ class TestGitLabModelProvider:
 
             assert (body["detail"]) == expected_error_message
 
+    @pytest.mark.usefixtures("mock_track_internal_event")
     @pytest.mark.parametrize("mock_model_responses", [True])
     def test_gitlab_model_provider_preserves_gitlab_identifier(
         self,
         mock_client,
-        mock_track_internal_event: Mock,
     ):
         """Test that gitlab_identifier is preserved when model_provider is gitlab."""
 
@@ -2478,10 +2477,10 @@ class TestAmazonQIntegration:
             ),
         ],
     )
+    @pytest.mark.usefixtures("auth_user")
     def test_failed_authorization_scope(
         self,
         mock_client,
-        auth_user,
         model_provider,
         model_name,
     ):

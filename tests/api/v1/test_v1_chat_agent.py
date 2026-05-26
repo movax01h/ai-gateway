@@ -1,4 +1,4 @@
-# pylint: disable=import-outside-toplevel,file-naming-for-tests,unused-argument
+# pylint: disable=import-outside-toplevel,file-naming-for-tests
 from unittest.mock import Mock, patch
 
 import pytest
@@ -97,7 +97,7 @@ def default_headers_fixture():
 
 @pytest.fixture(name="mock_create_event_stream")
 def mock_create_event_stream_fixture():
-    async def _dummy_create_event_stream(*args, **kwargs):
+    async def _dummy_create_event_stream(*_args, **_kwargs):
 
         async def _dummy_stream_events():
             if hasattr(mock_create_event_stream_mock, "stream_return_values"):

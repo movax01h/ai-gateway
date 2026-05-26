@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 """Test suite for v1 ToolApprovalRequestNode class."""
 
 from unittest.mock import Mock, patch
@@ -201,12 +200,12 @@ class TestToolApprovalRequestNodeInvalidCalls:
     """Test suite for invalid tool call handling."""
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("conversation_history_key")
     async def test_invalid_tool_calls_returns_error_messages(
         self,
         tool_approval_request_node,
         base_flow_state,
         component_name,
-        conversation_history_key,
         mock_toolset,
     ):
         """Test that invalid tool calls return error ToolMessages."""
@@ -246,12 +245,12 @@ class TestToolApprovalRequestNodeInvalidCalls:
         assert result["status"] == WorkflowStatusEnum.EXECUTION.value
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("conversation_history_key")
     async def test_mixed_valid_invalid_rejects_entire_batch(
         self,
         tool_approval_request_node,
         base_flow_state,
         component_name,
-        conversation_history_key,
         mock_toolset,
     ):
         """Test that when any call is invalid, the entire batch is rejected.
@@ -296,12 +295,12 @@ class TestToolApprovalRequestNodeNoToolCalls:
     """Test suite for no tool calls handling."""
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("conversation_history_key")
     async def test_no_tool_calls_returns_error_human_message(
         self,
         tool_approval_request_node,
         base_flow_state,
         component_name,
-        conversation_history_key,
     ):
         """Test that AIMessage without tool calls returns error HumanMessage."""
         mock_message = Mock(spec=AIMessage)
@@ -326,12 +325,12 @@ class TestToolApprovalRequestNodeNoToolCalls:
         assert result["status"] == WorkflowStatusEnum.EXECUTION.value
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("conversation_history_key")
     async def test_non_ai_message_returns_error(
         self,
         tool_approval_request_node,
         base_flow_state,
         component_name,
-        conversation_history_key,
     ):
         """Test that non-AIMessage returns error HumanMessage."""
         mock_message = Mock(spec=HumanMessage)

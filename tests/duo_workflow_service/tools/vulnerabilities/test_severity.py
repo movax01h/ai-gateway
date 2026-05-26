@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, Mock
 
@@ -109,9 +108,8 @@ async def assert_tool_url_error(
 
 
 @pytest.mark.asyncio
-async def test_update_vulnerability_severity_arun(
-    gitlab_client_mock, metadata, vulnerability_data
-):
+@pytest.mark.usefixtures("vulnerability_data")
+async def test_update_vulnerability_severity_arun(gitlab_client_mock, metadata):
     gitlab_client_mock.apost = AsyncMock(
         return_value={
             "data": {

@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,line-too-long,too-many-lines,unused-argument
+# pylint: disable=file-naming-for-tests,line-too-long,too-many-lines
 import json
 from datetime import datetime
 from typing import AsyncIterator, Type
@@ -55,7 +55,7 @@ def auth_user_fixture():
 
 @pytest.fixture(name="mock_create_event_stream")
 def mock_create_event_stream_fixture():
-    async def _dummy_create_event_stream(*args, **kwargs):
+    async def _dummy_create_event_stream(*_args, **kwargs):
         react_inputs = ReActAgentInputs(
             messages=(
                 kwargs.get("agent_request").messages
@@ -302,11 +302,10 @@ class TestReActAgentStream:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_model", "mocked_tools")
     async def test_success(
         self,
         mock_client: TestClient,
-        mock_model: Mock,
-        mocked_tools: Mock,
         mock_create_event_stream: Mock,
         agent_request: AgentRequest,
         model_metadata: TypeModelMetadata,
@@ -768,12 +767,11 @@ class TestReActAgentStream:
             ),
         ],
     )
+    @pytest.mark.usefixtures("auth_user", "mock_model")
     async def test_authorization(
         self,
-        auth_user: CloudConnectorUser,
         agent_request: AgentRequest,
         mock_client: TestClient,
-        mock_model: Mock,
         expected_status_code: int,
         expected_error: str,
         expected_internal_events,
@@ -980,18 +978,16 @@ class TestReActAgentStream:
             ),
         ],
     )
+    @pytest.mark.usefixtures("auth_user", "mock_model", "config_values")
     async def test_authorization_with_duo_core_cutoff(
         self,
-        auth_user: CloudConnectorUser,
         agent_request: AgentRequest,
         mock_client: TestClient,
-        mock_model: Mock,
         expected_status_code: int,
         expected_error: str,
         expected_internal_events,
         mock_track_internal_event: Mock,
         model_metadata,
-        config_values,
         feature_enablement_type: str,
     ):
         json_params = agent_request.model_dump(mode="json")
@@ -1075,11 +1071,10 @@ class TestChatAgent:
             ),
         ],
     )
+    @pytest.mark.usefixtures("mock_model", "mocked_tools")
     async def test_request(
         self,
         mock_client: TestClient,
-        mock_model: Mock,
-        mocked_tools: Mock,
         mock_track_internal_event,
         messages: list[Message],
         expected_actions: list[TypeAgentEvent],

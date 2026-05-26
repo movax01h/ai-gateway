@@ -1,4 +1,4 @@
-# pylint: disable=unused-variable,direct-environment-variable-reference,unused-argument
+# pylint: disable=unused-variable,direct-environment-variable-reference
 import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -28,12 +28,16 @@ from lib.langsmith_tracing import set_langsmith_trace_headers
 
 # Concrete implementation for testing
 class MockGraph:
-    async def astream(self, input, config, stream_mode):
+    async def astream(  # pylint: disable=unused-argument  # astream() signature
+        self, input, config, stream_mode
+    ):
         yield "updates", {"step1": {"key": "value"}}
 
 
 class MockGraphWithUiChatLog:
-    async def astream(self, input, config, stream_mode):
+    async def astream(  # pylint: disable=unused-argument  # astream() signature
+        self, input, config, stream_mode
+    ):
         yield "values", {
             "status": WorkflowStatusEnum.COMPLETED,
             "ui_chat_log": [
@@ -59,7 +63,9 @@ class MockWorkflow(AbstractWorkflow):
 
 
 @pytest.fixture(autouse=True)
-def prepare_container(mock_duo_workflow_service_container):
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
     pass
 
 
@@ -273,15 +279,14 @@ async def test_compile_and_run_graph(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -310,15 +315,14 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_skips_merge_when_no_jwt_pre_approved_tools(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -343,15 +347,14 @@ async def test_compile_and_run_graph_skips_merge_when_no_jwt_pre_approved_tools(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_invalid_json(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -376,15 +379,14 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_invalid
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_merges_with_existing_preapproved_tools(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -412,15 +414,14 @@ async def test_compile_and_run_graph_merges_with_existing_preapproved_tools(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_empty_json_array(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -446,15 +447,14 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_empty_j
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_skips_merge_when_claims_is_none(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -540,7 +540,7 @@ def test_track_internal_event(workflow, internal_event_client: Mock):
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_with_exception(
     mock_tools_registry,
-    mock_gitlab_workflow,
+    _mock_gitlab_workflow,
     mock_fetch_workflow_and_container_data,
     workflow,
 ):
@@ -665,7 +665,7 @@ async def test_namespace_level_workflow(
 @patch("duo_workflow_service.workflows.abstract_workflow.tracing_context")
 @patch.object(MockWorkflow, "_compile_and_run_graph")
 async def test_tracing_enabled_based_on_env_and_extended_logging(
-    mock_compile_and_run_graph,
+    _mock_compile_and_run_graph,
     mock_tracing_context,
     env_var_value,
     extended_logging,
@@ -710,7 +710,7 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
 @patch("duo_workflow_service.workflows.abstract_workflow.tracing_context")
 @patch.object(MockWorkflow, "_compile_and_run_graph")
 async def test_tracing_context_with_parent_trace_headers(
-    mock_compile_and_run_graph,
+    _mock_compile_and_run_graph,
     mock_tracing_context,
     user,
     langsmith_trace_headers,
@@ -759,7 +759,9 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
     """Test that _compile_and_run_graph records time to first response when graph is updated."""
 
     class MockGraphWithMessages:
-        async def astream(self, input, config, stream_mode):
+        async def astream(  # pylint: disable=unused-argument  # astream() signature
+            self, input, config, stream_mode
+        ):
             yield "updates", {"step1": {"key": "value"}}
             yield "values", {"status": "running", "ui_chat_log": []}
             yield "messages", {"message": "second message"}
@@ -827,7 +829,9 @@ async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
     """Test that _compile_and_run_graph returns None when ui_chat_log is empty."""
 
     class MockGraphWithEmptyUiChatLog:
-        async def astream(self, input, config, stream_mode):
+        async def astream(  # pylint: disable=unused-argument  # astream() signature
+            self, input, config, stream_mode
+        ):
             yield "values", {"status": WorkflowStatusEnum.COMPLETED, "ui_chat_log": []}
 
     mock_tools_registry.return_value = MagicMock()
@@ -868,7 +872,9 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
     original_error = RuntimeError("Original error details")
 
     class MockGraphWithNotifiableException:
-        async def astream(self, input, config, stream_mode):
+        async def astream(  # pylint: disable=unused-argument  # astream() signature
+            self, input, config, stream_mode
+        ):
             yield "updates", {"step1": {"key": "value"}}
             raise NotifiableException(
                 "Custom error message for user"
@@ -918,15 +924,14 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_parses_tool_access_policies_object_format(
     mock_tools_registry,
     mock_gitlab_workflow,
-    mock_convert_mcp_tools,
-    mock_fetch_workflow_and_container_data,
-    project,
+    _mock_convert_mcp_tools,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -955,7 +960,7 @@ class TestInitAuditEvents:
     @patch("duo_workflow_service.workflows.abstract_workflow.AuditEventClient")
     @patch("duo_workflow_service.workflows.abstract_workflow.AuditEventCollector")
     async def test_does_not_pass_ip_address_to_collector(
-        self, mock_collector_cls, mock_client_cls, user
+        self, mock_collector_cls, _mock_client_cls, user
     ):
         mock_collector = MagicMock()
         mock_collector.start = AsyncMock()

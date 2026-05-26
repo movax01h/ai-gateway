@@ -608,7 +608,7 @@ class TestAgentComponentAttachNodes:
             # Custom values
         ],
     )
-    # pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def test_attach_creates_nodes_with_correct_parameters(
         self,
         mock_final_response_node_cls,
@@ -628,7 +628,7 @@ class TestAgentComponentAttachNodes:
         prompt_id,
         prompt_version,
         ui_log_events,
-        ui_role_as,
+        ui_role_as,  # pylint: disable=unused-argument  # parametrize value
     ):
         """Test that nodes are created with correct parameters."""
         agent_component.attach(mock_state_graph, mock_router)
@@ -691,20 +691,18 @@ class TestAgentComponentAttachNodes:
         assert final_call_kwargs["ui_history"].events == ui_log_events
 
 
+@pytest.mark.usefixtures(
+    "mock_agent_node_cls", "mock_tool_node_cls", "mock_final_response_node_cls"
+)
 class TestAgentComponentAttachEdges:
     """Test suite for AgentComponent routing behavior through graph execution."""
 
-    # pylint: disable=unused-argument
     def test_routing_with_custom_schema_tool_call_goes_to_final_response(
         self,
-        request,
         mock_state_graph,
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         mock_custom_schema_tool_call,
         agent_component_with_custom_schema,
     ):
@@ -728,7 +726,6 @@ class TestAgentComponentAttachEdges:
         result = router_function(state_with_final_tool)
         assert result == f"{component_name}#final_response"
 
-    # pylint: disable=unused-argument
     @pytest.mark.parametrize(
         "component_fixture",
         ["agent_component", "agent_component_with_custom_schema"],
@@ -742,9 +739,6 @@ class TestAgentComponentAttachEdges:
         base_flow_state,
         component_name,
         mock_other_tool_call,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         component_fixture,
     ):
         """Test that non-final tool calls route to tools node."""
@@ -769,7 +763,6 @@ class TestAgentComponentAttachEdges:
         result = router_function(state_with_other_tool)
         assert result == f"{component_name}#tools"
 
-    # pylint: disable=unused-argument
     def test_routing_with_mixed_tool_calls_prioritizes_final_response(
         self,
         mock_state_graph,
@@ -778,9 +771,6 @@ class TestAgentComponentAttachEdges:
         component_name,
         mock_other_tool_call,
         mock_custom_schema_tool_call,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         agent_component_with_custom_schema,
     ):
         """Test that mixed tool calls prioritize final response routing (custom schema)."""
@@ -803,7 +793,6 @@ class TestAgentComponentAttachEdges:
         result = router_function(state_with_mixed_tools)
         assert result == f"{component_name}#final_response"
 
-    # pylint: disable=unused-argument
     def test_routing_with_without_conversation_history(
         self,
         agent_component,
@@ -813,9 +802,6 @@ class TestAgentComponentAttachEdges:
         component_name,
         mock_final_tool_call,
         mock_other_tool_call,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that mixed tool calls prioritize final response routing."""
         # Create state with mixed tool calls
@@ -841,7 +827,6 @@ class TestAgentComponentAttachEdges:
         ):
             router_function(base_flow_state)
 
-    # pylint: disable=unused-argument
     def test_routing_with_non_ai_message_raises_error(
         self,
         agent_component,
@@ -849,9 +834,6 @@ class TestAgentComponentAttachEdges:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that non-AIMessage raises RoutingError."""
         # Create state with non-AIMessage
@@ -878,7 +860,6 @@ class TestAgentComponentAttachEdges:
         ):
             router_function(state_with_non_ai_message)
 
-    # pylint: disable=unused-argument
     def test_routing_with_no_tool_calls_goes_to_final_response(
         self,
         agent_component,
@@ -886,9 +867,6 @@ class TestAgentComponentAttachEdges:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that messages with no tool calls route to final_response."""
         # Create state with AIMessage but no tool calls
@@ -1207,6 +1185,9 @@ class TestAgentComponentBindToSupervisor:
         assert component.outputs == ()
 
 
+@pytest.mark.usefixtures(
+    "mock_agent_node_cls", "mock_tool_node_cls", "mock_final_response_node_cls"
+)
 class TestAgentComponentToolApprovalRouter:
     """Test suite for tool approval fetch router."""
 
@@ -1239,7 +1220,6 @@ class TestAgentComponentToolApprovalRouter:
             pre_approved_tools=[],
         )
 
-    # pylint: disable=unused-argument
     def test_tool_approval_fetch_router_with_tool_message_routes_to_agent(
         self,
         agent_component_with_tool_approval,
@@ -1247,9 +1227,6 @@ class TestAgentComponentToolApprovalRouter:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that ToolMessage after approval fetch routes to agent (REJECT case)."""
         # Create state with ToolMessage (rejection)
@@ -1281,7 +1258,6 @@ class TestAgentComponentToolApprovalRouter:
         result = router_function(state_with_tool_message)
         assert result == f"{component_name}#agent"
 
-    # pylint: disable=unused-argument
     def test_tool_approval_fetch_router_with_human_message_routes_to_agent(
         self,
         agent_component_with_tool_approval,
@@ -1289,9 +1265,6 @@ class TestAgentComponentToolApprovalRouter:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that HumanMessage after approval fetch routes to agent (MODIFY case)."""
         # Create state with HumanMessage (rejection with feedback)
@@ -1322,7 +1295,6 @@ class TestAgentComponentToolApprovalRouter:
         result = router_function(state_with_human_message)
         assert result == f"{component_name}#agent"
 
-    # pylint: disable=unused-argument
     def test_tool_approval_fetch_router_with_ai_message_routes_to_tools(
         self,
         agent_component_with_tool_approval,
@@ -1330,9 +1302,6 @@ class TestAgentComponentToolApprovalRouter:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
         mock_other_tool_call,
     ):
         """Test that AIMessage with tool_calls after approval routes to tools (APPROVE case)."""
@@ -1364,7 +1333,6 @@ class TestAgentComponentToolApprovalRouter:
         result = router_function(state_with_ai_message)
         assert result == f"{component_name}#tools"
 
-    # pylint: disable=unused-argument
     def test_tool_approval_fetch_router_with_empty_history_raises_error(
         self,
         agent_component_with_tool_approval,
@@ -1372,9 +1340,6 @@ class TestAgentComponentToolApprovalRouter:
         mock_router,
         base_flow_state,
         component_name,
-        mock_agent_node_cls,
-        mock_tool_node_cls,
-        mock_final_response_node_cls,
     ):
         """Test that empty conversation history raises RoutingError."""
         state_with_empty_history = base_flow_state.copy()

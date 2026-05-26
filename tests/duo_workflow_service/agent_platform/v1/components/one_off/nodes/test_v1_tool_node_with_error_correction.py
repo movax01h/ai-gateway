@@ -1,6 +1,6 @@
 """Test suite for ToolNodeWithErrorCorrection class."""
 
-# pylint: disable=unused-argument,file-naming-for-tests,import-outside-toplevel
+# pylint: disable=file-naming-for-tests,import-outside-toplevel
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -110,7 +110,7 @@ def conversation_history_key_fixture(component_name):
 
 
 @pytest.fixture(name="tool_node_with_error_correction")
-def tool_node_with_error_correction_fixture(
+def tool_node_with_error_correction_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
     component_name,
     mock_toolset,
     flow_id,
@@ -489,6 +489,9 @@ class TestToolNodeWithErrorCorrectionRun:
         assert ATTEMPTS_REMAINING_SENTINEL in conversation_messages[1].content
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_tool_monitoring", "mock_prompt_security", "mock_logger"
+    )
     async def test_run_no_tool_calls_reasoning_log_included_in_result(
         self,
         component_name,
@@ -501,9 +504,6 @@ class TestToolNodeWithErrorCorrectionRun:
         execution_result_key,
         conversation_history_key,
         base_flow_state,
-        mock_tool_monitoring,
-        mock_prompt_security,
-        mock_logger,
     ):
         """Test that ON_AGENT_REASONING log is included in the result when no tool calls."""
         ui_history = UIHistory(
@@ -868,13 +868,12 @@ class TestToolNodeWithErrorCorrectionContextTracking:
         assert result["context"][component_name]["correction_attempts"] == 3
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool", "mock_prompt_security")
     async def test_run_success_does_not_update_correction_attempts(
         self,
         tool_node_with_error_correction,
         flow_state_with_tool_calls_one_off,
         component_name,
-        mock_tool,
-        mock_prompt_security,
     ):
         """Test successful run does not update correction_attempts in context."""
         result = await tool_node_with_error_correction.run(

@@ -1,4 +1,4 @@
-# pylint: disable=import-outside-toplevel,unused-argument
+# pylint: disable=import-outside-toplevel
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -90,7 +90,8 @@ def mock_model_config_fixture():
         yield mock_configs
 
 
-def test_get_models_returns_correct_data(mock_model_config, client):
+@pytest.mark.usefixtures("mock_model_config")
+def test_get_models_returns_correct_data(client):
     response = client.get("/definitions")
 
     assert response.status_code == 200

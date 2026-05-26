@@ -1,4 +1,4 @@
-# pylint: disable=line-too-long,unused-argument
+# pylint: disable=line-too-long
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -142,7 +142,7 @@ def ui_history_fixture():
 
 
 @pytest.fixture(name="deterministic_step_node")
-def deterministic_step_node_fixture(
+def deterministic_step_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
     inputs,
     mock_tool,
     flow_id,

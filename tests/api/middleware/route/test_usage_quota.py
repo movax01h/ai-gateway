@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -61,7 +60,7 @@ class TestDecoratorBasics:
     ):
         """Test that decorator allows request when quota check passes."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -86,7 +85,7 @@ class TestDecoratorBasics:
 
         mock_request.user = mock_user_with_skip_usage_cutoff
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -107,7 +106,7 @@ class TestDecoratorBasics:
     ):
         """Test that decorator returns 402 when quota is exhausted."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -129,7 +128,7 @@ class TestDecoratorBasics:
     ):
         """Test that 402 response has correct JSON format."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -154,7 +153,7 @@ class TestDecoratorBasics:
     ):
         """Test that UsageQuotaCheckUnavailable results in a 403 fail-close response."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -179,7 +178,7 @@ class TestDecoratorBasics:
     ):
         """Test that InsufficientEntitlements results in a 403 not-entitled response."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -206,7 +205,7 @@ class TestEventTypeResolution:
     async def test_uses_static_event_type(self, mock_request, mock_usage_quota_service):
         """Test that decorator uses static EventType when provided."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -228,10 +227,10 @@ class TestEventTypeResolution:
     ):
         """Test that decorator uses callable resolver when provided."""
 
-        async def resolve_event_type(payload):
+        async def resolve_event_type(_payload):
             return UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS
 
-        async def test_handler(request, *args, payload=None, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -257,10 +256,10 @@ class TestEventTypeResolution:
     ):
         """Test that resolver errors are caught and None is returned."""
 
-        async def failing_resolver(payload):
+        async def failing_resolver(_payload):
             raise ValueError("Resolver error")
 
-        async def test_handler(request, *args, payload=None, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -289,7 +288,7 @@ class TestFeatureQualifiedName:
     ):
         """Test that feature_qualified_name is passed to service."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         feature_name = FeatureQualifiedNameStatic.CODE_SUGGESTIONS
@@ -317,7 +316,7 @@ class TestErrorHandling:
     ):
         """Test that decorator allows request when unexpected error occurs (fail-open)."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -339,7 +338,7 @@ class TestErrorHandling:
     ):
         """Test that decorated handler receives all arguments correctly."""
 
-        async def test_handler(request, arg1, arg2, kwarg1=None, **kwargs):
+        async def test_handler(_request, arg1, arg2, kwarg1=None, **_kwargs):
             return JSONResponse(
                 {
                     "arg1": arg1,
@@ -374,7 +373,7 @@ class TestEventTypeEnum:
     ):
         """Test decorator with CODE_COMPLETIONS event type."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -396,7 +395,7 @@ class TestEventTypeEnum:
     ):
         """Test decorator with CODE_GENERATIONS event type."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -418,7 +417,7 @@ class TestEventTypeEnum:
     ):
         """Test decorator with AMAZON_Q_INTEGRATION event type."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -444,7 +443,7 @@ class TestModelNameParameter:
     ):
         """Test that model_name is passed to service as ModelMetadata."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -469,7 +468,7 @@ class TestModelNameParameter:
     ):
         """Test that model_metadata is None when model_name is not provided."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(
@@ -492,7 +491,7 @@ class TestModelNameParameter:
     ):
         """Test that model_metadata is None when model_name is explicitly None."""
 
-        async def test_handler(request, *args, **kwargs):
+        async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
 
         decorated = has_sufficient_usage_quota(

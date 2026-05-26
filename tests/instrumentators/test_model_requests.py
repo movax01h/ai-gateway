@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import contextvars
 from unittest import mock
 
@@ -285,7 +284,7 @@ class TestWatchContainer:
         contextvars.copy_context().run(run)
 
     @mock.patch("prometheus_client.Counter.labels")
-    def test_register_token_usage_with_agent_name(self, mock_counters, container):
+    def test_register_token_usage_with_agent_name(self, _mock_counters, container):
         init_token_usage()
         init_llm_operations()
 
@@ -312,7 +311,7 @@ class TestWatchContainer:
 
     @mock.patch("prometheus_client.Counter.labels")
     def test_register_token_usage_with_compaction_billing_fields(
-        self, mock_counters, container
+        self, _mock_counters, container
     ):
         init_token_usage()
         init_llm_operations()

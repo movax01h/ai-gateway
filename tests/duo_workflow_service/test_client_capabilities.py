@@ -20,9 +20,8 @@ def gl_version_unsupported_fixture():
     gitlab_version.set(None)
 
 
-def test_is_client_capable_in_supported_gitlab_version(
-    gl_version_supported,
-):  # pylint: disable=unused-argument
+@pytest.mark.usefixtures("gl_version_supported")
+def test_is_client_capable_in_supported_gitlab_version():
     """Test that is_client_capable returns True only when all capabilities are declared."""
     client_capabilities.set({"feature_a", "feature_b"})
     assert is_client_capable(frozenset({"feature_a"})) is True
@@ -32,9 +31,8 @@ def test_is_client_capable_in_supported_gitlab_version(
     assert is_client_capable(frozenset({"feature_a", "feature_c"})) is False
 
 
-def test_is_client_capable_in_unsupported_gitlab_version(
-    gl_version_unsupported,
-):  # pylint: disable=unused-argument
+@pytest.mark.usefixtures("gl_version_unsupported")
+def test_is_client_capable_in_unsupported_gitlab_version():
     """Test that is_client_capable returns False when the GitLab version is below 18.7.0."""
     client_capabilities.set({"feature_a", "feature_b"})
     assert is_client_capable(frozenset({"feature_a"})) is False

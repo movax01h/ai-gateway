@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -44,8 +43,9 @@ query: type = Issue
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_version_18_6")
 async def test_successful_query_returns_data(
-    glql_tool, mock_gitlab_client, mock_version_18_6, sample_glql_query
+    glql_tool, mock_gitlab_client, sample_glql_query
 ):
     """Test successful GLQL query returns expected data."""
     expected_data = {
@@ -70,8 +70,9 @@ async def test_successful_query_returns_data(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_version_18_6")
 async def test_request_body_contains_glql_yaml(
-    glql_tool, mock_gitlab_client, mock_version_18_6, sample_glql_query
+    glql_tool, mock_gitlab_client, sample_glql_query
 ):
     """Test that the request body correctly includes the GLQL YAML."""
     mock_gitlab_client.apost.return_value = GitLabHttpResponse(
@@ -93,9 +94,8 @@ query: type = Issue
 
 
 @pytest.mark.asyncio
-async def test_api_error_returns_error_response(
-    glql_tool, mock_gitlab_client, mock_version_18_6
-):
+@pytest.mark.usefixtures("mock_version_18_6")
+async def test_api_error_returns_error_response(glql_tool, mock_gitlab_client):
     """Test that API errors raise ToolException."""
     mock_gitlab_client.apost.return_value = GitLabHttpResponse(
         status_code=500, body={"message": "Internal server error"}
@@ -108,9 +108,8 @@ async def test_api_error_returns_error_response(
 
 
 @pytest.mark.asyncio
-async def test_connection_exception_propagates(
-    glql_tool, mock_gitlab_client, mock_version_18_6
-):
+@pytest.mark.usefixtures("mock_version_18_6")
+async def test_connection_exception_propagates(glql_tool, mock_gitlab_client):
     """Test that connection exceptions are raised."""
     mock_gitlab_client.apost.side_effect = Exception("Connection timeout")
 
@@ -182,8 +181,9 @@ async def test_version_check(
         ),
     ],
 )
+@pytest.mark.usefixtures("mock_version_18_6")
 async def test_invalid_query_format_handled_by_api(
-    glql_tool, mock_gitlab_client, mock_version_18_6, invalid_query, api_error_message
+    glql_tool, mock_gitlab_client, invalid_query, api_error_message
 ):
     """Test that invalid query formats are sent to API and API errors raise ToolException."""
     # Mock API returning validation error
@@ -221,8 +221,9 @@ def test_tool_properties():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_version_18_6")
 async def test_pagination_with_after_cursor(
-    glql_tool, mock_gitlab_client, mock_version_18_6, sample_glql_query
+    glql_tool, mock_gitlab_client, sample_glql_query
 ):
     """Test that pagination cursor is correctly passed to API."""
     expected_data = {
@@ -261,8 +262,9 @@ async def test_pagination_with_after_cursor(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_version_18_6")
 async def test_pagination_without_after_cursor(
-    glql_tool, mock_gitlab_client, mock_version_18_6, sample_glql_query
+    glql_tool, mock_gitlab_client, sample_glql_query
 ):
     """Test that request without after parameter doesn't include it in body."""
     expected_data = {

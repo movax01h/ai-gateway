@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,unused-argument
+# pylint: disable=file-naming-for-tests
 import pytest
 from fastapi import HTTPException
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -10,7 +10,7 @@ from ai_gateway.api.v1.proxy.request import authorize_with_unit_primitive_header
 @pytest.mark.asyncio
 async def test_authorize_with_unit_primitive_header_missing_header(mock_request):
     @authorize_with_unit_primitive_header()
-    async def dummy_func(request):
+    async def dummy_func(_request):
         return "Success"
 
     with pytest.raises(HTTPException) as exc_info:
@@ -25,7 +25,7 @@ async def test_authorize_with_unit_primitive_header_unknown(mock_request):
     mock_request.headers[X_GITLAB_UNIT_PRIMITIVE] = "odd_feature"
 
     @authorize_with_unit_primitive_header()
-    async def dummy_func(request):
+    async def dummy_func(_request):
         return "Success"
 
     with pytest.raises(HTTPException) as exc_info:
@@ -40,7 +40,7 @@ async def test_authorize_with_unit_primitive_header_unauthorized(mock_request):
     mock_request.headers[X_GITLAB_UNIT_PRIMITIVE] = GitLabUnitPrimitive.DUO_CHAT
 
     @authorize_with_unit_primitive_header()
-    async def dummy_func(request):
+    async def dummy_func(_request):
         return "Success"
 
     with pytest.raises(HTTPException) as exc_info:
@@ -59,7 +59,7 @@ async def test_authorize_with_unit_primitive_header_authorized(mock_request):
     mock_request.headers[X_GITLAB_UNIT_PRIMITIVE] = GitLabUnitPrimitive.DUO_CHAT
 
     @authorize_with_unit_primitive_header()
-    async def dummy_func(request):
+    async def dummy_func(_request):
         return "Success"
 
     result = await dummy_func(mock_request)

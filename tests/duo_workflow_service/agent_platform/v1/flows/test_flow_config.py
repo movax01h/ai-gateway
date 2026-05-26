@@ -500,9 +500,8 @@ class TestLoadComponentClass:
 
         assert result is mock_component_class
 
-    def test_load_component_class_not_found_raises_error(
-        self, component_registry_instance_type  # pylint: disable=unused-argument
-    ):
+    @pytest.mark.usefixtures("component_registry_instance_type")
+    def test_load_component_class_not_found_raises_error(self):
         """Test loading non-existent component class raises TypeError."""
         with pytest.raises(KeyError):
             load_component_class("NonExistentComponent")

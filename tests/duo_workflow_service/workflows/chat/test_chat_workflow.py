@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg,unused-argument
+# pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg
 import json
 from unittest.mock import ANY, MagicMock, Mock, patch
 from uuid import UUID
@@ -112,7 +112,7 @@ def user_fixture():
 
 
 @pytest.fixture(name="workflow_with_project")
-def workflow_with_project_fixture(
+def workflow_with_project_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     mock_duo_workflow_service_container: containers.Container,
     mock_chat_agent: ChatAgent,
     user: CloudConnectorUser,
@@ -451,11 +451,11 @@ async def test_workflow_run(
     "mock_fetch_workflow_and_container_data",
 )
 async def test_workflow_run_with_agent_name_override(
-    mock_checkpoint_notifier,
-    mock_tools_registry,
+    mock_checkpoint_notifier,  # pylint: disable=unused-argument  # patch-injected dependency
+    mock_tools_registry,  # pylint: disable=unused-argument  # patch-injected dependency
     user,
     workflow_id,
-    workflow_type,
+    workflow_type,  # pylint: disable=unused-argument  # parametrize value
     flow_type,
 ):
     """Test that agent_name_override is passed to create_agent for chat-partial flows."""
@@ -1148,11 +1148,11 @@ async def test_workflow_with_approval_object(flow_type: GLReportingEventContext)
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 @patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 async def test_compile_with_tools_override_and_flow_config(
     mock_state_graph,
     mock_toolset,
     mock_get_tools,
-    mock_duo_workflow_service_container,
     flow_type: GLReportingEventContext,
     mock_checkpointer,
 ):

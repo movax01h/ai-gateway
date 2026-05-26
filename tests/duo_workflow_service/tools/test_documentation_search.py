@@ -1,4 +1,3 @@
-# pylint: disable=unused-argument
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +11,7 @@ from duo_workflow_service.tools.documentation_search import (
 )
 
 
+@pytest.mark.usefixtures("vertex_search_mock", "discoveryengine_client_mock")
 class TestDocumentationSearch:
     @pytest.fixture(name="vertex_search_mock")
     def vertex_search_mock_fixture(self):
@@ -22,11 +22,7 @@ class TestDocumentationSearch:
         return AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_arun_success(
-        self,
-        vertex_search_mock,
-        discoveryengine_client_mock,
-    ):
+    async def test_arun_success(self):
         processed_results = [
             {
                 "id": "1",
@@ -49,12 +45,7 @@ class TestDocumentationSearch:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_gitlab_version")
-    async def test_arun_with_dynamic_gitlab_version(
-        self,
-        vertex_search_mock,
-        discoveryengine_client_mock,
-        gl_version,
-    ):
+    async def test_arun_with_dynamic_gitlab_version(self):
         processed_results = [
             {
                 "id": "1",
@@ -75,11 +66,7 @@ class TestDocumentationSearch:
         assert response == expected_response
 
     @pytest.mark.asyncio
-    async def test_arun_with_exception(
-        self,
-        vertex_search_mock,
-        discoveryengine_client_mock,
-    ):
+    async def test_arun_with_exception(self):
         tool = DocumentationSearch()
         error_msg = "Test error"
         with patch.object(

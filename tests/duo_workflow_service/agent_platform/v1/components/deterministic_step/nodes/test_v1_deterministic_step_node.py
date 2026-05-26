@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,line-too-long,unused-argument
+# pylint: disable=file-naming-for-tests,line-too-long
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -246,6 +246,7 @@ class TestDeterministicStepNode:
         assert additional_props.value == flow_id
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_get_vars_from_state")
     async def test_run_type_error_handling(
         self,
         deterministic_step_node,
@@ -255,7 +256,6 @@ class TestDeterministicStepNode:
         ui_history,
         mock_tool_monitoring,
         flow_type,
-        mock_get_vars_from_state,
     ):
         """Test run handles TypeError during tool execution."""
         # Configure tool to raise TypeError
@@ -294,16 +294,15 @@ class TestDeterministicStepNode:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("ui_history", "mock_get_vars_from_state")
     async def test_run_validation_error_handling(
         self,
         deterministic_step_node,
         workflow_state,
         mock_tool,
         mock_internal_event_client,
-        ui_history,
         mock_tool_monitoring,
         flow_type,
-        mock_get_vars_from_state,
     ):
         """Test run handles ValidationError during tool execution."""
         # Configure tool to raise ValidationError
