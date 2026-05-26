@@ -34,6 +34,12 @@ __all__ = ["AgentNode", "AgentFinalOutput", "AgentStuckError"]
 
 log = structlog.stdlib.get_logger("agent_node")
 
+# LiteLLM injects this placeholder into empty text blocks when formatting messages
+# for the Anthropic API. Filter it out so it never reaches the UI chat log.
+_LITELLM_EMPTY_CONTENT_PLACEHOLDER = (
+    "[System: Empty message content sanitised to satisfy protocol]"
+)
+
 
 class AgentStuckError(Exception):
     """Exception raised when an agent exceeds the maximum number of truncation retries.
@@ -155,6 +161,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     def _extract_text(completion: AIMessage) -> str:
         """Extract plain text from an ``AIMessage``, handling both string and list content.
 
+        LiteLLM placeholder strings (injected when sanitising empty text blocks for
+        the Anthropic API) are filtered out and never included in the returned text.
+
         Args:
             completion: The ``AIMessage`` to extract text from.
 
@@ -163,14 +172,17 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         """
         content = completion.content
         if isinstance(content, str):
-            return content
+            return "" if content == _LITELLM_EMPTY_CONTENT_PLACEHOLDER else content
         if isinstance(content, list):
             parts = []
             for block in content:
                 if isinstance(block, str):
-                    parts.append(block)
+                    if block != _LITELLM_EMPTY_CONTENT_PLACEHOLDER:
+                        parts.append(block)
                 elif isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block.get("text", ""))
+                    text = block.get("text", "")
+                    if text != _LITELLM_EMPTY_CONTENT_PLACEHOLDER:
+                        parts.append(text)
             return "".join(parts)
         return ""
 

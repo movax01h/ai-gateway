@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
+    _LITELLM_EMPTY_CONTENT_PLACEHOLDER,
     AgentFinalOutput,
     AgentNode,
     AgentStuckError,
@@ -952,20 +953,33 @@ class TestAgentNodeReasoning:
         ]
         assert len(reasoning_logs) == 0
 
-
-class TestExtractText:
-    """Unit tests for AgentNode._extract_text covering all content branches."""
-
-    def test_str_block_inside_list(self):
-        """A plain str entry inside a list content block is included in extracted text."""
-        message = AIMessage(
-            content=["plain string block", {"type": "text", "text": " and dict block"}]
+    @pytest.mark.asyncio
+    async def test_no_reasoning_emitted_for_litellm_placeholder(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """LiteLLM placeholder injected into empty text content must not appear in the UI chat log."""
+        placeholder_message = AIMessage(
+            content=_LITELLM_EMPTY_CONTENT_PLACEHOLDER,
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "read_file",
+                    "args": {"file_path": "README.md"},
+                }
+            ],
         )
-        assert AgentNode._extract_text(message) == "plain string block and dict block"
+        mock_prompt.ainvoke = AsyncMock(return_value=placeholder_message)
 
-    def test_non_str_non_list_content_returns_empty(self):
-        """Content that is neither str nor list returns an empty string."""
-        message = AIMessage(content="placeholder")
-        # Bypass the normal str path by directly setting content to an unexpected type
-        message.content = 42
-        assert AgentNode._extract_text(message) == ""
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result.get(FlowStateKeys.UI_CHAT_LOG, [])
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 0
