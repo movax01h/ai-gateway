@@ -266,6 +266,7 @@ configurable_unit_primitives:
       - "claude_opus_4_7"
       - "claude_opus_4_7_vertex"
       - "claude_opus_4_7_bedrock"
+      - "gemini_3_5_flash_vertex"
       - "gpt_5"
       - "gpt_5_codex"
       - "gpt_5_2_codex"
@@ -279,7 +280,6 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
-        - "gemini_3_5_flash_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
@@ -315,6 +315,7 @@ configurable_unit_primitives:
       - "claude_opus_4_7"
       - "claude_opus_4_7_vertex"
       - "claude_opus_4_7_bedrock"
+      - "gemini_3_5_flash_vertex"
       - "gpt_5"
       - "gpt_5_codex"
       - "gpt_5_2_codex"
@@ -328,7 +329,6 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
-        - "gemini_3_5_flash_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
