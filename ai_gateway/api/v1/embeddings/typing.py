@@ -14,6 +14,7 @@ class EmbeddingsRequest(BaseModel):
     model_metadata: ModelMetadata
     contents: list[str]
     dimensions: int | None = None
+    litellm_drop_params: bool | None = None
 
 
 class EmbeddingsResponse(BaseModel):

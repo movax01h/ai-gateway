@@ -82,15 +82,16 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         self,
         contents: list[str],
         dimensions: Optional[int] = None,
+        drop_params: Optional[bool] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        embedding_args: dict[str, Any] = {
-            **self._default_params,
-            "input": contents,
-        }
+        embedding_args: dict[str, Any] = {**self._default_params, "input": contents}
 
         if dimensions:
             embedding_args["dimensions"] = dimensions
+
+        if drop_params:
+            embedding_args["drop_params"] = drop_params
 
         # Override model from default params if it is set in kwargs (bound from model_metadata)
         if model := kwargs.pop("model", None):
@@ -145,10 +146,12 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         """
         contents = input.get("contents", [])
         dimensions = input.get("dimensions", None)
+        drop_params = input.get("drop_params", None)
 
         embedding_args = self._build_embedding_args(
             contents,
             dimensions,
+            drop_params,
             **kwargs,
         )
 

@@ -102,6 +102,32 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["custom_llm_provider"] == "openai"
 
     @pytest.mark.asyncio
+    async def test_async_invoke_with_drop_params(
+        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        result = await model.ainvoke(
+            input={
+                "contents": ["test text 1", "test text 2"],
+                "dimensions": 768,
+                "drop_params": True,
+            }
+        )
+
+        assert isinstance(result, AIMessage)
+        assert result.content == mock_litellm_aembedding_response.data
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["input"] == ["test text 1", "test text 2"]
+        assert call_kwargs["dimensions"] == 768
+        assert call_kwargs["model"] == "test-embedding-model"
+        assert call_kwargs["custom_llm_provider"] == "openai"
+        assert call_kwargs["drop_params"] is True
+
+    @pytest.mark.asyncio
     async def test_async_invoke_vertex(
         self, mock_litellm_aembedding, mock_litellm_aembedding_response
     ):

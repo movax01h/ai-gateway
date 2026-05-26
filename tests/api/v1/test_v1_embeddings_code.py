@@ -247,6 +247,26 @@ class BaseTestCodeEmbeddings:
         response_json = response.json()
         assert response_json["predictions"] == mock_litellm_aembedding_response.data
 
+    def test_successful_response_with_drop_params(
+        self, mock_client, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        params = self._build_params(
+            model_provider="gitlab",
+            model_identifier="text_embedding_005_vertex",
+            dimensions=1024,
+        )
+        params["litellm_drop_params"] = True
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        mock_litellm_aembedding.assert_called_once()
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["input"] == params["contents"]
+        assert call_kwargs["dimensions"] == 1024
+        assert call_kwargs["drop_params"] is True
+
+        response_json = response.json()
+        assert response_json["predictions"] == mock_litellm_aembedding_response.data
+
     def test_successful_response_custom_provider_vertex(
         self,
         mock_client: TestClient,
