@@ -283,7 +283,6 @@ configurable_unit_primitives:
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
-        - "devstral_2_mistral"
       group_ids:
         - 9970  # gitlab-org group ID
 
@@ -333,7 +332,6 @@ configurable_unit_primitives:
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
-        - "devstral_2_mistral"
       group_ids:
         - 9970  # gitlab-org group ID
 
