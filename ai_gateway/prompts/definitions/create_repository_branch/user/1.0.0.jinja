@@ -18,15 +18,9 @@ Name your branch based on this context:
    You MUST push even though there are no commits yet — the remote may reject the branch name.
    {% include 'common/push_retry/1.0.0.jinja' %}
 4. If the push fails because the branch name is rejected by the remote, rename the branch and start again from step 2.
-5. Respond with the result
+5. Respond using the structured output tool with status, branch_name (on success), and error (on failure)
 </branch_handling_strategy>
 
 <retry_limit>
 You may attempt a maximum of 5 different branch names. If all attempts fail, report the failure.
 </retry_limit>
-
-<final_response_format>
-Respond with EXACTLY one of:
-- Success: just the branch name (e.g., "duo/fix/123-description-w42")
-- Failure: "FAILED: <error_summary>"
-</final_response_format>

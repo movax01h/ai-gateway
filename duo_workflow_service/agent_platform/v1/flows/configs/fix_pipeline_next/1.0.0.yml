@@ -118,6 +118,8 @@ components:
     type: AgentComponent
     prompt_id: "create_repository_branch"
     prompt_version: "^1.0.0"
+    response_schema_id: "create_repository_branch"
+    response_schema_version: "^1.0.0"
     toolset:
       - "run_git_command"
     inputs:
@@ -304,7 +306,11 @@ routers:
   - from: "fix_pipeline_next_code_suggestions"
     to: "end"
   - from: "create_repository_branch"
-    to: "fix_pipeline_git_commit"
+    condition:
+      input: "context:create_repository_branch.final_answer.status"
+      routes:
+        "success": "fix_pipeline_git_commit"
+        "default_route": "end"
   - from: "fix_pipeline_git_commit"
     to: "fix_pipeline_git_push"
   - from: "fix_pipeline_git_push"

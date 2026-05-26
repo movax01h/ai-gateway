@@ -37,6 +37,8 @@ components:
     type: AgentComponent
     prompt_id: "create_repository_branch"
     prompt_version: "^1.0.0"
+    response_schema_id: "create_repository_branch"
+    response_schema_version: "^1.0.0"
     toolset:
       - "run_git_command"
     inputs:
@@ -87,7 +89,7 @@ components:
     inputs:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
-      - from: "context:create_repository_branch.final_answer"
+      - from: "context:create_repository_branch.final_answer.branch_name"
         as: "target_branch_details"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "source_branch"
@@ -117,7 +119,11 @@ routers:
   - from: "convert_to_gitlab_ci"
     to: "create_repository_branch"
   - from: "create_repository_branch"
-    to: "git_commit"
+    condition:
+      input: "context:create_repository_branch.final_answer.status"
+      routes:
+        "success": "git_commit"
+        "default_route": "end"
   - from: "git_commit"
     to: "git_push"
   - from: "git_push"
