@@ -1467,6 +1467,67 @@ class TestIntegration:
         assert isinstance(variables["main"][0], SystemMessage)
         assert len(variables["ui_chat_log"]) == 2
 
+    def test_create_repository_branch_schema_output_resolution_success(self):
+        """Test that the create_repository_branch structured response schema output can be resolved via IOKey path
+        'context:create_repository_branch.final_answer.branch_name'.
+
+        This simulates the downstream components (fix_pipeline_git_push, git_push, push_and_create_mr) reading the
+        branch name after a successful branch creation.
+        """
+        state: FlowState = {
+            "status": WorkflowStatusEnum.EXECUTION,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {
+                "create_repository_branch": {
+                    "final_answer": {
+                        "status": "success",
+                        "branch_name": "duo/fix/123-fix-pipeline",
+                    }
+                }
+            },
+        }
+
+        branch_name_key = IOKey.parse_key(
+            "context:create_repository_branch.final_answer.branch_name"
+        )
+        status_key = IOKey.parse_key(
+            "context:create_repository_branch.final_answer.status"
+        )
+
+        assert branch_name_key.value_from_state(state) == "duo/fix/123-fix-pipeline"
+        assert status_key.value_from_state(state) == "success"
+
+    def test_create_repository_branch_schema_output_resolution_failure(self):
+        """Test that the create_repository_branch structured response schema output can be resolved when branch creation
+        fails."""
+        state: FlowState = {
+            "status": WorkflowStatusEnum.EXECUTION,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": {
+                "create_repository_branch": {
+                    "final_answer": {
+                        "status": "failed",
+                        "error": "Branch name rejected by remote after 5 attempts",
+                    }
+                }
+            },
+        }
+
+        status_key = IOKey.parse_key(
+            "context:create_repository_branch.final_answer.status"
+        )
+        error_key = IOKey.parse_key(
+            "context:create_repository_branch.final_answer.error"
+        )
+
+        assert status_key.value_from_state(state) == "failed"
+        assert (
+            error_key.value_from_state(state)
+            == "Branch name rejected by remote after 5 attempts"
+        )
+
 
 class TestBaseIOKey:
     """Tests for BaseIOKey class."""

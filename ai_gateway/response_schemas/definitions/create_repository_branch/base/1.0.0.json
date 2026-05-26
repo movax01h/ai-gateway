@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "create_repository_branch_response",
+  "description": "Response schema for the create_repository_branch agent that creates and pushes a new Git branch.",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "The result of the branch creation operation. Use 'success' when the branch was created and pushed successfully. Use 'failed' when all attempts to create and push the branch failed.",
+      "enum": [
+        "success",
+        "failed"
+      ],
+      "examples": [
+        "success",
+        "failed"
+      ]
+    },
+    "branch_name": {
+      "type": "string",
+      "description": "The name of the branch that was created and pushed (e.g. 'duo/fix/123-description'). Required when status is 'success'. Omit or leave empty when status is 'failed'.",
+      "examples": [
+        "duo/fix/123-description-w42",
+        "duo/feature/456-new-feature"
+      ]
+    },
+    "error": {
+      "type": "string",
+      "description": "A summary of why the branch creation failed. Required when status is 'failed'. Omit or leave empty when status is 'success'.",
+      "examples": [
+        "Branch name rejected by remote after 5 attempts",
+        "Authentication error: Permission denied (publickey)"
+      ]
+    }
+  },
+  "required": [
+    "status"
+  ]
+}
