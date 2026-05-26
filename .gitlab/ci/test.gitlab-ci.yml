@@ -39,8 +39,8 @@ tests:undercoverage:
       else
         echo "The 'pipeline:skip-undercoverage' label is not set on the MR, proceeding.";
       fi
-    - git fetch origin $CI_MERGE_REQUEST_DIFF_BASE_SHA --depth=1
-    - make test-undercoverage UNDERCOVERAGE_COMPARE_BRANCH=$CI_MERGE_REQUEST_DIFF_BASE_SHA UNDERCOVERAGE_DIFF_RANGE_NOTATION=..
+    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_SHA --depth=1
+    - make test-undercoverage UNDERCOVERAGE_COMPARE_BRANCH=$CI_MERGE_REQUEST_TARGET_BRANCH_SHA UNDERCOVERAGE_DIFF_RANGE_NOTATION=..
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
