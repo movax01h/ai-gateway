@@ -3,9 +3,17 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import BaseModel, ValidationError
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.start_flow import StartFlow, StartFlowInput
+from duo_workflow_service.tools.start_flow import (
+    FLOW_IDENTIFIER_MAP,
+    StartCodeReviewFlowInput,
+    StartDeveloperFlowInput,
+    StartFixPipelineFlowInput,
+    StartFlow,
+    StartFlowInput,
+)
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -45,28 +53,166 @@ def tool_no_project_fixture(metadata_no_project):
     return StartFlow(metadata=metadata_no_project)
 
 
+# ---------------------------------------------------------------------------
+# FLOW_IDENTIFIER_MAP
+# ---------------------------------------------------------------------------
+
+
+def test_flow_identifier_map_covers_all_flow_names():
+    assert FLOW_IDENTIFIER_MAP == {
+        "developer": "developer/v1",
+        "fix_pipeline": "fix_pipeline/v1",
+        "code_review": "code_review/v1",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool description checks
+# ---------------------------------------------------------------------------
+
+
+def test_description_does_not_contain_user_approval_sentence(tool):
+    assert (
+        "The user must approve this tool call before the flow starts"
+        not in tool.description
+    )
+
+
+def test_description_mentions_async_progress(tool):
+    assert "asynchronously" in tool.description
+    assert "session URL" in tool.description
+
+
+def test_description_emphasizes_delegation(tool):
+    assert "prefer" in tool.description
+    assert "delegating" in tool.description
+
+
+def test_description_does_not_contain_versioned_identifiers(tool):
+    assert "fix_pipeline/v1" not in tool.description
+    assert "code_review/v1" not in tool.description
+    assert "developer/v1" not in tool.description
+
+
+# ---------------------------------------------------------------------------
+# Per-workflow input model validation
+# ---------------------------------------------------------------------------
+
+
+def test_start_developer_flow_input_requires_goal():
+    with pytest.raises(ValidationError):
+        StartDeveloperFlowInput(name="developer")
+
+
+def test_start_developer_flow_input_accepts_goal():
+    inp = StartDeveloperFlowInput(name="developer", goal="implement the login feature")
+    assert inp.goal == "implement the login feature"
+
+
+def test_start_fix_pipeline_flow_input_requires_all_fields():
+    with pytest.raises(ValidationError):
+        StartFixPipelineFlowInput(name="fix_pipeline")
+
+
+def test_start_fix_pipeline_flow_input_validates_fields():
+    inp = StartFixPipelineFlowInput(
+        name="fix_pipeline",
+        pipeline_url="https://gitlab.com/group/project/-/pipelines/123",
+        merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+        source_branch="feature-branch",
+    )
+    assert inp.pipeline_url is not None
+    assert (
+        inp.merge_request_url == "https://gitlab.com/group/project/-/merge_requests/1"
+    )
+    assert inp.source_branch == "feature-branch"
+
+
+def test_start_code_review_flow_input_requires_merge_request_url():
+    with pytest.raises(ValidationError):
+        StartCodeReviewFlowInput(name="code_review")
+
+
+def test_start_code_review_flow_input_accepts_valid_url():
+    inp = StartCodeReviewFlowInput(
+        name="code_review",
+        merge_request_url="https://gitlab.com/group/project/-/merge_requests/42",
+    )
+    assert inp.merge_request_url == (
+        "https://gitlab.com/group/project/-/merge_requests/42"
+    )
+
+
+# ---------------------------------------------------------------------------
+# StartFlowInput (discriminated union wrapper) validation
+# ---------------------------------------------------------------------------
+
+
+def test_start_flow_input_discriminates_developer():
+    inp = StartFlowInput(
+        flow={"name": "developer", "goal": "implement the login feature"}
+    )
+    assert isinstance(inp.flow, StartDeveloperFlowInput)
+
+
+def test_start_flow_input_discriminates_fix_pipeline():
+    inp = StartFlowInput(
+        flow={
+            "name": "fix_pipeline",
+            "pipeline_url": "https://gitlab.com/group/project/-/pipelines/123",
+            "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/1",
+            "source_branch": "main",
+        }
+    )
+    assert isinstance(inp.flow, StartFixPipelineFlowInput)
+
+
+def test_start_flow_input_discriminates_code_review():
+    inp = StartFlowInput(
+        flow={
+            "name": "code_review",
+            "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/42",
+        }
+    )
+    assert isinstance(inp.flow, StartCodeReviewFlowInput)
+
+
+def test_start_flow_input_rejects_unknown_flow_name():
+    with pytest.raises(ValidationError):
+        StartFlowInput(flow={"name": "unknown_flow", "goal": "something"})
+
+
+def test_start_flow_input_rejects_developer_without_goal():
+    with pytest.raises(ValidationError):
+        StartFlowInput(flow={"name": "developer"})
+
+
+# ---------------------------------------------------------------------------
+# _execute: fix_pipeline
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_execute_success(tool, gitlab_client_mock):
+async def test_execute_fix_pipeline_success(tool, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(
-            status_code=201,
-            body={"id": "wf-123"},
-        )
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-123"})
     )
 
     result = await tool.arun(
         {
-            "workflow_definition": "fix_pipeline/v1",
-            "goal": "https://gitlab.com/group/project/-/pipelines/99",
-            "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/1",
-            "pipeline_source_branch": "feature-branch",
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": "https://gitlab.com/group/project/-/pipelines/99",
+                "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/1",
+                "source_branch": "feature-branch",
+            }
         }
     )
 
     data = json.loads(result)
     assert data["status"] == "started"
     assert data["workflow_id"] == "wf-123"
-    assert data["flow_name"] == "fix_pipeline/v1"
+    assert data["flow_name"] == "fix_pipeline"
     assert (
         data["session_url"]
         == "https://gitlab.com/group/project/-/automate/agent-sessions/wf-123"
@@ -74,32 +220,87 @@ async def test_execute_success(tool, gitlab_client_mock):
 
     posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
     assert posted_body["workflow_definition"] == "fix_pipeline/v1"
-    assert posted_body["goal"] == "https://gitlab.com/group/project/-/pipelines/99"
+    assert "pipelines/99" in posted_body["goal"]
     assert posted_body["environment"] == "ambient"
     assert posted_body["start_workflow"] is True
-    assert posted_body["project_id"] == 42
+    # project_id extracted from pipeline URL, not from self.project
+    assert posted_body["project_id"] == "group/project"
 
 
 @pytest.mark.asyncio
-async def test_execute_fix_pipeline_with_merge_request_url_and_source_branch(
-    tool, gitlab_client_mock
-):
+async def test_execute_code_review_cross_project(tool, gitlab_client_mock):
+    """code_review with a URL from a different project uses that project."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-xp"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": (
+                    "https://gitlab.com/other-group/other-project/-/merge_requests/7"
+                ),
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["goal"] == "7"
+    assert posted_body["project_id"] == "other-group/other-project"
+
+
+@pytest.mark.asyncio
+async def test_execute_fix_pipeline_cross_project(tool, gitlab_client_mock):
+    """fix_pipeline with a URL from a different project uses that project."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-xp2"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": (
+                    "https://gitlab.com/other-group/other-project/-/pipelines/55"
+                ),
+                "merge_request_url": (
+                    "https://gitlab.com/other-group/other-project/-/merge_requests/3"
+                ),
+                "source_branch": "main",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["project_id"] == "other-group/other-project"
+
+
+@pytest.mark.asyncio
+async def test_execute_fix_pipeline_additional_context(tool, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
         return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-fp1"})
     )
 
     result = await tool.arun(
         {
-            "workflow_definition": "fix_pipeline/v1",
-            "goal": "https://gitlab.com/group/project/-/pipelines/99",
-            "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/1",
-            "pipeline_source_branch": "feature-branch",
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": "https://gitlab.com/group/project/-/pipelines/99",
+                "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/1",
+                "source_branch": "feature-branch",
+            }
         }
     )
 
     data = json.loads(result)
     assert data["status"] == "started"
-    assert data["workflow_id"] == "wf-fp1"
 
     posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
     assert posted_body["additional_context"] == [
@@ -116,61 +317,127 @@ async def test_execute_fix_pipeline_with_merge_request_url_and_source_branch(
     ]
 
 
-@pytest.mark.asyncio
-async def test_execute_fix_pipeline_with_merge_request_url_only_raises(
-    tool, gitlab_client_mock
-):
-    with pytest.raises(ToolException, match="source_branch is missing"):
-        await tool._execute(
-            workflow_definition="fix_pipeline/v1",
-            goal="https://gitlab.com/group/project/-/pipelines/99",
-            merge_request_url="https://gitlab.com/group/project/-/merge_requests/2",
-        )
-
-    gitlab_client_mock.apost.assert_not_called()
+# ---------------------------------------------------------------------------
+# _execute: code_review
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_execute_fix_pipeline_with_source_branch_only_raises(
-    tool, gitlab_client_mock
-):
-    with pytest.raises(ToolException, match="merge_request_url is missing"):
-        await tool._execute(
-            workflow_definition="fix_pipeline/v1",
-            goal="https://gitlab.com/group/project/-/pipelines/99",
-            pipeline_source_branch="main",
-        )
-
-    gitlab_client_mock.apost.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_execute_fix_pipeline_without_optional_params_raises(
-    tool, gitlab_client_mock
-):
-    with pytest.raises(ToolException, match="merge_request_url is missing"):
-        await tool._execute(
-            workflow_definition="fix_pipeline/v1",
-            goal="https://gitlab.com/group/project/-/pipelines/99",
-        )
-
-    gitlab_client_mock.apost.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_execute_non_fix_pipeline_ignores_merge_request_url_and_source_branch(
-    tool, gitlab_client_mock
-):
+async def test_execute_code_review_success(tool, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-fp5"})
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-cr1"})
     )
 
     result = await tool.arun(
         {
-            "workflow_definition": "developer/v1",
-            "goal": "https://gitlab.com/group/project/-/issues/5",
-            "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/1",
-            "pipeline_source_branch": "feature-branch",
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/42",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["goal"] == "42"
+    assert posted_body["workflow_definition"] == "code_review/v1"
+    # project_id extracted from URL, not from self.project
+    assert posted_body["project_id"] == "group/project"
+
+
+@pytest.mark.asyncio
+async def test_execute_string_body_response(tool, gitlab_client_mock):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body=json.dumps({"id": "wf-str"}),
+        )
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": "https://gitlab.com/group/project/-/merge_requests/42",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["workflow_id"] == "wf-str"
+
+
+# ---------------------------------------------------------------------------
+# _execute: developer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_goal_only(tool, gitlab_client_mock):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-dev1"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Add a dark mode toggle to the settings page",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["goal"] == "Add a dark mode toggle to the settings page"
+    assert posted_body["workflow_definition"] == "developer/v1"
+    # Falls back to self.project when no project_url is provided
+    assert posted_body["project_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_cross_project(tool, gitlab_client_mock):
+    """Developer with project_url targets that project instead of self.project."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-dev-xp"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Implement feature X",
+                "project_url": "https://gitlab.com/other-team/other-repo",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["project_id"] == "other-team/other-repo"
+    assert posted_body["goal"] == "Implement feature X"
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_does_not_add_additional_context(
+    tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-dev2"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Implement the feature described in the issue",
+            }
         }
     )
 
@@ -181,6 +448,11 @@ async def test_execute_non_fix_pipeline_ignores_merge_request_url_and_source_bra
     assert "additional_context" not in posted_body
 
 
+# ---------------------------------------------------------------------------
+# _execute: no project
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
 async def test_execute_without_project(tool_no_project, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
@@ -189,8 +461,10 @@ async def test_execute_without_project(tool_no_project, gitlab_client_mock):
 
     result = await tool_no_project.arun(
         {
-            "workflow_definition": "developer/v1",
-            "goal": "https://gitlab.com/group/project/-/issues/5",
+            "flow": {
+                "name": "developer",
+                "goal": "Implement the feature described in the issue",
+            }
         }
     )
 
@@ -203,19 +477,80 @@ async def test_execute_without_project(tool_no_project, gitlab_client_mock):
     assert "project_id" not in posted_body
 
 
+# ---------------------------------------------------------------------------
+# Invalid URL handling
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_execute_string_body_response(tool, gitlab_client_mock):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(
-            status_code=201,
-            body=json.dumps({"id": "wf-str"}),
+@pytest.mark.parametrize(
+    "merge_request_url",
+    [
+        "not-a-url",
+        "https://other-host.com/group/project/-/merge_requests/1",
+        "https://gitlab.com/group/project/-/pipelines/1",  # wrong resource type
+        "https://gitlab.com/group/project/-/merge_requests/abc",  # non-numeric IID
+        "https://gitlab.com/",  # no path
+        "",
+    ],
+)
+async def test_execute_code_review_invalid_merge_request_url(tool, merge_request_url):
+    with pytest.raises(ToolException, match="Could not parse merge request URL"):
+        await tool._execute(
+            flow=StartCodeReviewFlowInput(
+                name="code_review",
+                merge_request_url=merge_request_url,
+            )
         )
-    )
 
-    result = await tool.arun({"workflow_definition": "code_review/v1", "goal": "42"})
 
-    data = json.loads(result)
-    assert data["workflow_id"] == "wf-str"
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pipeline_url",
+    [
+        "not-a-url",
+        "https://other-host.com/group/project/-/pipelines/1",
+        "https://gitlab.com/group/project/-/merge_requests/1",  # wrong resource type
+        "https://gitlab.com/group/project/-/pipelines/abc",  # non-numeric IID
+        "https://gitlab.com/",  # no path
+        "",
+    ],
+)
+async def test_execute_fix_pipeline_invalid_pipeline_url(tool, pipeline_url):
+    with pytest.raises(ToolException, match="Could not parse pipeline URL"):
+        await tool._execute(
+            flow=StartFixPipelineFlowInput(
+                name="fix_pipeline",
+                pipeline_url=pipeline_url,
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+                source_branch="main",
+            )
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "project_url",
+    [
+        "not-a-url",
+        "https://other-host.com/group/project",
+        "https://gitlab.com/",  # no project path
+    ],
+)
+async def test_execute_developer_invalid_project_url(tool, project_url):
+    with pytest.raises(ToolException, match="Could not parse project URL"):
+        await tool._execute(
+            flow=StartDeveloperFlowInput(
+                name="developer",
+                goal="Implement feature X",
+                project_url=project_url,
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# _execute: HTTP errors and exceptions
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -225,15 +560,14 @@ async def test_execute_http_failure(tool, gitlab_client_mock, status_code):
         return_value=GitLabHttpResponse(status_code=status_code, body="error body")
     )
 
-    # arun converts ToolException into a ToolMessage with the error string
-    # when handle_tool_error is truthy (default); use ainvoke on the internal
-    # coroutine to surface the raised exception directly.
     with pytest.raises(ToolException) as exc_info:
         await tool._execute(
-            workflow_definition="fix_pipeline/v1",
-            goal="https://gitlab.com/group/project/-/pipelines/99",
-            merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
-            pipeline_source_branch="feature-branch",
+            flow=StartFixPipelineFlowInput(
+                name="fix_pipeline",
+                pipeline_url="https://gitlab.com/group/project/-/pipelines/99",
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+                source_branch="feature-branch",
+            ),
         )
 
     assert str(status_code) in str(exc_info.value)
@@ -245,14 +579,26 @@ async def test_execute_exception(tool, gitlab_client_mock):
 
     with pytest.raises(RuntimeError, match="network error"):
         await tool._execute(
-            workflow_definition="developer/v1",
-            goal="https://gitlab.com/group/project/-/issues/1",
+            flow=StartDeveloperFlowInput(
+                name="developer",
+                goal="Implement the feature",
+            ),
         )
+
+
+# ---------------------------------------------------------------------------
+# format_display_message
+# ---------------------------------------------------------------------------
 
 
 def test_format_display_message_with_workflow_id_and_session_url(tool):
     args = StartFlowInput(
-        workflow_definition="fix_pipeline/v1", goal="https://example.com/pipelines/1"
+        flow=StartFixPipelineFlowInput(
+            name="fix_pipeline",
+            pipeline_url="https://example.com/pipelines/1",
+            merge_request_url="https://example.com/merge_requests/1",
+            source_branch="main",
+        )
     )
     response = json.dumps(
         {
@@ -263,18 +609,23 @@ def test_format_display_message_with_workflow_id_and_session_url(tool):
 
     msg = tool.format_display_message(args, response)
 
-    assert "fix_pipeline/v1" in msg
+    assert "fix_pipeline" in msg
     assert "wf-abc" in msg
     assert "View session" in msg
 
 
 def test_format_display_message_with_workflow_id_no_session_url(tool):
-    args = StartFlowInput(workflow_definition="code_review/v1", goal="99")
+    args = StartFlowInput(
+        flow=StartCodeReviewFlowInput(
+            name="code_review",
+            merge_request_url="https://gitlab.com/group/project/-/merge_requests/99",
+        )
+    )
     response = json.dumps({"workflow_id": "wf-abc", "session_url": None})
 
     msg = tool.format_display_message(args, response)
 
-    assert "code_review/v1" in msg
+    assert "code_review" in msg
     assert "wf-abc" in msg
     assert "View session" not in msg
 
@@ -287,12 +638,103 @@ def test_format_display_message_with_workflow_id_no_session_url(tool):
         json.dumps({}),  # missing workflow_id
     ],
 )
-def test_format_display_message_fallback(tool, response):
+def test_format_display_message_fallback_developer(tool, response):
     args = StartFlowInput(
-        workflow_definition="developer/v1", goal="https://example.com/issues/5"
+        flow=StartDeveloperFlowInput(
+            name="developer",
+            goal="Add a dark mode toggle",
+        )
     )
 
     msg = tool.format_display_message(args, response)
 
-    assert "developer/v1" in msg
-    assert "https://example.com/issues/5" in msg
+    assert "developer" in msg
+    assert "Add a dark mode toggle" in msg
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        "not valid json{{{",
+        json.dumps({}),
+    ],
+)
+def test_format_display_message_fallback_code_review(tool, response):
+    args = StartFlowInput(
+        flow=StartCodeReviewFlowInput(
+            name="code_review",
+            merge_request_url="https://gitlab.com/group/project/-/merge_requests/42",
+        )
+    )
+
+    msg = tool.format_display_message(args, response)
+
+    assert "code_review" in msg
+    assert "merge_requests/42" in msg
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        "not valid json{{{",
+        json.dumps({}),
+    ],
+)
+def test_format_display_message_fallback_fix_pipeline(tool, response):
+    args = StartFlowInput(
+        flow=StartFixPipelineFlowInput(
+            name="fix_pipeline",
+            pipeline_url="https://gitlab.com/group/project/-/pipelines/99",
+            merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+            source_branch="main",
+        )
+    )
+
+    msg = tool.format_display_message(args, response)
+
+    assert "fix_pipeline" in msg
+    assert "pipelines/99" in msg
+
+
+def test_format_display_message_fallback_unknown_flow(tool):
+    """The else branch is hit when flow_name is not one of the known values."""
+    args = Mock()
+    args.flow.model_dump.return_value = {"name": "unknown_flow", "extra": "data"}
+
+    msg = tool.format_display_message(args, None)
+
+    assert "unknown_flow" in msg
+
+
+# ---------------------------------------------------------------------------
+# _execute: defensive branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_raises_for_non_basemodel_flow(tool):
+    """Line 110: the else branch raises ToolException for non-BaseModel input."""
+    with pytest.raises(ToolException, match="Unexpected flow input type"):
+        await tool._execute(flow="not-a-basemodel")
+
+
+@pytest.mark.asyncio
+async def test_execute_raises_for_unknown_flow_name(tool):
+    """Line 115: raises ToolException when flow_name is not in FLOW_IDENTIFIER_MAP."""
+    flow = Mock(spec=BaseModel)
+    flow.model_dump.return_value = {"name": "unknown_flow"}
+    with pytest.raises(ToolException, match="Unknown flow"):
+        await tool._execute(flow=flow)
+
+
+# ---------------------------------------------------------------------------
+# _resolve_goal_and_project: defensive branch
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_goal_and_project_raises_for_unknown_flow(tool):
+    """Line 221: raises ToolException when flow_name is not developer/fix_pipeline/code_review."""
+    with pytest.raises(ToolException, match="Unknown flow"):
+        tool._resolve_goal_and_project("unknown_flow", {"name": "unknown_flow"})
