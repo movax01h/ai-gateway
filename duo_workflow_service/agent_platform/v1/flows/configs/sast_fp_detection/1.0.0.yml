@@ -72,6 +72,8 @@ components:
     type: AgentComponent
     prompt_id: "sast_fp_detection_agent_prompt"
     prompt_version: "^1.0.0"
+    response_schema_id: "sast_fp_detection"
+    response_schema_version: "^1.0.0"
     inputs:
       - from: "context:sast_vulnerability_report_component.final_answer"
         as: vulnerability_details

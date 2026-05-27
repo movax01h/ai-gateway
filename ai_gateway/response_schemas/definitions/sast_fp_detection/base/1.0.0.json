@@ -1,0 +1,21 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "sast_fp_detection_response",
+    "description": "Response schema for the SAST false positive detection agent that provides a likelihood score and explanation.",
+    "type": "object",
+    "properties": {
+        "false_positive_likelihood": {
+            "type": "integer",
+            "description": "The likelihood that this vulnerability is a false positive, as a percentage from 0-100. 0-20 = definitely real, 21-40 = likely real, 41-60 = uncertain, 61-80 = likely false positive, 81-100 = definitely false positive.",
+            "minimum": 0,
+            "maximum": 100,
+            "examples": [15, 45, 85]
+        },
+        "explanation": {
+            "type": "string",
+            "description": "Detailed explanation of the false positive analysis, including evidence and reasoning for the likelihood score.",
+            "examples": ["The code uses proper input sanitization..."]
+        }
+    },
+    "required": ["false_positive_likelihood", "explanation"]
+}
