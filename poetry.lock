@@ -2524,14 +2524,14 @@ tests = ["pytest"]
 
 [[package]]
 name = "hiddenlayer-sdk"
-version = "3.2.2"
+version = "3.7.1"
 description = "The official Python library for the hiddenlayer API"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "hiddenlayer_sdk-3.2.2-py3-none-any.whl", hash = "sha256:cb82463e59b10fabb73fa5bcf9e4d4ca3e8b9dab1b115d4ba806c16a0fb16979"},
-    {file = "hiddenlayer_sdk-3.2.2.tar.gz", hash = "sha256:e627b790fa559a81ac1b56e89dfc02c91d0797e2df0a938599c197cbf033db74"},
+    {file = "hiddenlayer_sdk-3.7.1-py3-none-any.whl", hash = "sha256:600a24299c1ce36ad403fadd0d74640de2b0f2b2c834a22346ab28d5a6244ff5"},
+    {file = "hiddenlayer_sdk-3.7.1.tar.gz", hash = "sha256:bf432bbbc430665a2b567bf127f8b9bc2ea5d0350ae5253cb4bba0e6e4e7969c"},
 ]
 
 [package.dependencies]
@@ -2543,7 +2543,7 @@ requests = ">=2.32.4"
 requests-auth = ">=8.0.0"
 sniffio = "*"
 types-requests = ">=2.32.0.20241016"
-typing-extensions = ">=4.10,<5"
+typing-extensions = ">=4.14,<5"
 
 [package.extras]
 aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
