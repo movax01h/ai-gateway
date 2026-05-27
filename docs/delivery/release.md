@@ -75,12 +75,12 @@ When you need to backport a fix to a specific AI Gateway release version:
 1. **Tag the merge commit**: After the MR is merged, a maintainer needs to tag the merge commit with a new patch version tag following the format `self-hosted-vX.Y.Z-ee`.
    - For example, if backporting to version 18.4.1, the new tag would be `self-hosted-v18.4.2-ee`.
 
-```shell
-git tag -l "self-hosted-v18.4.*"
+     ```shell
+     git tag -l "self-hosted-v18.4.*"
 
-self-hosted-v18.4.0-ee
-self-hosted-v18.4.1-ee
-```
+     self-hosted-v18.4.0-ee
+     self-hosted-v18.4.1-ee
+     ```
 
 1. **Trigger the release**: Creating the tag automatically triggers the [release jobs](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/pipelines) which build and publish a new Docker image.
 
