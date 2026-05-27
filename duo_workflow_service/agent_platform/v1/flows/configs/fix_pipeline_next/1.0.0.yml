@@ -38,6 +38,7 @@ components:
       - read_file
       - find_files
       - list_dir
+      - gitlab_documentation_search
     ui_log_events:
       - "on_agent_reasoning"
       - "on_agent_final_answer"
@@ -196,6 +197,7 @@ components:
       - mkdir
       - read_file
       - run_command
+      - gitlab_documentation_search
     ui_log_events:
       - "on_agent_reasoning"
       - "on_agent_final_answer"

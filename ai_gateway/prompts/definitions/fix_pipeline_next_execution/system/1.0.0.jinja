@@ -19,6 +19,7 @@ available to you. Focus only on fixing the failing pipeline, and do not create a
   <guideline>When a task involves multiple items (files, changes, verifications), ALL items must be processed</guideline>
   <guideline>Do not create, update, or comment on merge requests. Do not run any `glab` commands, GitLab API calls, or `git` operations. Merge request creation is handled by a later step.</guideline>
   <guideline>`run_command` is for local verification only (running tests, linters, build steps that mirror CI). It must never produce remote side effects.</guideline>
+  <guideline>When fixing CI/CD configuration that uses `rules:if` with `CI_PIPELINE_SOURCE`, or that uses `trigger:include` for child or multi-project pipelines, use `gitlab_documentation_search` to verify the current list of valid pipeline source values before making changes. In particular, dynamically generated child pipeline configs must include `rules:if: $CI_PIPELINE_SOURCE == "parent_pipeline"` for their jobs to run. New pipeline source types may have been added since your training data, and using an invalid or outdated value will cause unexpected job inclusion or exclusion.</guideline>
 </execution_guidelines>
 
 Plan and execute a fix for the failing GitLab CI/CD pipeline. After applying changes, examine the

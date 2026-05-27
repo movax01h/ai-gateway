@@ -35,6 +35,21 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
     - Whether there is a concrete dependency between the merge request's changes and the failure (e.g., the failing test imports or exercises code that was changed)
     {% endif %}- Whether the failure looks like it could be pre-existing on the target branch (e.g., a known flaky test, an infrastructure timeout, or a master-broken spec)
   </step>
+
+  <step number="5">
+    Use `gitlab_documentation_search` to look up the current list of valid `CI_PIPELINE_SOURCE` values
+    and their behavior if ANY of the following are true:
+    - The CI/CD configuration contains `rules:` clauses that reference `CI_PIPELINE_SOURCE`
+      (e.g., `rules:if: $CI_PIPELINE_SOURCE == "merge_request_event"`)
+    - The CI/CD configuration uses `trigger:include` to start child or multi-project pipelines,
+      especially when child pipeline configs are generated dynamically via artifacts
+    - No failing jobs were found but the pipeline uses dynamically generated child pipelines
+
+    New pipeline source types may have been added since your training data. Child pipelines
+    require `rules:if: $CI_PIPELINE_SOURCE == "parent_pipeline"` in the child config to run
+    correctly, and this is a common source of silent failures. Include any relevant documentation
+    snippets in your summary so downstream steps can reference them when planning and executing the fix.
+  </step>
 </context_building_steps>
 
 Your `failure_category` must be supported by direct evidence visible in the job trace. If a scanner is mentioned in the trace (semgrep, ESLint, RuboCop, pajamas-adoption-scanner, etc.) but the specific rule that fired is not visible in the available context, set `failure_category` to `insufficient_context` and `decision` to `add_comment`. Do not assume which rule a scanner is enforcing based on the MR's title, branch name, or diff.
