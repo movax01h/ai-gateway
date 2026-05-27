@@ -4,10 +4,7 @@ from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
 
-from duo_workflow_service.audit_events.client import (
-    AUDIT_EVENTS_MIN_GITLAB_VERSION,
-    AuditEventClient,
-)
+from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import ToolInvokedEvent
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
@@ -84,32 +81,16 @@ class TestSendBatch:
 class TestSendBatchUnsupported:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "feature_flag_enabled, gitlab_version_str",
-        [
-            (False, str(AUDIT_EVENTS_MIN_GITLAB_VERSION)),
-            (True, "17.0.0"),
-            (True, None),
-            (False, "17.0.0"),
-        ],
-        ids=[
-            "feature_flag_off",
-            "version_too_old",
-            "version_unparseable",
-            "flag_off_and_version_too_old",
-        ],
+        "gitlab_version_str",
+        ["17.0.0", None],
+        ids=["version_too_old", "version_unparseable"],
     )
     async def test_unsupported_skips_send(
-        self, http_client, events, feature_flag_enabled, gitlab_version_str
+        self, http_client, events, gitlab_version_str
     ):
-        with (
-            patch(
-                "duo_workflow_service.audit_events.client.is_feature_enabled",
-                return_value=feature_flag_enabled,
-            ),
-            patch(
-                "duo_workflow_service.audit_events.client.gitlab_version"
-            ) as mock_version,
-        ):
+        with patch(
+            "duo_workflow_service.audit_events.client.gitlab_version"
+        ) as mock_version:
             mock_version.get.return_value = gitlab_version_str
             client = _make_client(http_client)
             result = await client.send_batch(events)
