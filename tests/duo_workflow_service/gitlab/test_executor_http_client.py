@@ -8,7 +8,11 @@ from langchain_core.tools import ToolException
 
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox
-from duo_workflow_service.gitlab.executor_http_client import ExecutorGitLabHttpClient
+from duo_workflow_service.gitlab.executor_http_client import (
+    ExecutorGitLabHttpClient,
+    ServerErrorResponse,
+    _is_retryable_error,
+)
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
@@ -393,9 +397,10 @@ async def test_executor_gitlab_http_client_success(
 async def test_executor_gitlab_http_client_http_connection_error(
     client, monkeypatch_execute_http_response
 ):
-    monkeypatch_execute_http_response.side_effect = ToolException("Connection refused")
+    """Test that non-retryable ToolExceptions propagate immediately."""
+    monkeypatch_execute_http_response.side_effect = ToolException("Permission denied")
 
-    with pytest.raises(ToolException, match="Connection refused"):
+    with pytest.raises(ToolException, match="Permission denied"):
         await client.aget("/api/v4/test")
 
     monkeypatch_execute_http_response.assert_called_once()
@@ -508,6 +513,212 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
 
     with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
         with pytest.raises(Exception, match="GraphQL request timed out"):
+            await client.graphql("{ currentUser { username } }")
+
+    assert monkeypatch_execute_action.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Tests for _is_retryable_error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "exc, expected",
+    [
+        (asyncio.TimeoutError(), True),
+        (ServerErrorResponse(500), True),
+        (ServerErrorResponse(503), True),
+        (Exception("HTTP action error: request timed out"), True),
+        (Exception("GraphQL request timed out after 10.0 seconds"), True),
+        (ToolException("HTTP action error: connection refused"), True),
+        (ToolException("HTTP action error: connection reset by peer"), True),
+        (ToolException("HTTP action error: broken pipe"), True),
+        (ToolException("HTTP action error: network unreachable"), True),
+        (
+            ToolException("HTTP action error: failed to establish a new connection"),
+            True,
+        ),
+        (ToolException("Permission denied"), False),
+        (ToolException("Access denied"), False),
+        (ToolException("Not found"), False),
+        (Exception("JSON decode error"), False),
+    ],
+)
+def test_is_retryable_error(exc, expected):
+    assert _is_retryable_error(exc) == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests for 5xx retry behaviour in _call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_on_500_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call retries when the executor returns a 500 status code."""
+    error_response = contract_pb2.ActionResponse()
+    error_response.httpResponse.statusCode = 500
+    error_response.httpResponse.body = "Internal Server Error"
+
+    success_response = contract_pb2.ActionResponse()
+    success_response.httpResponse.statusCode = 200
+    success_response.httpResponse.body = '{"key": "value"}'
+
+    monkeypatch_execute_http_response.side_effect = [error_response, success_response]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_on_503_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call retries when the executor returns a 503 status code."""
+    error_response = contract_pb2.ActionResponse()
+    error_response.httpResponse.statusCode = 503
+    error_response.httpResponse.body = "Service Unavailable"
+
+    success_response = contract_pb2.ActionResponse()
+    success_response.httpResponse.statusCode = 200
+    success_response.httpResponse.body = '{"result": "ok"}'
+
+    monkeypatch_execute_http_response.side_effect = [error_response, success_response]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"result": "ok"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_http_call_exhausts_retries_on_repeated_500s(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call raises ServerErrorResponse after all retries are exhausted on 500."""
+    error_response = contract_pb2.ActionResponse()
+    error_response.httpResponse.statusCode = 500
+    error_response.httpResponse.body = "Internal Server Error"
+
+    monkeypatch_execute_http_response.return_value = error_response
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(ServerErrorResponse, match="Server error: HTTP 500"):
+            await client.aget("/api/v4/test")
+
+    assert monkeypatch_execute_http_response.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_http_call_does_not_retry_4xx_errors(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call does NOT retry for 4xx client errors."""
+    error_response = contract_pb2.ActionResponse()
+    error_response.httpResponse.statusCode = 404
+    error_response.httpResponse.body = '{"message": "Not found"}'
+
+    monkeypatch_execute_http_response.return_value = error_response
+
+    result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 404
+    monkeypatch_execute_http_response.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests for network-error retry behaviour in _call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_on_connection_refused_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call retries when a connection-refused ToolException is raised."""
+    success_response = contract_pb2.ActionResponse()
+    success_response.httpResponse.statusCode = 200
+    success_response.httpResponse.body = '{"key": "value"}'
+
+    monkeypatch_execute_http_response.side_effect = [
+        ToolException("HTTP action error: connection refused"),
+        success_response,
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_http_call_exhausts_retries_on_repeated_network_errors(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call raises after all retries are exhausted on network errors."""
+    monkeypatch_execute_http_response.side_effect = ToolException(
+        "HTTP action error: connection reset by peer"
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(ToolException, match="connection reset by peer"):
+            await client.aget("/api/v4/test")
+
+    assert monkeypatch_execute_http_response.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Tests for network-error retry behaviour in graphql
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_graphql_retries_on_network_error_and_succeeds(
+    client, monkeypatch_execute_action
+):
+    """Test that graphql retries when a network ToolException is raised."""
+    success_response = json.dumps({"data": {"currentUser": {"username": "bob"}}})
+
+    call_count = 0
+
+    async def side_effect(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise ToolException("HTTP action error: connection refused")
+        return success_response
+
+    monkeypatch_execute_action.side_effect = side_effect
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.graphql("{ currentUser { username } }")
+
+    assert result["currentUser"]["username"] == "bob"
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graphql_exhausts_retries_on_repeated_network_errors(
+    client, monkeypatch_execute_action
+):
+    """Test that graphql raises after all retries are exhausted on network errors."""
+    monkeypatch_execute_action.side_effect = ToolException(
+        "HTTP action error: connection reset by peer"
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(ToolException, match="connection reset by peer"):
             await client.graphql("{ currentUser { username } }")
 
     assert monkeypatch_execute_action.call_count == 3
