@@ -296,6 +296,20 @@ models:
       max_tokens: 128_000
       max_retries: 1
 
+  - name: "Claude Opus 4.8"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_opus_4_8"
+    description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    proxy_provider: anthropic
+    model_class_provider: anthropic
+    family:
+      - claude
+    params:
+      model: "claude-opus-4-8"
+      max_tokens: 128_000
+
   - name: "Claude Opus 4.6"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_6_bedrock"
