@@ -2,7 +2,7 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import structlog
 from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
@@ -16,6 +16,8 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
+    ToolInfo,
+    ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
 )
@@ -25,6 +27,24 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 log = structlog.stdlib.get_logger("notifier")
 
 CHECKPOINT_THROTTLE_SECONDS = 0.05
+
+# Substring patterns used to identify Anthropic provider-side (server) tool blocks
+# inside AIMessageChunk.content.  These mirror the detection logic in
+# langchain-anthropic's _make_message_chunk_from_anthropic_event, which uses the
+# same substring checks.
+#
+# "tool_use" in block_type  → catches "server_tool_use" (and would also catch the
+#                              regular "tool_use" type, but that never appears in
+#                              server-streamed assistant content so there is no
+#                              ambiguity here).
+# "tool_result" in block_type → catches all *_tool_result variants:
+#                                web_search_tool_result, web_fetch_tool_result,
+#                                code_execution_tool_result, mcp_tool_result, etc.
+#
+# We intentionally avoid hardcoding specific type strings so that new server tools
+# added by Anthropic are handled automatically without code changes.
+_SERVER_TOOL_USE_SUBSTRING = "tool_use"
+_SERVER_TOOL_RESULT_SUBSTRING = "tool_result"
 
 
 class _ThrottleState:
@@ -53,6 +73,9 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self.last_sent_ui_message_id: Optional[str] = None
         self.current_resp_id: Optional[str] = None
         self._throttle = _ThrottleState()
+        # Tracks the index in ui_chat_log of the in-progress server tool entry so that
+        # the result block can update it in place rather than appending a new entry.
+        self._server_tool_log_index: Optional[int] = None
 
     async def send_event(
         self,
@@ -221,6 +244,24 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         Processes incoming message chunks and either creates a new chat log entry
         or appends content to the existing last entry if it's an ongoing agent message.
 
+        Anthropic provider-side (server) tool blocks arrive inside
+        ``AIMessageChunk.content`` as structured dicts rather than plain text.
+        Detection uses substring checks that mirror those in langchain-anthropic's
+        streaming code, making the handler generic across all current and future
+        Anthropic server tool types:
+
+        * Blocks whose ``type`` contains ``"tool_use"`` (e.g. ``server_tool_use``) –
+            the model is invoking a server tool.  A new TOOL entry is appended to the
+            log with ``ToolStatus.PENDING`` and the tool name/args.
+        * Blocks whose ``type`` contains ``"tool_result"`` (e.g.
+            ``web_search_tool_result``, ``web_fetch_tool_result``,
+            ``code_execution_tool_result``, …) – the server has finished running the
+            tool.  The pending TOOL entry created for the matching tool-use block is
+            updated in-place: its ``status`` is set to ``ToolStatus.SUCCESS`` and
+            ``tool_info.tool_response`` is populated with the raw ``content`` payload
+            from the block.
+        * Regular ``text`` blocks continue to be accumulated on the current AGENT entry.
+
         Args:
             message (BaseMessage): The message chunk to be processed and added to the log.
         """
@@ -229,23 +270,136 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         self._replace_langchain_id_with_open_ai_id(message)
 
+        content = message.content
+
+        # Structured content (list of blocks) – inspect each block individually.
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type", "")
+
+                if _SERVER_TOOL_USE_SUBSTRING in block_type:
+                    self._handle_server_tool_use_block(message, block)
+                elif _SERVER_TOOL_RESULT_SUBSTRING in block_type:
+                    self._handle_server_tool_result_block(block)
+                elif block_type == "text" and block.get("text"):
+                    self._accumulate_text_chunk(message)
+                    break  # message.text() already aggregates all text blocks; avoid double-accumulation
+            return
+
+        # Plain string content – accumulate as regular agent text.
+        self._accumulate_text_chunk(message)
+
+    def _accumulate_text_chunk(self, message: AIMessageChunk) -> None:
+        """Accumulate a text-bearing AIMessageChunk onto the current AGENT log entry.
+
+        If the chunk shares the same message ID as the most-recently-seen AI message,
+        its text is appended to the existing entry.  Otherwise a new AGENT entry is
+        created.
+
+        Args:
+            message (AIMessageChunk): The chunk whose text should be accumulated.
+        """
+        text = message.text()
+        if not text:
+            return
+
         if self.latest_ai_message and self.latest_ai_message.id == message.id:
             self.latest_ai_message += message
-            self.ui_chat_log[-1]["content"] = self.latest_ai_message.text()
+            accumulated_text = self.latest_ai_message.text()
+            # TOOL entries may have been inserted after this message's first text chunk,
+            # so the AGENT entry is not necessarily the last item in the log.
+            for entry in reversed(self.ui_chat_log):
+                if (
+                    entry.get("message_type") == MessageTypeEnum.AGENT
+                    and entry.get("message_id") == message.id
+                ):
+                    entry["content"] = accumulated_text
+                    break
         else:
             self.latest_ai_message = message
-            last_ui_message = UiChatLog(
-                message_id=message.id,
-                status=None,
-                correlation_id=None,
-                message_type=MessageTypeEnum.AGENT,
-                message_sub_type=None,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                content=message.text(),
-                tool_info=None,
-                additional_context=None,
+            self.ui_chat_log.append(
+                UiChatLog(
+                    message_id=message.id,
+                    status=None,
+                    correlation_id=None,
+                    message_type=MessageTypeEnum.AGENT,
+                    message_sub_type=None,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    content=text,
+                    tool_info=None,
+                    additional_context=None,
+                )
             )
-            self.ui_chat_log.append(last_ui_message)
+
+    def _handle_server_tool_use_block(
+        self, message: AIMessageChunk, block: dict[str, Any]
+    ) -> None:
+        """Create a TOOL log entry when the model invokes a server-side tool.
+
+        The entry starts with ``ToolStatus.PENDING`` and will be updated in-place by
+        ``_handle_server_tool_result_block`` once the result arrives.
+
+        Args:
+            message (AIMessageChunk): The originating message chunk (used for ID).
+            block (dict): The server tool-use content block dict (type contains ``"tool_use"``).
+        """
+        tool_name = block.get("name", "unknown_server_tool")
+        tool_args = block.get("input") or {}
+        tool_use_id = block.get("id") or message.id
+
+        entry = UiChatLog(
+            message_id=tool_use_id,
+            status=ToolStatus.PENDING,
+            correlation_id=None,
+            message_type=MessageTypeEnum.TOOL,
+            message_sub_type=tool_name,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            content=f"Using {tool_name}: {tool_args}",
+            tool_info=ToolInfo(name=tool_name, args=tool_args),
+            additional_context=None,
+        )
+        self._server_tool_log_index = len(self.ui_chat_log)
+        self.ui_chat_log.append(entry)
+
+    def _handle_server_tool_result_block(self, block: dict[str, Any]) -> None:
+        """Update the pending server tool log entry with the tool result.
+
+        When a block whose ``type`` contains ``"tool_result"`` arrives, the previously
+        created ``server_tool_use`` entry (tracked by ``_server_tool_log_index``) is
+        updated in-place: its ``status`` changes to ``ToolStatus.SUCCESS`` and
+        ``tool_info.tool_response`` is set to the raw ``content`` value from the block.
+
+        The ``content`` payload is stored as-is without provider-specific parsing so
+        that this handler works uniformly across all Anthropic server tool result types
+        (``web_search_tool_result``, ``web_fetch_tool_result``,
+        ``code_execution_tool_result``, etc.).
+
+        If no pending tool entry is found (e.g., out-of-order delivery) the method
+        logs a warning and returns gracefully without modifying the log.
+
+        Args:
+            block (dict): A server tool result content block (type contains ``"tool_result"``).
+        """
+        if (
+            self._server_tool_log_index is not None
+            and self._server_tool_log_index < len(self.ui_chat_log)
+            and self.ui_chat_log[self._server_tool_log_index].get("message_id")
+            == block.get("tool_use_id")
+        ):
+            entry = self.ui_chat_log[self._server_tool_log_index]
+            entry["status"] = ToolStatus.SUCCESS
+            if entry.get("tool_info") is not None:
+                entry["tool_info"]["tool_response"] = block.get(  # type: ignore[index]
+                    "content"
+                )
+            self._server_tool_log_index = None
+        else:
+            log.warning(
+                "Received server tool result with no matching server_tool_use entry",
+                block_type=block.get("type"),
+            )
 
     # OpenAI's response API returns the message start, and values with a resp_... ID
     #  instead of the LangChain ID. All streamed messages still contain a LangChain ID.
