@@ -157,3 +157,60 @@ class TestInternalEventsClientAIContext:
         )
         assert standard_context.data["user_type"] == "service_account"
         assert "subject_type" not in standard_context.data
+
+
+class TestTruncateString:
+    """Test InternalEventsClient.truncate_string length validator."""
+
+    @pytest.fixture
+    def client(self):
+        with (
+            patch("lib.internal_events.client.requests.Session"),
+            patch("lib.internal_events.client.LoggingAsyncEmitter"),
+            patch("lib.internal_events.client.Tracker"),
+        ):
+            yield InternalEventsClient(
+                enabled=True,
+                endpoint="https://test.endpoint.com",
+                app_id="test_app",
+                namespace="test_namespace",
+                batch_size=1,
+                thread_count=1,
+            )
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            pytest.param(None, None, id="none_returns_none"),
+            pytest.param("", "", id="empty_string_returns_empty"),
+            pytest.param("short value", "short value", id="short_string_unchanged"),
+            pytest.param(
+                "a" * InternalEventsClient.MAX_VALUE_LENGTH,
+                "a" * InternalEventsClient.MAX_VALUE_LENGTH,
+                id="exactly_max_length_unchanged",
+            ),
+        ],
+    )
+    def test_truncate_string_does_not_truncate(self, client, value, expected):
+        assert client.truncate_string(value) == expected
+
+    def test_truncate_string_truncates_when_over_max(self, client):
+        value = "a" * (InternalEventsClient.MAX_VALUE_LENGTH + 50)
+
+        result = client.truncate_string(value)
+
+        assert result is not None
+        assert len(result) == InternalEventsClient.MAX_VALUE_LENGTH
+        assert result.endswith("...")
+        assert result == "a" * (InternalEventsClient.MAX_VALUE_LENGTH - 3) + "..."
+
+    def test_truncate_string_preserves_prefix_content(self, client):
+        prefix = "important-prefix:"
+        value = prefix + "x" * InternalEventsClient.MAX_VALUE_LENGTH
+
+        result = client.truncate_string(value)
+
+        assert result is not None
+        assert result.startswith(prefix)
+        assert result.endswith("...")
+        assert len(result) == InternalEventsClient.MAX_VALUE_LENGTH

@@ -23,6 +23,7 @@ class InternalEventsClient:
     STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-8"
     AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-1"
     REQUEST_TIMEOUT = (5.0, 10.0)
+    MAX_VALUE_LENGTH = 1000
 
     def __init__(
         self,
@@ -156,12 +157,13 @@ class InternalEventsClient:
         new_context["extra"] = extra
 
         session_id = additional_properties.value
+        event_property = self.truncate_string(additional_properties.property)
 
         self._logger.info(
             "Building AIContext",
             event_name=event_name,
             label=additional_properties.label,
-            property=additional_properties.property,
+            property=event_property,
             session_id=session_id,
             workflow_id=extra.get("workflow_id"),
             flow_type=extra.get("workflow_type"),
@@ -201,7 +203,7 @@ class InternalEventsClient:
             action=event_name,
             label=additional_properties.label,
             value=additional_properties.value,
-            property_=additional_properties.property,
+            property_=event_property,
         )
 
         self.snowplow_tracker.track(structured_event)
@@ -220,3 +222,17 @@ class InternalEventsClient:
             emitter_buffer_size=buffer_size,
         )
         tracked_internal_events.get().add(event_name)
+
+    def truncate_string(self, value: str | None) -> str | None:
+        """Truncate a string to MAX_VALUE_LENGTH, appending '...' if trimmed.
+
+        Args:
+            value: The string to truncate, or None.
+        Returns:
+            The original string if it is within the length limit or None/empty,
+            otherwise the string truncated to MAX_VALUE_LENGTH characters (including
+            the trailing '...').
+        """
+        if value and len(value) > self.MAX_VALUE_LENGTH:
+            return value[: self.MAX_VALUE_LENGTH - 3] + "..."
+        return value
