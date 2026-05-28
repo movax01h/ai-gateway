@@ -391,6 +391,21 @@ class CreateVulnerabilityIssueInput(BaseModel):
         description="Array of vulnerability IDs that will be linked to the created issue. Up to 100 can be provided."
     )
 
+    @field_validator("vulnerability_ids", mode="before")
+    @classmethod
+    def coerce_to_list(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if not isinstance(parsed, list):
+                    raise ValueError(
+                        f"Expected JSON string to deserialize to a list, got {type(parsed).__name__}"
+                    )
+                return parsed
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON string: {e}")
+        return v
+
 
 class CreateVulnerabilityIssue(DuoBaseTool):
     tier_check_licensed_feature: ClassVar[str] = LICENSED_FEATURE_SECURITY_DASHBOARD

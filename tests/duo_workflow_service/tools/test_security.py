@@ -1703,6 +1703,59 @@ def test_create_vulnerability_issue_format_display_message(
     assert tool.format_display_message(test_input_data) == expected_message
 
 
+@pytest.mark.parametrize(
+    "vulnerability_ids,expected",
+    [
+        (
+            '["gid://gitlab/Vulnerability/1", "gid://gitlab/Vulnerability/2"]',
+            ["gid://gitlab/Vulnerability/1", "gid://gitlab/Vulnerability/2"],
+        ),
+        (
+            ["gid://gitlab/Vulnerability/1"],
+            ["gid://gitlab/Vulnerability/1"],
+        ),
+    ],
+)
+def test_create_vulnerability_issue_input_coerce_to_list(vulnerability_ids, expected):
+    input_data = CreateVulnerabilityIssueInput(
+        project_full_path="namespace/project",
+        vulnerability_ids=vulnerability_ids,
+    )
+    assert input_data.vulnerability_ids == expected
+
+
+@pytest.mark.parametrize(
+    "vulnerability_ids,expected_error",
+    [
+        (
+            "not valid json",
+            "Invalid JSON string",
+        ),
+        (
+            '"gid://gitlab/Vulnerability/1"',
+            "Expected JSON string to deserialize to a list, got str",
+        ),
+        (
+            "123",
+            "Expected JSON string to deserialize to a list, got int",
+        ),
+        (
+            "null",
+            "Expected JSON string to deserialize to a list, got NoneType",
+        ),
+    ],
+)
+def test_create_vulnerability_issue_input_coerce_to_list_invalid(
+    vulnerability_ids, expected_error
+):
+    with pytest.raises(ValidationError) as exc_info:
+        CreateVulnerabilityIssueInput(
+            project_full_path="namespace/project",
+            vulnerability_ids=vulnerability_ids,
+        )
+    assert expected_error in str(exc_info.value)
+
+
 @pytest.mark.asyncio
 async def test_link_vulnerability_to_merge_request(gitlab_client_mock, metadata):
     with patch(
