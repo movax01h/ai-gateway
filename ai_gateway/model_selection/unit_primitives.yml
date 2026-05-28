@@ -372,12 +372,15 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_6_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_4_6_bedrock"
   - feature_setting: model_configuration
     unit_primitives:
       - "complete_code"
@@ -397,22 +400,28 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_6_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_4_6_bedrock"
   - feature_setting: "recommend_reviewers_assign"
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - "claude_sonnet_4_20250514_vertex"
+      - "claude_sonnet_4_6_vertex"
     selectable_models:
       - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_4_6_bedrock"
   - feature_setting: "review_merge_request"
     unit_primitives:
       - "review_merge_request"
