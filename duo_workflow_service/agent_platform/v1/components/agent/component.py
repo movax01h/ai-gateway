@@ -166,8 +166,10 @@ class AgentComponentBase(BaseComponent):
         self._response_schema = response_schema
         return self
 
-    # Variable injected by the node runner at execution time — never a component input.
-    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset({"history"})
+    # Variables injected by the node runner at execution time — never component inputs.
+    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset(
+        {"history", "current_date", "current_time", "current_timezone"}
+    )
 
     @model_validator(mode="after")
     def validate_prompt_variable_coverage(self) -> Self:

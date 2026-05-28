@@ -113,8 +113,6 @@ components:
         as: "mr_data"
       - from: "context:analyze_prescan_results.final_answer"
         as: "codebase_context"
-      - from: "context:current_date"
-        as: "current_date"
       - from: "context:project_id"
         as: "project_id"
       - from: "context:goal"

@@ -1,5 +1,7 @@
-# pylint: disable=file-naming-for-tests
+# pylint: disable=file-naming-for-tests, too-many-lines
 import copy
+import importlib
+from datetime import datetime
 from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
@@ -131,6 +133,24 @@ def _mock_maybe_compact_history_fixture():
         yield mock_compact
 
 
+FAKE_RUNTIME_VARS = {
+    "current_date": "2026-01-01",
+    "current_time": "12:00:00",
+    "current_timezone": "UTC",
+}
+
+
+@pytest.fixture(name="_mock_predefined_runtime_variables")
+def _mock_predefined_runtime_variables_fixture():
+    """Fixture for mocking _predefined_runtime_variables to return deterministic values."""
+    with patch.object(
+        AgentNode,
+        "_predefined_runtime_variables",
+        return_value=FAKE_RUNTIME_VARS,
+    ):
+        yield
+
+
 class TestAgentNode:
     """Test suite for AgentNode class focusing on the run method."""
 
@@ -146,6 +166,7 @@ class TestAgentNode:
         prompt_variables,
         mock_get_vars_from_state,
         _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
     ):
         """Test successful run with empty conversation history."""
 
@@ -166,6 +187,7 @@ class TestAgentNode:
             input={
                 **prompt_variables,
                 "history": [],
+                **FAKE_RUNTIME_VARS,
             }
         )
 
@@ -181,6 +203,7 @@ class TestAgentNode:
         prompt_variables,
         mock_get_vars_from_state,
         _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
     ):
         """Test successful run with existing conversation history."""
         existing_history = flow_state_with_history[FlowStateKeys.CONVERSATION_HISTORY][
@@ -206,6 +229,7 @@ class TestAgentNode:
             input={
                 **prompt_variables,
                 "history": existing_history,
+                **FAKE_RUNTIME_VARS,
             }
         )
 
@@ -221,6 +245,7 @@ class TestAgentNode:
         prompt_variables,
         mock_get_vars_from_state,
         _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
     ):
         """Test run method with conversation_history missing the component key."""
         base_flow_state[FlowStateKeys.CONVERSATION_HISTORY] = {}
@@ -242,6 +267,7 @@ class TestAgentNode:
             input={
                 **prompt_variables,
                 "history": [],
+                **FAKE_RUNTIME_VARS,
             }
         )
 
@@ -319,6 +345,7 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
     ):
         """Test run method when final_response_tool is combined with other tools."""
         # Create mock AI message with final_response_tool and another tool
@@ -354,8 +381,14 @@ class TestAgentNode:
         ]
         mock_prompt.ainvoke.assert_has_calls(
             [
-                call(input={**prompt_variables, "history": []}),
-                call(input={**prompt_variables, "history": retry_history}),
+                call(input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS}),
+                call(
+                    input={
+                        **prompt_variables,
+                        "history": retry_history,
+                        **FAKE_RUNTIME_VARS,
+                    }
+                ),
             ]
         )
 
@@ -412,6 +445,7 @@ class TestAgentNode:
         base_flow_state,
         component_name,
         _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
     ):
         """Test run method when final_response_tool has validation error."""
         # Create mock AI message with invalid final_response_tool args
@@ -442,7 +476,9 @@ class TestAgentNode:
         assert mock_prompt.ainvoke.call_count == 2
 
         prompt_calls = mock_prompt.ainvoke.call_args_list
-        assert prompt_calls[0] == call(input={**prompt_variables, "history": []})
+        assert prompt_calls[0] == call(
+            input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS}
+        )
 
         retry_messages_history = prompt_calls[1][1]["input"]["history"]
         assert len(retry_messages_history) == 2
@@ -570,6 +606,7 @@ class TestAgentNodeTruncation:
         component_name,
         prompt_variables,
         _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
     ):
         """Test that a truncated LLM response retries internally within AgentNode."""
         truncated_message = copy.copy(mock_ai_message)
@@ -595,8 +632,20 @@ class TestAgentNodeTruncation:
         ]
         mock_prompt.ainvoke.assert_has_calls(
             [
-                call(input={**prompt_variables, "history": []}),
-                call(input={**prompt_variables, "history": expected_retry_history}),
+                call(
+                    input={
+                        **prompt_variables,
+                        "history": [],
+                        **FAKE_RUNTIME_VARS,
+                    }
+                ),
+                call(
+                    input={
+                        **prompt_variables,
+                        "history": expected_retry_history,
+                        **FAKE_RUNTIME_VARS,
+                    }
+                ),
             ]
         )
 
@@ -983,3 +1032,61 @@ class TestAgentNodeReasoning:
             if log["message_type"] == MessageTypeEnum.AGENT
         ]
         assert len(reasoning_logs) == 0
+
+    def test_non_str_non_list_content_returns_empty(self):
+        """Content that is neither str nor list returns an empty string."""
+        message = AIMessage(content="placeholder")
+        # Bypass the normal str path by directly setting content to an unexpected type
+        message.content = 42
+        assert AgentNode._extract_text(message) == ""
+
+
+class TestPredefinedRuntimeVariables:
+    """Unit tests for AgentNode._predefined_runtime_variables."""
+
+    def test_returns_expected_keys_with_valid_values(self):
+        result = AgentNode._predefined_runtime_variables()
+        assert set(result.keys()) == {
+            "current_date",
+            "current_time",
+            "current_timezone",
+        }
+        datetime.strptime(result["current_date"], "%Y-%m-%d")
+        datetime.strptime(result["current_time"], "%H:%M:%S")
+        assert isinstance(result["current_timezone"], str)
+
+    @pytest.mark.asyncio
+    async def test_runtime_variables_included_in_prompt_invocation(
+        self,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """_predefined_runtime_variables keys are passed to the prompt ainvoke call."""
+        await agent_node.run(base_flow_state)
+
+        invoked_input = mock_prompt.ainvoke.call_args[1]["input"]
+        assert "current_date" in invoked_input
+        assert "current_time" in invoked_input
+        assert "current_timezone" in invoked_input
+
+    @pytest.mark.parametrize(
+        "component_cls",
+        [
+            "duo_workflow_service.agent_platform.v1.components.agent.component.AgentComponentBase",
+            "duo_workflow_service.agent_platform.v1.components.one_off.component.OneOffComponent",
+        ],
+    )
+    def test_runtime_injected_vars(self, component_cls):
+        """_RUNTIME_INJECTED_VARS includes history, current_time, and current_timezone."""
+
+        module_path, cls_name = component_cls.rsplit(".", 1)
+        cls = getattr(importlib.import_module(module_path), cls_name)
+        assert cls._RUNTIME_INJECTED_VARS >= {
+            "history",
+            "current_date",
+            "current_time",
+            "current_timezone",
+        }
