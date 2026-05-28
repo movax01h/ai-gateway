@@ -31,6 +31,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
     CHAT_READ_ONLY_TOOLS,
+    CHAT_UTILITY_TOOLS,
     RUN_COMMAND_TOOLS,
     Routes,
     Workflow,
@@ -558,10 +559,20 @@ class TestUnauthorizedChatExecution:
             + CHAT_GITLAB_MUTATION_TOOLS
             + CHAT_FLOW_TOOLS,
         ),
+        (
+            ["duo_chat_clarification_question_tool"],
+            {},
+            CHAT_READ_ONLY_TOOLS
+            + CHAT_MUTATION_TOOLS
+            + RUN_COMMAND_TOOLS
+            + CHAT_GITLAB_MUTATION_TOOLS
+            + CHAT_UTILITY_TOOLS,
+        ),
     ],
     ids=[
         "without_flow_tools_feature_flag",
         "with_flow_tools_feature_flag",
+        "with_clarification_question_tool_feature_flag",
     ],
 )
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")

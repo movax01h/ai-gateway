@@ -84,6 +84,7 @@ _outbox = MagicMock(spec=Outbox)
                 "todo_write",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "clarification_question",
             },
         ),
         (
@@ -99,6 +100,7 @@ _outbox = MagicMock(spec=Outbox)
                 "run_command",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "clarification_question",
             },
         ),
         (
@@ -133,6 +135,7 @@ _outbox = MagicMock(spec=Outbox)
                 "gitlab_note_search",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "clarification_question",
                 "get_epic",
                 "list_epics",
                 "list_issue_notes",
@@ -207,6 +210,7 @@ _outbox = MagicMock(spec=Outbox)
                 "gitlab_note_search",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "clarification_question",
                 "get_epic",
                 "list_epics",
                 "create_epic",
@@ -276,6 +280,7 @@ _outbox = MagicMock(spec=Outbox)
                 "run_git_command",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "clarification_question",
             },
         ),
         (
@@ -299,6 +304,7 @@ _outbox = MagicMock(spec=Outbox)
                 "extract_lines_from_text",
                 "handover_tool",
                 "request_user_clarification_tool",
+                "clarification_question",
                 "run_tests",
             },
         ),
@@ -407,6 +413,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "run_git_command": tools.git.Command(metadata=tool_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
+        "clarification_question": tools.ClarificationQuestionTool(),
         "get_epic": tools.GetEpic(metadata=tool_metadata),
         "list_epics": tools.ListEpics(metadata=tool_metadata),
         "create_epic": tools.CreateEpic(metadata=tool_metadata),
@@ -514,6 +521,7 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
         "run_git_command",
         "handover_tool",
         "request_user_clarification_tool",
+        "clarification_question",
         "extra_tool",
     }
     assert registry.approval_required("extra_tool") is True
@@ -698,6 +706,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "todo_write",
         "handover_tool",
         "request_user_clarification_tool",
+        "clarification_question",
     }
     # Tools from read_write_files privilege should be in preapproved_tools
     read_write_tools = {

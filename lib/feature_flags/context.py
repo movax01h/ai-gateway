@@ -14,6 +14,7 @@ class FeatureFlag(StrEnum):
     AI_CONTEXT_COMPACTION = "ai_context_compaction"
     DUO_WORKFLOW_AUDIT_EVENTS = "duo_workflow_audit_events"
     AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
+    DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

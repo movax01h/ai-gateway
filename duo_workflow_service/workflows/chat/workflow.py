@@ -129,6 +129,8 @@ RUN_COMMAND_TOOLS = ["run_command"]
 
 CHAT_FLOW_TOOLS = ["start_flow"]
 
+CHAT_UTILITY_TOOLS = ["clarification_question"]
+
 
 @support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
@@ -378,12 +380,19 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
+        utility_tools = (
+            CHAT_UTILITY_TOOLS
+            if is_feature_enabled(FeatureFlag.DUO_CHAT_CLARIFICATION_QUESTION_TOOL)
+            else []
+        )
+
         available_tools = (
             read_only_tools
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
             + flow_tools
+            + utility_tools
         )
         return available_tools
 

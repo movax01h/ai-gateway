@@ -21,6 +21,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from lib.feature_flags import current_feature_flag_context
 
 
 @pytest.fixture(name="mock_datetime")
@@ -878,3 +879,87 @@ class TestPromptAdapterFriendlyName:
 
             _, first_kwargs = call_args_list[0]
             assert first_kwargs["model_friendly_name"] == "Unknown"
+
+
+@pytest.mark.parametrize(
+    "prompt_template",
+    [
+        {
+            "system_static": "static",
+            "user": "{{ message.content }}",
+        }
+    ],
+)
+class TestClarificationQuestionToolFeatureFlagPropagation:
+    """Verify the clarification_question_tool_enabled flag is propagated to the static system prompt context."""
+
+    @pytest.fixture
+    def mock_gitlab_instance_info(self):
+        return GitLabInstanceInfo(
+            instance_type="gitlab-com",
+            instance_url="https://gitlab.com",
+            instance_version="17.0.0",
+        )
+
+    @pytest.fixture
+    def input_data(self, project, namespace) -> ChatWorkflowState:
+        return {
+            "conversation_history": {"test_agent": [HumanMessage(content="Hello")]},
+            "project": project,
+            "namespace": namespace,
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "goal": "Test goal",
+            "approval": None,
+            "preapproved_tools": None,
+            "denied_tools": None,
+        }
+
+    @pytest.mark.parametrize(
+        ("feature_flags", "expected_enabled"),
+        [
+            ([], False),
+            (["duo_chat_clarification_question_tool"], True),
+            (["some_unrelated_flag"], False),
+        ],
+        ids=[
+            "no_flags",
+            "clarification_flag_enabled",
+            "only_unrelated_flag",
+        ],
+    )
+    @patch(
+        "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+    def test_clarification_question_tool_enabled_in_static_template_context(
+        self,
+        mock_get_model_metadata,
+        mock_instance_info,
+        mock_gitlab_instance_info,
+        feature_flags,
+        expected_enabled,
+        model_provider,
+        prompt_config,
+        input_data,
+    ):
+        mock_get_model_metadata.return_value = None
+        mock_instance_info.return_value = mock_gitlab_instance_info
+        current_feature_flag_context.set(set(feature_flags))
+
+        adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
+
+        with patch(
+            "duo_workflow_service.agents.prompt_adapter.jinja2_formatter"
+        ) as mock_formatter:
+            mock_formatter.return_value = "Formatted prompt"
+
+            adapter.invoke(input_data, agent_name="test_agent")
+
+            _, first_kwargs = mock_formatter.call_args_list[0]
+            assert "clarification_question_tool_enabled" in first_kwargs
+            assert (
+                first_kwargs["clarification_question_tool_enabled"] is expected_enabled
+            )
