@@ -9,7 +9,6 @@ class DevConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     selectable_models: list[str]
-    group_ids: list[int]
 
 
 class DeprecationInfo(BaseModel):

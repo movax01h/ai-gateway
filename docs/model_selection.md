@@ -251,7 +251,7 @@ Each Unit Primitive can be configured with:
 - A default model
 - A set of selectable models
 - Beta models available for testing
-- Developer-only models (restricted to specific groups)
+- Developer-only models (restricted to GitLab team members)
 
 Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives.yml` and the following properties are available:
 
@@ -263,8 +263,7 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
-  - `selectable_models`: models only visible to users in groups specified by `group_ids`
-  - `group_ids`: GitLab group IDs that can access the developer models (e.g., `[9970]` for `gitlab-org`)
+  - `selectable_models`: models only visible to GitLab team members
 - `deprecation`: optional nested configuration for model deprecations with the following fields:
   - `deprecation_date`: indicates when the model becomes deprecated (e.g., `2025-10-08`)
   - `removal_version`: specifies the GitLab version after which the model will no longer be supported (e.g., `18.8`)
@@ -285,8 +284,6 @@ configurable_unit_primitives:
       selectable_models:
         - "claude_sonnet_4_5_20250929"
         - "claude_haiku_4_5_20251001"
-      group_ids:
-        - 9970
   ```
 
 ## Model size configuration
@@ -350,11 +347,9 @@ There's an [open issue](https://gitlab.com/gitlab-org/gitlab/-/work_items/587907
 
 The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone.
 This is useful when you want to validate a new model internally without exposing customers to potential issues.
-When you set `dev.selectable_models`, you must also specify at least one group in `dev.group_ids`.
-This prevents accidentally making "internal-only" models available to everyone.
 
-The actual access control happens in the client (GitLab Rails), which checks whether the user is a GitLab team member and belongs to any of the groups in `dev.group_ids`.
-Users in those groups see both the regular and developer models, while everyone else only sees the regular ones.
+The actual access control happens in the client (GitLab Rails), which checks whether the user is a GitLab team member.
+GitLab team members see both the regular and developer models, while everyone else only sees the regular ones.
 
 ## Model deprecations
 

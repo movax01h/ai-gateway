@@ -229,22 +229,6 @@ class ModelSelectionConfig:
             ]
         return []
 
-    def _validate_dev_models(
-        self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
-    ) -> list[str]:
-        errors = [
-            f"Feature '{upc.feature_setting}' has dev selectable_models "
-            f"but group_ids is empty. Specify at least one group ID."
-            for upc in unit_primitive_configs
-            if upc.dev and upc.dev.selectable_models and not upc.dev.group_ids
-        ]
-        if errors:
-            return [
-                "Developer-only models contain certain errors:\n"
-                + "\n".join(f"  - {error}" for error in errors)
-            ]
-        return []
-
     def _validate_selectable_model_required_fields(
         self,
         unit_primitive_configs: Iterable[UnitPrimitiveConfig],
@@ -281,7 +265,6 @@ class ModelSelectionConfig:
         error_messages = [
             *self._validate_model_ids_exist(unit_primitive_configs, models_ids),
             *self._validate_default_models_are_selectable(unit_primitive_configs),
-            *self._validate_dev_models(unit_primitive_configs),
             *self._validate_selectable_model_required_fields(
                 unit_primitive_configs, models, models_ids
             ),
