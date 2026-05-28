@@ -45,7 +45,7 @@ prompts:
           1. **Identify intent** - Is this an analytical question or a query/visualization request?
           2. **Determine scope** - Project, group, or cross-project analysis
           3. **Check for ambiguous concepts** - Does the question contain terms like "team", "quarter", "bugs" that need clarification?
-          4. **Select data source** - Identify which data source the user is asking about (WorkItem, MergeRequest, Pipeline, Job, or Project), then call `get_glql_schema` to retrieve its schema.
+          4. **Select data source** - Identify which data source the user is asking about, then call `get_glql_schema` to retrieve its schema. Check `supported_modes` to determine if it uses standard or analytics mode.
           5. **Build query** - Refer to the glql_syntax section to build the appropriate query based on the schema returned by the tool.
           6. **Generate insights or queries** - Based on user intent
         </core_function>
@@ -57,6 +57,8 @@ prompts:
           - "What's my team working on?"
           - "What is the bug creation trend for the past month"
           - "How is performance this quarter?"
+          - "What's the acceptance rate for Python suggestions?"
+          - "Show me code suggestion trends by language"
 
           **Query/Visualization Requests** (query-first approach): User wants to see the query or have data displayed
 
@@ -175,8 +177,7 @@ prompts:
           - Use `display: table` for data with multiple fields (default)
           - Use `display: list` for simple title-only lists
           - Use `display: orderedList` when user requests a numbered or ranked list
-
-          **Note**: GLQL displays data as tables, lists, or ordered lists - not charts. If a user requests a chart or graph, ask if they'd like a Mermaid diagram instead, which can visualize trends, distributions, or flows.
+          - Use `display: columnChart` for visualizing comparisons, distributions, or trends (e.g., counts by category, metrics over time). Works only with analytics-mode queries.
 
           **DO NOT render data as a markdown table or list** unless the user explicitly asks for "markdown format". The GLQL block provides an interactive, live-updating view that users can customize.
 
@@ -294,6 +295,30 @@ prompts:
           - `currentUser()` works for user fields (e.g. assignee, author, reviewer, approver, merger)
           - Labels: `~` prefix required (`~bug`, `~"label with spaces"`)
           - Milestones: `%` prefix required (`%v1.0`, `%"milestone name"`)
+
+          ### Query Modes
+
+          Data sources may support different query modes. Always check the schema returned by `get_glql_schema` for the `supported_modes` field:
+
+          - **Standard mode** (default): Uses `fields` for display columns. No `mode` parameter needed.
+          - **Analytics mode** (`mode: analytics`): Uses `dimensions` and `metrics` for aggregations. Does NOT support `fields`.
+          - Some data sources support both modes, some only support one. The schema will tell you.
+          - If `supported_modes` is not given for a data source, it will always only support standard mode
+
+          **When building a query**:
+          1. Check `supported_modes` in the schema to determine which mode(s) are available
+          2. If the source only supports `analytics`, you MUST use `mode: analytics` with `dimensions` and `metrics`
+          3. If the source supports both, choose based on user intent: use analytics for aggregations/trends/rates, standard for listing individual items
+
+          Analytics mode sample query:
+
+          ```
+          mode: analytics
+          query: type = CodeSuggestion and timestamp >= -30d
+          dimensions: language
+          metrics: totalCount, acceptanceRate
+          sort: totalCount desc
+          ```
 
           ### Time Expressions (ALWAYS PREFER RELATIVE)
 

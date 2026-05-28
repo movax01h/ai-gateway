@@ -5,7 +5,7 @@ import json
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.get_glql_schema import _SCHEMAS, GetGlqlSchema
+from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
 
 
 @pytest.fixture
@@ -33,6 +33,7 @@ async def test_all_data_sources(schema_tool):
         "Pipeline",
         "Job",
         "Project",
+        "CodeSuggestion",
     }
 
 
@@ -65,14 +66,4 @@ async def test_unknown_in_comma_separated(schema_tool):
 async def test_default_is_all(schema_tool):
     """Default data_source returns all schemas."""
     result = json.loads(await schema_tool._execute())
-    assert len(result) == 5
-
-
-@pytest.mark.asyncio
-async def test_schema_structure():
-    """Each schema has required keys."""
-    for name, schema in _SCHEMAS.items():
-        assert "type_values" in schema, f"{name} missing type_values"
-        assert "filters" in schema, f"{name} missing filters"
-        assert "display_fields" in schema, f"{name} missing display_fields"
-        assert "sort_fields" in schema, f"{name} missing sort_fields"
+    assert len(result) == 6

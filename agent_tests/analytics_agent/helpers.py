@@ -46,6 +46,44 @@ def glql_response(
     }
 
 
+def glql_analytics_response(
+    nodes: list[dict[str, Any]],
+    count: int | None = None,
+    has_next_page: bool = False,
+    end_cursor: str | None = None,
+) -> dict[str, Any]:
+    """Build a GLQL analytics-mode API response.
+
+    Analytics responses omit the top-level ``fields`` array that standard
+    responses include. The Rust transform also flattens dimension keys into
+    each node (e.g. ``{"language": "python", "totalCount": 1500, ...}``),
+    so nodes should be passed in already-flat form to match the real API.
+
+    Args:
+        nodes: List of aggregated result items (flat dimension + metric keys)
+        count: Total count (defaults to len(nodes))
+        has_next_page: Whether there are more pages
+        end_cursor: Cursor for next page
+
+    Returns:
+        GLQL analytics response dict
+    """
+    return {
+        "data": {
+            "count": count if count is not None else len(nodes),
+            "nodes": nodes,
+            "pageInfo": {
+                "hasNextPage": has_next_page,
+                "hasPreviousPage": False,
+                "endCursor": end_cursor,
+                "startCursor": None,
+            },
+        },
+        "error": None,
+        "success": True,
+    }
+
+
 def mock_glql_response(
     mock_gitlab_client: AsyncMock,
     response: dict[str, Any] | list[dict[str, Any]],
@@ -172,6 +210,97 @@ SAMPLE_PROJECTS = [
         "starCount": 2300,
         "openIssuesCount": 800,
         "openMergeRequestsCount": 50,
+    },
+]
+
+SAMPLE_CODE_SUGGESTIONS = [
+    {
+        "language": "python",
+        "totalCount": 1500,
+        "usersCount": 25,
+        "acceptanceRate": 0.72,
+        "suggestionSizeSum": 45000,
+        "acceptedCount": 1080,
+        "rejectedCount": 420,
+        "shownCount": 1500,
+    },
+    {
+        "language": "ruby",
+        "totalCount": 980,
+        "usersCount": 18,
+        "acceptanceRate": 0.65,
+        "suggestionSizeSum": 29400,
+        "acceptedCount": 637,
+        "rejectedCount": 343,
+        "shownCount": 980,
+    },
+    {
+        "language": "javascript",
+        "totalCount": 1200,
+        "usersCount": 22,
+        "acceptanceRate": 0.78,
+        "suggestionSizeSum": 36000,
+        "acceptedCount": 936,
+        "rejectedCount": 264,
+        "shownCount": 1200,
+    },
+]
+
+SAMPLE_CODE_SUGGESTIONS_BY_IDE = [
+    {
+        "ideName": "VS Code",
+        "totalCount": 2500,
+        "usersCount": 40,
+        "acceptanceRate": 0.75,
+        "suggestionSizeSum": 75000,
+        "acceptedCount": 1875,
+        "rejectedCount": 625,
+        "shownCount": 2500,
+    },
+    {
+        "ideName": "JetBrains IDE",
+        "totalCount": 800,
+        "usersCount": 15,
+        "acceptanceRate": 0.68,
+        "suggestionSizeSum": 24000,
+        "acceptedCount": 544,
+        "rejectedCount": 256,
+        "shownCount": 800,
+    },
+]
+
+SAMPLE_CODE_SUGGESTIONS_BY_USER = [
+    {
+        "user": {
+            "id": "gid://gitlab/User/1",
+            "username": "alice",
+            "name": "Alice Smith",
+            "avatarUrl": "https://gitlab.com/uploads/-/avatar/alice.png",
+            "webUrl": "https://gitlab.com/alice",
+        },
+        "totalCount": 500,
+        "usersCount": 1,
+        "acceptanceRate": 0.82,
+        "suggestionSizeSum": 15000,
+        "acceptedCount": 410,
+        "rejectedCount": 90,
+        "shownCount": 500,
+    },
+    {
+        "user": {
+            "id": "gid://gitlab/User/2",
+            "username": "bob",
+            "name": "Bob Jones",
+            "avatarUrl": "https://gitlab.com/uploads/-/avatar/bob.png",
+            "webUrl": "https://gitlab.com/bob",
+        },
+        "totalCount": 350,
+        "usersCount": 1,
+        "acceptanceRate": 0.71,
+        "suggestionSizeSum": 10500,
+        "acceptedCount": 249,
+        "rejectedCount": 101,
+        "shownCount": 350,
     },
 ]
 

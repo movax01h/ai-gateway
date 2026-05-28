@@ -13,20 +13,22 @@ class GetGlqlSchemaInput(BaseModel):
         description="""Which data source schema(s) to retrieve.
 
         Accepted values:
-        - A single data source: "WorkItem", "MergeRequest", "Pipeline", "Job", or "Project"
+        - A single data source: "WorkItem", "MergeRequest", "Pipeline", "Job", "Project", or "CodeSuggestion"
         - Multiple comma-separated: "Pipeline,Job" (returns a dict keyed by source name)
         - "all" (default): returns every data source schema
 
         Examples:
         - "Pipeline" → returns the Pipeline schema (filters, display_fields, sort_fields)
+        - "CodeSuggestion" → returns the CodeSuggestion schema (filters, dimensions, metrics, sort_fields)
         - "Pipeline,Job" → returns {"Pipeline": {...}, "Job": {...}}
-        - "all" → returns all 5 data source schemas
+        - "all" → returns all data source schemas
         """,
     )
 
 
 _SCHEMAS = {
     "WorkItem": {
+        "scope": ["project", "group"],
         "type_values": [
             "Issue",
             "Epic",
@@ -125,7 +127,6 @@ _SCHEMAS = {
         ],
     },
     "MergeRequest": {
-        "type_values": ["MergeRequest"],
         "scope": ["project", "group"],
         "filters": [
             {"name": "project", "operators": ["="]},
@@ -200,9 +201,9 @@ _SCHEMAS = {
         ],
     },
     "Pipeline": {
-        "type_values": ["Pipeline"],
+        "scope": ["project"],
         "filters": [
-            {"name": "project", "operators": ["="], "required": "true"},
+            {"name": "project", "operators": ["="]},
             {"name": "author", "operators": ["="]},
             {"name": "ref", "operators": ["="]},
             {
@@ -275,9 +276,9 @@ _SCHEMAS = {
         "sort_fields": [],
     },
     "Job": {
-        "type_values": ["Job"],
+        "scope": ["project"],
         "filters": [
-            {"name": "project", "operators": ["="], "required": "true"},
+            {"name": "project", "operators": ["="]},
             {"name": "kind", "operators": ["="], "values": ["bridge", "build"]},
             {"name": "pipeline", "operators": ["="], "note": "pipeline IID number"},
             {
@@ -347,12 +348,11 @@ _SCHEMAS = {
         "sort_fields": [],
     },
     "Project": {
-        "type_values": ["Project"],
+        "scope": ["namespace"],
         "filters": [
             {
                 "name": "namespace",
                 "operators": ["="],
-                "required": "true",
                 "alias": "group",
             },
             {"name": "archivedOnly", "operators": ["=", "!="]},
@@ -391,6 +391,45 @@ _SCHEMAS = {
         ],
         "sort_fields": ["fullPath", "lastActivity (desc only)", "path"],
     },
+    "CodeSuggestion": {
+        "scope": ["project", "group"],
+        "supported_modes": ["analytics"],
+        "analytics": {
+            "filters": [
+                {"name": "language", "operators": ["=", "in"]},
+                {"name": "ideName", "operators": ["=", "in"]},
+                {"name": "timestamp", "operators": [">", "<", ">=", "<="]},
+                {
+                    "name": "user",
+                    "operators": ["=", "in"],
+                    "note": "numeric user ID only (e.g. user = 123)",
+                },
+            ],
+            "dimensions": ["language", "ideName", "timestamp", "user"],
+            "metrics": [
+                "totalCount",
+                "usersCount",
+                "acceptanceRate",
+                "suggestionSizeSum",
+                "acceptedCount",
+                "rejectedCount",
+                "shownCount",
+            ],
+            "sort_fields": [
+                "language",
+                "ideName",
+                "timestamp",
+                "user",
+                "totalCount",
+                "usersCount",
+                "acceptanceRate",
+                "suggestionSizeSum",
+                "acceptedCount",
+                "rejectedCount",
+                "shownCount",
+            ],
+        },
+    },
 }
 
 
@@ -402,7 +441,8 @@ class GetGlqlSchema(DuoBaseTool):
     MUST be called before building any GLQL query to ensure only valid fields are used.
 
     Supports fetching a single source, multiple comma-separated sources, or "all" sources at once.
-    Supported data sources: WorkItem, MergeRequest, Pipeline, Job, Project.
+    Supported data sources: WorkItem, MergeRequest, Pipeline, Job, Project, CodeSuggestion.
+    Check the returned schema's supported_modes to determine if a source uses standard or analytics mode.
     """
     args_schema: Type[BaseModel] = GetGlqlSchemaInput
 
