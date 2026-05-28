@@ -267,7 +267,11 @@ class ChatAgent:
                     )
                     synthetic_tool_messages = [
                         ToolMessage(
-                            content="Tool execution was interrupted. Please try running the tool again.",
+                            content=(
+                                "Tool execution was interrupted. Retry this tool call,"
+                                " or stop and report to the user if you detect you"
+                                " are in a retry loop."
+                            ),
                             tool_call_id=tc.get("id"),
                         )
                         for tc in last_ai.tool_calls
