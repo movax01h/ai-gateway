@@ -21,6 +21,7 @@ from duo_workflow_service.slash_commands.goal_parser import (
 )
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from lib.context import get_model_metadata
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
 from lib.prompts.utilities import render_security_block
 
@@ -75,6 +76,9 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                     model_metadata.friendly_name
                     if model_metadata and model_metadata.friendly_name
                     else "Unknown"
+                ),
+                "clarification_question_tool_enabled": is_feature_enabled(
+                    FeatureFlag.DUO_CHAT_CLARIFICATION_QUESTION_TOOL
                 ),
             }
             system_template_override = _kwargs.get("system_template_override")
