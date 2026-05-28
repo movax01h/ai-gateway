@@ -8,8 +8,10 @@ import pytest
 from agent_tests.helpers import ask_agent
 
 from .helpers import (
+    SAMPLE_CODE_SUGGESTIONS,
     SAMPLE_ISSUES,
     SAMPLE_MRS,
+    glql_analytics_response,
     glql_response,
     mock_glql_response,
 )
@@ -85,6 +87,34 @@ async def test_list_display_type(
     await result.assert_llm_validates(
         [
             "The response presents the MRs as a list using 'display: list` or `table` in the GLQL query",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_column_chart_display_type(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Should use columnChart display type for visualization requests."""
+    mock_glql_response(
+        mock_gitlab_client,
+        glql_analytics_response(SAMPLE_CODE_SUGGESTIONS),
+    )
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Show me a column chart of code suggestion acceptance rates by language in the gitlab-org group",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response uses 'display: columnChart' in the GLQL embedded view",
+            "The GLQL query uses analytics mode (mode: analytics)",
         ]
     )
 
