@@ -13,10 +13,18 @@ from ai_gateway.models.v2._model_compat import (
     remove_trailing_assistant_message,
     supports_assistant_prefill,
 )
-from ai_gateway.models.v2.litellm_model_registry import register_external_models
+from ai_gateway.models.v2.litellm_model_registry import (
+    register_builtin_models,
+    register_external_models,
+)
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
 __all__ = ["ChatLiteLLM"]
+
+# Register built-in model metadata for models that ship in our model_selection
+# registry but are absent from the pinned LiteLLM bundled `model_cost` registry
+# (e.g., Claude Opus 4.8 Bedrock until the next LiteLLM bump).
+register_builtin_models()
 
 # Register any additional model metadata supplied by operators via an external
 # JSON file (path set by AIGW_LITELLM__MODEL_METADATA_FILE). It allows operators

@@ -42,12 +42,69 @@ from litellm import register_model
 __all__ = [
     "ENV_VAR_NAME",
     "load_external_model_metadata",
+    "register_builtin_models",
     "register_external_models",
 ]
 
 ENV_VAR_NAME = "AIGW_LITELLM__MODEL_METADATA_FILE"
 
 log = structlog.stdlib.get_logger("litellm_model_registry")
+
+# Models that ship in our model_selection registry but are absent from the
+# pinned LiteLLM bundled `model_cost` registry. Registering them here lets
+# the AI Gateway route requests without waiting on a LiteLLM dependency bump.
+# Capability flags and costs mirror the predecessor entry (Opus 4.6) since
+# Opus 4.8 was launched at parity. Update when LiteLLM ships a native entry.
+_OPUS_4_8_BEDROCK_METADATA: Dict[str, Any] = {
+    "litellm_provider": "bedrock_converse",
+    "mode": "chat",
+    "max_input_tokens": 1_000_000,
+    "max_output_tokens": 128_000,
+    "max_tokens": 128_000,
+    "input_cost_per_token": 5e-06,
+    "output_cost_per_token": 2.5e-05,
+    "cache_creation_input_token_cost": 6.25e-06,
+    "cache_read_input_token_cost": 5e-07,
+    "supports_function_calling": True,
+    "supports_tool_choice": True,
+    "supports_response_schema": True,
+    "supports_prompt_caching": True,
+    "supports_pdf_input": True,
+    "supports_vision": True,
+    "supports_reasoning": True,
+    "supports_computer_use": True,
+}
+
+BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
+    # Bedrock cross-region inference profiles for Claude Opus 4.8.
+    "global.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
+    "us.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
+    "eu.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
+    "bedrock/global.anthropic.claude-opus-4-8": _OPUS_4_8_BEDROCK_METADATA,
+}
+
+
+def register_builtin_models() -> None:
+    """Register model metadata for entries that ship in `models.yml` but are missing from the pinned LiteLLM bundled
+    registry.
+
+    Safe to call multiple
+    times; LiteLLM's `register_model` is idempotent for identical metadata.
+    """
+    try:
+        register_model(BUILTIN_MODEL_METADATA)
+    except Exception as exc:  # pylint: disable=broad-except
+        log.warning(
+            "Failed to register built-in LiteLLM model metadata",
+            error=str(exc),
+        )
+        return
+
+    log.info(
+        "Registered built-in LiteLLM models",
+        count=len(BUILTIN_MODEL_METADATA),
+        models=list(BUILTIN_MODEL_METADATA.keys()),
+    )
 
 
 def load_external_model_metadata(file_path: str) -> Dict[str, Dict[str, Any]]:
