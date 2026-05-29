@@ -25,7 +25,7 @@ INVALID_TOOL_ERROR_MESSAGE = (
 )
 
 
-@patch("duo_workflow_service.conversation.trimmer.count_tokens")
+@patch("duo_workflow_service.conversation.trimmer._token_estimator.count")
 def test_pretrim_large_messages(mock_count_tokens):
     max_single_messages_tokens = 100
     # Simulate token count
@@ -262,7 +262,10 @@ def test_restore_message_consistency_tool_message_before_tool_call():
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
-@patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
+@patch(
+    "duo_workflow_service.conversation.trimmer._token_estimator.count",
+    return_value=999_999,
+)
 def test_apply_token_based_trim_preserves_tool_messages(
     _mock_count_tokens,
     mock_trim_messages,
@@ -388,7 +391,10 @@ def test_apply_token_based_trim_single_message_too_large():
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
-@patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
+@patch(
+    "duo_workflow_service.conversation.trimmer._token_estimator.count",
+    return_value=999_999,
+)
 def test_apply_token_based_trim_error_handling(_mock_count_tokens, mock_trim_messages):
     """Test fallback mechanism when trim_messages raises an exception."""
 
@@ -749,7 +755,10 @@ def test_restore_message_consistency_drops_blank_ai_messages(
 
 
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
-@patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
+@patch(
+    "duo_workflow_service.conversation.trimmer._token_estimator.count",
+    return_value=999_999,
+)
 def test_apply_token_based_trim_empty_result_handling(
     _mock_count_tokens, mock_trim_messages
 ):
@@ -885,7 +894,10 @@ def test_apply_token_based_trim_skips_when_under_budget(mock_logger):
     assert len(start_calls) == 0
 
 
-@patch("duo_workflow_service.conversation.trimmer.count_tokens", return_value=999_999)
+@patch(
+    "duo_workflow_service.conversation.trimmer._token_estimator.count",
+    return_value=999_999,
+)
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 def test_apply_token_based_trim_trims_when_over_threshold(
     mock_trim_messages,
@@ -969,7 +981,7 @@ def test_apply_token_based_trim_under_budget_returns_messages_unchanged():
         (70_001, True),
     ],
 )
-@patch("duo_workflow_service.conversation.trimmer.count_tokens")
+@patch("duo_workflow_service.conversation.trimmer._token_estimator.count")
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 def test_apply_token_based_trim_threshold_boundary(
     mock_trim_messages,

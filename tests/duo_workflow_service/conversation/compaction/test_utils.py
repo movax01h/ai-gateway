@@ -22,6 +22,9 @@ from duo_workflow_service.conversation.compaction.utils import (
     _format_tool_calls_as_text,
     strip_tool_metadata,
 )
+from duo_workflow_service.conversation.token_estimator import TokenEstimator
+
+_TOKEN_ESTIMATOR = TokenEstimator()
 
 
 class TestIsTurnComplete:
@@ -288,7 +291,7 @@ def _mock_estimate_tokens(messages: list[BaseMessage]) -> int:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.utils.count_tokens",
+    "duo_workflow_service.conversation.token_estimator.TokenEstimator.count",
     side_effect=lambda msgs, is_complete_history: _mock_estimate_tokens(msgs),
 )
 class TestResolveRecentMessagesInternal:
@@ -360,7 +363,7 @@ class TestResolveRecentMessagesInternal:
     def test_empty_messages_returns_empty(self, mock_count_tokens):
         """Empty message list should return empty."""
         config = CompactionConfig()
-        assert resolve_recent_messages_internal([], config) == []
+        assert resolve_recent_messages_internal([], config, _TOKEN_ESTIMATOR) == []
         mock_count_tokens.assert_not_called()
 
     def test_with_chat_style_history_with_length_limit(self, mock_count_tokens):
@@ -371,14 +374,18 @@ class TestResolveRecentMessagesInternal:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[-i:]
 
         for i in [3, 4]:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == [
                 AIMessage(content="Here is the answers for your response"),
                 HumanMessage(content="New query"),
@@ -388,7 +395,9 @@ class TestResolveRecentMessagesInternal:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == [
                 AIMessage(
                     content="I'll use multiple tools",
@@ -413,35 +422,45 @@ class TestResolveRecentMessagesInternal:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[-1:]
 
         for i in [3, 4, 5, 6]:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[-3:]
 
         for i in [7, 8]:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[-7:]
 
         for i in [9, 10, 11]:
             config = CompactionConfig(
                 max_recent_messages=i, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[-9:]
 
         for i in [12, 13, 14]:
             config = CompactionConfig(
                 max_recent_messages=12, recent_messages_token_budget=100_000
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[-12:]
 
         assert mock_count_tokens.called
@@ -453,21 +472,25 @@ class TestResolveRecentMessagesInternal:
         config = CompactionConfig(
             max_recent_messages=100, recent_messages_token_budget=1
         )
-        result = resolve_recent_messages_internal(messages, config)
+        result = resolve_recent_messages_internal(messages, config, _TOKEN_ESTIMATOR)
         assert result == []
 
         for limit in [2, 4, 7, 10]:
             config = CompactionConfig(
                 max_recent_messages=100, recent_messages_token_budget=limit
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == [HumanMessage(content="New query")]
 
         for limit in [11, 15, 19, 22]:
             config = CompactionConfig(
                 max_recent_messages=100, recent_messages_token_budget=limit
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == [
                 AIMessage(content="Here is the answers for your response"),
                 HumanMessage(content="New query"),
@@ -477,7 +500,9 @@ class TestResolveRecentMessagesInternal:
             config = CompactionConfig(
                 max_recent_messages=100, recent_messages_token_budget=limit
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == [
                 AIMessage(
                     content="I'll use multiple tools",
@@ -496,21 +521,25 @@ class TestResolveRecentMessagesInternal:
             config = CompactionConfig(
                 max_recent_messages=100, recent_messages_token_budget=limit
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages[1:]
 
         for limit in [35, 37]:
             config = CompactionConfig(
                 max_recent_messages=100, recent_messages_token_budget=limit
             )
-            result = resolve_recent_messages_internal(messages, config)
+            result = resolve_recent_messages_internal(
+                messages, config, _TOKEN_ESTIMATOR
+            )
             assert result == messages
 
         assert mock_count_tokens.called
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.utils.count_tokens",
+    "duo_workflow_service.conversation.token_estimator.TokenEstimator.count",
     return_value=10,
 )
 class TestSliceForSummarization:
@@ -519,7 +548,7 @@ class TestSliceForSummarization:
     def test_empty_messages(self, mock_count_tokens):
         """Should return empty slices for empty input."""
         config = CompactionConfig()
-        result = slice_for_summarization([], config)
+        result = slice_for_summarization([], config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == []
         assert result.to_summarize == []
@@ -537,7 +566,7 @@ class TestSliceForSummarization:
         config = CompactionConfig(
             max_recent_messages=1, recent_messages_token_budget=100_000
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="first"),
@@ -557,7 +586,7 @@ class TestSliceForSummarization:
         config = CompactionConfig(
             max_recent_messages=1, recent_messages_token_budget=100_000
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == []
         assert result.to_summarize == [
@@ -579,7 +608,7 @@ class TestSliceForSummarization:
         config = CompactionConfig(
             max_recent_messages=2, recent_messages_token_budget=100_000
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="initial query"),
@@ -605,7 +634,7 @@ class TestSliceForSummarization:
         config = CompactionConfig(
             max_recent_messages=2, recent_messages_token_budget=100_000
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="query"),
@@ -621,7 +650,7 @@ class TestSliceForSummarization:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.utils.count_tokens",
+    "duo_workflow_service.conversation.token_estimator.TokenEstimator.count",
     side_effect=lambda msgs, is_complete_history: _mock_estimate_tokens(msgs),
 )
 class TestSliceForSummarizationWithTokenBudget:
@@ -651,7 +680,7 @@ class TestSliceForSummarizationWithTokenBudget:
         config = CompactionConfig(
             max_recent_messages=100, recent_messages_token_budget=5
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="initial query"),
@@ -681,7 +710,7 @@ class TestSliceForSummarizationWithTokenBudget:
         config = CompactionConfig(
             max_recent_messages=100, recent_messages_token_budget=9
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="initial query"),
@@ -707,7 +736,7 @@ class TestSliceForSummarizationWithTokenBudget:
         config = CompactionConfig(
             max_recent_messages=100, recent_messages_token_budget=100_000
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="initial query"),
@@ -730,7 +759,7 @@ class TestSliceForSummarizationWithTokenBudget:
         config = CompactionConfig(
             max_recent_messages=100, recent_messages_token_budget=1
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="initial query"),
@@ -767,7 +796,7 @@ class TestSliceForSummarizationWithTokenBudget:
         config = CompactionConfig(
             max_recent_messages=100, recent_messages_token_budget=5
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="query"),
@@ -809,7 +838,7 @@ class TestSliceForSummarizationWithTokenBudget:
         config = CompactionConfig(
             max_recent_messages=10, recent_messages_token_budget=8
         )
-        result = slice_for_summarization(messages, config)
+        result = slice_for_summarization(messages, config, _TOKEN_ESTIMATOR)
 
         assert result.leading_context == [
             HumanMessage(content="initial"),

@@ -4,11 +4,16 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from duo_workflow_service.conversation.token_estimator import count_tokens
+from duo_workflow_service.conversation.token_estimator import TokenEstimator
 
 PATCH_COUNT_APPROX = (
     "duo_workflow_service.conversation.token_estimator.count_tokens_approximately"
 )
+
+
+def count_tokens(messages, *, is_complete_history):
+    """Test helper that delegates to a fresh TokenEstimator instance."""
+    return TokenEstimator().count(messages, is_complete_history=is_complete_history)
 
 
 class TestCountTokensArbitrary:

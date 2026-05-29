@@ -115,7 +115,11 @@ class TestPlannerComponent:
         }
 
     @pytest.fixture(name="planner_component")
-    def planner_component_fixture(self, mock_dependencies) -> PlannerComponent:
+    def planner_component_fixture(
+        self,
+        mock_dependencies,
+        mock_duo_workflow_service_container,  # pylint: disable=unused-argument
+    ) -> PlannerComponent:
         return PlannerComponent(**mock_dependencies)
 
     @pytest.fixture(name="compiled_graph")
