@@ -363,9 +363,9 @@ configurable_unit_primitives:
     unit_primitives:
       - "measure_comment_temperature"
     default_models:
-      - "gemini_2_0_flash_lite_vertex"
+      - "gemini_2_5_flash_vertex"
     selectable_models:
-      - "gemini_2_0_flash_lite_vertex"
+      - "gemini_2_5_flash_vertex"
   - feature_setting: "workflow"
     unit_primitives:
       - "duo_agent_platform"

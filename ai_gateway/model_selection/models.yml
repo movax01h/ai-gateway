@@ -124,22 +124,6 @@ models:
       top_k: 1
       max_tokens: 8_192
 
-  - name: "Gemini 2.0 Flash Lite"
-    provider: "Vertex"
-    gitlab_identifier: "gemini_2_0_flash_lite_vertex"
-    description: "Optimized for high-volume, latency-sensitive tasks."
-    cost_indicator: "$"
-    max_context_tokens: 1_000_000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-0-flash-lite
-    model_class_provider: litellm
-    params:
-      model: "vertex_ai/gemini-2.0-flash-lite"
-      temperature: 0.0
-      top_p: 1.0
-      top_k: 1
-      max_tokens: 8_192
-    prompt_params:
-      vertex_location: us-central1
-
   - name: "Gemini 2.5 Flash"
     provider: "Vertex"
     gitlab_identifier: "gemini_2_5_flash_vertex"
@@ -153,7 +137,7 @@ models:
       max_tokens: 65_535
     deprecation:
       deprecation_date: "2026-03-01"
-      removal_version: "19.1"
+      removal_version: "19.5"
 
   - name: "Claude Opus 4.0"
     provider: "Anthropic"

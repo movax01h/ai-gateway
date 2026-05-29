@@ -10,7 +10,9 @@ from uuid import uuid4
 import structlog
 from langgraph.graph import END, StateGraph
 
-from duo_workflow_service.agents import HumanApprovalCheckExecutor
+from duo_workflow_service.agents.human_approval_check_executor import (
+    HumanApprovalCheckExecutor,
+)
 from duo_workflow_service.entities.event import WorkflowEventType
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
