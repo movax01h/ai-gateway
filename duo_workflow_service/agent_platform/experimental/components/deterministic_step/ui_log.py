@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from enum import auto
 from functools import partial
 from typing import Any, Callable, Optional, override
+from uuid import uuid4
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -74,7 +75,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
     ) -> UiChatLog:
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             content=self._format_message(tool, tool_call_args, tool_response),
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
@@ -102,7 +103,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=message,
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.FAILURE,
             correlation_id=kwargs.get("correlation_id"),

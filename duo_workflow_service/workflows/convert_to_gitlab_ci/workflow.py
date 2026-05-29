@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
+from uuid import uuid4
 
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
@@ -96,7 +97,7 @@ def _git_output(command_output: list[str], state: WorkflowState):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"{command_output[-1]}",
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -157,7 +158,7 @@ class Workflow(AbstractWorkflow):
                         message_type=MessageTypeEnum.TOOL,
                         message_sub_type=None,
                         content="File too large, skipping.",
-                        message_id=None,
+                        message_id=f"tool-{str(uuid4())}",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.FAILURE,
                         correlation_id=None,
@@ -175,7 +176,7 @@ class Workflow(AbstractWorkflow):
                     message_type=MessageTypeEnum.TOOL,
                     message_sub_type=None,
                     content="Loaded Jenkins file",
-                    message_id=None,
+                    message_id=f"tool-{str(uuid4())}",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
@@ -330,7 +331,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting Jenkinsfile translation workflow from file: {target_file}",
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
