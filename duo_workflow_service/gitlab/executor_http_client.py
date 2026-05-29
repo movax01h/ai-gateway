@@ -41,12 +41,19 @@ _NETWORK_ERROR_KEYWORDS = (
 )
 
 
-class ServerErrorResponse(Exception):
-    """Raised internally when the executor returns a 5xx HTTP status code."""
+class _ServerErrorRetry(Exception):
+    """Raised internally to trigger a retry when the executor returns a 5xx HTTP status code.
 
-    def __init__(self, status_code: int):
+    This exception is never propagated to callers; it is caught after all retry
+    attempts are exhausted and converted back to a :class:`GitLabHttpResponse`
+    with the original 5xx status code.
+    """
+
+    def __init__(self, status_code: int, body: str, headers: Any):
         super().__init__(f"Server error: HTTP {status_code}")
         self.status_code = status_code
+        self.body = body
+        self.headers = headers
 
 
 def _is_retryable_error(exc: BaseException) -> bool:
@@ -59,7 +66,7 @@ def _is_retryable_error(exc: BaseException) -> bool:
     """
     if isinstance(exc, asyncio.TimeoutError):
         return True
-    if isinstance(exc, ServerErrorResponse):
+    if isinstance(exc, _ServerErrorRetry):
         return True
     if isinstance(exc, Exception):
         message = str(exc).lower()
@@ -112,7 +119,11 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
             )
             status_code = action_response.httpResponse.statusCode
             if status_code >= 500:
-                raise ServerErrorResponse(status_code)
+                raise _ServerErrorRetry(
+                    status_code,
+                    action_response.httpResponse.body,
+                    action_response.httpResponse.headers,
+                )
             body = self._parse_response(
                 action_response.httpResponse.body,
                 parse_json=parse_json,
@@ -124,7 +135,22 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
                 headers=action_response.httpResponse.headers,
             )
 
-        return await _call_with_retry()
+        try:
+            return await _call_with_retry()
+        except _ServerErrorRetry as exc:
+            # All retry attempts exhausted for a 5xx response.  Return the
+            # last server error as a regular response so callers can inspect
+            # the status code, matching the pre-retry behaviour.
+            body = self._parse_response(
+                exc.body,
+                parse_json=parse_json,
+                object_hook=object_hook,
+            )
+            return GitLabHttpResponse(
+                status_code=exc.status_code,
+                body=body,
+                headers=exc.headers,
+            )
 
     async def graphql(
         self, query: str, variables: Optional[dict] = None, timeout: float = 10.0
