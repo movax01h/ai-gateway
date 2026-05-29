@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import json
 from unittest.mock import AsyncMock, Mock
 
@@ -730,11 +731,291 @@ async def test_execute_raises_for_unknown_flow_name(tool):
 
 
 # ---------------------------------------------------------------------------
-# _resolve_goal_and_project: defensive branch
+# _resolve_goal_project_and_linkable: defensive branch
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_goal_and_project_raises_for_unknown_flow(tool):
-    """Line 221: raises ToolException when flow_name is not developer/fix_pipeline/code_review."""
+def test_resolve_goal_project_and_linkable_raises_for_unknown_flow(tool):
+    """Raises ToolException when flow_name is not developer/fix_pipeline/code_review."""
     with pytest.raises(ToolException, match="Unknown flow"):
-        tool._resolve_goal_and_project("unknown_flow", {"name": "unknown_flow"})
+        tool._resolve_goal_project_and_linkable(
+            "unknown_flow", {"name": "unknown_flow"}
+        )
+
+
+# ---------------------------------------------------------------------------
+# Explicit linkable linkage: issue_id / merge_request_id in payload
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_with_issue_url(tool, gitlab_client_mock):
+    """Developer flow with issue_url sends issue_id in payload."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-iss1"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Implement the feature described in the issue",
+                "issue_url": "https://gitlab.com/group/project/-/issues/42",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+    assert data["workflow_id"] == "wf-iss1"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["issue_id"] == 42
+    assert "merge_request_id" not in posted_body
+    assert posted_body["project_id"] == 42  # from self.project
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_with_issue_url_and_project_url(
+    tool, gitlab_client_mock
+):
+    """Developer flow with both issue_url and project_url sends both."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-iss2"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Fix the bug",
+                "project_url": "https://gitlab.com/other-team/other-repo",
+                "issue_url": "https://gitlab.com/other-team/other-repo/-/issues/7",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["project_id"] == "other-team/other-repo"
+    assert posted_body["issue_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_cross_project_issue_uses_issue_project(
+    tool, gitlab_client_mock
+):
+    """When project_url and issue_url differ, issue project wins."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-xp-iss"})
+    )
+
+    await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Fix the bug",
+                "project_url": "https://gitlab.com/team-a/repo-a",
+                "issue_url": "https://gitlab.com/team-b/repo-b/-/issues/42",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    # Issue project takes precedence so Rails resolves the IID correctly
+    assert posted_body["project_id"] == "team-b/repo-b"
+    assert posted_body["issue_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_without_issue_url_omits_issue_id(
+    tool, gitlab_client_mock
+):
+    """Developer flow without issue_url does not send issue_id."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-no-iss"})
+    )
+
+    await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Refactor the auth module",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert "issue_id" not in posted_body
+    assert "merge_request_id" not in posted_body
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_with_work_item_url(tool, gitlab_client_mock):
+    """Developer flow accepts work_items URLs via issue_url field."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-wi1"})
+    )
+
+    result = await tool.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Implement the feature",
+                "issue_url": "https://gitlab.com/group/project/-/work_items/55",
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["issue_id"] == 55
+
+
+@pytest.mark.asyncio
+async def test_execute_fix_pipeline_sends_merge_request_id(tool, gitlab_client_mock):
+    """fix_pipeline flow sends merge_request_id in payload."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-fp-mr"})
+    )
+
+    await tool.arun(
+        {
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": "https://gitlab.com/group/project/-/pipelines/99",
+                "merge_request_url": (
+                    "https://gitlab.com/group/project/-/merge_requests/5"
+                ),
+                "source_branch": "feature-branch",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["merge_request_id"] == 5
+    assert "issue_id" not in posted_body
+
+
+@pytest.mark.asyncio
+async def test_execute_code_review_sends_merge_request_id(tool, gitlab_client_mock):
+    """code_review flow sends merge_request_id in payload."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-cr-mr"})
+    )
+
+    await tool.arun(
+        {
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": (
+                    "https://gitlab.com/group/project/-/merge_requests/42"
+                ),
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["merge_request_id"] == 42
+    assert "issue_id" not in posted_body
+
+
+@pytest.mark.asyncio
+async def test_execute_developer_issue_url_without_project_extracts_from_issue(
+    tool_no_project, gitlab_client_mock
+):
+    """When no project context exists, project_id is extracted from issue_url."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-no-proj"})
+    )
+
+    await tool_no_project.arun(
+        {
+            "flow": {
+                "name": "developer",
+                "goal": "Fix the bug from the issue",
+                "issue_url": "https://gitlab.com/group/project/-/issues/10",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["project_id"] == "group/project"
+    assert posted_body["issue_id"] == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "issue_url",
+    [
+        "not-a-url",
+        "https://other-host.com/group/project/-/issues/1",
+        "https://gitlab.com/",
+    ],
+)
+async def test_execute_developer_invalid_issue_url(tool, issue_url):
+    with pytest.raises(ToolException, match="Could not parse issue URL"):
+        await tool._execute(
+            flow=StartDeveloperFlowInput(
+                name="developer",
+                goal="Implement feature X",
+                issue_url=issue_url,
+            )
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "merge_request_url",
+    [
+        "not-a-url",
+        "https://other-host.com/group/project/-/merge_requests/1",
+        "https://gitlab.com/group/project/-/pipelines/1",
+        "https://gitlab.com/group/project/-/merge_requests/abc",
+        "https://gitlab.com/",
+        "",
+    ],
+)
+async def test_execute_fix_pipeline_invalid_merge_request_url(tool, merge_request_url):
+    """fix_pipeline with invalid merge_request_url raises ToolException."""
+    with pytest.raises(ToolException, match="Could not parse merge request URL"):
+        await tool._execute(
+            flow=StartFixPipelineFlowInput(
+                name="fix_pipeline",
+                pipeline_url="https://gitlab.com/group/project/-/pipelines/99",
+                merge_request_url=merge_request_url,
+                source_branch="main",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_fix_pipeline_cross_project_mr_uses_mr_project(
+    tool, gitlab_client_mock
+):
+    """When pipeline and MR belong to different projects, MR project wins."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-xp-mr"})
+    )
+
+    await tool.arun(
+        {
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": ("https://gitlab.com/team-a/repo-a/-/pipelines/55"),
+                "merge_request_url": (
+                    "https://gitlab.com/team-b/repo-b/-/merge_requests/3"
+                ),
+                "source_branch": "main",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    # MR project takes precedence so Rails resolves the IID correctly
+    assert posted_body["project_id"] == "team-b/repo-b"
+    assert posted_body["merge_request_id"] == 3
