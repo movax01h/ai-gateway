@@ -354,6 +354,10 @@ flow:
       input_schema:
         source_branch:
           type: string
+        source:
+          type: string
+          description: The pipeline source (e.g. merge_request_event, push)
+          optional: true
     - category: agent_platform_standard_context
       input_schema:
         workload_branch:

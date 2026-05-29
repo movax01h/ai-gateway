@@ -63,6 +63,7 @@ class FlowConfigInputSchema(BaseModel):
     type: str
     format: Optional[str] = None
     description: Optional[str] = None
+    optional: Optional[bool] = None
 
 
 class FlowConfigInput(BaseModel):
@@ -96,16 +97,19 @@ class BaseFlowConfig(BaseModel):
 
         for item in self.flow.inputs:
             schema = {
-                key: value.model_dump(exclude_none=True)
+                key: value.model_dump(exclude_none=True, exclude={"optional"})
                 for key, value in item.input_schema.items()
             }
+            required_keys = [
+                key for key, value in item.input_schema.items() if not value.optional
+            ]
 
             jsonschema = {
                 "$schema": INPUT_JSONSCHEMA_VERSION,
                 "additionalProperties": False,
                 "type": "object",
                 "properties": schema,
-                "required": list(schema.keys()),
+                "required": required_keys,
             }
 
             json_schemas_by_category[item.category] = jsonschema

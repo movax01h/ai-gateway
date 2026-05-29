@@ -10,6 +10,8 @@ from lib.internal_events.context import (
     EventContext,
     InternalEventAdditionalProperties,
     current_event_context,
+    merge_request_url_context,
+    pipeline_source_context,
     tracked_internal_events,
 )
 from lib.snowplow import LoggingAsyncEmitter
@@ -154,6 +156,12 @@ class InternalEventsClient:
             **kwargs,
         }
         extra = additional_properties.extra
+        mr_url = merge_request_url_context.get(None)
+        if mr_url:
+            extra["merge_request_url"] = mr_url
+        p_source = pipeline_source_context.get(None)
+        if p_source:
+            extra["pipeline_source"] = p_source
         new_context["extra"] = extra
 
         session_id = additional_properties.value
