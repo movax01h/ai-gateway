@@ -237,6 +237,11 @@ Compaction makes an LLM call to summarize older messages. These calls are tagged
 - **Cloud-hosted**: Compaction LLM calls are emitted in the billing event with `operation_type="compaction_auto"`. CustomersDot uses this field to decide whether to exclude compaction operations from credit calculation.
 - **Self-hosted**: Compaction LLM calls are excluded from billing entirely. The `PromptRegistrySelfHostedBillingSupport` wrapper in `duo_workflow_service/interceptors/route/usage_billing.py` skips registering the billing callback when `operation_type == "compaction_auto"`, so the `TrackLlmCallForSelfHosted` gRPC action is never invoked for compaction calls.
 
-## Feature Flag
+## Enabling Compaction
 
-Compaction requires the `AI_CONTEXT_COMPACTION` feature flag (runtime key: `ai_context_compaction`) to be enabled. The flag is checked in the `maybe_compact_history()` function. Even with compaction configured, it will fall back to token-based trimming if the feature flag is disabled.
+Compaction runs whenever a workflow declares a `compaction` block in its
+configuration (which causes the call site to construct a
+`ConversationCompactor` and pass it to `maybe_compact_history()`).
+Workflows that do not declare `compaction` continue to fall back to
+legacy token-based trimming and emit the `duo_workflow_legacy_trim_executed`
+internal event when trimming actually alters the history.
