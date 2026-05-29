@@ -806,6 +806,7 @@ class TestReActAgentStream:
     @pytest.mark.parametrize(
         "auth_user,agent_request,expected_status_code,expected_error,expected_internal_events,model_metadata,config_values,feature_enablement_type",
         [
+            # Non-cutoff user (holds duo_classic_chat): standalone classic chat passes.
             (
                 CloudConnectorUser(
                     authenticated=True,
@@ -821,55 +822,11 @@ class TestReActAgentStream:
                     )
                 ],
                 None,
-                {
-                    "custom_models": {"enabled": True},
-                    "process_level_feature_flags": {
-                        "duo_classic_chat_duo_core_cutoff": False
-                    },
-                },
-                "duo_core",
+                {"custom_models": {"enabled": True}},
+                "duo_pro",
             ),
-            (
-                CloudConnectorUser(
-                    authenticated=True,
-                    claims=UserClaims(scopes=["duo_classic_chat"]),
-                ),
-                AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
-                403,
-                '{"detail":"Duo Core no longer authorized to access Duo Classic Chat"}',
-                [],
-                None,
-                {
-                    "custom_models": {"enabled": True},
-                    "process_level_feature_flags": {
-                        "duo_classic_chat_duo_core_cutoff": True
-                    },
-                },
-                "duo_core",
-            ),
-            (
-                CloudConnectorUser(
-                    authenticated=True,
-                    claims=UserClaims(scopes=["duo_classic_chat"]),
-                ),
-                AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
-                200,
-                "",
-                [
-                    call(
-                        "request_duo_classic_chat",
-                        category="ai_gateway.api.v2.chat.agent",
-                    )
-                ],
-                None,
-                {
-                    "custom_models": {"enabled": True},
-                    "process_level_feature_flags": {
-                        "duo_classic_chat_duo_core_cutoff": True
-                    },
-                },
-                "duo_classic",
-            ),
+            # Non-cutoff user: @GitLabDuo mention still authorizes against duo_classic_chat
+            # (primary path passes; the carve-out is only a fallback). Header is irrelevant.
             (
                 CloudConnectorUser(
                     authenticated=True,
@@ -889,20 +846,54 @@ class TestReActAgentStream:
                     )
                 ],
                 None,
-                {
-                    "custom_models": {"enabled": True},
-                    "process_level_feature_flags": {
-                        "duo_classic_chat_duo_core_cutoff": True
-                    },
-                },
+                {"custom_models": {"enabled": True}},
                 "duo_core",
             ),
-            # Preamble user message (injected MR context) precedes the @GitLabDuo trigger.
-            # The first user message has no ping; the last one does. Must be allowed.
+            # Cutoff cohort (holds duo_chat, lacks duo_classic_chat): standalone classic chat
+            # is blocked. Blank enablement-type header proves the block is header-independent.
             (
                 CloudConnectorUser(
                     authenticated=True,
-                    claims=UserClaims(scopes=["duo_classic_chat"]),
+                    claims=UserClaims(scopes=["duo_chat"]),
+                ),
+                AgentRequest(messages=[Message(role=Role.USER, content="Hi")]),
+                403,
+                '{"detail":"Duo Core no longer authorized to access Duo Classic Chat"}',
+                [],
+                None,
+                {"custom_models": {"enabled": True}},
+                "",
+            ),
+            # Cutoff cohort: @GitLabDuo MR mention is re-authorized against duo_chat. Blank
+            # header proves this covers the blank-enablement cohort too.
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_chat"]),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(role=Role.USER, content="@GitLabDuo explain this diff")
+                    ]
+                ),
+                200,
+                "",
+                [
+                    call(
+                        "request_duo_chat",
+                        category="ai_gateway.api.v2.chat.agent",
+                    )
+                ],
+                None,
+                {"custom_models": {"enabled": True}},
+                "",
+            ),
+            # Cutoff cohort: preamble user message (injected MR context) precedes the
+            # @GitLabDuo trigger; the last user message carries the ping. Must be allowed.
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["duo_chat"]),
                 ),
                 AgentRequest(
                     messages=[
@@ -920,25 +911,20 @@ class TestReActAgentStream:
                 "",
                 [
                     call(
-                        "request_duo_classic_chat",
+                        "request_duo_chat",
                         category="ai_gateway.api.v2.chat.agent",
                     )
                 ],
                 None,
-                {
-                    "custom_models": {"enabled": True},
-                    "process_level_feature_flags": {
-                        "duo_classic_chat_duo_core_cutoff": True
-                    },
-                },
+                {"custom_models": {"enabled": True}},
                 "duo_core",
             ),
-            # Second ReAct step: user message with @GitLabDuo is NOT the last message;
+            # Cutoff cohort, second ReAct step: the @GitLabDuo user message is NOT last; the
             # last message is the assistant scratchpad (content=None). Must still be allowed.
             (
                 CloudConnectorUser(
                     authenticated=True,
-                    claims=UserClaims(scopes=["duo_classic_chat"]),
+                    claims=UserClaims(scopes=["duo_chat"]),
                 ),
                 AgentRequest(
                     messages=[
@@ -963,18 +949,32 @@ class TestReActAgentStream:
                 "",
                 [
                     call(
-                        "request_duo_classic_chat",
+                        "request_duo_chat",
                         category="ai_gateway.api.v2.chat.agent",
                     )
                 ],
                 None,
-                {
-                    "custom_models": {"enabled": True},
-                    "process_level_feature_flags": {
-                        "duo_classic_chat_duo_core_cutoff": True
-                    },
-                },
+                {"custom_models": {"enabled": True}},
                 "duo_core",
+            ),
+            # User entitled to neither duo_classic_chat nor duo_chat: even an @GitLabDuo
+            # mention cannot grant access — the fallback re-auth against duo_chat also fails.
+            (
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(scopes=["amazon_q_integration"]),
+                ),
+                AgentRequest(
+                    messages=[
+                        Message(role=Role.USER, content="@GitLabDuo explain this diff")
+                    ]
+                ),
+                403,
+                '{"detail":"Unauthorized to access duo chat"}',
+                [],
+                None,
+                {"custom_models": {"enabled": True}},
+                "",
             ),
         ],
     )
