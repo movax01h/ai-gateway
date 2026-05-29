@@ -1,0 +1,32 @@
+Investigate this failing pipeline caused by a dependency version bump, apply
+the required fixes by committing them to the MR's source branch, then post a
+short summary comment on the MR.
+
+<pipeline>
+  <pipeline_url>{{pipeline_url}}</pipeline_url>
+</pipeline>
+
+Procedure:
+
+1. Use `get_pipeline_failing_jobs` and `get_job_logs` to gather errors, stack
+   traces, and failing test names with their `file:line` locations.
+2. Use `get_merge_request` to identify the MR for this pipeline and capture
+   its `source_branch` — you will commit to this branch.
+3. Use `list_merge_request_diffs` to see what the dep-bump MR changed.
+4. Use `find_files` + `read_file` to locate dependency manifest files
+   (requirements.txt, pyproject.toml, Gemfile, package.json, go.mod, pom.xml,
+   etc.) and extract the package name, ecosystem, and old/new versions.
+5. If vulnerability IDs are mentioned in the logs, use `list_vulnerabilities`
+   and `get_vulnerability_details` for CVE context.
+6. Use `grep` to find every reference to the bumped dependency (including
+   test files — a common miss); `read_file` each match to understand usage.
+7. For each breaking change, decide a concrete fix (old code → new code),
+   categorized (API removed, signature changed, import path moved, new
+   required parameter, type change, behavior change).
+8. `read_file` each file you'll modify to confirm current content (required
+   for `old_str` matching in the next step).
+9. Apply ALL fixes in a single `create_commit` call against `source_branch`
+   with a clear one-line commit message naming the dependency.
+10. Use `create_merge_request_note` to post a short comment on the MR with:
+    one sentence on what broke, the commit subject, and the list of files
+    changed.
