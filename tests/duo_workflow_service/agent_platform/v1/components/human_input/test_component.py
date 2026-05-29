@@ -4,7 +4,9 @@ import pytest
 from langgraph.graph import StateGraph
 
 from duo_workflow_service.agent_platform.v1.components.human_input.component import (
+    ChatHumanInputComponent,
     HumanInputComponent,
+    human_input_component_factory,
 )
 from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import (
     UILogEventsHumanInput,
@@ -274,3 +276,81 @@ class TestHumanInputComponent:
 
             fetch_node_ui_history = mock_fetch_node.call_args[1]["ui_history"]
             assert fetch_node_ui_history == mock_ui_history.return_value
+
+
+class TestChatHumanInputComponent:
+    """Test suite for ChatHumanInputComponent."""
+
+    @pytest.fixture(name="flow_type")
+    def flow_type_fixture(self) -> GLReportingEventContext:
+        return GLReportingEventContext.from_workflow_definition("chat")
+
+    def _make_component(self, user, flow_type, **kwargs):
+        return ChatHumanInputComponent(
+            name="test_human_input",
+            sends_response_to="some_agent",
+            flow_id="test_flow",
+            flow_type=flow_type,
+            user=user,
+            environment="chat",
+            message_template="Test message",
+            **kwargs,
+        )
+
+    def test_accepts_only_on_user_response(self, user, flow_type):
+        """Chat component accepts ui_log_events without ON_USER_INPUT_PROMPT."""
+        component = self._make_component(
+            user,
+            flow_type,
+            ui_log_events=[UILogEventsHumanInput.ON_USER_RESPONSE],
+        )
+        assert component.ui_log_events == [UILogEventsHumanInput.ON_USER_RESPONSE]
+
+    def test_accepts_both_events(self, user, flow_type):
+        """Chat component also accepts both events when provided."""
+        component = self._make_component(
+            user,
+            flow_type,
+            ui_log_events=[
+                UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
+                UILogEventsHumanInput.ON_USER_RESPONSE,
+            ],
+        )
+        assert UILogEventsHumanInput.ON_USER_RESPONSE in component.ui_log_events
+
+
+class TestHumanInputComponentFactory:
+    """Test suite for human_input_component_factory."""
+
+    @pytest.fixture(name="flow_type")
+    def flow_type_fixture(self) -> GLReportingEventContext:
+        return GLReportingEventContext.from_workflow_definition("chat")
+
+    def _base_kwargs(self, user, flow_type):
+        return {
+            "name": "test_human_input",
+            "sends_response_to": "some_agent",
+            "flow_id": "test_flow",
+            "flow_type": flow_type,
+            "user": user,
+            "message_template": "Test message",
+            "ui_log_events": [
+                UILogEventsHumanInput.ON_USER_INPUT_PROMPT,
+                UILogEventsHumanInput.ON_USER_RESPONSE,
+            ],
+        }
+
+    def test_chat_environment_returns_chat_component(self, user, flow_type):
+        """Factory returns ChatHumanInputComponent for chat environment."""
+        kwargs = self._base_kwargs(user, flow_type)
+        kwargs["environment"] = "chat"
+        kwargs["ui_log_events"] = [UILogEventsHumanInput.ON_USER_RESPONSE]
+        component = human_input_component_factory(**kwargs)
+        assert isinstance(component, ChatHumanInputComponent)
+
+    def test_ambient_environment_returns_base_component(self, user, flow_type):
+        """Factory returns HumanInputComponent for ambient environment."""
+        kwargs = self._base_kwargs(user, flow_type)
+        kwargs["environment"] = "ambient"
+        component = human_input_component_factory(**kwargs)
+        assert isinstance(component, HumanInputComponent)
