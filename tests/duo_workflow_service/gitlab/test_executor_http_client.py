@@ -10,8 +10,8 @@ from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.executor_http_client import (
     ExecutorGitLabHttpClient,
-    ServerErrorResponse,
     _is_retryable_error,
+    _ServerErrorRetry,
 )
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
@@ -527,8 +527,8 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
     "exc, expected",
     [
         (asyncio.TimeoutError(), True),
-        (ServerErrorResponse(500), True),
-        (ServerErrorResponse(503), True),
+        (_ServerErrorRetry(500, "Internal Server Error", {}), True),
+        (_ServerErrorRetry(503, "Service Unavailable", {}), True),
         (Exception("HTTP action error: request timed out"), True),
         (Exception("GraphQL request timed out after 10.0 seconds"), True),
         (ToolException("HTTP action error: connection refused"), True),
@@ -604,7 +604,7 @@ async def test_http_call_retries_on_503_and_succeeds(
 async def test_http_call_exhausts_retries_on_repeated_500s(
     client, monkeypatch_execute_http_response
 ):
-    """Test that _call raises ServerErrorResponse after all retries are exhausted on 500."""
+    """Test that _call returns a 500 GitLabHttpResponse after all retries are exhausted."""
     error_response = contract_pb2.ActionResponse()
     error_response.httpResponse.statusCode = 500
     error_response.httpResponse.body = "Internal Server Error"
@@ -612,9 +612,31 @@ async def test_http_call_exhausts_retries_on_repeated_500s(
     monkeypatch_execute_http_response.return_value = error_response
 
     with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
-        with pytest.raises(ServerErrorResponse, match="Server error: HTTP 500"):
-            await client.aget("/api/v4/test")
+        result = await client.aget("/api/v4/test", parse_json=False)
 
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 500
+    assert result.body == "Internal Server Error"
+    assert monkeypatch_execute_http_response.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_http_call_exhausts_retries_on_repeated_500s_with_json_body(
+    client, monkeypatch_execute_http_response
+):
+    """Test that _call returns a parsed-JSON body when parse_json=True and retries are exhausted."""
+    error_response = contract_pb2.ActionResponse()
+    error_response.httpResponse.statusCode = 500
+    error_response.httpResponse.body = '{"error": "Internal Server Error"}'
+
+    monkeypatch_execute_http_response.return_value = error_response
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")  # parse_json=True by default
+
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 500
+    assert result.body == {"error": "Internal Server Error"}
     assert monkeypatch_execute_http_response.call_count == 3
 
 
