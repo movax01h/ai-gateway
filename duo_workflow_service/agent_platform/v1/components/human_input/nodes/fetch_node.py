@@ -3,6 +3,9 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langgraph.types import interrupt
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import (
     UILogEventsHumanInput,
 )
@@ -101,8 +104,12 @@ class FetchNode:
 
         if event["event_type"] in (FlowEventType.MODIFY, FlowEventType.RESPONSE):
             if "message" not in event or not event["message"]:
-                raise ValueError(
-                    f"{event['event_type'].value.upper()} event must include a message with user feedback"
+                event_name = event["event_type"].value.upper()
+                raise NotifiableAgentException(
+                    "An internal error occurred: the user input event did not include a message.",
+                    internal_detail=(
+                        f"{event_name} event must include a message with user feedback"
+                    ),
                 )
 
             # Extract user message from event
@@ -134,6 +141,7 @@ class FetchNode:
             return result
 
         # For any other event type, raise error as this should not happen
-        raise ValueError(
-            f"Unknown event type: {event['event_type']}. Expected one of: {list(FlowEventType)}"
+        raise NotifiableAgentException(
+            "An internal error occurred: an unexpected event type was received.",
+            internal_detail=f"Unknown event type: {event['event_type']}. Expected one of: {list(FlowEventType)}",
         )

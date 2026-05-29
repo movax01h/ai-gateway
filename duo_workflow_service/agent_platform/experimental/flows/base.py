@@ -33,6 +33,9 @@ from duo_workflow_service.agent_platform.experimental.state.base import (
     FlowEvent,
     FlowEventType,
 )
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent as V1BaseComponent,
 )
@@ -500,9 +503,14 @@ class Flow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(
-            error, extra={"workflow_id": self._workflow_id, "source": __name__}
-        )
+        log_extra: dict[str, Any] = {
+            "workflow_id": self._workflow_id,
+            "source": __name__,
+        }
+        if isinstance(error, NotifiableAgentException) and error.internal_detail:
+            log_extra["internal_detail"] = error.internal_detail
+
+        log_exception(error, extra=log_extra)
 
         if compiled_graph is not None:
             existing_logs = (
@@ -516,4 +524,5 @@ class Flow(AbstractWorkflow):
                 existing_logs=existing_logs,
                 log=self.log,
                 workflow_id=self._workflow_id,
+                error=error,
             )

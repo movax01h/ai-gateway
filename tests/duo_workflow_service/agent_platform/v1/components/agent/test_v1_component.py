@@ -14,10 +14,12 @@ from ai_gateway.response_schemas import (
 )
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
-    RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -893,11 +895,45 @@ class TestAgentComponentAttachEdges:
         )
         router_function = agent_router_call[0][1]
 
-        # Test the routing behavior - should raise RoutingError
-        with pytest.raises(
-            RoutingError, match="Conversation history not found for key"
-        ):
+        # Test the routing behavior - should raise NotifiableAgentException
+        with pytest.raises(NotifiableAgentException) as exc_info:
             router_function(base_flow_state)
+
+        assert (
+            "Conversation history not found for key" in exc_info.value.internal_detail
+        )
+        assert (
+            "Conversation history not found for key" in exc_info.value.internal_detail
+        )
+
+    def test_routing_with_schema_mode_and_no_tool_calls_raises_error(
+        self,
+        agent_component_with_custom_schema,
+        mock_state_graph,
+        mock_router,
+        base_flow_state,
+        component_name,
+    ):
+        """Test that schema mode with no tool calls raises NotifiableAgentException."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = []
+
+        state_with_no_tools = base_flow_state.copy()
+        state_with_no_tools[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_message]
+        }
+
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        router_calls = mock_state_graph.add_conditional_edges.call_args_list
+        agent_router_call = next(
+            call for call in router_calls if call[0][0] == f"{component_name}#agent"
+        )
+        router_function = agent_router_call[0][1]
+
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            router_function(state_with_no_tools)
+        assert "Schema mode requires a tool call" in exc_info.value.internal_detail
 
     def test_routing_with_non_ai_message_raises_error(
         self,
@@ -907,7 +943,7 @@ class TestAgentComponentAttachEdges:
         base_flow_state,
         component_name,
     ):
-        """Test that non-AIMessage raises RoutingError."""
+        """Test that non-AIMessage raises NotifiableAgentException."""
         # Create state with non-AIMessage
         mock_message = Mock()  # Not an AIMessage
 
@@ -925,12 +961,14 @@ class TestAgentComponentAttachEdges:
         )
         router_function = agent_router_call[0][1]
 
-        # Test the routing behavior - should raise RoutingError
-        with pytest.raises(
-            RoutingError,
-            match=f"Last message is not AIMessage for component {component_name}",
-        ):
+        # Test the routing behavior - should raise NotifiableAgentException
+        with pytest.raises(NotifiableAgentException) as exc_info:
             router_function(state_with_non_ai_message)
+
+        assert (
+            f"Last message is not AIMessage for component {component_name}"
+            in exc_info.value.internal_detail
+        )
 
     def test_routing_with_no_tool_calls_goes_to_final_response(
         self,

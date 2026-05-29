@@ -20,6 +20,9 @@ from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -362,23 +365,30 @@ class AgentComponent(AgentComponentBase):
         history_iokey = self._conversation_history_key.to_iokey(state)
         history: list[BaseMessage] = history_iokey.value_from_state(state) or []
         if not history:
-            raise RoutingError(
-                f"Conversation history not found for key "
-                f"{history_iokey.target}:{history_iokey.subkeys}"
+            raise NotifiableAgentException(
+                "An internal error occurred: no conversation history was found.",
+                internal_detail=(
+                    f"Conversation history not found for key "
+                    f"{history_iokey.target}:{history_iokey.subkeys}"
+                ),
             )
 
         last_message = history[-1]
 
         if not isinstance(last_message, AIMessage):
-            raise RoutingError(
-                f"Last message is not AIMessage for component {self.name}"
+            raise NotifiableAgentException(
+                "An internal error occurred: the agent produced an unexpected message type.",
+                internal_detail=f"Last message is not AIMessage for component {self.name}",
             )
 
         if not last_message.tool_calls:
             if self._response_schema is not None:
-                raise RoutingError(
-                    f"Schema mode requires a tool call but got a text-only response "
-                    f"for component {self.name}"
+                raise NotifiableAgentException(
+                    "An internal error occurred: the agent did not produce the expected tool call.",
+                    internal_detail=(
+                        f"Schema mode requires a tool call but got a text-only response "
+                        f"for component {self.name}"
+                    ),
                 )
             return f"{self.name}#final_response"
 

@@ -9,6 +9,9 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     EndComponent,
@@ -1112,3 +1115,58 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             workflow_id="test-workflow-123",
             exc_info=graph.aupdate_state.side_effect,
         )
+
+    @pytest.mark.asyncio
+    async def test_handle_workflow_failure_notifiable_agent_exception_surfaces_ui_message(
+        self, flow_instance
+    ):
+        """NotifiableAgentException surfaces ui_message in the UI chat log."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        flow_instance.checkpoint_notifier = notifier
+
+        graph = AsyncMock()
+        secret = "internal-token-shh"
+        error = NotifiableAgentException(
+            "Safe user-facing message", internal_detail=secret
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+        ) as mock_log_exception:
+            await flow_instance._handle_workflow_failure(error, graph, {})
+
+        mock_log_exception.assert_called_once()
+        log_extra = mock_log_exception.call_args.kwargs["extra"]
+        assert log_extra["workflow_id"] == "test-workflow-123"
+        assert log_extra["internal_detail"] == secret
+
+        state = graph.aupdate_state.call_args[0][1]
+        ui_chat_log = state["ui_chat_log"].value
+        assert len(ui_chat_log) == 1
+        assert ui_chat_log[0]["content"] == "Safe user-facing message"
+        assert secret not in ui_chat_log[0]["content"]
+        assert ui_chat_log[0]["status"] == ToolStatus.FAILURE
+
+    @pytest.mark.asyncio
+    async def test_handle_workflow_failure_notifiable_agent_exception_no_internal_detail(
+        self, flow_instance
+    ):
+        """NotifiableAgentException without internal_detail is logged without that key."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        flow_instance.checkpoint_notifier = notifier
+
+        graph = AsyncMock()
+        error = NotifiableAgentException("Safe message only")
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+        ) as mock_log_exception:
+            await flow_instance._handle_workflow_failure(error, graph, {})
+
+        log_extra = mock_log_exception.call_args.kwargs["extra"]
+        assert "internal_detail" not in log_extra
+
+        state = graph.aupdate_state.call_args[0][1]
+        assert state["ui_chat_log"].value[0]["content"] == "Safe message only"

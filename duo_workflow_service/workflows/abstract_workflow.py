@@ -3,7 +3,7 @@ import asyncio
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NoReturn, Optional
 from uuid import uuid4
 
 import structlog
@@ -24,6 +24,9 @@ from pydantic import BaseModel, ConfigDict
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.audit_events.callback_handler import AuditEventCallbackHandler
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.collector import AuditEventCollector
@@ -442,49 +445,76 @@ class AbstractWorkflow(ABC):
 
                 return self._extract_trace_output(last_state)
         except BaseException as e:
-            is_notifiable = isinstance(e, NotifiableException)
-            is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
-
-            self.last_error = e.__cause__ if is_notifiable else e
-
-            # This needs to come before the send_event so we don't mess up the ui_chat_log
-            if not is_notifiable and not is_cancel:
-                await self._handle_workflow_failure(e, compiled_graph, graph_config)
-
-            if is_cancel:
-                # when workflow is cancelled with AIO_CANCEL_STOP_WORKFLOW_REQUEST, a new checkpoint is not created and
-                # internal workflow state is not updated, thus the clients don't receive a newCheckpoint notification
-                # here we send a notification with stopped status for clients to react accordingly
-                status = WorkflowStatusEnum.CANCELLED
-                ui_chat_log = []
-            else:
-                status = WorkflowStatusEnum.ERROR
-                content = str(e) if is_notifiable else GENERIC_WORKFLOW_ERROR_MESSAGE
-                ui_chat_log = [
-                    UiChatLog(
-                        message_type=MessageTypeEnum.AGENT,
-                        message_sub_type=None,
-                        content=content,
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        status=ToolStatus.FAILURE,
-                        correlation_id=None,
-                        tool_info=None,
-                        additional_context=None,
-                        message_id=f"error-{str(uuid4())}",
-                    )
-                ]
-
-            await self.checkpoint_notifier.send_event(
-                type="values",
-                state={"status": status, "ui_chat_log": ui_chat_log},
-                stream=self._stream,
+            await self._handle_compile_and_run_exception(
+                e, compiled_graph, graph_config
             )
-
-            raise TraceableException(e)
         finally:
             self.is_done = True
             if audit_collector:
                 await audit_collector.close()
+
+    async def _handle_compile_and_run_exception(
+        self,
+        e: BaseException,
+        compiled_graph,
+        graph_config: RunnableConfig,
+    ) -> NoReturn:
+        is_notifiable = isinstance(e, NotifiableException)
+        is_notifiable_agent = isinstance(e, NotifiableAgentException)
+        is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+
+        self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
+
+        # NotifiableException is chat-specific and carries its own UI semantics; the
+        # send_event below surfaces str(e) directly so subclass _handle_workflow_failure
+        # is skipped to avoid duplicating UI side-effects. NotifiableAgentException, on
+        # the other hand, is delegated to _handle_workflow_failure so the subclass can
+        # log internal_detail server-side and persist the safe ui_message to the UI
+        # chat log via aupdate_state.
+        # This needs to come before the send_event so we don't mess up the ui_chat_log.
+        if not is_notifiable and not is_cancel:
+            await self._handle_workflow_failure(e, compiled_graph, graph_config)
+
+        if is_cancel:
+            # when workflow is cancelled with AIO_CANCEL_STOP_WORKFLOW_REQUEST, a new checkpoint is not created and
+            # internal workflow state is not updated, thus the clients don't receive a newCheckpoint notification
+            # here we send a notification with stopped status for clients to react accordingly
+            status = WorkflowStatusEnum.CANCELLED
+            ui_chat_log: list[UiChatLog] = []
+        else:
+            status = WorkflowStatusEnum.ERROR
+            # Only surface the explicit ui_message from NotifiableAgentException or the
+            # str() of a NotifiableException; all other exceptions fall back to the generic
+            # message to avoid leaking internal details (stack traces, tokens, infra hints)
+            # to end users.
+            if isinstance(e, NotifiableAgentException):
+                content = e.ui_message
+            elif isinstance(e, NotifiableException):
+                content = str(e)
+            else:
+                content = GENERIC_WORKFLOW_ERROR_MESSAGE
+            ui_chat_log = [
+                UiChatLog(
+                    message_type=MessageTypeEnum.AGENT,
+                    message_sub_type=None,
+                    content=content,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    status=ToolStatus.FAILURE,
+                    correlation_id=None,
+                    tool_info=None,
+                    additional_context=None,
+                    message_id=f"error-{str(uuid4())}",
+                )
+            ]
+
+        assert self.checkpoint_notifier is not None
+        await self.checkpoint_notifier.send_event(
+            type="values",
+            state={"status": status, "ui_chat_log": ui_chat_log},
+            stream=self._stream,
+        )
+
+        raise TraceableException(e)
 
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any
