@@ -697,6 +697,7 @@ class BasePromptRegistry(ABC):
         internal_event_category=__name__,
         tools: Optional[List[BaseTool]] = None,
         is_graph_node: bool = False,
+        unit_primitive: Optional[GitLabUnitPrimitive] = None,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -715,12 +716,17 @@ class BasePromptRegistry(ABC):
         )
         prompt.set_limits(self.model_limits)
 
-        if not user.can(prompt.unit_primitive):
+        # Callers may authorize against a different unit primitive than the prompt's declared
+        # one (e.g. the Duo Core code-review carve-out re-authorizes the shared chat/react
+        # prompt against duo_chat instead of duo_classic_chat).
+        authorized_unit_primitive = unit_primitive or prompt.unit_primitive
+
+        if not user.can(authorized_unit_primitive):
             raise WrongUnitPrimitives
 
         # Only record internal events once we know the user has access to the Unit Primitive
         self.internal_event_client.track_event(
-            f"request_{prompt.unit_primitive}", category=internal_event_category
+            f"request_{authorized_unit_primitive}", category=internal_event_category
         )
 
         return prompt

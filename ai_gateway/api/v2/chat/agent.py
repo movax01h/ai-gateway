@@ -11,13 +11,9 @@ from gitlab_cloud_connector import (
 from starlette.responses import StreamingResponse
 
 from ai_gateway.api.feature_category import feature_category
-from ai_gateway.api.middleware import (
-    X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER,
-    X_GITLAB_VERSION_HEADER,
-)
+from ai_gateway.api.middleware import X_GITLAB_VERSION_HEADER
 from ai_gateway.api.v2.chat.typing import AgentRequest
 from ai_gateway.async_dependency_resolver import (
-    get_config,
     get_container_application,
     get_internal_event_client,
     get_prompt_registry,
@@ -52,44 +48,24 @@ async def get_gl_agent_remote_executor_factory():
     yield get_container_application().chat.gl_agent_remote_executor_factory
 
 
-def authorize_duo_core(
-    request: Request,
-    config: providers.Configuration,
-    agent_request: AgentRequest,
-):
-    if (
-        request.headers.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER) == "duo_core"
-        and config.process_level_feature_flags.duo_classic_chat_duo_core_cutoff()
-    ):
-        # @GitLabDuo is present in the message when the request originates from
-        # DuoCodeReviewChatWorker, which is triggered by a user mentioning @GitLabDuo in an
-        # MR note. Classic Duo Chat requests never contain @GitLabDuo, so its presence
-        # reliably identifies a code review request — a flow that Duo Core users are still
-        # permitted to use.
-        #
-        # We search from the end of the message list because the @GitLabDuo mention is always
-        # the most recent user message (it's what triggers DuoCodeReviewChatWorker). Earlier
-        # user messages may be injected context (e.g. MR diff) that does not contain the ping.
-        # We also can't rely on messages[-1] alone: the Rails ReAct loop appends an assistant
-        # scratchpad message (content=None) after each tool execution and calls again, so the
-        # last message is often the assistant entry, not the user message.
-        try:
-            content = next(
-                (
-                    m.content
-                    for m in reversed(agent_request.messages)
-                    if m.role == Role.USER and m.content
-                ),
-                "",
-            )
-        except (IndexError, AttributeError, TypeError):
-            content = ""
-
-        if "@GitLabDuo" not in content:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Duo Core no longer authorized to access Duo Classic Chat",
-            )
+def _has_gitlabduo_mention(agent_request: AgentRequest) -> bool:
+    # The @GitLabDuo MR code-review flow (DuoCodeReviewChatWorker) always carries an
+    # @GitLabDuo mention; standalone classic chat never does. We use this to tell the two
+    # apart without relying on a header — the monolith does not send the unit primitive, so
+    # this must work across all GitLab versions.
+    #
+    # Search from the end for the most recent user message with content: the @GitLabDuo ping
+    # is the latest user turn, while the Rails ReAct loop appends assistant scratchpad messages
+    # (content=None) and earlier user turns may be injected context (e.g. the MR diff).
+    content = next(
+        (
+            m.content
+            for m in reversed(agent_request.messages)
+            if m.role == Role.USER and m.content
+        ),
+        "",
+    )
+    return "@GitLabDuo" in content
 
 
 def authorize_additional_context(
@@ -119,6 +95,7 @@ def authorize_additional_context(
 def get_agent(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
+    agent_request: AgentRequest,
 ) -> ReActAgent:
     try:
         prompt = prompt_registry.get_on_behalf(
@@ -127,9 +104,28 @@ def get_agent(
             internal_event_category=__name__,
         )
     except WrongUnitPrimitives:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unauthorized to access duo chat",
+        # chat/react authorizes against duo_classic_chat. Users entitled to neither chat
+        # primitive are simply unauthorized.
+        if not current_user.can(GitLabUnitPrimitive.DUO_CHAT):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized to access duo chat",
+            )
+
+        # Holding duo_chat but not duo_classic_chat is the Duo Core classic-chat cutoff
+        # (gitlab-org/gitlab#581229). Standalone classic chat stays blocked, but the @GitLabDuo
+        # MR code-review flow is still permitted, so re-authorize it against duo_chat (agentic).
+        if not _has_gitlabduo_mention(agent_request):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Duo Core no longer authorized to access Duo Classic Chat",
+            )
+
+        prompt = prompt_registry.get_on_behalf(
+            current_user,
+            "chat/react",
+            internal_event_category=__name__,
+            unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
         )
 
     return ReActAgent(prompt=prompt)
@@ -210,11 +206,9 @@ async def chat(
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
-    config: Annotated[providers.Configuration, Depends(get_config)],
 ):
-    agent = get_agent(current_user, prompt_registry)
+    agent = get_agent(current_user, prompt_registry, agent_request)
 
-    authorize_duo_core(request, config, agent_request)
     authorize_additional_context(current_user, agent_request, internal_event_client)
 
     async def _stream_handler(stream_events: AsyncIterator[TypeAgentEvent]):
