@@ -242,11 +242,9 @@ config:
 graph TD;
     __start__(__start__):::first;
     __end__(__end__):::last;
-    __start__ --> resolve_dep_bump_investigate;
-    resolve_dep_bump_investigate(resolve_dep_bump_investigate<br>#91;AgentComponent#93;);
-    resolve_dep_bump_comment(resolve_dep_bump_comment<br>#91;AgentComponent#93;);
-    resolve_dep_bump_investigate --> resolve_dep_bump_comment;
-    resolve_dep_bump_comment --> __end__;
+    __start__ --> resolve_dep_bump_pipeline_fix;
+    resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
+    resolve_dep_bump_pipeline_fix --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
