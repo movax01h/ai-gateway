@@ -1,3 +1,9 @@
-from .component import HumanInputComponent
+from .component import (
+    ChatHumanInputComponent,
+    HumanInputComponent,
+)
 
-__all__ = ["HumanInputComponent"]
+__all__ = [
+    "HumanInputComponent",
+    "ChatHumanInputComponent",
+]

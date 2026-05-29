@@ -404,6 +404,7 @@ class Flow(AbstractWorkflow):
                 "flow_id": self._workflow_id,
                 "flow_type": self._workflow_type,
                 "user": self._user,
+                "environment": self._config.environment,
             }
         )
 
