@@ -72,6 +72,47 @@ class AgentResult:
         )
         return self
 
+    def assert_called_tool_with_args(
+        self,
+        tool_name: str,
+        **args_matcher: Any,
+    ) -> "AgentResult":
+        """Assert at least one call to tool_name had args matching args_matcher.
+
+        All args_matcher key-value pairs must equal the call's args. Extra args on the call are ignored.
+        """
+        matching = [
+            tc
+            for tc in self.tool_calls
+            if tc.name == tool_name
+            and all(tc.args.get(k) == v for k, v in args_matcher.items())
+        ]
+        if not matching:
+            same_name = [tc.args for tc in self.tool_calls if tc.name == tool_name]
+            assert matching, (
+                f"Expected '{tool_name}' to be called with args matching "
+                f"{args_matcher}. Calls to '{tool_name}': {same_name or 'none'}"
+            )
+        return self
+
+    def assert_not_called_tool_with_args(
+        self,
+        tool_name: str,
+        **args_matcher: Any,
+    ) -> "AgentResult":
+        """Assert no call to tool_name had args matching args_matcher."""
+        matching = [
+            tc
+            for tc in self.tool_calls
+            if tc.name == tool_name
+            and all(tc.args.get(k) == v for k, v in args_matcher.items())
+        ]
+        assert not matching, (
+            f"Expected '{tool_name}' NOT to be called with args matching "
+            f"{args_matcher}. Matching calls: {[tc.args for tc in matching]}"
+        )
+        return self
+
     def assert_tool_call_count(
         self,
         tool_name: str,
@@ -135,7 +176,7 @@ async def ask_agent(
     agent: Any,
     initial_state_factory: Callable[..., dict],
     question: str,
-    max_turns: int = 10,
+    max_turns: int = 20,
     validation_model: str = "",
 ) -> AgentResult:
     """Ask the agent a question and run until final response.

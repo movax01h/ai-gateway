@@ -46,6 +46,31 @@ def glql_response(
     }
 
 
+def glql_error_response(
+    error: str = "The requested field is not supported in this GitLab instance.",
+) -> dict[str, Any]:
+    """Build a GLQL API response representing a failure (e.g. unsupported field/filter).
+
+    Mirrors the shape the real GLQL API returns when a query references something the instance doesn't expose, which is
+    the signal the agent's prompt uses to fall back to Orbit.
+    """
+    return {
+        "data": {
+            "count": 0,
+            "nodes": [],
+            "pageInfo": {
+                "hasNextPage": False,
+                "hasPreviousPage": False,
+                "endCursor": None,
+                "startCursor": None,
+            },
+        },
+        "error": error,
+        "fields": [],
+        "success": False,
+    }
+
+
 def glql_analytics_response(
     nodes: list[dict[str, Any]],
     count: int | None = None,

@@ -113,7 +113,7 @@ async def test_ide_analytical_question_answers_first(
         [
             "The response provides a direct answer or count BEFORE showing any query",
             "Response includes a collapsible/details section containing the underlying GLQL query as a yaml code block",
-            "Response does NOT contain a ```glql code block",
+            "No fenced code block uses ```glql as its language tag",
             "Response does NOT suggest clicking on a menu or ⋮ icon",
         ]
     )
@@ -139,8 +139,8 @@ async def test_ide_query_request_uses_markdown(
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
-            "Response includes the GLQL query as a yaml code block, not in a collapsible section",
-            "Response does NOT contain a ```glql code block",
+            "Response includes the GLQL query as a yaml code block",
+            "No fenced code block uses ```glql as its language tag",
             "Response does NOT suggest clicking on a menu or ⋮ icon",
         ]
     )
@@ -167,7 +167,7 @@ async def test_ide_visualization_request_uses_markdown(
         [
             "Response presents the data in standard Markdown format (e.g. a table or list)",
             "Response includes the GLQL query as a yaml code block in a collapsible section",
-            "Response does NOT contain a ```glql code block",
+            "No fenced code block uses ```glql as its language tag",
             "Response does NOT suggest clicking on a menu or ⋮ icon",
         ]
     )

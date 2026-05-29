@@ -13,12 +13,15 @@ Requires ANTHROPIC_API_KEY environment variable.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import json
+from typing import TYPE_CHECKING, Any, Type
 from unittest.mock import MagicMock
 
 import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from duo_workflow_service.entities.state import ChatWorkflowState
@@ -110,7 +113,6 @@ def real_llm(execution_model):
     """Real Anthropic model for testing, configured via --execution-model."""
     return ChatAnthropic(  # type: ignore[call-arg]
         model=execution_model,
-        temperature=0.0,
         max_tokens=4096,
     )
 
@@ -154,3 +156,287 @@ def initial_state():
         )
 
     return _create_state
+
+
+# ===== Mock Orbit MCP tools =====
+# The real Orbit MCP tools (`orbit_list_commands`, `orbit_invoke_command`) are
+# injected at runtime by Rails/Workhorse — no Python tool classes exist in
+# this repo to import. These mocks mirror the real tool names, descriptions,
+# and shapes so the LLM sees a realistic surface during tests. The canned
+# graph schema reflects the live Orbit graph as of 2026-05-14 — 6 domains,
+# the most-traversed edges — so routing decisions are made against
+# representative data.
+
+
+class OrbitListCommandsInput(BaseModel):
+    command_names: list[str] | None = Field(default=None)
+    format: str = Field(default="llm")
+
+
+class MockOrbitListCommands(BaseTool):
+    """Mock of orbit_list_commands — lists available Orbit commands."""
+
+    name: str = "orbit_list_commands"
+    description: str = (
+        "List Orbit Knowledge Graph commands with descriptions and input "
+        "schemas. Use this before invoke_command to discover available "
+        "command details."
+    )
+    args_schema: Type[BaseModel] = OrbitListCommandsInput
+
+    def _run(self, **_: Any) -> str:
+        return json.dumps(
+            {
+                "commands": [
+                    {
+                        "name": "query_graph",
+                        "description": (
+                            "Execute a graph query. Before composing a "
+                            "query, call get_query_dsl for the DSL and "
+                            "get_graph_schema for the node and edge names."
+                        ),
+                    },
+                    {
+                        "name": "get_graph_schema",
+                        "description": (
+                            "Return the graph schema. Use expand_nodes for "
+                            "node types to include properties and "
+                            "relationships."
+                        ),
+                    },
+                    {
+                        "name": "get_query_dsl",
+                        "description": "Return the query_graph JSON DSL grammar.",
+                    },
+                    {
+                        "name": "get_response_format",
+                        "description": (
+                            "Return the JSON Schema for query_graph responses."
+                        ),
+                    },
+                ]
+            }
+        )
+
+    async def _arun(self, **kwargs: Any) -> str:
+        return self._run(**kwargs)
+
+
+class OrbitInvokeCommandInput(BaseModel):
+    command_name: str
+    parameters: dict[str, Any] | None = Field(default=None)
+
+
+_ORBIT_COMMAND_RESPONSES: dict[str, dict[str, Any]] = {
+    "get_graph_schema": {
+        "domains": [
+            {
+                "name": "ci",
+                "nodes": [
+                    "Deployment",
+                    "Environment",
+                    "Job",
+                    "JobMetadata",
+                    "Pipeline",
+                    "Runner",
+                    "Stage",
+                ],
+            },
+            {
+                "name": "code_review",
+                "nodes": [
+                    "MergeRequest",
+                    "MergeRequestDiff",
+                    "MergeRequestDiffFile",
+                ],
+            },
+            {"name": "core", "nodes": ["Group", "Note", "Project", "User"]},
+            {"name": "plan", "nodes": ["Label", "Milestone", "WorkItem"]},
+            {
+                "name": "security",
+                "nodes": [
+                    "Finding",
+                    "SecurityScan",
+                    "Vulnerability",
+                    "VulnerabilityIdentifier",
+                    "VulnerabilityOccurrence",
+                    "VulnerabilityScanner",
+                ],
+            },
+            {
+                "name": "source_code",
+                "nodes": [
+                    "Branch",
+                    "Definition",
+                    "Directory",
+                    "File",
+                    "ImportedSymbol",
+                ],
+            },
+        ],
+        "edges": [
+            {"name": "APPROVED", "from": ["User"], "to": ["MergeRequest"]},
+            {
+                "name": "ASSIGNED",
+                "from": ["User"],
+                "to": ["MergeRequest", "WorkItem"],
+            },
+            {
+                "name": "AUTHORED",
+                "from": ["User"],
+                "to": ["MergeRequest", "Note", "Vulnerability", "WorkItem"],
+            },
+            {
+                "name": "CALLS",
+                "from": ["Definition", "File"],
+                "to": ["Definition", "ImportedSymbol"],
+            },
+            {
+                "name": "CLOSED",
+                "from": ["User"],
+                "to": ["MergeRequest", "WorkItem"],
+            },
+            {"name": "CLOSES", "from": ["MergeRequest"], "to": ["WorkItem"]},
+            {
+                "name": "CONTAINS",
+                "from": ["Branch", "Directory", "Group", "Project", "WorkItem"],
+                "to": ["Branch", "Directory", "File", "Group", "Project", "WorkItem"],
+            },
+            {
+                "name": "DEFINES",
+                "from": ["File", "Definition"],
+                "to": ["Definition"],
+            },
+            {"name": "DEPLOYED_TO", "from": ["MergeRequest"], "to": ["Deployment"]},
+            {"name": "EXTENDS", "from": ["Definition"], "to": ["Definition"]},
+            {"name": "FIXES", "from": ["MergeRequest"], "to": ["Vulnerability"]},
+            {"name": "HAS_DIFF", "from": ["MergeRequest"], "to": ["MergeRequestDiff"]},
+            {
+                "name": "HAS_FILE",
+                "from": ["MergeRequestDiff"],
+                "to": ["MergeRequestDiffFile"],
+            },
+            {"name": "HAS_JOB", "from": ["Pipeline", "Stage"], "to": ["Job"]},
+            {
+                "name": "HAS_LABEL",
+                "from": ["MergeRequest", "WorkItem"],
+                "to": ["Label"],
+            },
+            {
+                "name": "HAS_NOTE",
+                "from": ["MergeRequest", "Vulnerability", "WorkItem"],
+                "to": ["Note"],
+            },
+            {"name": "HAS_STAGE", "from": ["Pipeline"], "to": ["Stage"]},
+            {
+                "name": "IMPORTS",
+                "from": ["File", "ImportedSymbol"],
+                "to": ["Definition", "ImportedSymbol"],
+            },
+            {
+                "name": "IN_GROUP",
+                "from": ["Label", "Milestone", "WorkItem"],
+                "to": ["Group"],
+            },
+            {
+                "name": "IN_MILESTONE",
+                "from": ["MergeRequest", "WorkItem"],
+                "to": ["Milestone"],
+            },
+            {
+                "name": "IN_PROJECT",
+                "from": [
+                    "Branch",
+                    "Deployment",
+                    "Environment",
+                    "Job",
+                    "Label",
+                    "MergeRequest",
+                    "Milestone",
+                    "Pipeline",
+                    "Vulnerability",
+                    "WorkItem",
+                ],
+                "to": ["Project"],
+            },
+            {"name": "MEMBER_OF", "from": ["User"], "to": ["Group", "Project"]},
+            {"name": "MERGED", "from": ["User"], "to": ["MergeRequest"]},
+            {"name": "RELATED_TO", "from": ["WorkItem"], "to": ["WorkItem"]},
+            {"name": "REVIEWER", "from": ["User"], "to": ["MergeRequest"]},
+            {
+                "name": "TRIGGERED",
+                "from": ["MergeRequest", "User"],
+                "to": ["Job", "Pipeline"],
+            },
+        ],
+    },
+    "get_query_dsl": {
+        "version": "0.1",
+        "grammar": {
+            "type": "object",
+            "properties": {
+                "node_type": {"type": "string"},
+                "filters": {"type": "object"},
+                "expand": {"type": "array"},
+                "node_ids": {"type": "array"},
+            },
+        },
+    },
+    "get_response_format": {
+        "version": "0.1",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "results": {"type": "array"},
+                "page_info": {"type": "object"},
+            },
+        },
+    },
+    "query_graph": {
+        "results": [
+            {
+                "id": "gid://gitlab/MergeRequest/1",
+                "title": "Refactor GLQL frontend renderer",
+            },
+            {
+                "id": "gid://gitlab/MergeRequest/2",
+                "title": "Fix GLQL embedded view bug",
+            },
+        ]
+    },
+}
+
+
+class MockOrbitInvokeCommand(BaseTool):
+    """Mock of orbit_invoke_command — runs a named Orbit command."""
+
+    name: str = "orbit_invoke_command"
+    description: str = (
+        "Execute an Orbit command. This is a wrapper tool: keep only "
+        "command_name and parameters at the top level, and put downstream "
+        "command inputs inside parameters."
+    )
+    args_schema: Type[BaseModel] = OrbitInvokeCommandInput
+
+    def _run(self, command_name: str, parameters: dict | None = None) -> str:
+        del parameters  # unused — mock ignores command-specific inputs
+        response = _ORBIT_COMMAND_RESPONSES.get(
+            command_name,
+            {"error": f"Unknown orbit command: {command_name}"},
+        )
+        return json.dumps(response)
+
+    async def _arun(self, command_name: str, parameters: dict | None = None) -> str:
+        return self._run(command_name, parameters)
+
+
+@pytest.fixture
+def orbit_list_commands_tool():
+    """Mock orbit_list_commands tool — reusable across agent test suites."""
+    return MockOrbitListCommands()
+
+
+@pytest.fixture
+def orbit_invoke_command_tool():
+    """Mock orbit_invoke_command tool — reusable across agent test suites."""
+    return MockOrbitInvokeCommand()

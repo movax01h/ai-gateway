@@ -99,9 +99,52 @@ def analytics_agent(
     glql_tool,
     work_item_note_tool,
     merge_request_note_tool,
+    orbit_list_commands_tool,
+    orbit_invoke_command_tool,
     mock_tools_registry,
 ):
-    """Analytics agent with real LLM and mocked tools."""
+    """Analytics agent with the full toolset including mock Orbit MCP tools."""
+    from duo_workflow_service.agents.chat_agent import ChatAgent
+    from duo_workflow_service.tools.toolset import Toolset
+
+    all_tools = [
+        glql_schema_tool,
+        glql_tool,
+        work_item_note_tool,
+        merge_request_note_tool,
+        orbit_list_commands_tool,
+        orbit_invoke_command_tool,
+    ]
+
+    RealLLMPromptAdapter = make_prompt_adapter_class()
+    adapter = RealLLMPromptAdapter(
+        model=real_llm,
+        system_template=analytics_system_template,
+        tools=all_tools,
+        agent_name="analytics_agent",
+    )
+
+    tools_dict = {tool.name: tool for tool in all_tools}
+    return ChatAgent(
+        name="analytics_agent",
+        prompt_adapter=adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=Toolset(pre_approved=set(), all_tools=tools_dict),
+    )
+
+
+@pytest.fixture
+def analytics_agent_without_orbit(
+    real_llm,
+    analytics_system_template,
+    glql_schema_tool,
+    glql_tool,
+    work_item_note_tool,
+    merge_request_note_tool,
+    mock_tools_registry,
+):
+    """Analytics agent with real LLM and mocked tools (no Orbit)."""
     from duo_workflow_service.agents.chat_agent import ChatAgent
     from duo_workflow_service.tools.toolset import Toolset
 
