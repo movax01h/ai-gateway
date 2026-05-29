@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any, Callable, Literal, Optional, override
+from uuid import uuid4
 
 from duo_workflow_service.agent_platform.v1.ui_log.base import (
     BaseUILogEvents,
@@ -84,7 +85,8 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
             tool_info=kwargs.get("tool_info"),
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=kwargs.get("message_sub_type"),
-            message_id=kwargs.get("message_id"),
+            message_id=kwargs.get("message_id")
+            or f"{self._ui_roles_as.value}-{str(uuid4())}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )

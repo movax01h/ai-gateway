@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Any, Generic, Protocol, TypeVar
+from uuid import uuid4
 
 import structlog
 from langchain.tools import BaseTool
@@ -138,7 +139,7 @@ class RunToolNode(Generic[WorkflowStateT]):
                                     name=self._tool.name, args=tool_params
                                 ),
                                 additional_context=None,
-                                message_id=None,
+                                message_id=f"tool-{str(uuid4())}",
                             )
                         )
                         continue
@@ -165,7 +166,7 @@ class RunToolNode(Generic[WorkflowStateT]):
                     correlation_id=None,
                     tool_info=ToolInfo(name=self._tool.name, args=tool_params),
                     additional_context=None,
-                    message_id=None,
+                    message_id=f"tool-{str(uuid4())}",
                 )
             )
 

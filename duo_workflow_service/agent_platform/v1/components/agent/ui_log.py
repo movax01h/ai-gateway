@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from enum import auto
 from functools import partial
 from typing import Any, Callable, Optional, override
+from uuid import uuid4
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -89,7 +90,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             ),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -115,7 +116,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=tool.name,
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -146,7 +147,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=None,
             additional_context=kwargs.get("context_elements", []),
             message_sub_type="reasoning",
-            message_id=kwargs.get("message_id"),
+            message_id=f"agent-{str(uuid4())}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )

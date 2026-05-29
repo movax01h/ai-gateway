@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from enum import auto
 from functools import partial
 from typing import Callable, Optional, override
+from uuid import uuid4
 
 from duo_workflow_service.agent_platform.v1.ui_log import (
     BaseUILogEvents,
@@ -66,7 +67,7 @@ class AgentLogWriter(BaseUILogWriter[UILogEventsHumanInput]):
             message_type=MessageTypeEnum.REQUEST,
             message_sub_type=request_type,
             content=content,
-            message_id=None,
+            message_id=f"request-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=None,
             correlation_id=correlation_id,
@@ -118,7 +119,7 @@ class UserLogWriter(BaseUILogWriter[UILogEventsHumanInput]):
             message_type=MessageTypeEnum.USER,
             message_sub_type=None,
             content=content,
-            message_id=None,
+            message_id=f"user-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=None,
             correlation_id=correlation_id,

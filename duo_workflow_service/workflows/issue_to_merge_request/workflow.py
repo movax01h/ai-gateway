@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated, Any
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -145,7 +146,7 @@ def _git_output(
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"{command_output[-1]}",
-            message_id=None,
+            message_id=f"tool-{str(uuid4())}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

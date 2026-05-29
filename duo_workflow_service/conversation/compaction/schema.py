@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -72,5 +73,5 @@ class CompactionResult:
             correlation_id=None,
             tool_info=None,
             additional_context=None,
-            message_id=None,
+            message_id=f"agent-{str(uuid4())}",
         )
