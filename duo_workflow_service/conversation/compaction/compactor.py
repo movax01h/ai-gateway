@@ -18,7 +18,7 @@ from duo_workflow_service.conversation.compaction.utils import (
     slice_for_summarization,
     strip_tool_metadata,
 )
-from duo_workflow_service.conversation.token_estimator import count_tokens
+from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.billing_events.service import LLMOperationType
@@ -93,8 +93,9 @@ class ConversationCompactor:
         self._model_name = getattr(model_metadata, "name", "unknown")
         self._internal_events_client = internal_events_client
         self._config = config
+        self._token_estimator = TokenEstimator()
         prompt_tpl = cast(ChatPromptTemplate, self._prompt.prompt_tpl)
-        self._prompt_overhead_tokens = count_tokens(
+        self._prompt_overhead_tokens = self._token_estimator.count(
             prompt_tpl.format_messages(history=[]), is_complete_history=False
         )
 
@@ -114,7 +115,7 @@ class ConversationCompactor:
         if len(messages) <= self._config.max_recent_messages:
             return False
 
-        token_count = count_tokens(messages, is_complete_history=True)
+        token_count = self._token_estimator.count(messages, is_complete_history=True)
         threshold = self._config.trim_threshold * get_model_max_context_token_limit()
         log.info(
             "Checking if compact is needed.",
@@ -141,7 +142,7 @@ class ConversationCompactor:
         if not messages or not self.should_compact(messages):
             return CompactionResult(messages=messages, was_compacted=False)
 
-        slices = slice_for_summarization(messages, self._config)
+        slices = slice_for_summarization(messages, self._config, self._token_estimator)
 
         if not slices.to_summarize:
             log.warning(
@@ -152,7 +153,9 @@ class ConversationCompactor:
             )
             return CompactionResult(messages=messages, was_compacted=False)
 
-        original_tokens = count_tokens(messages, is_complete_history=True)
+        original_tokens = self._token_estimator.count(
+            messages, is_complete_history=True
+        )
         start_time = time.time()
 
         try:

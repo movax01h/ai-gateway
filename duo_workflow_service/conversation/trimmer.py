@@ -12,11 +12,13 @@ from langchain_core.messages import (
     trim_messages,
 )
 
-from duo_workflow_service.conversation.token_estimator import count_tokens
+from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.tracking.errors import log_exception
 
 logger = structlog.stdlib.get_logger("conversation_trimmer")
+
+_token_estimator = TokenEstimator()
 
 LEGACY_MAX_CONTEXT_TOKENS = 200_000  # old default for backwards compatibility
 TRIM_THRESHOLD = 0.7  # Only run expensive trimming when utilization exceeds this
@@ -53,7 +55,7 @@ def _pretrim_large_messages(
     """
     processed_messages = []
     for message in messages:
-        msg_token = count_tokens([message], is_complete_history=False)
+        msg_token = _token_estimator.count([message], is_complete_history=False)
         if msg_token > max_single_message_tokens:
             logger.info(
                 f"Message with role: {message.type} token size: {msg_token} "
@@ -246,7 +248,7 @@ def apply_token_based_trim(
     token_budget = int(TRIM_THRESHOLD * max_context_tokens)
     max_single_message_tokens = int(token_budget * MAX_SINGLE_MESSAGE_TOKEN_SHARE)
 
-    initial_tokens = count_tokens(messages=messages, is_complete_history=True)
+    initial_tokens = _token_estimator.count(messages=messages, is_complete_history=True)
     initial_roles = _get_message_roles(messages)
 
     if initial_tokens < token_budget:
@@ -288,7 +290,9 @@ def apply_token_based_trim(
             processed_messages,
             max_tokens=token_budget,
             strategy="last",
-            token_counter=lambda x: count_tokens(x, is_complete_history=False),
+            token_counter=lambda x: _token_estimator.count(
+                x, is_complete_history=False
+            ),
             start_on="human",
             include_system=True,
             allow_partial=False,
@@ -321,7 +325,7 @@ def apply_token_based_trim(
     final_tokens = (
         initial_tokens
         if result == messages
-        else count_tokens(result, is_complete_history=False)
+        else _token_estimator.count(result, is_complete_history=False)
         + TikTokenCounter(agent_name=component_name).tool_tokens
     )
 

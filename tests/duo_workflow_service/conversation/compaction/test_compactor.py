@@ -18,10 +18,24 @@ from duo_workflow_service.conversation.compaction.compactor import (
 DEFAULT_MAX_RECENT_MESSAGES = 10
 
 
+def _token_count_side_effect(history_tokens: int, per_turn_tokens: int = 100):
+    """Return a TokenEstimator.count side_effect that distinguishes call modes.
+
+    Complete-history calls (``is_complete_history=True``) are used by
+    ``should_compact`` / ``original_tokens`` and need to clear the trim
+    threshold. Per-turn calls (``is_complete_history=False``) drive
+    ``resolve_recent_messages_internal`` and must stay small so recent turns
+    are retained.
+    """
+    return lambda *args, **kwargs: (
+        history_tokens if kwargs.get("is_complete_history") else per_turn_tokens
+    )
+
+
 @patch(
     "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
 )
-@patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+@patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
 class TestConversationCompactorShouldCompact:
     """Test suite for ConversationCompactor.should_compact method."""
 
@@ -349,13 +363,13 @@ class TestConversationCompactorCompact:
         mock_prompt.ainvoke.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_compact_success(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
         """Should return compacted messages when summarization succeeds."""
         mock_get_max_context.return_value = 400_000
-        mock_count_tokens.return_value = int(0.8 * 400_000)
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
 
         summary_message = AIMessage(
             content="Summary of conversation",
@@ -394,13 +408,13 @@ class TestConversationCompactorCompact:
         assert result.messages[-1].content == COMPACTION_CONTINUE_MESSAGE
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_compact_llm_failure(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
         """Should return original messages and error when LLM fails."""
         mock_get_max_context.return_value = 400_000
-        mock_count_tokens.return_value = int(0.8 * 400_000)
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
 
         mock_prompt.ainvoke.side_effect = Exception("LLM error")
 
@@ -419,11 +433,7 @@ class TestConversationCompactorCompact:
         assert result.error is not None
 
     @pytest.mark.asyncio
-    @patch(
-        "duo_workflow_service.conversation.compaction.utils.count_tokens",
-        return_value=50000,
-    )
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
         "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
         return_value=None,
@@ -431,8 +441,7 @@ class TestConversationCompactorCompact:
     async def test_compact_no_messages_to_summarize(
         self,
         _mock_get_model_metadata,
-        mock_count_tokens_compactor,
-        _mock_count_tokens_utils,
+        mock_count_tokens,
         mock_get_max_context,
         mock_prompt_registry,
         mock_prompt,
@@ -440,7 +449,7 @@ class TestConversationCompactorCompact:
     ):
         """Should return unchanged when slicing leaves nothing to summarize."""
         mock_get_max_context.return_value = 400_000
-        mock_count_tokens_compactor.return_value = int(0.8 * 400_000)
+        mock_count_tokens.return_value = int(0.8 * 400_000)
 
         compactor = create_conversation_compactor(
             config=CompactionConfig(
@@ -467,7 +476,7 @@ class TestConversationCompactorCompact:
         mock_prompt.ainvoke.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_compact_result_has_correct_metadata(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
@@ -500,13 +509,13 @@ class TestConversationCompactorCompact:
         assert result.messages_summarized > 0
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_compact_does_not_append_human_message_when_last_is_human(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
         """Should not append extra HumanMessage when compacted messages already end with one."""
         mock_get_max_context.return_value = 400_000
-        mock_count_tokens.return_value = int(0.8 * 400_000)
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
 
         summary_message = AIMessage(
             content="Summary",
@@ -617,7 +626,7 @@ class TestCompactorPrometheusMetrics:
     """Test Prometheus metric recording during compaction."""
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_success_increments_counter_and_records_duration(
         self,
         mock_count_tokens,
@@ -658,7 +667,7 @@ class TestCompactorPrometheusMetrics:
         )
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_error_increments_counter(
         self,
         mock_count_tokens,
@@ -694,7 +703,7 @@ class TestCompactorSnowplowEvents:
     """Test Snowplow event firing during compaction."""
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
         "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
     )
@@ -747,7 +756,7 @@ class TestCompactorSnowplowEvents:
         assert "duration_seconds" in additional_props.extra
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
         "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
     )
@@ -784,7 +793,7 @@ class TestCompactorSnowplowEvents:
         assert "duration_seconds" in additional_props.extra
 
     @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.compaction.compactor.count_tokens")
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
         "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
     )
