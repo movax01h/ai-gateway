@@ -148,8 +148,8 @@ LEGACY_MODEL_MAPPING = {
     },
     "measure_comment_temperature": {
         "1.0.0": "gemini_1_5_flash_vertex",
-        "1.0.1": "gemini_2_0_flash_lite_vertex",
-        "1.0.2": "gemini_2_0_flash_lite_vertex",
+        "1.0.1": "gemini_2_5_flash_vertex",
+        "1.0.2": "gemini_2_5_flash_vertex",
     },
     "resolve_vulnerability": {
         "0.0.1-dev": "claude_sonnet_4_20250514",
