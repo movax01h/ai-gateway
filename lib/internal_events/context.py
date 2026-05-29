@@ -87,3 +87,10 @@ current_event_context: ContextVar[EventContext] = ContextVar(
 tracked_internal_events: ContextVar[Set[str]] = ContextVar(
     "tracked_internal_events", default=set()
 )
+
+merge_request_url_context: ContextVar[Optional[str]] = ContextVar(
+    "merge_request_url", default=None
+)
+pipeline_source_context: ContextVar[Optional[str]] = ContextVar(
+    "pipeline_source", default=None
+)

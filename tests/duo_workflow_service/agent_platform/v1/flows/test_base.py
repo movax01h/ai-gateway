@@ -34,6 +34,10 @@ from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
+from lib.internal_events.context import (
+    merge_request_url_context,
+    pipeline_source_context,
+)
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
@@ -1170,3 +1174,120 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         state = graph.aupdate_state.call_args[0][1]
         assert state["ui_chat_log"].value[0]["content"] == "Safe message only"
+
+
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+class TestSetTrackingContextFromAdditionalContext:
+    """Tests for _set_tracking_context_from_additional_context called during Flow.__init__."""
+
+    def _create_flow(self, user, additional_context=None):
+        config = FlowConfig(
+            flow=FlowConfigMetadata(
+                entry_point="agent",
+                inputs=[],
+            ),
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "prompt_version": "v1",
+                    "toolset": ["read_file"],
+                },
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+        flow_type = GLReportingEventContext.from_workflow_definition("chat")
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.v1.flows.base.load_component_class"
+            ) as mock_load_class,
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            mock_component = MagicMock(spec=BaseComponent)
+            mock_component.__entry_hook__.return_value = "agent_entry_node"
+            mock_load_class.return_value = MagicMock(return_value=mock_component)
+            return Flow(
+                workflow_id="test-id",
+                workflow_metadata={
+                    "git_url": "https://gitlab.com/test/project",
+                    "git_sha": "abc123",
+                    "extended_logging": False,
+                },
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+                additional_context=additional_context,
+            )
+
+    def test_sets_merge_request_url_and_pipeline_source(self, user):
+        mr_token = merge_request_url_context.set(None)
+        ps_token = pipeline_source_context.set(None)
+        try:
+            self._create_flow(
+                user,
+                additional_context=[
+                    AdditionalContext(
+                        category="merge_request",
+                        content='{"url": "https://gitlab.com/project/-/merge_requests/1"}',
+                    ),
+                    AdditionalContext(
+                        category="pipeline",
+                        content='{"source_branch": "main", "source": "merge_request_event"}',
+                    ),
+                ],
+            )
+            assert (
+                merge_request_url_context.get()
+                == "https://gitlab.com/project/-/merge_requests/1"
+            )
+            assert pipeline_source_context.get() == "merge_request_event"
+        finally:
+            merge_request_url_context.reset(mr_token)
+            pipeline_source_context.reset(ps_token)
+
+    def test_handles_invalid_merge_request_json(self, user):
+        mr_token = merge_request_url_context.set(None)
+        try:
+            self._create_flow(
+                user,
+                additional_context=[
+                    AdditionalContext(
+                        category="merge_request",
+                        content="not valid json",
+                    ),
+                ],
+            )
+            assert merge_request_url_context.get() is None
+        finally:
+            merge_request_url_context.reset(mr_token)
+
+    def test_handles_invalid_pipeline_json(self, user):
+        ps_token = pipeline_source_context.set(None)
+        try:
+            self._create_flow(
+                user,
+                additional_context=[
+                    AdditionalContext(
+                        category="pipeline",
+                        content="not valid json",
+                    ),
+                ],
+            )
+            assert pipeline_source_context.get() is None
+        finally:
+            pipeline_source_context.reset(ps_token)
+
+    def test_no_context_set_without_additional_context(self, user):
+        mr_token = merge_request_url_context.set(None)
+        ps_token = pipeline_source_context.set(None)
+        try:
+            self._create_flow(user)
+            assert merge_request_url_context.get() is None
+            assert pipeline_source_context.get() is None
+        finally:
+            merge_request_url_context.reset(mr_token)
+            pipeline_source_context.reset(ps_token)

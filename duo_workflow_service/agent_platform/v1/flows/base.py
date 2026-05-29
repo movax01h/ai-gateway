@@ -55,6 +55,10 @@ from duo_workflow_service.workflows.abstract_workflow import (
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import (
+    merge_request_url_context,
+    pipeline_source_context,
+)
 
 __all__ = ["Flow", "persist_error_to_ui_chat_log"]
 
@@ -191,7 +195,29 @@ class Flow(AbstractWorkflow):
                     schema_config.schema_id, schema_config.to_schema_dict()
                 )
 
+        self._set_tracking_context_from_additional_context()
+
     # pylint: enable=dangerous-default-value
+
+    def _set_tracking_context_from_additional_context(self) -> None:
+        """Set merge_request_url and pipeline_source ContextVars from additional context."""
+        context_mappings = [
+            ("merge_request", "url", merge_request_url_context),
+            ("pipeline", "source", pipeline_source_context),
+        ]
+        for item in self._additional_context or []:
+            for category, key, context_var in context_mappings:
+                if item.category == category and item.content:
+                    try:
+                        value = json.loads(item.content).get(key)
+                        if value:
+                            context_var.set(value)
+                    except (json.JSONDecodeError, AttributeError) as e:
+                        self.log.warning(
+                            "Failed to parse additional context for tracking",
+                            category=category,
+                            error=str(e),
+                        )
 
     @override
     def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]

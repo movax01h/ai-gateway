@@ -9,6 +9,8 @@ from lib.internal_events.context import (
     EventContext,
     InternalEventAdditionalProperties,
     current_event_context,
+    merge_request_url_context,
+    pipeline_source_context,
 )
 
 
@@ -157,6 +159,114 @@ class TestInternalEventsClientAIContext:
         )
         assert standard_context.data["user_type"] == "service_account"
         assert "subject_type" not in standard_context.data
+
+    def test_track_event_includes_merge_request_url_when_context_set(
+        self, client, mock_tracker
+    ):
+        """Verify merge_request_url is injected into extra when ContextVar is set."""
+        current_event_context.set(EventContext())
+        token = merge_request_url_context.set(
+            "https://gitlab.com/group/project/-/merge_requests/1"
+        )
+        try:
+            client.track_event(
+                "test_event",
+                additional_properties=InternalEventAdditionalProperties(
+                    label="test_label",
+                ),
+            )
+
+            mock_tracker.track.assert_called_once()
+            structured_event = mock_tracker.track.call_args[0][0]
+            standard_context = next(
+                ctx
+                for ctx in structured_event.context
+                if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+            )
+            assert (
+                standard_context.data["extra"]["merge_request_url"]
+                == "https://gitlab.com/group/project/-/merge_requests/1"
+            )
+        finally:
+            merge_request_url_context.reset(token)
+
+    def test_track_event_omits_merge_request_url_when_context_not_set(
+        self, client, mock_tracker
+    ):
+        """Verify merge_request_url is not in extra when ContextVar is unset."""
+        current_event_context.set(EventContext())
+        token = merge_request_url_context.set(None)
+        try:
+            client.track_event(
+                "test_event",
+                additional_properties=InternalEventAdditionalProperties(
+                    label="test_label",
+                ),
+            )
+
+            mock_tracker.track.assert_called_once()
+            structured_event = mock_tracker.track.call_args[0][0]
+            standard_context = next(
+                ctx
+                for ctx in structured_event.context
+                if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+            )
+            assert "merge_request_url" not in standard_context.data["extra"]
+        finally:
+            merge_request_url_context.reset(token)
+
+    def test_track_event_includes_pipeline_source_when_context_set(
+        self, client, mock_tracker
+    ):
+        """Verify pipeline_source is injected into extra when ContextVar is set."""
+        current_event_context.set(EventContext())
+        token = pipeline_source_context.set("merge_request_event")
+        try:
+            client.track_event(
+                "test_event",
+                additional_properties=InternalEventAdditionalProperties(
+                    label="test_label",
+                ),
+            )
+
+            mock_tracker.track.assert_called_once()
+            structured_event = mock_tracker.track.call_args[0][0]
+            standard_context = next(
+                ctx
+                for ctx in structured_event.context
+                if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+            )
+            assert (
+                standard_context.data["extra"]["pipeline_source"]
+                == "merge_request_event"
+            )
+        finally:
+            pipeline_source_context.reset(token)
+
+    def test_track_event_omits_pipeline_source_when_context_not_set(
+        self, client, mock_tracker
+    ):
+        """Verify pipeline_source is not in extra when ContextVar is unset."""
+        current_event_context.set(EventContext())
+        token = pipeline_source_context.set(None)
+        try:
+            client.track_event(
+                "test_event",
+                additional_properties=InternalEventAdditionalProperties(
+                    label="test_label",
+                ),
+            )
+
+            mock_tracker.track.assert_called_once()
+            structured_event = mock_tracker.track.call_args[0][0]
+            standard_context = next(
+                ctx
+                for ctx in structured_event.context
+                if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+            )
+            assert "pipeline_source" not in standard_context.data["extra"]
+        finally:
+            pipeline_source_context.reset(token)
 
 
 class TestTruncateString:
