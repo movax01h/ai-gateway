@@ -10,6 +10,7 @@ import pytest
 from ai_gateway.models.v2.litellm_model_registry import (
     ENV_VAR_NAME,
     load_external_model_metadata,
+    register_builtin_models,
     register_external_models,
 )
 
@@ -35,6 +36,27 @@ VALID_JSON = json.dumps(
         }
     }
 )
+
+
+class TestRegisterBuiltinModels:
+    """Tests for ``register_builtin_models``."""
+
+    def test_success_registers_models(self) -> None:
+        """When ``register_model`` succeeds, built-in models are registered."""
+        with patch(
+            "ai_gateway.models.v2.litellm_model_registry.register_model"
+        ) as mock_register:
+            register_builtin_models()
+            mock_register.assert_called_once()
+
+    def test_exception_does_not_propagate(self) -> None:
+        """If ``register_model`` raises, the function returns without re-raising."""
+        with patch(
+            "ai_gateway.models.v2.litellm_model_registry.register_model",
+            side_effect=RuntimeError("litellm internal error"),
+        ):
+            # Should not raise
+            register_builtin_models()
 
 
 class TestLoadExternalModelMetadata:

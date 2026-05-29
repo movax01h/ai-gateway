@@ -310,6 +310,21 @@ models:
       model: "claude-opus-4-8"
       max_tokens: 128_000
 
+  - name: "Claude Opus 4.8"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_opus_4_8_bedrock"
+    description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-8
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: bedrock/global.anthropic.claude-opus-4-8
+      custom_llm_provider: bedrock
+      max_tokens: 128_000
+      max_retries: 1
+
   - name: "Claude Opus 4.6"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_6_bedrock"
