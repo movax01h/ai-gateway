@@ -94,8 +94,8 @@ tests:agents:analytics:
     - when: manual
   parallel:
     matrix:
-      - EXECUTION_MODEL: "claude-haiku-4-5-20251001"
       - EXECUTION_MODEL: "claude-sonnet-4-6"
+      - EXECUTION_MODEL: "claude-opus-4-7"
 
 .test-base: &test-base
   stage: test
