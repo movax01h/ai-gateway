@@ -5,6 +5,9 @@ import structlog
 from langchain_core.messages import AIMessage, ToolMessage
 
 from ai_gateway.response_schemas.base import BaseAgentOutput
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
@@ -133,18 +136,24 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         history = history_iokey.value_from_state(state) or []
 
         if not history:
-            raise ValueError(
-                f"No messages found for conversation history key "
-                f"{history_iokey.target}:{history_iokey.subkeys}"
+            raise NotifiableAgentException(
+                "An internal error occurred: no conversation history was found.",
+                internal_detail=(
+                    f"No messages found for conversation history key "
+                    f"{history_iokey.target}:{history_iokey.subkeys}"
+                ),
             )
 
         last_message = history[-1]
 
         if not isinstance(last_message, AIMessage):
-            raise ValueError(
-                f"The last message for conversation history key "
-                f"{history_iokey.target}:{history_iokey.subkeys} "
-                f"is not of type AIMessage"
+            raise NotifiableAgentException(
+                "An internal error occurred: the agent produced an unexpected message type.",
+                internal_detail=(
+                    f"The last message for conversation history key "
+                    f"{history_iokey.target}:{history_iokey.subkeys} "
+                    f"is not of type AIMessage"
+                ),
             )
 
         return last_message, history
@@ -158,28 +167,38 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         state: FlowState,
     ) -> tuple[str, dict]:
         if not last_message.tool_calls:
-            raise ValueError(
-                f"Response schema requires a tool call but got a text-only response "
-                f"for conversation history key "
-                f"{history_iokey.target}:{history_iokey.subkeys}"
+            raise NotifiableAgentException(
+                "An internal error occurred: the agent did not produce the expected tool call.",
+                internal_detail=(
+                    f"Response schema requires a tool call but got a text-only response "
+                    f"for conversation history key "
+                    f"{history_iokey.target}:{history_iokey.subkeys}"
+                ),
             )
 
         if len(last_message.tool_calls) > 1:
-            raise ValueError(
-                f"Too many tool calls found in the last message for conversation "
-                f"history key {history_iokey.target}:{history_iokey.subkeys}"
+            raise NotifiableAgentException(
+                "An internal error occurred: the agent produced too many tool calls.",
+                internal_detail=(
+                    f"Too many tool calls found in the last message for conversation "
+                    f"history key {history_iokey.target}:{history_iokey.subkeys}"
+                ),
             )
 
         final_response_call = last_message.tool_calls[0]
 
         if self._response_schema is None:
-            raise ValueError(
-                "Response schema is required for structured response extraction"
+            raise NotifiableAgentException(
+                "An internal error occurred: response schema configuration is missing.",
+                internal_detail="Response schema is required for structured response extraction",
             )
         if final_response_call["name"] != self._response_schema.tool_title:
-            raise ValueError(
-                f"Final response tool call not found in the conversation history "
-                f"for key {history_iokey.target}:{history_iokey.subkeys}"
+            raise NotifiableAgentException(
+                "An internal error occurred: the agent's final response did not match the expected format.",
+                internal_detail=(
+                    f"Final response tool call not found in the conversation history "
+                    f"for key {history_iokey.target}:{history_iokey.subkeys}"
+                ),
             )
 
         parsed_response = self._response_schema(**final_response_call["args"])

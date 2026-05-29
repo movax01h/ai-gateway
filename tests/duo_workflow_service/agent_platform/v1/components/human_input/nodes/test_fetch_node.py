@@ -3,6 +3,9 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import HumanMessage
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.human_input.nodes.fetch_node import (
     FetchNode,
 )
@@ -201,11 +204,12 @@ class TestFetchNode:
             "duo_workflow_service.agent_platform.v1.components.human_input.nodes.fetch_node.interrupt",
             return_value=mock_event,
         ):
-            with pytest.raises(
-                ValueError,
-                match="MODIFY event must include a message with user feedback",
-            ):
+            with pytest.raises(NotifiableAgentException) as exc_info:
                 await fetch_node.run(sample_state)
+            assert (
+                "user input event did not include a message"
+                in exc_info.value.ui_message
+            )
 
     @pytest.mark.asyncio
     async def test_interrupt_handling_unknown_event(self, fetch_node, sample_state):
@@ -218,7 +222,6 @@ class TestFetchNode:
             "duo_workflow_service.agent_platform.v1.components.human_input.nodes.fetch_node.interrupt",
             return_value=mock_event,
         ):
-            with pytest.raises(
-                ValueError, match="Unknown event type: UNKNOWN_EVENT_TYPE"
-            ):
+            with pytest.raises(NotifiableAgentException) as exc_info:
                 await fetch_node.run(sample_state)
+            assert "unexpected event type was received" in exc_info.value.ui_message

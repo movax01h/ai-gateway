@@ -16,6 +16,9 @@ from ai_gateway.prompts import BasePromptRegistry, InMemoryPromptRegistry
 from ai_gateway.response_schemas import InlineResponseSchemaRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     AbortComponent,
     BaseComponent,
@@ -74,13 +77,18 @@ async def persist_error_to_ui_chat_log(
     existing_logs: list,
     log: Any,
     workflow_id: str,
+    error: BaseException | None = None,
 ) -> None:
-    """Persist a generic error entry to the UI chat log via aupdate_state.
+    """Persist an error entry to the UI chat log via aupdate_state.
 
     Appends a ``WORKFLOW_END`` / ``FAILURE`` log entry to *existing_logs* and
     writes the combined list to the graph checkpoint using ``Overwrite`` so
     that the reducer is bypassed entirely.  If ``aupdate_state`` raises, the
     exception is caught and a warning is logged instead of propagating.
+
+    When *error* is a :class:`NotifiableAgentException`, the safe ``ui_message``
+    is surfaced to the UI. Any other exception (or ``None``) falls back to the
+    generic catch-all message to avoid leaking internal details.
 
     Args:
         compiled_graph: The compiled LangGraph instance (must not be ``None``).
@@ -88,8 +96,13 @@ async def persist_error_to_ui_chat_log(
         existing_logs: The current ``ui_chat_log`` entries to preserve.
         log: A structlog logger (or any object with a ``warning`` method).
         workflow_id: The workflow identifier used in the warning log.
+        error: The exception that caused the failure, used to extract a safe
+            user-facing message when available.
     """
-    error_message = GENERIC_WORKFLOW_ERROR_MESSAGE
+    if isinstance(error, NotifiableAgentException):
+        error_message = error.ui_message
+    else:
+        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE
 
     error_log = UiChatLog(
         message_type=MessageTypeEnum.AGENT,
@@ -584,9 +597,14 @@ class Flow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(
-            error, extra={"workflow_id": self._workflow_id, "source": __name__}
-        )
+        log_extra: dict[str, Any] = {
+            "workflow_id": self._workflow_id,
+            "source": __name__,
+        }
+        if isinstance(error, NotifiableAgentException) and error.internal_detail:
+            log_extra["internal_detail"] = error.internal_detail
+
+        log_exception(error, extra=log_extra)
 
         if compiled_graph is not None:
             existing_logs = (
@@ -600,4 +618,5 @@ class Flow(AbstractWorkflow):
                 existing_logs=existing_logs,
                 log=self.log,
                 workflow_id=self._workflow_id,
+                error=error,
             )

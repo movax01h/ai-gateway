@@ -5,6 +5,9 @@ from unittest.mock import Mock, patch
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
@@ -153,11 +156,10 @@ class TestFinalResponseNode:
         state["conversation_history"] = {component_name: [Mock(spec=BaseMessage)]}
 
         # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             await node.run(state)
 
-        error_message = str(exc_info.value)
-        assert "is not of type AIMessage" in error_message
+        assert "is not of type AIMessage" in exc_info.value.internal_detail
 
     @pytest.mark.asyncio
     async def test_run_multiple_tool_calls_raises_error(
@@ -185,11 +187,13 @@ class TestFinalResponseNode:
         }
 
         # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             await node.run(state)
 
-        error_message = str(exc_info.value)
-        assert "Too many tool calls found in the last message" in error_message
+        assert (
+            "Too many tool calls found in the last message"
+            in exc_info.value.internal_detail
+        )
 
     @pytest.mark.asyncio
     async def test_run_no_final_response_tool_call_raises_error(
@@ -217,13 +221,54 @@ class TestFinalResponseNode:
         }
 
         # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             await node.run(state)
 
-        error_message = str(exc_info.value)
         assert (
             "Final response tool call not found in the conversation history"
-            in error_message
+            in exc_info.value.internal_detail
+        )
+
+    def test_extract_structured_response_no_schema_raises_error(
+        self,
+        component_name,
+        simple_output,
+        base_flow_state,
+        mock_other_tool_call,
+        ui_history,
+    ):
+        """Test _extract_structured_response raises NotifiableAgentException when response_schema is None."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [mock_other_tool_call]
+
+        node = FinalResponseNode(
+            name="test_node",
+            conversation_history_key=_make_conversation_history_key(component_name),
+            output_key=_make_output_key(simple_output),
+            ui_history=ui_history,
+            response_schema=None,
+            component_name=component_name,
+        )
+
+        history_iokey = IOKey(
+            target="conversation_history",
+            subkeys=[component_name],
+            optional=True,
+        )
+        output_iokey = simple_output
+
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            node._extract_structured_response(
+                mock_message,
+                [mock_message],
+                history_iokey,
+                output_iokey,
+                base_flow_state,
+            )
+
+        assert (
+            "Response schema is required for structured response extraction"
+            in exc_info.value.internal_detail
         )
 
     @pytest.mark.asyncio
@@ -251,11 +296,10 @@ class TestFinalResponseNode:
         state = base_flow_state.copy()
         state["conversation_history"] = {component_name: [mock_message]}
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             await node.run(state)
 
-        error_message = str(exc_info.value)
-        assert "Response schema requires a tool call" in error_message
+        assert "Response schema requires a tool call" in exc_info.value.internal_detail
 
     @pytest.mark.asyncio
     async def test_run_empty_tool_calls_uses_text_path(
@@ -297,7 +341,7 @@ class TestFinalResponseNode:
     async def test_run_no_conversation_history_raises_error(
         self, component_name, simple_output, flow_state_no_history, ui_history
     ):
-        """Test run raises ValueError when no conversation history exists for component."""
+        """Test run raises NotifiableAgentException when no conversation history exists for component."""
         node = FinalResponseNode(
             name="test_node",
             conversation_history_key=_make_conversation_history_key(component_name),
@@ -306,17 +350,19 @@ class TestFinalResponseNode:
         )
 
         # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             await node.run(flow_state_no_history)
 
-        error_message = str(exc_info.value)
-        assert "No messages found for conversation history key" in error_message
+        assert (
+            "No messages found for conversation history key"
+            in exc_info.value.internal_detail
+        )
 
     @pytest.mark.asyncio
     async def test_run_empty_conversation_history_raises_error(
         self, component_name, simple_output, flow_state_empty_history, ui_history
     ):
-        """Test run raises ValueError when conversation history is empty for component."""
+        """Test run raises NotifiableAgentException when conversation history is empty for component."""
         node = FinalResponseNode(
             name="test_node",
             conversation_history_key=_make_conversation_history_key(component_name),
@@ -325,11 +371,13 @@ class TestFinalResponseNode:
         )
 
         # Execute and verify error
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             await node.run(flow_state_empty_history)
 
-        error_message = str(exc_info.value)
-        assert "No messages found for conversation history key" in error_message
+        assert (
+            "No messages found for conversation history key"
+            in exc_info.value.internal_detail
+        )
 
     @pytest.mark.asyncio
     async def test_run_with_multiple_messages_uses_last(

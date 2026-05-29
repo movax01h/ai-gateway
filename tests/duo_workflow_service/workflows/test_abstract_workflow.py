@@ -1,12 +1,16 @@
-# pylint: disable=unused-variable,direct-environment-variable-reference
+# pylint: disable=unused-variable,direct-environment-variable-reference,too-many-lines
 import asyncio
 import os
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -49,6 +53,10 @@ class MockGraphWithUiChatLog:
 
 
 class MockWorkflow(AbstractWorkflow):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.handle_failure_calls: list[tuple[BaseException, Any, Any]] = []
+
     def _compile(self, goal, tools_registry, checkpointer):
         return MockGraph()
 
@@ -56,7 +64,7 @@ class MockWorkflow(AbstractWorkflow):
         return {"goal": goal, "state": "initial"}
 
     async def _handle_workflow_failure(self, error, compiled_graph, graph_config):
-        print(error)
+        self.handle_failure_calls.append((error, compiled_graph, graph_config))
 
     def log_workflow_elements(self, element):
         print(element)
@@ -912,6 +920,11 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
     assert str(exc.original_exception) == "Custom error message for user"
     assert workflow.last_error is original_error
 
+    # NotifiableException keeps its existing semantics: _handle_workflow_failure
+    # must NOT be called for it because the abstract layer already surfaces
+    # str(e) directly in the UI.
+    assert not workflow.handle_failure_calls
+
     mock_notifier.send_event.assert_called_once()
     call_args = mock_notifier.send_event.call_args
     assert call_args.kwargs["type"] == "values"
@@ -982,3 +995,82 @@ class TestInitAuditEvents:
 
         _, kwargs = mock_collector_cls.call_args
         assert "ip_address" not in kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+async def test_compile_and_run_graph_notifiable_agent_exception_handling(
+    mock_user_interface,
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_convert_mcp_tools,
+    user,
+):
+    """Test that NotifiableAgentException surfaces ui_message and logs internal_detail server-side."""
+
+    original_error = RuntimeError("Original error details")
+    secret = "secret-token-xyz"
+
+    class MockGraphWithNotifiableAgentException:
+        async def astream(  # pylint: disable=unused-argument  # astream() signature
+            self, input, config, stream_mode
+        ):
+            yield "updates", {"step1": {"key": "value"}}
+            raise NotifiableAgentException(
+                "Safe message for user", internal_detail=secret
+            ) from original_error
+
+    mock_notifier = AsyncMock()
+    mock_notifier.send_event = AsyncMock()
+    mock_user_interface.return_value = mock_notifier
+
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_checkpointer.send_event = AsyncMock()
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    mcp_tool = MagicMock()
+    mock_convert_mcp_tools.return_value = [mcp_tool]
+
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        [mcp_tool],
+    )
+
+    workflow._compile = MagicMock(return_value=MockGraphWithNotifiableAgentException())
+
+    with pytest.raises(TraceableException) as exc_info:
+        await workflow._compile_and_run_graph("Test goal")
+
+    exc = exc_info.value
+    assert isinstance(exc.original_exception, NotifiableAgentException)
+    assert workflow.last_error is original_error
+
+    # _handle_workflow_failure must be called so subclasses can log the
+    # internal_detail server-side and persist the safe ui_message to the
+    # UI chat log via their own UI logic.
+    assert len(workflow.handle_failure_calls) == 1
+    failure_error, _, _ = workflow.handle_failure_calls[0]
+    assert isinstance(failure_error, NotifiableAgentException)
+    assert failure_error.internal_detail == secret
+
+    mock_notifier.send_event.assert_called_once()
+    call_args = mock_notifier.send_event.call_args
+    assert call_args.kwargs["type"] == "values"
+    state = call_args.kwargs["state"]
+    assert state["status"] == WorkflowStatusEnum.ERROR
+    assert len(state["ui_chat_log"]) == 1
+    assert state["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+    # Only the safe ui_message is surfaced; internal_detail must not leak
+    assert state["ui_chat_log"][0]["content"] == "Safe message for user"
+    assert secret not in state["ui_chat_log"][0]["content"]
+    assert state["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
