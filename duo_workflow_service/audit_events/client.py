@@ -9,7 +9,6 @@ from packaging.version import InvalidVersion, Version
 from duo_workflow_service.audit_events.event_types import AuditEvent
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from lib.context import gitlab_version
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 logger = structlog.stdlib.get_logger("audit_event_client")
 
@@ -31,15 +30,7 @@ class AuditEventClient:
 
     @property
     def _is_supported(self) -> bool:
-        """Check if the connected GitLab instance supports audit events.
-
-        Audit events require both:
-        1. The duo_workflow_audit_events feature flag enabled on the Rails side
-        2. A GitLab version that ships the /audit_events endpoint
-        """
-        if not is_feature_enabled(FeatureFlag.DUO_WORKFLOW_AUDIT_EVENTS):
-            return False
-
+        """Check if the connected GitLab instance ships the /audit_events endpoint."""
         try:
             gl_version = Version(gitlab_version.get())  # type: ignore[arg-type]
         except (InvalidVersion, TypeError):
