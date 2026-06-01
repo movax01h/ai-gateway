@@ -94,9 +94,17 @@ routers:
   - from: "secret_vulnerability_details_component"
     to: "secret_vulnerability_source_file_component"
   - from: "secret_vulnerability_source_file_component"
-    to: "secret_vulnerability_lines_component"
+    condition:
+      input: "context:secret_vulnerability_source_file_component.execution_result"
+      routes:
+        "success": "secret_vulnerability_lines_component"
+        "default_route": "end"
   - from: "secret_vulnerability_lines_component"
-    to: "secret_vulnerability_report_component"
+    condition:
+      input: "context:secret_vulnerability_lines_component.execution_result"
+      routes:
+        "success": "secret_vulnerability_report_component"
+        "default_route": "end"
   - from: "secret_vulnerability_report_component"
     to: "secret_fp_detection_agent"
   - from: "secret_fp_detection_agent"
