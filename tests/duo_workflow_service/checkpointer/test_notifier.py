@@ -8,10 +8,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
-from duo_workflow_service.entities.state import (
-    MessageTypeEnum,
-    WorkflowStatusEnum,
-)
+from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import client_capabilities, gitlab_version
