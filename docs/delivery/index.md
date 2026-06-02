@@ -79,4 +79,5 @@ Related docs:
 
 - [Release](./release.md)
 - [Security fixes](./security_fixes.md)
+- [Emergency deployment](./emergency_deployment.md)
 - [GitLab AI Gateway project provisioning process](https://internal.gitlab.com/handbook/engineering/ai/ai-gateway/provisioning/) (Internal only)
