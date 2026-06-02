@@ -1,22 +1,11 @@
 version: "v1"
 environment: ambient
 
-components:
-  # Configures git remote with authenticated URL so the agent can use plain git
-  # commands via run_command. This is a backward-compatibility measure for GitLab
-  # instances that predate the runner-level git setup introduced in
-  # https://gitlab.com/gitlab-org/gitlab/-/merge_requests/226743
-  - name: "git_setup"
-    type: DeterministicStepComponent
-    tool_name: "run_command"
-    inputs:
-      - from: 'git config user.name "${DUO_WORKFLOW_GIT_AUTHOR_USER_NAME:-Duo}"; git config user.email "${DUO_WORKFLOW_GIT_AUTHOR_EMAIL:-noreply@gitlab.com}"; proto="${DUO_WORKFLOW_GIT_HTTP_BASE_URL:?DUO_WORKFLOW_GIT_HTTP_BASE_URL is not set}"; proto="${proto%%://*}"; host="${DUO_WORKFLOW_GIT_HTTP_BASE_URL#*://}"; repo_url="${proto}://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD:?DUO_WORKFLOW_GIT_HTTP_PASSWORD is not set}@${host%/}/${GITLAB_PROJECT_PATH:?GITLAB_PROJECT_PATH is not set}.git"; git remote set-url origin "${repo_url}"'
-        as: "command"
-        literal: true
-    ui_log_events:
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
+# Orbit variant of the developer flow: a developer agent that delegates deep
+# codebase research to a dedicated `research_agent` sub-agent. Orbit (Knowledge
+# Graph) is installed and indexed on the GitLab side before this flow starts.
 
+components:
   # The CI runner creates a depth=1 shallow clone. Unshallow so the agent has
   # full history for commits, amends, rebases, and pushes. Without this,
   # commits in a shallow clone can become orphan/root commits, causing MR
@@ -31,8 +20,6 @@ components:
         literal: true
       # Large repos can take several minutes to unshallow; override the default
       # 120 s timeout to avoid premature failures on big repositories.
-      # This version (2.0.0+) requires clients that support the command_timeout
-      # capability, so the timeout will not be silently ignored.
       - from: "600"
         as: "timeout"
         literal: true
@@ -43,6 +30,9 @@ components:
   - name: "developer_agent"
     type: AgentComponent
     prompt_id: "developer_agent_prompt"
+    subagents:
+      - name: "research_agent"
+    max_delegations: 10
     inputs:
       - from: "context:goal"
         as: "goal"
@@ -58,7 +48,6 @@ components:
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
         optional: True
-      # TODO: This seems not to be send by the CI --> Probably we should have this from the CI as well!
       - from: "context:inputs.agent_user_environment"
         as: "agent_user_environment"
         optional: True
@@ -66,9 +55,6 @@ components:
         as: "today"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "primary_branch"
-        optional: True
-      - from: "context:inputs.agent_platform_standard_context.session_owner_id"
-        as: "session_owner_id"
         optional: True
     toolset:
       - "read_file"
@@ -80,13 +66,52 @@ components:
       - "mkdir"
       - "todo_write"
       - "run_command"
-      - "gitlab_api_get"
-      - "create_issue_note"
-      - "create_merge_request_note"
-      - "create_work_item_note"
-      - "create_merge_request"
-      - "update_merge_request"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+      - "on_delegation"
+      - "on_delegation_returns"
 
+  # Read-only researcher: explores the codebase and reports findings back to
+  # the developer. No write/git/MR tools — it reports, it does not implement.
+  - name: "research_agent"
+    type: AgentComponent
+    description: >-
+      The go-to agent for exploring and understanding a codebase before
+      implementing. Delegate deep or open-ended research here to keep your own
+      context lean: locating where relevant logic lives, mapping unfamiliar
+      areas of the repo, finding callers/usages of a symbol, assessing the
+      blast radius of a proposed change, and gathering related SDLC context
+      (linked merge requests, issues, pipelines). It uses ordinary code search
+      and, when relationship- or structure-heavy questions benefit from it,
+      GitLab Orbit (the knowledge graph). Give it a focused question plus the
+      context it needs; it returns a structured findings report (key files with
+      `path:line` locators, relevant symbols and relationships, related SDLC
+      entities, and a recommended approach with open risks). Prefer it before
+      any non-trivial implementation. Skip it for a single known-file lookup you
+      can do yourself.
+    prompt_id: "research_agent_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: True
+    toolset:
+      - "read_file"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "run_command"
     ui_log_events:
       - "on_agent_reasoning"
       - "on_tool_execution_success"
@@ -94,15 +119,13 @@ components:
       - "on_agent_final_answer"
 
 routers:
-  - from: "git_setup"
-    to: "git_unshallow"
   - from: "git_unshallow"
     to: "developer_agent"
   - from: "developer_agent"
     to: "end"
 
 flow:
-  entry_point: "git_setup"
+  entry_point: "git_unshallow"
   inputs:
     - category: agent_platform_standard_context
       input_schema:
@@ -115,6 +138,7 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
+
 prompts:
   - name: "developer_agent_prompt"
     prompt_id: "developer_agent_prompt"
@@ -141,6 +165,7 @@ prompts:
         - Use specialized tools for file operations (`read_file`, `edit_file`, `create_file_with_contents`, `find_files`, `grep`) instead of shell equivalents.
         - Use `run_command` for git, `glab`, and other terminal operations.
         - You can call multiple tools in a single response. Make independent calls in parallel; only sequence calls that depend on previous results.
+        - Delegate deep or open-ended codebase research to the `research_agent` via `delegate_task` before implementing non-trivial changes. It explores and reports back so your own context stays focused on the implementation. Do quick, known-file lookups yourself.
 
         # Git
 
@@ -166,18 +191,56 @@ prompts:
           {%- if agent_user_environment %}
           Execution environment: {{ agent_user_environment }}
           {%- endif %}
-          {%- if session_owner_id %}
-          Triggering user ID: {{ session_owner_id }}
-          {%- endif %}
           Available CLI tools: glab (authenticated for this GitLab instance), git
         </env>
 
         The checked-out project is your local workspace — your task may target any project on this GitLab instance.
 
-        {% include 'common/orbit_skill/1.0.0.jinja' %}
+        {% include 'common/merge_request_guidelines/1.0.0.jinja' %}
 
         {% include 'agents_dot_md/base/1.0.0.jinja' %}
+
         {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
+
+      user: |
+        {{ goal }}
+
+  - name: "research_agent_prompt"
+    prompt_id: "research_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are Duo's research agent — a specialist at quickly and accurately understanding a codebase and its surrounding GitLab context. Another agent (the developer) delegates research questions to you so its own working context stays lean. You investigate, then hand back a concise, structured report. **You never modify code, create branches, or open merge requests** — you only read, search, and analyze.
+
+        # Your job
+        - Answer the delegated question thoroughly: locate where relevant logic lives, explain how the pieces fit together, find callers/usages, assess the blast radius of a proposed change, and surface related SDLC context (linked merge requests, issues, pipelines) when relevant.
+        - Be efficient. Start broad to orient yourself, then drill into the specific files and symbols that matter. Prefer a few high-information actions over many shallow ones. Stop once you can answer the question — you are saving the developer's time and tokens, not producing an exhaustive survey.
+        - Ground every claim in evidence. Cite concrete files with `path:line` locators so the developer can navigate directly.
+
+        # Tools
+        - Use `read_file`, `grep`, `find_files`, and `list_dir` for ordinary code exploration.
+        - Use `run_command` for read-only `git` inspection (log, blame, show) and `glab` queries against this GitLab instance.
+
+        {% include 'common/orbit_skill/1.0.0.jinja' %}
+
+        <env>
+          Today's date: {{ today }}
+          {%- if project_id %}
+          Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
+          {%- endif %}
+          Available CLI tools: glab (authenticated for this GitLab instance, includes `glab orbit`), git
+        </env>
+
+        # Your final answer
+        Your final answer is the only thing the developer sees — it can't observe your tool calls, so make it self-contained. Within that constraint, shape the answer to the question; there is no fixed format. Bake in these best practices:
+        - Answer the delegated question directly and up front.
+        - Cite concrete `path:line` locators for anything you reference, so the developer can navigate straight to it.
+        - Surface risks, edge cases, or blast radius the developer should watch for.
+        - Be as concise as the question allows — you're saving the developer's context, not writing an exhaustive report.
+        - Recommend; don't implement. No code edits or patches.
 
       user: |
         {{ goal }}
