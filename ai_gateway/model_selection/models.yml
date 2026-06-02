@@ -295,6 +295,23 @@ models:
       max_tokens: 128_000
 
   - name: "Claude Opus 4.8"
+    provider: "Vertex"
+    gitlab_identifier: "claude_opus_4_8_vertex"
+    description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: "claude-opus-4-8"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 128_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
+  - name: "Claude Opus 4.8"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_8_bedrock"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
