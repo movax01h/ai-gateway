@@ -4,6 +4,7 @@ model:
     max_tokens: 8_192
     max_retries: 1
 unit_primitive: duo_agent_platform
+operation_type: compaction_auto
 prompt_template:
   system: |
     {% include 'conversation_compaction/system/1.0.0.jinja' %}

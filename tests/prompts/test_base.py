@@ -27,7 +27,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import MidStreamFallbackError, Timeout
-from pydantic import AnyUrl
+from pydantic import AnyUrl, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 from structlog.testing import capture_logs
 
@@ -156,6 +156,32 @@ configurable_unit_primitives:
         assert prompt.name == "test_prompt"
         assert prompt.unit_primitive == unit_primitive
         assert isinstance(prompt.bound, Runnable)
+
+    def test_operation_type_defaults_to_standard(self, prompt: Prompt):
+        """Prompts built from a PromptConfig without an explicit ``operation_type`` should expose the default
+        ``"standard"`` value on the typed attribute."""
+        assert prompt.operation_type == "standard"
+
+    def test_operation_type_propagated_from_config(
+        self,
+        model_provider: ModelClassProvider,
+        model_factory: TypeModelFactory,
+        prompt_config: PromptConfig,
+    ):
+        """``PromptConfig.operation_type`` should be surfaced on ``Prompt.operation_type``."""
+        prompt_config = prompt_config.model_copy(
+            update={"operation_type": "compaction_auto"}
+        )
+        built = Prompt(model_provider, model_factory, prompt_config)
+        assert built.operation_type == "compaction_auto"
+
+    def test_prompt_config_rejects_unknown_operation_type(
+        self, prompt_config: PromptConfig
+    ):
+        """``operation_type`` is typed as ``LLMOperationType`` (a Literal); unknown values must fail validation."""
+        bad = prompt_config.model_dump() | {"operation_type": "bogus"}
+        with pytest.raises(ValidationError):
+            PromptConfig.model_validate(bad)
 
     def test_build_prompt_template(self, prompt_config: PromptConfig):
         prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
@@ -508,7 +534,9 @@ configurable_unit_primitives:
         mock_watcher.register_message.assert_called_once_with(result)
 
         mock_watcher.register_token_usage.assert_called_once_with(
-            prompt.model_name, usage_metadata, prompt.internal_event_extra
+            prompt.model_name,
+            usage_metadata,
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
         )
 
     @pytest.mark.asyncio
@@ -527,7 +555,9 @@ configurable_unit_primitives:
                 mock_watcher.register_message.assert_any_call(message)
 
         mock_watcher.register_token_usage.assert_called_once_with(
-            prompt.model_name, usage_metadata, prompt.internal_event_extra
+            prompt.model_name,
+            usage_metadata,
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
         )
 
     @pytest.mark.asyncio
@@ -550,7 +580,9 @@ configurable_unit_primitives:
                 mock_watcher.register_message.assert_any_call(message)
 
         mock_watcher.register_token_usage.assert_called_once_with(
-            prompt.model_name, usage_metadata, prompt.internal_event_extra
+            prompt.model_name,
+            usage_metadata,
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
         )
 
     @pytest.mark.asyncio

@@ -63,6 +63,7 @@ from ai_gateway.prompts.caching import (
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
+from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
 from lib.prompts.utilities import (
@@ -269,6 +270,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     model_provider: str
     model: Model
     unit_primitive: GitLabUnitPrimitive
+    operation_type: LLMOperationType = "standard"
     prompt_tpl: Runnable[Any, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
@@ -356,6 +358,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_provider=model_provider,
             model=model,
             unit_primitive=config.unit_primitive,
+            operation_type=config.operation_type,
             bound=chain,
             prompt_tpl=prompt_tpl,
             **kwargs,
@@ -620,7 +623,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         usage_metadata: dict[str, UsageMetadata],
     ) -> None:
         for model, usage in usage_metadata.items():
-            watcher.register_token_usage(model, usage, self.internal_event_extra)
+            # operation_type is authoritative from the prompt YAML; override any
+            # caller-supplied value in internal_event_extra.
+            watcher.register_token_usage(
+                model,
+                usage,
+                {**self.internal_event_extra, "operation_type": self.operation_type},
+            )
 
     @classmethod
     def _build_prompt_template(cls, config: PromptConfig) -> Runnable[Any, PromptValue]:

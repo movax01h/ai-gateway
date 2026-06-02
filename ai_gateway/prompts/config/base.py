@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ai_gateway.model_selection import PromptParams
 from ai_gateway.model_selection.models import BaseModelParams
+from lib.billing_events.service import LLMOperationType
 
 __all__ = ["PromptConfig", "ModelConfig"]
 
@@ -21,6 +22,7 @@ class PromptConfig(BaseModel):
     unit_primitive: GitLabUnitPrimitive
     prompt_template: dict[str, str]
     params: PromptParams | None = None
+    operation_type: LLMOperationType = "standard"
 
 
 class InMemoryPromptConfig(BaseModel):
@@ -33,6 +35,7 @@ class InMemoryPromptConfig(BaseModel):
     unit_primitives: list[GitLabUnitPrimitive]
     prompt_template: dict[str, str]
     params: PromptParams | None = None
+    operation_type: LLMOperationType = "standard"
 
     def to_prompt_data(self) -> dict:
         params = self.model_dump(exclude={"prompt_id", "unit_primitives"})

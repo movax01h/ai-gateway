@@ -23,6 +23,7 @@ def mock_prompt_fixture():
         SystemMessage(content="system prompt"),
         HumanMessage(content="user prompt"),
     ]
+    mock.operation_type = "compaction_auto"
     return mock
 
 
