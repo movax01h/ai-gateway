@@ -517,6 +517,30 @@ class TestClientInitialization:
         )
         assert client.enabled is False
 
+    @pytest.mark.parametrize(
+        "api_user,api_token",
+        [
+            ("", "customersdot_api_token"),  # empty user
+            ("aigw@gitlab.local", ""),  # empty token
+            ("", ""),  # both empty (GDK image default from example.env)
+        ],
+    )
+    def test_enabled_false_when_credentials_are_empty_strings(
+        self, api_user: str, api_token: str
+    ):
+        """Empty string credentials must disable the client.
+
+        example.env ships both variables as empty strings with the comment "Leave empty to disable this feature."
+        python-dotenv loads these as "" (not None), so the enabled check must treat "" the same as None or the quota
+        client is incorrectly activated and fails with a ConnectError -> PERMISSION_DENIED on every gRPC call.
+        """
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user=api_user,
+            customersdot_api_token=api_token,
+        )
+        assert client.enabled is False
+
     def test_stores_customersdot_api_user(self):
         """Should store the CustomersDot API user."""
         client = UsageQuotaClient(
