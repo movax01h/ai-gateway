@@ -125,10 +125,9 @@ class UsageQuotaClient:
         self.customersdot_url = customersdot_url
         self.customersdot_api_user = customersdot_api_user
         self.customersdot_api_token = customersdot_api_token
-        self.enabled = (
-            self.customersdot_api_token is not None
-            and self.customersdot_api_user is not None
-        )
+        self.enabled = bool(
+            self.customersdot_api_user and self.customersdot_api_user.strip()
+        ) and bool(self.customersdot_api_token and self.customersdot_api_token.strip())
         self.request_timeout = request_timeout
         self._http_client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
