@@ -50,10 +50,20 @@ class TestInMemoryPromptConfig:
             ([], GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
         ],
     )
+    @pytest.mark.parametrize(
+        "extra_config,expected_operation_type",
+        [
+            ({}, "standard"),
+            ({"operation_type": "compaction_auto"}, "compaction_auto"),
+        ],
+        ids=["default_operation_type", "explicit_compaction_auto"],
+    )
     def test_to_prompt_data(
         self,
         unit_primitives: list[GitLabUnitPrimitive],
         expected_unit_primitive: GitLabUnitPrimitive,
+        extra_config: dict,
+        expected_operation_type: str,
     ):
         """Test converting InMemoryPromptConfig to PromptConfig."""
         config_data = {
@@ -73,12 +83,14 @@ class TestInMemoryPromptConfig:
                 "stop": ["Human:", "Assistant:"],
                 "timeout": 30.0,
             },
+            **extra_config,
         }
 
         in_memory_config = InMemoryPromptConfig.model_validate(config_data)
         prompt_data = in_memory_config.to_prompt_data()
 
         assert isinstance(prompt_data, dict)
+        assert prompt_data["operation_type"] == expected_operation_type
 
         prompt_config = PromptConfig(**prompt_data)
 
@@ -90,6 +102,7 @@ class TestInMemoryPromptConfig:
         assert prompt_config.name == "test_prompt"
         assert prompt_config.model.params.model == "claude-3-sonnet"
         assert prompt_config.unit_primitive == expected_unit_primitive
+        assert prompt_config.operation_type == expected_operation_type
         assert prompt_config.prompt_template == {
             "system": "You are a helpful assistant.",
             "user": "{{user_input}}",

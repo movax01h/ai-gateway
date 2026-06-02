@@ -167,8 +167,26 @@ class TestWatchContainer:
         "unit_primitive",
         [GitLabUnitPrimitive.DUO_CHAT],
     )
+    @pytest.mark.parametrize(
+        ("internal_event_extra", "expected_operation_type", "expected_extra_kwargs"),
+        [
+            ({"extra_key": "val"}, "standard", {"extra_key": "val"}),
+            (
+                {"extra_key": "val", "operation_type": "compaction_auto"},
+                "compaction_auto",
+                {"extra_key": "val", "operation_type": "compaction_auto"},
+            ),
+        ],
+        ids=["default_standard", "compaction_auto_in_dict"],
+    )
     def test_register_token_usage_track_usage(
-        self, container, unit_primitive, internal_event_client
+        self,
+        container,
+        unit_primitive,
+        internal_event_client,
+        internal_event_extra,
+        expected_operation_type,
+        expected_extra_kwargs,
     ):
 
         init_llm_operations()
@@ -187,7 +205,7 @@ class TestWatchContainer:
                         ephemeral_1h_input_tokens=7,
                     ),
                 ),
-                {"extra_key": "val"},
+                internal_event_extra,
             )
 
         assert cap_logs[0] == {
@@ -215,7 +233,7 @@ class TestWatchContainer:
                 "agent_name": None,
                 "cache_read_tokens": 4,
                 "cache_write_tokens": 5,
-                "operation_type": "standard",
+                "operation_type": expected_operation_type,
             }
         ]
 
@@ -235,7 +253,7 @@ class TestWatchContainer:
                 cache_creation=5,
                 ephemeral_5m_input_tokens=6,
                 ephemeral_1h_input_tokens=7,
-                extra_key="val",
+                **expected_extra_kwargs,
             ),
         )
 

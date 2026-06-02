@@ -235,7 +235,9 @@ Compaction integrates with state management differently depending on the workflo
 Compaction makes an LLM call to summarize older messages. These calls are tagged with `operation_type="compaction_auto"` in the `LLMOperation` metadata, which affects billing differently depending on the deployment type:
 
 - **Cloud-hosted**: Compaction LLM calls are emitted in the billing event with `operation_type="compaction_auto"`. CustomersDot uses this field to decide whether to exclude compaction operations from credit calculation.
-- **Self-hosted**: Compaction LLM calls are excluded from billing entirely. The `PromptRegistrySelfHostedBillingSupport` wrapper in `duo_workflow_service/interceptors/route/usage_billing.py` skips registering the billing callback when `operation_type == "compaction_auto"`, so the `TrackLlmCallForSelfHosted` gRPC action is never invoked for compaction calls.
+- **Self-hosted**: Compaction LLM calls are excluded from billing entirely. The `PromptRegistrySelfHostedBillingSupport` wrapper in `duo_workflow_service/interceptors/route/usage_billing.py` skips registering the billing callback when `prompt.operation_type == "compaction_auto"`, so the `TrackLlmCallForSelfHosted` gRPC action is never invoked for compaction calls.
+
+The `operation_type` value is sourced from the prompt's YAML definition (`operation_type: compaction_auto` in `ai_gateway/prompts/definitions/conversation_compaction/base/1.0.0.yml`) and surfaced as the typed `Prompt.operation_type` attribute. The self-hosted billing wrapper reads it directly from that attribute. For token-usage instrumentation, `Prompt.handle_usage_metadata` merges `Prompt.operation_type` into `internal_event_extra` before invoking `register_token_usage`, so the value reaches both the `LLMOperation` billing record and the Snowplow `token_usage_*` event payload. Adding a new compaction variant only requires declaring `operation_type` in a new prompt YAML — no caller changes are needed.
 
 ## Enabling Compaction
 

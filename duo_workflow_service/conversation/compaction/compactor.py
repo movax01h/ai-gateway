@@ -21,7 +21,6 @@ from duo_workflow_service.conversation.compaction.utils import (
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, is_gitlab_team_member
 from lib.context.model import get_model_metadata
 from lib.internal_events.client import InternalEventsClient
@@ -49,8 +48,6 @@ class ConversationCompactor:
     This class encapsulates all logic for determining when compaction is needed and performing the actual summarization
     of conversation history.
     """
-
-    OPERATION_TYPE: LLMOperationType = "compaction_auto"
 
     def __init__(
         self,
@@ -84,7 +81,6 @@ class ConversationCompactor:
                 "workflow_id": workflow_id,
                 "workflow_type": workflow_type,
                 "is_compaction_call": True,
-                "operation_type": self.OPERATION_TYPE,
             },
         )
         self._agent_name = agent_name
@@ -312,6 +308,8 @@ class ConversationCompactor:
         """Fire a compaction_executed Snowplow event."""
         if self._internal_events_client is None:
             return
+        # operation_type is authoritative from the prompt YAML; override any
+        # caller-supplied value in kwargs.
         self._internal_events_client.track_event(
             event_name=EventEnum.COMPACTION_EXECUTED.value,
             additional_properties=InternalEventAdditionalProperties(
@@ -319,7 +317,7 @@ class ConversationCompactor:
                 property="workflow_id",
                 value=self._workflow_id,
                 workflow_type=self._workflow_type,
-                **kwargs,
+                **{**kwargs, "operation_type": self._prompt.operation_type},
             ),
             category=self.__class__.__name__,
         )

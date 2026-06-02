@@ -615,7 +615,7 @@ class TestIsCompactionCallFlag:
         assert extra["agent_name"] == "test_agent"
         assert extra["workflow_id"] == "test_workflow"
         assert extra["workflow_type"] == "test_type"
-        assert extra["operation_type"] == "compaction_auto"
+        assert "operation_type" not in extra
 
 
 @patch(
@@ -747,6 +747,7 @@ class TestCompactorSnowplowEvents:
         assert additional_props.value == "test_workflow"
         assert additional_props.extra["status"] == "success"
         assert additional_props.extra["model_name"] == "unknown"
+        assert additional_props.extra["operation_type"] == "compaction_auto"
         assert additional_props.extra["compaction_input_tokens"] == 1000
         assert additional_props.extra["compaction_output_tokens"] == 200
         assert additional_props.extra["tokens_before"] > 0
@@ -789,6 +790,7 @@ class TestCompactorSnowplowEvents:
         additional_props = call_kwargs["additional_properties"]
         assert additional_props.extra["status"] == "error"
         assert additional_props.extra["model_name"] == "unknown"
+        assert additional_props.extra["operation_type"] == "compaction_auto"
         assert additional_props.extra["error_type"] == "RuntimeError"
         assert "duration_seconds" in additional_props.extra
 

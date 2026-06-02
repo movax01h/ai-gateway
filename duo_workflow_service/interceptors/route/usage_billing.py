@@ -61,8 +61,7 @@ class PromptRegistrySelfHostedBillingSupport(BasePromptRegistry):
         hosted deployments do not trigger billing events.
         """
         prompt = self.instance.get(*args, **kwargs)
-        operation_type = prompt.internal_event_extra.get("operation_type", "standard")
-        if operation_type != "compaction_auto":
+        if prompt.operation_type != "compaction_auto":
             prompt.internal_callbacks.append(self.callback)
 
         return prompt
