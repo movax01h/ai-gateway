@@ -450,6 +450,64 @@ class TestMistralAIPrefixFormat:
         assert message_dicts == []
 
 
+class TestMistralContinueFinalMessage:
+    """Tests for continue_final_message support for Mistral models on OpenAI-compatible endpoints (e.g. vLLM)."""
+
+    @pytest.mark.parametrize(
+        ("custom_llm_provider", "model", "last_message_type", "expect_continue"),
+        [
+            # custom_openai + Mistral model: only assistant messages get continue_final_message
+            (
+                "custom_openai",
+                "mistralai/Ministral-3-3B-Instruct-2512",
+                "assistant",
+                True,
+            ),
+            ("hosted_vllm", "mistralai/Mistral-7B-Instruct-v0.3", "assistant", True),
+            ("custom_openai", "mistralai/Ministral-3-3B-Instruct-2512", "user", False),
+            (
+                "custom_openai",
+                "mistralai/Ministral-3-3B-Instruct-2512",
+                "system",
+                False,
+            ),
+            # custom_openai + non-Mistral model: no continue_final_message
+            ("custom_openai", "meta-llama/Llama-3-8B-Instruct", "assistant", False),
+            ("custom_openai", "Qwen/Qwen2.5-7B-Instruct", "assistant", False),
+            # Other providers: no continue_final_message regardless of model/message type
+            ("mistral", "mistralai/Ministral-3-3B-Instruct-2512", "assistant", False),
+            (None, "mistralai/Ministral-3-3B-Instruct-2512", "assistant", True),
+        ],
+    )
+    def test_create_message_dicts_continue_final_message_behavior(
+        self, custom_llm_provider, model, last_message_type, expect_continue
+    ):
+        """Verify continue_final_message is added for Mistral models with trailing assistant message."""
+        chat = ChatLiteLLM(model=model, custom_llm_provider=custom_llm_provider)
+
+        if last_message_type == "assistant":
+            messages = [HumanMessage(content="Hello"), AIMessage(content="Thought:")]
+        elif last_message_type == "user":
+            messages = [HumanMessage(content="Hello")]
+        else:  # system
+            messages = [SystemMessage(content="You are a helpful assistant.")]
+
+        _, params = chat._create_message_dicts(messages, stop=None)
+
+        if expect_continue:
+            assert params.get("extra_body", {}).get("continue_final_message") is True
+            assert params.get("extra_body", {}).get("add_generation_prompt") is False
+        else:
+            assert not params.get("extra_body", {}).get("continue_final_message")
+            assert "add_generation_prompt" not in params.get("extra_body", {})
+
+    def test_create_message_dicts_empty_messages(self):
+        """Verify no error when messages list is empty."""
+        chat = ChatLiteLLM(model="test-model", custom_llm_provider="custom_openai")
+        _, params = chat._create_message_dicts([], stop=None)
+        assert not params.get("extra_body", {}).get("continue_final_message")
+
+
 class TestClaude46PrefillCompat:
     @pytest.mark.parametrize(
         ("model", "expect_rewrite"),
