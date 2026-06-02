@@ -608,16 +608,7 @@ class ChatLiteLLM(BaseChatModel):
             params["stop"] = stop
         message_dicts = [_convert_message_to_dict(m) for m in messages]
 
-        # Add Mistral AI prefix flag for last assistant message when using Mistral AI API directly.
-        # Mistral AI API requires "prefix: true" when the last message is from the assistant,
-        # which is used by the ReAct agent to prime the model's response.
-        # See: https://docs.mistral.ai/api/
-        if (
-            self.custom_llm_provider == "mistral"
-            and message_dicts
-            and message_dicts[-1].get("role") == "assistant"
-        ):
-            message_dicts[-1]["prefix"] = True
+        _add_mistral_params(self.custom_llm_provider, self.model, message_dicts, params)
 
         return message_dicts, params
 
@@ -981,3 +972,31 @@ def _ensure_additional_properties_false(schema_dict: dict) -> dict:
 
         return result
     return schema_dict
+
+
+def _add_mistral_params(
+    custom_llm_provider: Optional[str],
+    model: Optional[str],
+    message_dicts: List[Dict[str, Any]],
+    params: Dict[str, Any],
+) -> None:
+    if not message_dicts or message_dicts[-1].get("role") != "assistant":
+        return
+
+    # Add Mistral AI prefix flag for last assistant message when using Mistral AI API directly.
+    # Mistral AI API requires "prefix: true" when the last message is from the assistant,
+    # which is used by the ReAct agent to prime the model's response.
+    # See: https://docs.mistral.ai/api/
+    if custom_llm_provider == "mistral":
+        message_dicts[-1]["prefix"] = True
+    # For Mistral models served via OpenAI-compatible endpoints (e.g. custom_openai, hosted_vllm, etc.),
+    # Mistral's chat template raises a 400 when the last message is from the assistant
+    # and add_generation_prompt=True (the vLLM default). The fix is
+    # continue_final_message=True, passed via extra_body so litellm includes it in
+    # the request body.
+    # See: https://huggingface.co/docs/transformers/en/model_doc/mistral#transformers.MistralCommonBackend.apply_chat_template.continue_final_message
+    elif "mistral" in (model or "").lower():
+        if "extra_body" not in params:
+            params["extra_body"] = {}
+        params["extra_body"]["continue_final_message"] = True
+        params["extra_body"]["add_generation_prompt"] = False
