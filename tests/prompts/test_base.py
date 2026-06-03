@@ -56,7 +56,12 @@ from ai_gateway.prompts import (
     Prompt,
     jinja2_formatter,
 )
-from ai_gateway.prompts.base import TemplateNotFoundError
+from ai_gateway.prompts.base import (
+    _PARSE_JSON_MAX_INPUT_LENGTH,
+    TemplateNotFoundError,
+    jinja_env,
+    parse_json,
+)
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
@@ -211,6 +216,14 @@ configurable_unit_primitives:
             ("{{ text|split }}", {"text": "a b"}, False),
             ('{{ text|split(":", 1) }}', {"text": "a:b"}, False),
             ('{{ text|split("", 1) }}', {"text": "oops"}, True),
+            ("{{ json_str|parse_json }}", {"json_str": '{"key": "value"}'}, False),
+            (
+                "{% set d = json_str|parse_json %}{{ d }}",
+                {"json_str": "[1, 2, 3]"},
+                False,
+            ),
+            ("{{ json_str|parse_json }}", {"json_str": "x" * 1_000_001}, True),
+            ("{{ json_str|parse_json }}", {"json_str": b"abc"}, True),
         ],
     )
     def test_jinja2_formatter_security_constraints(
@@ -1637,6 +1650,63 @@ class TestPromptCallbacks:
         # (asyncio.gather runs them concurrently)
         assert "success" in call_log
         assert "failing" in call_log
+
+
+class TestParseJsonFilter:
+    """Tests for the parse_json Jinja2 filter registered on jinja_env."""
+
+    @pytest.mark.parametrize(
+        ("json_str", "expected"),
+        [
+            ('{"key": "value"}', {"key": "value"}),
+            ("[1, 2, 3]", [1, 2, 3]),
+            ('"hello"', "hello"),
+            ("42", 42),
+            ("3.14", 3.14),
+            ("true", True),
+            ("false", False),
+            ("null", None),
+            ('{"nested": {"a": 1}}', {"nested": {"a": 1}}),
+        ],
+    )
+    def test_parse_json_valid_inputs(self, json_str: str, expected: Any):
+        """parse_json correctly parses valid JSON strings."""
+        assert parse_json(json_str) == expected
+
+    def test_parse_json_in_template_dict_access(self):
+        """parse_json result can be used to access dict keys in a template."""
+        template = "{% set d = json_str|parse_json %}{{ d.key }}"
+        result = jinja2_formatter(template, json_str='{"key": "hello"}')
+        assert result == "hello"
+
+    def test_parse_json_in_template_list_access(self):
+        """parse_json result can be used to index into a list in a template."""
+        template = "{% set lst = json_str|parse_json %}{{ lst[0] }}"
+        result = jinja2_formatter(template, json_str="[42, 43]")
+        assert result == "42"
+
+    def test_parse_json_invalid_json_raises(self):
+        """parse_json raises SecurityError for invalid JSON."""
+        with pytest.raises(SecurityError):
+            parse_json("not valid json")
+
+    def test_parse_json_oversized_input_raises_security_error(self):
+        """parse_json raises SecurityError when input exceeds the maximum length."""
+        oversized = "x" * (_PARSE_JSON_MAX_INPUT_LENGTH + 1)
+        with pytest.raises(SecurityError):
+            parse_json(oversized)
+
+    def test_parse_json_method_calls_on_result_are_blocked(self):
+        """Methods on objects returned by parse_json cannot be called in templates."""
+        # dict.keys() is callable — the sandbox should block it
+        template = "{% set d = json_str|parse_json %}{{ d.keys() }}"
+        with pytest.raises(SecurityError):
+            jinja2_formatter(template, json_str='{"key": "hello"}')
+
+    def test_parse_json_registered_on_jinja_env(self):
+        """parse_json is registered as a filter on the shared jinja_env."""
+        assert "parse_json" in jinja_env.filters
+        assert jinja_env.filters["parse_json"] is parse_json
 
 
 class TestValidateDefaultModels:
