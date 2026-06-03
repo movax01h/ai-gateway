@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from typing import (
@@ -191,9 +192,62 @@ def split_filter(
     return str(value).split(delimiter, split_limit)
 
 
+# Maximum number of characters allowed as input to the parse_json filter.
+# This guards against DoS via extremely large JSON payloads in templates.
+_PARSE_JSON_MAX_INPUT_LENGTH = 1_000_000
+
+
+def parse_json(value: Any) -> Any:
+    """Parse a JSON string into a Python object for use in prompt templates.
+
+    This filter allows prompt templates to deserialise JSON-encoded tool output
+    (e.g. from a ``DeterministicStepComponent``) so that individual fields can
+    be accessed directly inside the template.
+
+    Example usage in a Jinja2 template::
+
+        {% set data = prepared_data_json | parse_json %}
+        {{ data.some_field }}
+
+    Security notes:
+
+    * Input length is capped at ``_PARSE_JSON_MAX_INPUT_LENGTH`` characters to
+        prevent DoS via oversized payloads.
+    * ``json.loads`` only produces Python primitives (``dict``, ``list``,
+        ``str``, ``int``, ``float``, ``bool``, ``None``).  The surrounding
+        ``ImmutableSandboxedEnvironment`` already blocks method calls and
+        callable attribute access on any object returned by this filter, so no
+        additional sandboxing is required.
+
+    Args:
+        value: A JSON-encoded string to parse.
+
+    Returns:
+        The deserialised Python object.
+
+    Raises:
+        SecurityError: When the input does not conform to the security requirement.
+    """
+    if not isinstance(value, str):
+        raise SecurityError("Value for parse_json must be string.")
+
+    str_value = str(value)
+
+    if len(str_value) > _PARSE_JSON_MAX_INPUT_LENGTH:
+        raise SecurityError(
+            f"Input to parse_json filter exceeds maximum allowed length of {_PARSE_JSON_MAX_INPUT_LENGTH} characters"
+        )
+
+    try:
+        return json.loads(str_value)
+    except Exception as e:
+        raise SecurityError("Invalid json value") from e
+
+
 jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
 jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
 jinja_env.filters["split"] = split_filter
+jinja_env.filters["parse_json"] = parse_json
 
 log = structlog.stdlib.get_logger("prompts")
 
