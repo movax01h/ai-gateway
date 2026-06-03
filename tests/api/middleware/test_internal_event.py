@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from starlette.requests import Request
 from starlette_context import context, request_cycle_context
 
@@ -26,6 +27,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
+from lib.context.auth import StarletteUser
 from lib.internal_events import EventContext
 
 
@@ -672,6 +674,109 @@ async def test_middleware_set_context_root_namespace_id(
         mock_event_context.set.assert_called_once_with(expected_context)
 
     internal_event_middleware.app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "jwt_extra, header_value, expected",
+    [
+        ({"gitlab_root_namespace_id": 42}, b"999", 999),
+        ({"gitlab_root_namespace_id": 77}, None, 77),
+        ({"gitlab_root_namespace_id": 42.0}, None, 42),
+        ({"gitlab_root_namespace_id": "not-a-number"}, None, None),
+        ({}, None, None),
+        ({"gitlab_root_namespace_id": None}, None, None),
+        ({"gitlab_root_namespace_id": 42}, b"", None),
+        ({"gitlab_root_namespace_id": 42}, b"null", None),
+        (None, b"888", 888),
+        (None, None, None),
+    ],
+    ids=[
+        "header_wins_over_jwt",
+        "jwt_fallback_no_header",
+        "jwt_float_normalised",
+        "jwt_invalid_string_no_crash",
+        "jwt_missing_key_no_header",
+        "jwt_null_no_header",
+        "empty_header_no_jwt_fallback",
+        "null_sentinel_header_no_jwt_fallback",
+        "no_claims_header",
+        "no_claims_no_header",
+    ],
+)
+async def test_middleware_root_namespace_id_header_first_jwt_fallback(
+    internal_event_middleware, jwt_extra, header_value, expected
+):
+    claims = (
+        UserClaims(
+            gitlab_realm="saas",
+            scopes=[],
+            gitlab_instance_uid="test-uid",
+            issuer="",
+            extra=jwt_extra,
+        )
+        if jwt_extra is not None
+        else None
+    )
+    wrapped = StarletteUser(CloudConnectorUser(authenticated=True, claims=claims))
+
+    headers: list[tuple[bytes, bytes]] = []
+    if header_value is not None:
+        headers.append((X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), header_value))
+
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": headers,
+            "user": wrapped,
+        }
+    )
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(request.scope, AsyncMock(), AsyncMock())
+
+        set_context = mock_event_context.set.call_args[0][0]
+        assert set_context.ultimate_parent_namespace_id == expected
+
+
+@pytest.mark.asyncio
+async def test_middleware_root_namespace_id_jwt_fallback_ignored_for_non_saas(
+    internal_event_middleware,
+):
+    claims = UserClaims(
+        gitlab_realm="self-managed",
+        scopes=[],
+        gitlab_instance_uid="test-uid",
+        issuer="",
+        extra={"gitlab_root_namespace_id": 42},
+    )
+    wrapped = StarletteUser(CloudConnectorUser(authenticated=True, claims=claims))
+
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [],
+            "user": wrapped,
+        }
+    )
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(request.scope, AsyncMock(), AsyncMock())
+
+        set_context = mock_event_context.set.call_args[0][0]
+        assert set_context.ultimate_parent_namespace_id is None
 
 
 @pytest.mark.asyncio

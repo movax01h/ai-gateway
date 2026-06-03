@@ -61,8 +61,8 @@ class InternalEventMiddleware:
         unique_instance_id = None
 
         user = request.user
-        if hasattr(user, "claims") and user.claims:
-            unique_instance_id = user.claims.gitlab_instance_uid
+        claims = getattr(user, "claims", None)
+        unique_instance_id = claims.gitlab_instance_uid if claims else None
 
         project_id_str = request.headers.get(X_GITLAB_PROJECT_ID)
         project_id = (
@@ -84,6 +84,15 @@ class InternalEventMiddleware:
             if root_namespace_id_str and root_namespace_id_str != "null"
             else None
         )
+        if root_namespace_id_str is None and claims and claims.gitlab_realm == "saas":
+            jwt_root_namespace_id = (
+                claims.extra.get("gitlab_root_namespace_id") if claims.extra else None
+            )
+            if jwt_root_namespace_id is not None:
+                try:
+                    root_namespace_id = int(jwt_root_namespace_id)
+                except (ValueError, TypeError):
+                    pass
 
         organization_id_str = request.headers.get(X_GITLAB_ORGANIZATION_ID)
         organization_id = (
