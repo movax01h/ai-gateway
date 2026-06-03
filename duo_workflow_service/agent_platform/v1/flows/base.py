@@ -194,6 +194,10 @@ class Flow(AbstractWorkflow):
             message_sub_type=None,
         )
 
+        if self._config.environment == "chat":
+            initial_ui_chat_log["message_type"] = MessageTypeEnum.USER
+            initial_ui_chat_log["content"] = goal
+
         gitlab_instance_info = GitLabServiceContext.get_current_instance_info()
         gitlab_service_context = {
             "gitlab_instance_type": (
