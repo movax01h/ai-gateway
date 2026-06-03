@@ -288,6 +288,60 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_graph_input_chat_environment(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config_metadata,
+        mock_checkpointer,
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_state_graph,
+        flow_type: GLReportingEventContext,
+    ):
+        """Test get_workflow_state uses USER message type and raw goal content for chat environment."""
+        chat_config = FlowConfig(
+            flow=sample_flow_config_metadata,
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "toolset": ["read_file"],
+                },
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="chat",
+            version="v1",
+        )
+
+        goal = "test chat goal"
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-chat",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=chat_config,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
+            await flow.run(goal)
+
+        kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        input_data = kwargs.get("input")
+
+        assert isinstance(input_data, dict)
+        assert len(input_data["ui_chat_log"]) == 1
+        log_entry = input_data["ui_chat_log"][0]
+        assert log_entry["message_type"] == MessageTypeEnum.USER
+        assert log_entry["content"] == goal
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
     async def test_graph_input_namespace_level(
         self,
         mock_flow_metadata,
