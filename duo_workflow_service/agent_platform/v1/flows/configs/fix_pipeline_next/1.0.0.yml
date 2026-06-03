@@ -204,13 +204,32 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_git_commit"
-    type: AgentComponent
-    prompt_id: "commit_changes"
-    prompt_version: "^1.0.0"
+  - name: "git_add_all"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
     inputs:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
+      - from: "add"
+        as: "command"
+        literal: True
+      - from: "-A"
+        as: "args"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fix_pipeline_next_commit"
+    type: OneOffComponent
+    prompt_id: "fix_pipeline_next_commit"
+    prompt_version: "^1.0.0"
+    max_correction_attempts: 3
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "context:fix_pipeline_next_execution.final_answer"
+        as: "execution_summary"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -220,6 +239,7 @@ components:
     toolset:
       - "run_git_command"
     ui_log_events:
+      - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -324,9 +344,11 @@ routers:
     condition:
       input: "context:create_repository_branch.final_answer.status"
       routes:
-        "success": "fix_pipeline_git_commit"
+        "success": "git_add_all"
         "default_route": "end"
-  - from: "fix_pipeline_git_commit"
+  - from: "git_add_all"
+    to: "fix_pipeline_next_commit"
+  - from: "fix_pipeline_next_commit"
     to: "git_fetch_unshallow"
   - from: "git_fetch_unshallow"
     to: "git_push_branch"
