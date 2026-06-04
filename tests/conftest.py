@@ -146,6 +146,15 @@ def mock_connect_vertex_fixture():
         yield
 
 
+@pytest.fixture(name="mock_connect_google_genai")
+def mock_connect_google_genai_fixture():
+    with patch(
+        "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+        return_value=None,
+    ):
+        yield
+
+
 @pytest.fixture(name="mock_connect_vertex_search")
 def mock_connect_vertex_search_fixture():
     with patch(
@@ -169,6 +178,7 @@ def mock_container_fixture(
     mock_config: Config,
     mock_connect_vertex: Mock,  # pylint: disable=unused-argument
     mock_connect_vertex_search: Mock,  # pylint: disable=unused-argument
+    mock_connect_google_genai: Mock,  # pylint: disable=unused-argument
 ):
     container_application = ContainerApplication()
     container_application.config.from_dict(mock_config.model_dump())

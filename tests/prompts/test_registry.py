@@ -4,6 +4,7 @@ from typing import Any, Sequence, Type, cast
 from unittest.mock import Mock, patch
 
 import pytest
+import yaml
 from langchain.tools import BaseTool
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -29,6 +30,10 @@ from ai_gateway.prompts import LocalPromptRegistry, Prompt
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.registry import (
+    PROMPT_ID_TO_FEATURE_SETTING,
+    feature_setting_for_prompt_id,
+)
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 
@@ -1597,3 +1602,139 @@ class TestGetRequiredVariables:
             registry._default_model_metadata(
                 "unknown_step", "1.0.0", is_graph_node=False
             )
+
+
+# Prompt IDs that are exclusively invoked as DAP graph nodes (is_graph_node=True).
+# is_graph_node=True bypasses feature_setting_for_prompt_id entirely and provides
+# the duo_agent_platform feature setting directly, so these do not need an entry in
+# PROMPT_ID_TO_FEATURE_SETTING.
+# When adding a new graph-node prompt with unit_primitive=duo_agent_platform, add its
+# ID here.
+_GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
+    {
+        "analyze_prescan_codebase_results",
+        "code_review_prescan",
+        "commit_changes",
+        "conversation_compaction",
+        "convert_ci_push_changes",
+        "convert_to_gl_ci",
+        "ensure_clean_git_state",
+        "explore_directories_for_prescan",
+        "fix_pipeline_add_comment",
+        "fix_pipeline_comment_link",
+        "fix_pipeline_context",
+        "fix_pipeline_create_plan",
+        "fix_pipeline_decide_approach",
+        "fix_pipeline_decide_comment",
+        "fix_pipeline_execution",
+        "fix_pipeline_next_add_comment",
+        "fix_pipeline_next_checkout_existing_branch",
+        "fix_pipeline_next_code_suggestions",
+        "fix_pipeline_next_commit",
+        "fix_pipeline_next_context",
+        "fix_pipeline_next_create_new_mr",
+        "fix_pipeline_next_decide_fix",
+        "fix_pipeline_next_execution",
+        "fix_pipeline_push_changes",
+        "fix_pipeline_summarize_changes",
+        "gitlab_duo_mention_agent_prompt",
+        "project_activity_create_summary_issue",
+        "project_activity_fetch_issues_closed",
+        "project_activity_fetch_issues_new",
+        "project_activity_fetch_issues_updated",
+        "project_activity_fetch_merge_requests_closed",
+        "project_activity_fetch_merge_requests_new",
+        "project_activity_fetch_merge_requests_updated",
+        "project_activity_summarize_project_activity",
+        "resolve_dep_bump_pipeline_fix",
+        "resolve_sast_evaluate_mr_readiness",
+        "resolve_sast_vulnerability_commit",
+        "resolve_sast_vulnerability_execution",
+        "resolve_sast_vulnerability_push_and_create_mr",
+        "sast_fp_detection_agent_prompt",
+        "sast_post_results_to_gitlab_agent_prompt",
+        "sast_vulnerability_lines_agent_prompt",
+        "sast_vulnerability_report_agent_prompt",
+        "sast_vulnerability_source_file_agent_prompt",
+        "secret_fp_detection_agent_prompt",
+        "secret_post_results_to_gitlab_agent_prompt",
+        "secret_vulnerability_lines_agent_prompt",
+        "secret_vulnerability_report_agent_prompt",
+        "secret_vulnerability_source_file_agent_prompt",
+        "validate_sast_fix_has_changes",
+        "validate_sast_vulnerability_agent_prompt",
+    }
+)
+
+
+class TestDuoAgentPlatformPromptRegistration:
+    """
+    Safeguard: every prompt with unit_primitive=duo_agent_platform that is called
+    directly via HTTP from Rails (not as a DAP graph node) must appear in
+    PROMPT_ID_TO_FEATURE_SETTING so AIGW can route requests when model_metadata is
+    absent (e.g. self-managed instance with ai_gateway_url set but no model selected).
+
+    When adding a new prompt with unit_primitive=duo_agent_platform you must do one of:
+    1. Add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py
+        (for prompts called directly via HTTP without model_metadata).
+    2. Add its ID to _GRAPH_NODE_PROMPT_IDS in this file
+        (for prompts always invoked as DAP graph nodes via is_graph_node=True).
+    3. Add a matching entry to ai_gateway/model_selection/unit_primitives.yml
+        (if the prompt warrants its own standalone feature setting).
+    """
+
+    _definitions_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
+    )
+    _unit_primitives_path = (
+        Path(__file__).parent.parent.parent
+        / "ai_gateway"
+        / "model_selection"
+        / "unit_primitives.yml"
+    )
+
+    def _valid_feature_settings(self) -> set[str]:
+        with open(self._unit_primitives_path) as f:
+            data = yaml.safe_load(f)
+        return {
+            entry["feature_setting"] for entry in data["configurable_unit_primitives"]
+        }
+
+    def _duo_agent_platform_prompt_ids(self) -> list[str]:
+        """Return all prompt IDs whose base definition declares unit_primitive=duo_agent_platform."""
+        prompt_ids = []
+        for path in sorted(self._definitions_dir.glob("**")):
+            yml_files = sorted(list(path.glob("*.yml")))
+            if not yml_files:
+                continue
+            prompt_id_with_family = path.relative_to(self._definitions_dir)
+            if prompt_id_with_family.name != "base":
+                continue
+            with open(yml_files[0]) as f:
+                content = yaml.safe_load(f)
+            if content and content.get("unit_primitive") == "duo_agent_platform":
+                prompt_ids.append(str(prompt_id_with_family.parent))
+        return prompt_ids
+
+    def test_direct_http_prompts_are_registered(self) -> None:
+        valid_feature_settings = self._valid_feature_settings()
+        missing: list[str] = []
+
+        for prompt_id in self._duo_agent_platform_prompt_ids():
+            # Passes if the prompt has its own feature setting in unit_primitives.yml
+            if feature_setting_for_prompt_id(prompt_id) in valid_feature_settings:
+                continue
+            # Passes if explicitly registered for direct-HTTP routing
+            if prompt_id in PROMPT_ID_TO_FEATURE_SETTING:
+                continue
+            # Passes if acknowledged as a graph-node-only prompt
+            if prompt_id in _GRAPH_NODE_PROMPT_IDS:
+                continue
+            missing.append(prompt_id)
+
+        assert not missing, (
+            "The following prompts declare unit_primitive=duo_agent_platform but are not "
+            "registered for routing without model_metadata:\n"
+            + "\n".join(f"  - {pid}" for pid in missing)
+            + "\n\nSee TestDuoAgentPlatformPromptRegistration docstring for remediation options."
+        )

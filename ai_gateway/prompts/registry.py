@@ -184,6 +184,13 @@ LEGACY_MODEL_MAPPING = {
 PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "code_suggestions/completions": "code_completions",
     "code_suggestions/generations": "code_generations",
+    # These prompts are called directly via HTTP from Rails (not as DAP graph nodes).
+    # Without this mapping, AIGW cannot resolve a feature setting when model_metadata
+    # is absent, causing "Invalid feature setting" errors on self-managed instances
+    # with a configured ai_gateway_url.
+    "classify_code_review_mention_intent": "duo_agent_platform",
+    "generate_session_title": "duo_agent_platform",
+    "summarize_duo_workflow": "duo_agent_platform",
 }
 
 
