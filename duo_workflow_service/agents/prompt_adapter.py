@@ -113,6 +113,23 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         # early in the conversation.
         messages.append(SystemMessage(content=render_security_block()))
 
+        # Inject denied tools context so the LLM knows which tools are blocked
+        # and does not attempt to work around them.
+        denied_tools = list(dict.fromkeys(input.get("denied_tools", []) or []))
+        if denied_tools:
+            denied_tools_str = ", ".join(denied_tools)
+            messages.append(
+                SystemMessage(
+                    content=(
+                        f"The following tools have been blocked by an administrator"
+                        f" and are not available: {denied_tools_str}. "
+                        "Do not attempt to use these tools directly or indirectly through other means. "
+                        "If asked to perform an action that requires a blocked tool, inform the user that "
+                        "this action has been blocked by an administrator."
+                    )
+                )
+            )
+
         if "system_dynamic" in self.prompt_template:
             caching_status = prompt_caching_enabled_in_current_request()
             user_opted_out_of_caching = caching_status == "false"
