@@ -45,12 +45,12 @@ class TestCustomersDotURLResolution:
             assert url == "https://customers.gitlab.local/dws"
 
     def test_returns_mock_url_when_mock_enabled(self):
-        """Test that AIGW_MOCK_CRED_CD_URL is used when AIGW_MOCK_USAGE_CREDITS=true."""
+        """Test that AIGW_MOCK_USAGE_QUOTA_SERVER__URL is used when AIGW_MOCK_USAGE_CREDITS=true."""
         with patch.dict(
             os.environ,
             {
                 "AIGW_MOCK_USAGE_CREDITS": "true",
-                "AIGW_MOCK_CRED_CD_URL": "https://mock.customers.gitlab.com",
+                "AIGW_MOCK_USAGE_QUOTA_SERVER__URL": "https://mock.customers.gitlab.com",
                 "AIGW_CUSTOMER_PORTAL_URL": "https://customers.gitlab.com",
             },
             clear=True,
@@ -58,13 +58,26 @@ class TestCustomersDotURLResolution:
             url = _get_customersdot_url()
             assert url == "https://mock.customers.gitlab.com"
 
+    def test_returns_default_mock_url_when_mock_enabled_without_url(self):
+        """Default mock URL is used when AIGW_MOCK_USAGE_CREDITS=true but AIGW_MOCK_USAGE_QUOTA_SERVER__URL is unset."""
+        with patch.dict(
+            os.environ,
+            {
+                "AIGW_MOCK_USAGE_CREDITS": "true",
+                "AIGW_CUSTOMER_PORTAL_URL": "https://customers.gitlab.com",
+            },
+            clear=True,
+        ):
+            url = _get_customersdot_url()
+            assert url == "http://localhost:4567"
+
     def test_ignores_mock_url_when_mock_disabled(self):
-        """Test that AIGW_MOCK_CRED_CD_URL is ignored when AIGW_MOCK_USAGE_CREDITS=false."""
+        """Test that AIGW_MOCK_USAGE_QUOTA_SERVER__URL is ignored when AIGW_MOCK_USAGE_CREDITS=false."""
         with patch.dict(
             os.environ,
             {
                 "AIGW_MOCK_USAGE_CREDITS": "false",
-                "AIGW_MOCK_CRED_CD_URL": "https://mock.customers.gitlab.com",
+                "AIGW_MOCK_USAGE_QUOTA_SERVER__URL": "https://mock.customers.gitlab.com",
                 "AIGW_CUSTOMER_PORTAL_URL": "https://customers.gitlab.com",
             },
             clear=True,

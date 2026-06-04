@@ -218,6 +218,64 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
         actual_arg.close()
 
 
+class TestRunMockUsageQuotaServer:
+    @pytest.fixture(name="mock_run_dependencies")
+    def mock_run_dependencies_fixture(self):
+        with (
+            patch("duo_workflow_service.server.setup_profiling"),
+            patch("duo_workflow_service.server.setup_error_tracking"),
+            patch("duo_workflow_service.server.setup_monitoring"),
+            patch("duo_workflow_service.server.setup_logging"),
+            patch("duo_workflow_service.server.validate_llm_access"),
+            patch("asyncio.get_event_loop") as mock_get_loop,
+            patch("lib.usage_quota.mock_server.start_mock_server") as mock_start,
+        ):
+            mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+            mock_loop.run_until_complete = MagicMock()
+            mock_get_loop.return_value = mock_loop
+
+            yield mock_loop, mock_start
+
+            actual_arg = mock_loop.run_until_complete.call_args[0][0]
+            actual_arg.close()
+
+    def test_starts_when_enabled(self, vertex_project, mock_run_dependencies):
+        _, mock_start = mock_run_dependencies
+        config = Config(
+            google_cloud_platform=ConfigGoogleCloudPlatform(project=vertex_project),
+            custom_models=ConfigCustomModels(enabled="false"),
+            mock_usage_credits=True,
+        )
+
+        run(config)
+
+        mock_start.assert_called_once_with(port=config.mock_usage_quota_server.port)
+
+    @pytest.mark.parametrize("mock_usage_credits", [None, "false"])
+    def test_does_not_start_when_disabled(
+        self,
+        vertex_project,
+        mock_usage_credits,
+        monkeypatch,
+        mock_run_dependencies,
+    ):
+        _, mock_start = mock_run_dependencies
+        if mock_usage_credits is None:
+            monkeypatch.delenv("AIGW_MOCK_USAGE_CREDITS", raising=False)
+        else:
+            monkeypatch.setenv("AIGW_MOCK_USAGE_CREDITS", mock_usage_credits)
+
+        config = Config(
+            google_cloud_platform=ConfigGoogleCloudPlatform(project=vertex_project),
+            custom_models=ConfigCustomModels(enabled="false"),
+            _env_file=None,
+        )
+
+        run(config)
+
+        mock_start.assert_not_called()
+
+
 def test_validate_ll_access(mock_duo_workflow_service_container: ContainerApplication):
     pkg_prompts = cast(
         providers.Container, mock_duo_workflow_service_container.pkg_prompts

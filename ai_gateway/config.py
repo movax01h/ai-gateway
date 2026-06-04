@@ -1,5 +1,6 @@
 import os
 from typing import Annotated, Literal, Optional, Set, TypedDict
+from urllib.parse import urlparse
 
 import litellm
 from dotenv import find_dotenv
@@ -27,6 +28,7 @@ __all__ = [
     "ConfigAuditEvent",
     "ConfigCachingProxy",
     "ConfigDuoWorkflow",
+    "ConfigMockUsageQuotaServer",
 ]
 
 ENV_PREFIX = "AIGW"
@@ -135,6 +137,32 @@ class ConfigCustomersDot(BaseModel):
 class ConfigAgenticMock(BaseModel):
     auto_tool_approval: Optional[bool] = False
     use_last_human_message: Optional[bool] = True
+
+
+class ConfigMockUsageQuotaServer(BaseModel):
+    """Configuration for the mock CustomersDot usage quota server.
+
+    When ``AIGW_MOCK_USAGE_CREDITS=true`` the server is started automatically alongside AIGW and DWS
+    """
+
+    url: str = Field(
+        default="http://localhost:4567",
+        description=(
+            "URL where the mock CustomersDot usage quota server listens. "
+            "Used only when AIGW_MOCK_USAGE_CREDITS=true."
+        ),
+    )
+
+    @property
+    def port(self) -> int:
+        """Port parsed from the configured ``url``.
+
+        Falls back to the URL scheme's default port (80 for http, 443 for https) when the URL has no explicit port.
+        """
+        parsed = urlparse(self.url)
+        if parsed.port is not None:
+            return parsed.port
+        return 443 if parsed.scheme == "https" else 80
 
 
 class ConfigModelKeys(BaseModel):
@@ -295,6 +323,14 @@ class Config(BaseSettings):
     fireworks_api_base_url: str = "https://api.fireworks.ai/inference/v1"
     cloud_connector_service_name: str = "gitlab-ai-gateway"
     mock_model_responses: bool = False
+    mock_usage_credits: bool = Field(
+        default=False,
+        description=(
+            "When true, starts an in-process mock CustomersDot usage quota server "
+            "so local development does not require a real CustomersDot. "
+            "Intended for development only — never enable in production."
+        ),
+    )
     use_agentic_mock: bool = False
     bedrock_guardrail_config: Optional[Json[ConfigBedrockGuardrail]] = Field(
         default=None,
@@ -361,6 +397,9 @@ class Config(BaseSettings):
     ]
     agentic_mock: Annotated[ConfigAgenticMock, Field(default_factory=ConfigAgenticMock)]
     duo_workflow: Annotated[ConfigDuoWorkflow, Field(default_factory=ConfigDuoWorkflow)]
+    mock_usage_quota_server: Annotated[
+        ConfigMockUsageQuotaServer, Field(default_factory=ConfigMockUsageQuotaServer)
+    ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
