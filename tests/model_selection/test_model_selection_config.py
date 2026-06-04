@@ -14,6 +14,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ModelSelectionConfig,
     UnitPrimitiveConfig,
 )
+from lib.feature_flags.context import current_feature_flag_context
 
 
 # editorconfig-checker-disable
@@ -308,6 +309,9 @@ def test_get_model_for_feature(selection_config):
 
 @pytest.mark.usefixtures("mock_fs")
 def test_get_model_for_feature_with_multiple_defaults(selection_config):
+    """When ai_gateway_multi_default_models flag is enabled, use random.choice across all defaults."""
+    current_feature_flag_context.set({"ai_gateway_multi_default_models"})
+
     with patch("random.choice", return_value="gitlab-model-2") as mock_random_choice:
         assert selection_config.get_model_for_feature(
             "multiple_defaults"
@@ -321,6 +325,16 @@ def test_get_model_for_feature_with_multiple_defaults(selection_config):
         )
 
         mock_random_choice.assert_called_once_with(["gitlab-model-1", "gitlab-model-2"])
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_get_model_for_feature_with_multiple_defaults_flag_disabled(selection_config):
+    """When ai_gateway_multi_default_models flag is disabled, always use the first default model."""
+    with patch("random.choice") as mock_random_choice:
+        result = selection_config.get_model_for_feature("multiple_defaults")
+
+        assert result.gitlab_identifier == "gitlab-model-1"
+        mock_random_choice.assert_not_called()
 
 
 def test_get_model_for_feature_no_feature(selection_config):

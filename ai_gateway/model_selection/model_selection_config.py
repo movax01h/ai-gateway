@@ -20,6 +20,7 @@ from ai_gateway.model_selection.models import (
     ModelClassProvider,
 )
 from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 BASE_PATH = Path(__file__).parent
 MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
@@ -303,7 +304,9 @@ class ModelSelectionConfig:
         if feature_setting := self.get_unit_primitive_config_map().get(
             feature_setting_name, None
         ):
-            return self.get_model(random.choice(feature_setting.default_models))
+            if is_feature_enabled(FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS):
+                return self.get_model(random.choice(feature_setting.default_models))
+            return self.get_model(feature_setting.default_models[0])
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
 
