@@ -223,6 +223,12 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             tool_responses_dict = self.tool_responses_key.to_nested_dict(tool_responses)
             result = merge_nested_dict(result, tool_responses_dict)
 
+        # Flush UI log entries accumulated during tool execution into the result so
+        # downstream state includes on_tool_call_input / on_tool_execution_success /
+        # on_tool_execution_failed entries — without this, every tool log from a
+        # successful OneOff run is silently dropped.
+        result = merge_nested_dict(result, self._ui_history.pop_state_updates())
+
         return tool_responses, result
 
     def _handle_tool_execution_errors(
@@ -331,9 +337,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Execute tools with error correction tracking."""
-        result: dict[str, Any] = {
-            **self._ui_history.pop_state_updates(),
-        }
+        result: dict[str, Any] = {}
 
         # Get conversation history (needed for replace-mode reducer)
         conversation_history = (

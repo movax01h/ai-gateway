@@ -278,9 +278,10 @@ components:
       - "on_tool_execution_failed"
 
   - name: "fix_pipeline_next_create_new_mr"
-    type: AgentComponent
+    type: OneOffComponent
     prompt_id: "fix_pipeline_next_create_new_mr"
     prompt_version: "^1.0.0"
+    max_correction_attempts: 3
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
@@ -308,10 +309,9 @@ components:
         optional: True
     toolset:
       - "create_merge_request"
-      - "update_merge_request"
       - "create_merge_request_note"
     ui_log_events:
-      - "on_agent_final_answer"
+      - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 

@@ -461,3 +461,68 @@ def test_create_merge_request_format_display_message(input_data, expected_messag
     tool = CreateMergeRequest(description="Create merge request")
     message = tool.format_display_message(input_data)
     assert message == expected_message
+
+
+@pytest.mark.parametrize(
+    "tool_response",
+    [
+        json.dumps(
+            {
+                "created_merge_request": {
+                    "id": 123,
+                    "web_url": "https://gitlab.example.com/ns/proj/-/merge_requests/45",
+                }
+            }
+        ),
+        {
+            "created_merge_request": {
+                "id": 123,
+                "web_url": "https://gitlab.example.com/ns/proj/-/merge_requests/45",
+            }
+        },
+    ],
+)
+def test_create_merge_request_format_display_message_includes_created_url(
+    tool_response,
+):
+    """When a tool_response with web_url is supplied, the display message links the new MR."""
+    tool = CreateMergeRequest(description="Create merge request")
+    input_data = CreateMergeRequestInput(
+        project_id=42,
+        source_branch="feature-branch",
+        target_branch="main",
+        title="New feature implementation",
+    )
+    message = tool.format_display_message(input_data, tool_response)
+    assert (
+        message
+        == "Created merge request: https://gitlab.example.com/ns/proj/-/merge_requests/45"
+    )
+
+
+@pytest.mark.parametrize(
+    "tool_response",
+    [
+        None,
+        "",
+        "not json",
+        json.dumps({}),
+        json.dumps({"created_merge_request": {}}),
+        json.dumps({"created_merge_request": {"id": 1}}),
+    ],
+)
+def test_create_merge_request_format_display_message_falls_back_without_url(
+    tool_response,
+):
+    """When tool_response is missing or has no web_url, fall back to the input-based message."""
+    tool = CreateMergeRequest(description="Create merge request")
+    input_data = CreateMergeRequestInput(
+        project_id=42,
+        source_branch="feature-branch",
+        target_branch="main",
+        title="New feature implementation",
+    )
+    message = tool.format_display_message(input_data, tool_response)
+    assert (
+        message == "Create merge request from 'feature-branch' to 'main' in project 42"
+    )
