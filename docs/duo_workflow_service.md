@@ -88,7 +88,34 @@ You can also manually set up Duo Workflow by following these steps:
 ## Debugging and troubleshooting
 
 See the Duo
-Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/).
+Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/)
+and the [Duo Workflow Service runbook](https://runbooks.gitlab.com/duo-workflow-svc/) (useful for working with logs and operational tasks).
+
+### Debugging production flow failures
+
+When a flow execution fails in production, the fastest path from a failing workflow to the root cause is via GCP Cloud Logging.
+
+1. Get the workflow ID from the agent sessions UI. Note the approximate time the flow ran.
+1. Query [GCP Cloud Logging](https://console.cloud.google.com/logs/query) in the
+   `gitlab-runway-production` project, narrowing the time range to a window around the
+   flow execution to keep the query fast:
+
+   ```plaintext
+   resource.type="cloud_run_revision"
+   resource.labels.service_name="duo-workflow-svc"
+   jsonPayload.workflow_id="<id>"
+   jsonPayload.level="error"
+   ```
+
+1. Read the matching entries. The most useful fields:
+
+   | Field | What it tells you |
+   |---|---|
+   | `event` | Which call site failed, e.g. `"fetch merge request diffs request failed"`. Comes from the `identifier` argument in `_process_http_response`. |
+   | `status_code` | HTTP status returned by Rails (or another upstream). |
+   | `response_body` | First 300 chars of the upstream response — usually contains the actual error message. |
+   | `logger` | Python module that emitted the log, narrows where to read code. |
+   | `correlation_id` | Propagates to the corresponding Rails request log if you need to cross-reference. |
 
 ### Issues connecting to 50052 port
 
