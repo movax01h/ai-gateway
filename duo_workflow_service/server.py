@@ -138,9 +138,8 @@ allowed_ijwt_scopes = {
 }
 
 CUSTOMERSDOT_URL: str | None = (
-    os.environ.get("AIGW_MOCK_CRED_CD_URL")
+    os.environ.get("AIGW_MOCK_USAGE_QUOTA_SERVER__URL", "http://localhost:4567")
     if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true"
-    and os.environ.get("AIGW_MOCK_CRED_CD_URL")
     else os.environ.get(
         "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
         "https://customers.gitlab.com",
@@ -1006,6 +1005,13 @@ def setup_container(config: Config):
 
 def run(config: Config):
     self_hosted_mode = config.custom_models.enabled
+
+    if config.mock_usage_credits:
+        from lib.usage_quota.mock_server import (  # pylint: disable=import-outside-toplevel
+            start_mock_server,
+        )
+
+        start_mock_server(port=config.mock_usage_quota_server.port)
 
     setup_container(config)
     setup_litellm(config)

@@ -13,16 +13,17 @@ def _get_customersdot_url() -> str:
     """Get CustomersDot URL from environment variables.
 
     Priority:
-    1. AIGW_MOCK_CRED_CD_URL (when AIGW_MOCK_USAGE_CREDITS=true) for testing
+    1. AIGW_MOCK_USAGE_QUOTA_SERVER__URL (when AIGW_MOCK_USAGE_CREDITS=true) for testing;
+        falls back to http://localhost:4567 when AIGW_MOCK_USAGE_QUOTA_SERVER__URL is unset
     2. DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL (Duo Workflow Service config)
     3. AIGW_CUSTOMER_PORTAL_URL (AI Gateway config)
     4. Default: https://customers.gitlab.com
     """
     # pylint: disable=direct-environment-variable-reference
-    if os.environ.get(
-        "AIGW_MOCK_USAGE_CREDITS", ""
-    ).lower() == "true" and os.environ.get("AIGW_MOCK_CRED_CD_URL"):
-        return os.environ.get("AIGW_MOCK_CRED_CD_URL", "")
+    if os.environ.get("AIGW_MOCK_USAGE_CREDITS", "").lower() == "true":
+        return os.environ.get(
+            "AIGW_MOCK_USAGE_QUOTA_SERVER__URL", "http://localhost:4567"
+        )
     return os.environ.get(
         "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
         os.environ.get("AIGW_CUSTOMER_PORTAL_URL", "https://customers.gitlab.com"),

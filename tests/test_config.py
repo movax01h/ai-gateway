@@ -21,6 +21,7 @@ from ai_gateway.config import (
     ConfigGoogleCloudProfiler,
     ConfigInstrumentator,
     ConfigLogging,
+    ConfigMockUsageQuotaServer,
     ConfigModelLimits,
     ConfigModelSelection,
     ConfigProcessLevelFeatureFlags,
@@ -875,6 +876,33 @@ def test_setup_litellm_vertex_location(env: dict, expected_location: str):
         setup_litellm(Config(_env_file=None))
 
         assert litellm.vertex_location == expected_location
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_port"),
+    [
+        ("http://localhost:4567", 4567),
+        ("http://localhost:8888", 8888),
+        ("http://example.com", 80),
+        ("https://example.com", 443),
+    ],
+)
+def test_config_mock_usage_quota_server_port_parsed_from_url(
+    url: str, expected_port: int
+):
+    assert ConfigMockUsageQuotaServer(url=url).port == expected_port
+
+
+def test_config_mock_usage_quota_server_uses_documented_env_var():
+    with mock.patch.dict(
+        os.environ,
+        {"AIGW_MOCK_USAGE_QUOTA_SERVER__URL": "http://localhost:9999"},
+        clear=True,
+    ):
+        config = Config(_env_file=None)
+
+    assert config.mock_usage_quota_server.url == "http://localhost:9999"
+    assert config.mock_usage_quota_server.port == 9999
 
 
 # pylint: enable=direct-environment-variable-reference
