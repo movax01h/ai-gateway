@@ -1,7 +1,7 @@
 name: fix_pipeline_next_create_new_mr
 model:
   params:
-    max_tokens: 32_768
+    max_tokens: 16_384
     max_retries: 1
 unit_primitive: duo_agent_platform
 prompt_template:

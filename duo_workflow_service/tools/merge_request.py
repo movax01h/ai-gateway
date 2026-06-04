@@ -161,6 +161,26 @@ class CreateMergeRequest(DuoBaseTool):
     def format_display_message(
         self, args: CreateMergeRequestInput, _tool_response: Any = None
     ) -> str:
+        if _tool_response is not None:
+            try:
+                response_data = (
+                    json.loads(_tool_response)
+                    if isinstance(_tool_response, str)
+                    else _tool_response
+                )
+                web_url = response_data.get("created_merge_request", {}).get("web_url")
+                if web_url:
+                    return f"Created merge request: {web_url}"
+            except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                # The MR has already been created by the time we render the
+                # display message, so raising would surface a false tool
+                # failure. Log the error instead.
+                log.warning(
+                    "create_merge_request response shape unexpected; "
+                    "falling back to input-based display message",
+                    error=str(e),
+                    response_type=type(_tool_response).__name__,
+                )
         if args.url:
             return f"Create merge request from '{args.source_branch}' to '{args.target_branch}' in {args.url}"
         return (

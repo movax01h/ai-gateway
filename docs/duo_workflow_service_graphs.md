@@ -481,7 +481,7 @@ graph TD;
     fix_pipeline_next_commit(fix_pipeline_next_commit<br>#91;OneOffComponent#93;);
     git_fetch_unshallow(git_fetch_unshallow<br>#91;DeterministicStepComponent#93;);
     git_push_branch(git_push_branch<br>#91;DeterministicStepComponent#93;);
-    fix_pipeline_next_create_new_mr(fix_pipeline_next_create_new_mr<br>#91;AgentComponent#93;);
+    fix_pipeline_next_create_new_mr(fix_pipeline_next_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_next_context -.->|add_comment| fix_pipeline_add_comment;
     fix_pipeline_next_context -.->|create_plan| fix_pipeline_next_checkout_existing_branch;
     fix_pipeline_next_context -.->|no_action| __end__;
