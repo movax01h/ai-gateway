@@ -14,6 +14,9 @@ class FeatureFlag(StrEnum):
     AI_CONTEXT_COMPACTION = "ai_context_compaction"
     AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
+    # Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/gitlab_com_derisk/ai_gateway_multi_default_models.yml
+    AI_GATEWAY_MULTI_DEFAULT_MODELS = "ai_gateway_multi_default_models"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
