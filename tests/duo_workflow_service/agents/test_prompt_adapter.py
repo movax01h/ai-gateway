@@ -1,3 +1,5 @@
+# This test module covers the full prompt_adapter surface area and exceeds the line limit.
+# pylint: disable=too-many-lines
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -158,6 +160,61 @@ Base chat for {{ gitlab_instance_url }}.
     assert isinstance(system_message, SystemMessage)
     assert "Override for https://gitlab.example.com." in system_message.content
     assert "{{ gitlab_instance_url }}" not in system_message.content
+
+
+@pytest.mark.parametrize(
+    "denied_tools,expect_message",
+    [
+        (["create_issue", "create_merge_request"], True),
+        (["create_issue"], True),  # single tool case
+        ([], False),
+        (None, False),
+    ],
+    ids=["with_denied_tools", "single_tool", "empty_list", "none"],
+)
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_denied_tools_message(
+    mock_get_model_metadata,
+    sample_chat_workflow_state: ChatWorkflowState,
+    denied_tools,
+    expect_message,
+):
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base system prompt.",
+            "user": "{{ message.content }}",
+        },
+    )
+    template = ChatAgentPromptTemplate(
+        model_provider=ModelClassProvider.ANTHROPIC, config=prompt_config
+    )
+
+    state: ChatWorkflowState = {
+        **sample_chat_workflow_state,
+        "denied_tools": denied_tools,
+    }
+    result = template.invoke(state, agent_name="test_agent")
+
+    system_messages = [m for m in result.to_messages() if isinstance(m, SystemMessage)]
+    denied_tools_message = next(
+        (m for m in system_messages if "blocked by an administrator" in m.content),
+        None,
+    )
+
+    if expect_message:
+        assert denied_tools_message is not None
+        if denied_tools and len(denied_tools) > 1:
+            assert "create_issue" in denied_tools_message.content
+            assert "create_merge_request" in denied_tools_message.content
+        else:
+            # single tool — verify no trailing comma or formatting artifacts
+            assert "create_issue" in denied_tools_message.content
+            assert "create_issue," not in denied_tools_message.content
+    else:
+        assert denied_tools_message is None
 
 
 @pytest.mark.parametrize(
