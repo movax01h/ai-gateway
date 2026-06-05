@@ -20,7 +20,7 @@ __all__ = [
 
 # Literal type for all valid operation types.
 # When a new operation type is needed, add it here.
-LLMOperationType = Literal["standard", "compaction_auto"]
+LLMOperationType = Literal["standard", "compaction_auto", "compaction_manual"]
 
 
 BILL_ONCE_PER_WORKFLOW_FEATURES: frozenset[str] = frozenset(
@@ -54,7 +54,7 @@ class LLMOperation(BaseModel):
         agent_name: Name of the agent that triggered this operation, if any
         cache_read_tokens: Number of (read) tokens in the cache
         cache_write_tokens: Number of (write) tokens in the cache
-        operation_type: Categorizes the LLM call (e.g., 'standard', 'compaction_auto')
+        operation_type: Categorizes the LLM call (e.g., 'standard', 'compaction_auto', 'compaction_manual')
     """
 
     token_count: int

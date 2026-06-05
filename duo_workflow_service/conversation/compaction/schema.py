@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from duo_workflow_service.entities.state import MessageTypeEnum, UiChatLog
@@ -58,6 +58,7 @@ class CompactionResult:
     tokens_after: int = 0
     messages_summarized: int = 0
     error: Exception | None = field(default=None, repr=False)
+    summary: AIMessage | None = None
 
     def build_ui_chat_log(self) -> UiChatLog | None:
         """Build a UI chat log message if compaction occurred."""

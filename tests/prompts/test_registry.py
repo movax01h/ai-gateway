@@ -1616,6 +1616,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "code_review_prescan",
         "commit_changes",
         "conversation_compaction",
+        "conversation_compaction_manual",
         "convert_ci_push_changes",
         "convert_to_gl_ci",
         "ensure_clean_git_state",

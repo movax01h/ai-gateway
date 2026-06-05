@@ -27,6 +27,19 @@ def mock_prompt_fixture():
     return mock
 
 
+@pytest.fixture(name="mock_prompt_manual")
+def mock_prompt_manual_fixture():
+    """Mock Prompt for the manual compaction prompt."""
+    mock = AsyncMock()
+    mock.prompt_tpl = MagicMock()
+    mock.prompt_tpl.format_messages.return_value = [
+        SystemMessage(content="system prompt"),
+        HumanMessage(content="user prompt"),
+    ]
+    mock.operation_type = "compaction_manual"
+    return mock
+
+
 @pytest.fixture(name="mock_prompt_registry")
 def mock_prompt_registry_fixture(mock_prompt):
     """Mock BasePromptRegistry returning mock_prompt from get_on_behalf."""
@@ -46,12 +59,14 @@ def compactor_fixture(compaction_config, mock_prompt_registry, user):
     """Create a ConversationCompactor via the factory, using mock registry.
 
     Patches get_model_metadata so the compactor doesn't depend on the gRPC model metadata context variable during tests.
+    The patch stays active for the lifetime of the test because the compactor now reads model metadata lazily inside
+    compact().
     """
     with patch(
         "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
         return_value=None,
     ):
-        return create_conversation_compactor(
+        yield create_conversation_compactor(
             config=compaction_config,
             prompt_registry=mock_prompt_registry,
             user=user,
@@ -65,12 +80,17 @@ def compactor_fixture(compaction_config, mock_prompt_registry, user):
 def compactor_with_events_fixture(
     compaction_config, mock_prompt_registry, user, mock_internal_events_client
 ):
-    """Create a ConversationCompactor with an InternalEventsClient for event testing."""
+    """Create a ConversationCompactor with an InternalEventsClient for event testing.
+
+    Patches get_model_metadata so the compactor doesn't depend on the gRPC model metadata context variable during tests.
+    The patch stays active for the lifetime of the test because the compactor now reads model metadata lazily inside
+    compact().
+    """
     with patch(
         "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
         return_value=None,
     ):
-        return create_conversation_compactor(
+        yield create_conversation_compactor(
             config=compaction_config,
             prompt_registry=mock_prompt_registry,
             user=user,

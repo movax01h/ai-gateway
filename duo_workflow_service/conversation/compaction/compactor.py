@@ -13,6 +13,7 @@ from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from duo_workflow_service.conversation.compaction.schema import (
     CompactionConfig,
     CompactionResult,
+    MessageSlices,
 )
 from duo_workflow_service.conversation.compaction.utils import (
     slice_for_summarization,
@@ -30,6 +31,7 @@ from lib.internal_events.event_enum import EventEnum
 log = get_logger("compactor")
 
 COMPACTION_PROMPT_ID = "conversation_compaction"
+COMPACTION_PROMPT_MANUAL_ID = "conversation_compaction_manual"
 COMPACTION_PROMPT_VERSION = "^1.0.0"
 
 COMPACTION_CONTINUE_MESSAGE = (
@@ -69,31 +71,39 @@ class ConversationCompactor:
         # context is set (tests, edge cases), it falls back to
         # duo_agent_platform instead of failing on an unknown feature
         # setting derived from the prompt_id.
-        model_metadata = get_model_metadata()
-        self._prompt: Prompt = prompt_registry.get_on_behalf(
-            user,
-            COMPACTION_PROMPT_ID,
-            COMPACTION_PROMPT_VERSION,
-            model_metadata=model_metadata,
-            is_graph_node=True,
-            internal_event_extra={
-                "agent_name": agent_name,
-                "workflow_id": workflow_id,
-                "workflow_type": workflow_type,
-                "is_compaction_call": True,
-            },
-        )
+        self._prompt_registry = prompt_registry
+        self._user = user
         self._agent_name = agent_name
         self._workflow_id = workflow_id
         self._workflow_type = workflow_type
-        self._model_name = getattr(model_metadata, "name", "unknown")
+        self._model_name = getattr(get_model_metadata(), "name", "unknown")
         self._internal_events_client = internal_events_client
         self._config = config
         self._token_estimator = TokenEstimator()
-        prompt_tpl = cast(ChatPromptTemplate, self._prompt.prompt_tpl)
-        self._prompt_overhead_tokens = self._token_estimator.count(
-            prompt_tpl.format_messages(history=[]), is_complete_history=False
-        )
+
+        # Per-mode lazy prompt cache; populated on first compact() call for
+        # each mode. Keys: False = auto prompt, True = manual prompt.
+        self._prompts: dict[bool, Prompt] = {}
+
+    def _get_prompt(self, is_manual: bool) -> Prompt:
+        if is_manual not in self._prompts:
+            prompt_id = (
+                COMPACTION_PROMPT_MANUAL_ID if is_manual else COMPACTION_PROMPT_ID
+            )
+            self._prompts[is_manual] = self._prompt_registry.get_on_behalf(
+                self._user,
+                prompt_id,
+                COMPACTION_PROMPT_VERSION,
+                model_metadata=get_model_metadata(),
+                is_graph_node=True,
+                internal_event_extra={
+                    "agent_name": self._agent_name,
+                    "workflow_id": self._workflow_id,
+                    "workflow_type": self._workflow_type,
+                    "is_compaction_call": True,
+                },
+            )
+        return self._prompts[is_manual]
 
     def should_compact(self, messages: list[BaseMessage]) -> bool:
         """Determine if messages should be summarized.
@@ -121,7 +131,12 @@ class ConversationCompactor:
         )
         return token_count > threshold
 
-    async def compact(self, messages: list[BaseMessage]) -> CompactionResult:
+    async def compact(
+        self,
+        messages: list[BaseMessage],
+        is_manual: bool = False,
+        user_instruction: str | None = None,
+    ) -> CompactionResult:
         """Compact conversation history by summarizing older messages.
 
         Keeps:
@@ -131,23 +146,39 @@ class ConversationCompactor:
 
         Args:
             messages: List of messages to compact
+            is_manual: When True, bypass should_compact thresholds, force-summarize
+                the entire history if normal slicing yields no to_summarize,
+                skip the synthetic continuation HumanMessage, and let summary
+                tokens stream to the UI.
+            user_instruction: Optional user-supplied focus directive forwarded
+                to the manual prompt template.
 
         Returns:
             CompactionResult with compacted messages and metadata
         """
-        if not messages or not self.should_compact(messages):
+        if not messages:
+            return CompactionResult(messages=messages, was_compacted=False)
+
+        if not is_manual and not self.should_compact(messages):
             return CompactionResult(messages=messages, was_compacted=False)
 
         slices = slice_for_summarization(messages, self._config, self._token_estimator)
 
         if not slices.to_summarize:
-            log.warning(
-                "No messages to summarize",
-                n_msgs=len(messages),
-                n_leading=len(slices.leading_context),
-                n_recent=len(slices.recent_to_keep),
-            )
-            return CompactionResult(messages=messages, was_compacted=False)
+            if is_manual:
+                slices = MessageSlices(
+                    leading_context=[],
+                    to_summarize=messages,
+                    recent_to_keep=[],
+                )
+            else:
+                log.warning(
+                    "No messages to summarize",
+                    n_msgs=len(messages),
+                    n_leading=len(slices.leading_context),
+                    n_recent=len(slices.recent_to_keep),
+                )
+                return CompactionResult(messages=messages, was_compacted=False)
 
         original_tokens = self._token_estimator.count(
             messages, is_complete_history=True
@@ -159,10 +190,13 @@ class ConversationCompactor:
                 flow_type=self._workflow_type,
                 agent_name=self._agent_name,
             ):
-                summary = await self._invoke_summarizer(slices.to_summarize)
+                summary = await self._invoke_summarizer(
+                    slices.to_summarize,
+                    is_manual=is_manual,
+                    user_instruction=user_instruction,
+                )
             duration = time.time() - start_time
 
-            # Prometheus counter
             duo_workflow_metrics.count_compaction_execution(
                 flow_type=self._workflow_type,
                 agent_name=self._agent_name,
@@ -171,7 +205,6 @@ class ConversationCompactor:
         except Exception as e:
             duration = time.time() - start_time
 
-            # Prometheus counter for failure
             duo_workflow_metrics.count_compaction_execution(
                 flow_type=self._workflow_type,
                 agent_name=self._agent_name,
@@ -179,6 +212,7 @@ class ConversationCompactor:
             )
 
             self._fire_compaction_event(
+                is_manual=is_manual,
                 status=CompactionStatus.ERROR,
                 model_name=self._model_name,
                 tokens_before=original_tokens,
@@ -203,7 +237,7 @@ class ConversationCompactor:
 
         compacted_messages = slices.leading_context + [summary] + slices.recent_to_keep
 
-        if isinstance(compacted_messages[-1], AIMessage):
+        if not is_manual and isinstance(compacted_messages[-1], AIMessage):
             # Vertex AI / Gemini requires conversations to end with a user
             # message (strict role alternation: user <-> model). After
             # compaction, the message list may end with an AIMessage (summary
@@ -212,17 +246,22 @@ class ConversationCompactor:
             # Note: ToolMessages are not affected -- the Gemini API converts
             # them to role-less ContentType objects that don't participate in
             # role alternation.
+            #
+            # In manual mode, control returns to the user; their next message
+            # naturally satisfies the constraint without a synthetic marker.
             compacted_messages.append(HumanMessage(content=COMPACTION_CONTINUE_MESSAGE))
 
-        compacted_tokens = self._calculate_compacted_tokens(original_tokens, summary)
+        compacted_tokens = self._calculate_compacted_tokens(
+            original_tokens, summary, is_manual, user_instruction
+        )
 
-        # Extract token usage from the summary for the Snowplow event
         usage = summary.usage_metadata
         compaction_input_tokens = usage.get("input_tokens", 0) if usage else 0
         compaction_output_tokens = usage.get("output_tokens", 0) if usage else 0
 
         max_context_tokens = get_model_max_context_token_limit()
         self._fire_compaction_event(
+            is_manual=is_manual,
             status=CompactionStatus.SUCCESS,
             model_name=self._model_name,
             compaction_input_tokens=compaction_input_tokens,
@@ -243,6 +282,7 @@ class ConversationCompactor:
 
         log.info(
             "Finish context compaction",
+            is_manual=is_manual,
             num_msg_before=len(messages),
             num_msg_after=len(compacted_messages),
             msg_tokens_before=original_tokens,
@@ -264,18 +304,24 @@ class ConversationCompactor:
             tokens_before=original_tokens,
             tokens_after=compacted_tokens,
             messages_summarized=len(slices.to_summarize),
+            summary=summary,
         )
 
-    async def _invoke_summarizer(self, messages: list[BaseMessage]) -> AIMessage:
+    async def _invoke_summarizer(
+        self,
+        messages: list[BaseMessage],
+        is_manual: bool = False,
+        user_instruction: str | None = None,
+    ) -> AIMessage:
         """Invoke the LLM to summarize messages.
 
-        Uses the "nostream" tag to prevent LangGraph from streaming the
-        summarization to the UI. This is the recommended LangGraph pattern
-        for hiding internal LLM calls from stream_mode="messages" output.
-        See: langgraph.constants.TAG_NOSTREAM
+        In auto mode, the "nostream" tag prevents LangGraph from streaming the summarization to the UI (recommended
+        LangGraph pattern for hiding internal LLM calls from stream_mode="messages" output; see
+        langgraph.constants.TAG_NOSTREAM). In manual mode the tag is omitted so summary tokens stream to the UI.
         """
         log.info(
             "Start compaction summarization llm call.",
+            is_manual=is_manual,
             is_gitlab_team_member=is_gitlab_team_member.get(),
         )
         # Strip tool metadata from messages before summarization.
@@ -284,32 +330,57 @@ class ConversationCompactor:
         # Stripping unconditionally is safe since we convert tool call/result
         # info to human-readable text.
         messages = strip_tool_metadata(messages)
+
+        tags: list[str] = [] if is_manual else [TAG_NOSTREAM]
         config: RunnableConfig = {
-            "tags": [TAG_NOSTREAM],
+            "tags": tags,
             "run_name": "Compaction Summarization",
         }
-        result = await self._prompt.ainvoke({"history": messages}, config=config)
+
+        inputs: dict[str, object] = {"history": messages}
+        if is_manual and user_instruction:
+            inputs["user_instruction"] = user_instruction
+
+        prompt = self._get_prompt(is_manual)
+        result = await prompt.ainvoke(inputs, config=config)
         return cast(AIMessage, result)
 
     def _calculate_compacted_tokens(
-        self, original_tokens: int, summary: AIMessage
+        self,
+        original_tokens: int,
+        summary: AIMessage,
+        is_manual: bool,
+        user_instruction: str | None = None,
     ) -> int:
-        """Calculate the token count after compaction."""
+        """Calculate the token count after compaction.
+
+        The prompt-template overhead is rendered from the same inputs ``_invoke_summarizer`` uses, so the estimate
+        stays consistent with the actual LLM call. ``user_instruction`` only affects rendering in manual mode.
+        """
         usage_metadata = summary.usage_metadata
         input_tokens = usage_metadata.get("input_tokens", 0) if usage_metadata else 0
         output_tokens = usage_metadata.get("output_tokens", 0) if usage_metadata else 0
-        return (
-            original_tokens
-            - (input_tokens - self._prompt_overhead_tokens)
-            + output_tokens
+
+        overhead_inputs: dict[str, object] = {"history": []}
+        if is_manual and user_instruction:
+            overhead_inputs["user_instruction"] = user_instruction
+        prompt_tpl = cast(ChatPromptTemplate, self._get_prompt(is_manual).prompt_tpl)
+        overhead = self._token_estimator.count(
+            prompt_tpl.format_messages(**overhead_inputs),
+            is_complete_history=False,
         )
 
-    def _fire_compaction_event(self, **kwargs) -> None:
+        return original_tokens - (input_tokens - overhead) + output_tokens
+
+    def _fire_compaction_event(self, is_manual: bool, **kwargs) -> None:
         """Fire a compaction_executed Snowplow event."""
         if self._internal_events_client is None:
             return
         # operation_type is authoritative from the prompt YAML; override any
         # caller-supplied value in kwargs.
+        prompt = self._prompts.get(is_manual)
+        if prompt is None:
+            return
         self._internal_events_client.track_event(
             event_name=EventEnum.COMPACTION_EXECUTED.value,
             additional_properties=InternalEventAdditionalProperties(
@@ -317,7 +388,7 @@ class ConversationCompactor:
                 property="workflow_id",
                 value=self._workflow_id,
                 workflow_type=self._workflow_type,
-                **{**kwargs, "operation_type": self._prompt.operation_type},
+                **{**kwargs, "operation_type": prompt.operation_type},
             ),
             category=self.__class__.__name__,
         )
