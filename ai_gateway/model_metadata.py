@@ -391,3 +391,24 @@ def build_default_feature_setting_metadata(
     else:
         gitlab_payload["feature_setting"] = feature_setting
     return _create_gitlab_metadata(gitlab_payload)
+
+
+_COMPLETION_CONTEXT_CAPPED_PROVIDERS = frozenset({"fireworks_ai", "vertex_ai"})
+_COMPLETION_CONTEXT_MAX_PERCENT = 0.3
+
+
+def completion_context_max_percent_for_model_metadata(
+    model_metadata: TypeModelMetadata,
+) -> Optional[float]:
+    """Return the completion context cap (0.3) for Fireworks/Vertex models, otherwise None (use the engine default).
+
+    Bounds the amount of context sent for these models so latency and cost stay in check.
+    """
+    custom_llm_provider = getattr(
+        model_metadata.llm_definition.params, "custom_llm_provider", None
+    )
+
+    if custom_llm_provider in _COMPLETION_CONTEXT_CAPPED_PROVIDERS:
+        return _COMPLETION_CONTEXT_MAX_PERCENT
+
+    return None
