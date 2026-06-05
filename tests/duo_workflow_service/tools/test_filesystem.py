@@ -12,6 +12,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     DEFAULT_CONTEXT_EXCLUSIONS,
     DEFAULT_READ_FILE_LIMIT,
     DEFAULT_READ_FILE_OFFSET,
+    TRUSTED_ABSOLUTE_PATH_SEGMENTS,
     EditFile,
     EditFileInput,
     FindFiles,
@@ -27,6 +28,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     ReadFilesInput,
     WriteFile,
     WriteFileInput,
+    _is_trusted_absolute_path,
     validate_duo_context_exclusions,
 )
 from tests.duo_workflow_service.tools.conftest import (
@@ -798,6 +800,304 @@ def test_validate_duo_context_exclusions_allows_normal_files(path):
 def test_validate_duo_context_exclusions_rejects_sensitive_files(path):
     with pytest.raises(ToolException, match="Access denied"):
         validate_duo_context_exclusions(path)
+
+
+class TestIsTrustedAbsolutePath:
+    """Unit tests for the _is_trusted_absolute_path helper."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+            "/home/user/.agents/skills/ai-gateway-aws/SKILL.md",
+            # Trusted sequence appearing at the filesystem root
+            "/.agents/skills/glab/SKILL.md",
+            "/.agents/skills",
+            # Multi-segment trusted entry: .gitlab/duo/skills
+            "/home/user/.gitlab/duo/skills/y/SKILL.md",
+            # XDG_CONFIG_HOME variant: .config/gitlab/duo/skills
+            "/home/user/.config/gitlab/duo/skills/z/SKILL.md",
+        ],
+    )
+    def test_trusted_paths_return_true(self, path):
+        assert _is_trusted_absolute_path(path) is True
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # Non-absolute paths are never trusted
+            ".agents/skills/glab/SKILL.md",
+            "home/user/.agents/skills/glab/SKILL.md",
+            # Lookalikes — segment must match exactly, not as substring
+            "/x/.agentsfoo/SKILL.md",
+            "/tmp/evil.agents-data/x",
+            "/home/user/myagents/SKILL.md",
+            # All trusted segments present but not consecutive (extra dir in-between)
+            "/home/user/.agents/random/skills/glab/SKILL.md",
+            # Trusted roots are only readable under their `skills/` subdir, not the
+            # config root itself — .gitlab/duo/<file> stays denied.
+            "/root/.gitlab/duo/chat-rules.md",
+            "/home/user/.agents/config.yml",
+            # Non-dotted `gitlab/duo/skills` inside a repo checkout must NOT be trusted —
+            # only the dotfile-anchored `.config/gitlab/duo/skills` XDG variant is.
+            "/builds/group/project/gitlab/duo/skills/secret.env",
+            # Traversal alongside a trusted segment must fail closed even standalone.
+            "/home/user/.agents/skills/../../../etc/passwd",
+            "/home/user/.gitlab/duo/skills/..%2f..%2fetc/passwd",
+            # Sensitive absolute paths that must stay rejected
+            "/etc/passwd",
+            "/home/user/.ssh/id_rsa",
+            "/home/user/secrets/.env",
+            # Relative paths
+            "relative/path/file.md",
+            "",
+        ],
+    )
+    def test_non_trusted_paths_return_false(self, path):
+        assert _is_trusted_absolute_path(path) is False
+
+    def test_every_trusted_segment_is_dotfile_anchored(self):
+        """Each entry's first segment must start with '.' so it cannot appear at a repo checkout root."""
+        for entry in TRUSTED_ABSOLUTE_PATH_SEGMENTS:
+            assert entry.split("/", maxsplit=1)[0].startswith(
+                "."
+            ), f"{entry!r} is not dotfile-anchored"
+
+
+class TestValidateDuoContextExclusionsTrustedAbsolute:
+    """Tests for the allow_trusted_absolute parameter of validate_duo_context_exclusions."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+            "/home/user/.gitlab/duo/skills/y/SKILL.md",
+        ],
+    )
+    def test_trusted_absolute_allowed_when_flag_is_true(self, path):
+        """Trusted absolute paths must not raise when allow_trusted_absolute=True."""
+        # Should not raise
+        validate_duo_context_exclusions(path, allow_trusted_absolute=True)
+
+    def test_empty_path_returns_early_when_flag_is_true(self):
+        """The ``if not file_path`` guard must fire before the trusted-absolute check."""
+        # Should not raise
+        validate_duo_context_exclusions("", allow_trusted_absolute=True)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+            "/home/user/.gitlab/duo/skills/y/SKILL.md",
+        ],
+    )
+    def test_trusted_absolute_rejected_when_flag_is_false(self, path):
+        """Trusted absolute paths must still be rejected when allow_trusted_absolute=False (default)."""
+        with pytest.raises(ToolException, match="Access denied"):
+            validate_duo_context_exclusions(path, allow_trusted_absolute=False)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/etc/passwd",
+            "/home/user/.ssh/id_rsa",
+            "/home/user/secrets/.env",
+        ],
+    )
+    def test_non_trusted_absolute_rejected_even_when_flag_is_true(self, path):
+        """Non-trusted absolute paths must be rejected regardless of the flag."""
+        with pytest.raises(ToolException, match="Access denied"):
+            validate_duo_context_exclusions(path, allow_trusted_absolute=True)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # Traversal under a trusted prefix must still be rejected
+            "/home/user/.agents/../../etc/passwd",
+            "/root/.agents/../../../etc/shadow",
+        ],
+    )
+    def test_traversal_rejected_even_under_trusted_prefix(self, path):
+        """Path traversal must be caught before the trusted-absolute allow, even for trusted prefixes."""
+        with pytest.raises(ToolException, match="Access denied"):
+            validate_duo_context_exclusions(path, allow_trusted_absolute=True)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # Lookalikes — segment must match exactly
+            "/x/.agentsfoo/SKILL.md",
+            "/tmp/evil.agents-data/x",
+        ],
+    )
+    def test_lookalike_segments_rejected(self, path):
+        """Paths that look like trusted segments but are not exact matches must be rejected."""
+        with pytest.raises(ToolException, match="Access denied"):
+            validate_duo_context_exclusions(path, allow_trusted_absolute=True)
+
+    def test_repo_relative_gitlab_duo_still_denied(self):
+        """Repo-relative .gitlab/duo paths must remain denied (denylist unchanged)."""
+        with pytest.raises(ToolException, match="Access denied"):
+            validate_duo_context_exclusions(
+                ".gitlab/duo/chat-rules.md", allow_trusted_absolute=True
+            )
+
+
+class TestToolsTrustedAbsolutePaths:
+    """Integration tests covering all filesystem tools: read-only tools allow trusted absolute paths, while
+    write/edit/list tools reject them."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+            "/home/user/.gitlab/duo/skills/y/SKILL.md",
+        ],
+    )
+    async def test_read_file_allows_trusted_absolute(self, metadata_with_project, path):
+        """ReadFile must dispatch the action for trusted absolute paths."""
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        response = await tool._arun(path)
+
+        assert response == "test contents"
+        outbox = metadata_with_project["outbox"]
+        outbox.put_action_and_wait_for_response.assert_called_once()
+        action = outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+            "/home/user/.gitlab/duo/skills/y/SKILL.md",
+        ],
+    )
+    async def test_read_file_chunked_allows_trusted_absolute(
+        self, metadata_with_project, path
+    ):
+        """ReadFileChunked must dispatch the action for trusted absolute paths."""
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        response = await tool._arun(path)
+
+        assert response == "test contents"
+        outbox = metadata_with_project["outbox"]
+        outbox.put_action_and_wait_for_response.assert_called_once()
+        action = outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "paths",
+        [
+            ["/home/user/.agents/skills/glab/SKILL.md"],
+            ["/root/.agents/skills/x/SKILL.md"],
+            ["/home/user/.gitlab/duo/skills/y/SKILL.md"],
+            [
+                "/home/user/.agents/skills/glab/SKILL.md",
+                "/root/.agents/skills/x/SKILL.md",
+                "/home/user/.gitlab/duo/skills/y/SKILL.md",
+            ],
+        ],
+    )
+    async def test_read_files_allows_trusted_absolute(self, paths):
+        """ReadFiles must dispatch the action for trusted absolute paths."""
+        mock_outbox = MagicMock()
+        mock_response = json.dumps(
+            {filepath: {"content": "test contents"} for filepath in paths}
+        )
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=contract_pb2.ClientEvent(
+                actionResponse=contract_pb2.ActionResponse(
+                    plainTextResponse=contract_pb2.PlainTextResponse(
+                        response=mock_response
+                    )
+                )
+            )
+        )
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = {"outbox": mock_outbox}
+
+        response = await tool._arun(paths)
+
+        assert response == mock_response
+        action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFiles.filepaths == paths
+
+    @pytest.mark.asyncio
+    async def test_read_files_mixed_batch_aborts_on_non_trusted_absolute(self):
+        """A non-trusted absolute path anywhere in the batch must abort the whole read.
+
+        ReadFiles validates each path in a loop before dispatching, so a single bad path (here ``/etc/passwd``) must
+        raise before any action is dispatched, even when a valid relative path and a trusted absolute path are also
+        present.
+        """
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock()
+
+        tool = ReadFiles(description="Read multiple files")
+        tool.metadata = {"outbox": mock_outbox}
+
+        with pytest.raises(ToolException, match="Access denied"):
+            await tool._arun(
+                [
+                    "src/main.py",
+                    "/root/.agents/skills/x/SKILL.md",
+                    "/etc/passwd",
+                ]
+            )
+
+        mock_outbox.put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+        ],
+    )
+    async def test_write_file_rejects_trusted_absolute(self, path):
+        """WriteFile must reject trusted absolute paths (read-only scope)."""
+        with pytest.raises(ToolException, match="Access denied"):
+            await WriteFile(description="Write file content")._arun(path, "contents")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+        ],
+    )
+    async def test_edit_file_rejects_trusted_absolute(self, path):
+        """EditFile must reject trusted absolute paths (read-only scope)."""
+        with pytest.raises(ToolException, match="Access denied"):
+            await EditFile(description="Edit file content")._arun(path, "old", "new")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/user/.agents/skills/glab/SKILL.md",
+            "/root/.agents/skills/x/SKILL.md",
+        ],
+    )
+    async def test_list_dir_rejects_trusted_absolute(self, path):
+        """ListDir must reject trusted absolute paths (read-only scope)."""
+        with pytest.raises(ToolException, match="Access denied"):
+            await ListDir(description="List directory")._arun(path)
 
 
 def test_default_context_exclusions_does_not_exclude_bang_patterns():

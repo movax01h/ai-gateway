@@ -22,6 +22,30 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
 
+# Trusted path segments for globally-installed agent skills and Duo config.
+# Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md)
+# advertised via absolute file:// URIs by the workspace_agent_skills mechanism (!3201).
+#
+# Scope is intentionally limited to the `skills/` subdirectory of each trusted root so
+# the rest of `.gitlab/duo` — which is in the denylist below — stays protected.
+#
+# Every entry is dotfile-anchored (first segment starts with ".") to prevent a CI
+# repository checkout from matching: a repo containing a `gitlab/duo/skills/` directory
+# must NOT be trusted via this mechanism. The XDG variant is therefore anchored to the
+# conventional `~/.config` location rather than an arbitrary `$XDG_CONFIG_HOME`.
+#
+# Intentional fail-closed: skills under a non-standard `$GLAB_CONFIG_DIR` or
+# `$XDG_CONFIG_HOME` are rejected server-side; the client-side gate
+# (`getTrustedReadableDirectories`) is the authoritative second check.
+TRUSTED_ABSOLUTE_PATH_SEGMENTS = (
+    ".agents/skills",
+    ".gitlab/duo/skills",
+    ".config/gitlab/duo/skills",
+)
+
+# Path-traversal patterns rejected for every path, regardless of tool or trust level.
+PATH_TRAVERSAL_PATTERNS = ("../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e")
+
 # Security denylist of sensitive directories and files that should not be accessed
 DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
     [
@@ -49,12 +73,61 @@ DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
 )
 
 
-def validate_duo_context_exclusions(file_path: str) -> None:
+def _contains_path_traversal(file_path: str) -> bool:
+    """Return ``True`` if *file_path* contains any known path-traversal pattern.
+
+    Shared by ``_is_trusted_absolute_path`` (which fails closed) and
+    ``validate_duo_context_exclusions`` (which raises) so the traversal denylist lives in
+    one place and the two security-critical checks cannot drift apart.
+    """
+    return any(pattern in file_path for pattern in PATH_TRAVERSAL_PATTERNS)
+
+
+def _is_trusted_absolute_path(file_path: str) -> bool:
+    """Return True if *file_path* is absolute, traversal-free, and contains a trusted segment sequence.
+
+    Traversal patterns are checked here so this helper is safe to call standalone — a path
+    like ``/home/u/.agents/skills/../../etc/passwd`` is never reported as trusted.
+
+    Args:
+        file_path: File path to check (backslashes are normalised to ``/`` internally).
+
+    Returns:
+        True when the path is absolute, traversal-free, and contains a trusted segment
+        sequence from `TRUSTED_ABSOLUTE_PATH_SEGMENTS`.
+    """
+    file_path = file_path.replace("\\", "/")
+    if not file_path.startswith("/"):
+        return False
+
+    if _contains_path_traversal(file_path):
+        return False
+
+    segments = file_path.split("/")
+    for trusted in TRUSTED_ABSOLUTE_PATH_SEGMENTS:
+        parts = trusted.split("/")
+        if any(
+            segments[i : i + len(parts)] == parts
+            for i in range(len(segments) - len(parts) + 1)
+        ):
+            return True
+    return False
+
+
+def validate_duo_context_exclusions(
+    file_path: str, allow_trusted_absolute: bool = False
+) -> None:
     """Check if the given file path is in the managed Duo Context Exclusion denylist of sensitive paths or contains path
     traversal attempts.
 
     Args:
-        file_path: The file path to check
+        file_path: The file path to check.
+        allow_trusted_absolute: When ``True``, absolute paths whose segments include one
+            of the entries in ``TRUSTED_ABSOLUTE_PATH_SEGMENTS`` are allowed through
+            without hitting the ``gitmatch`` denylist (which rejects all absolute paths).
+            Should only be set to ``True`` for read-only tools (``ReadFile``,
+            ``ReadFileChunked``, ``ReadFiles``).  Write/edit/list tools keep the default
+            ``False`` so they continue to reject absolute paths.
 
     Raises:
         ToolException: If the path is in the denylist or an invalid path.
@@ -65,11 +138,18 @@ def validate_duo_context_exclusions(file_path: str) -> None:
     file_path = file_path.replace("\\", "/")
     while file_path.startswith("./"):
         file_path = file_path.replace("./", "", 1)
-    for pattern in ["../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e"]:
-        if pattern in file_path:
-            raise ToolException(
-                f"Access denied: Cannot access '{file_path}' as it contains path traversal patterns"
-            )
+
+    # Traversal guard must run first — this prevents ~/.agents/../../etc/passwd from
+    # being allowed even when allow_trusted_absolute is True.
+    if _contains_path_traversal(file_path):
+        raise ToolException(
+            f"Access denied: Cannot access '{file_path}' as it contains path traversal patterns"
+        )
+
+    # gitmatch raises InvalidPathError on any absolute path, so trusted skill paths must
+    # short-circuit before reaching it.
+    if allow_trusted_absolute and _is_trusted_absolute_path(file_path):
+        return
 
     try:
         excluded = DEFAULT_CONTEXT_EXCLUSIONS.match(file_path)
@@ -84,7 +164,9 @@ def validate_duo_context_exclusions(file_path: str) -> None:
         )
 
     if file_path != file_path.lower():
-        validate_duo_context_exclusions(file_path.lower())
+        validate_duo_context_exclusions(
+            file_path.lower(), allow_trusted_absolute=allow_trusted_absolute
+        )
         return
 
 
@@ -109,12 +191,10 @@ class ReadFile(DuoBaseTool):
     ]
 
     async def _execute(self, file_path: str) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
-        validate_duo_context_exclusions(file_path)
+        validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
         return await _execute_action(
             self.metadata,  # type: ignore
@@ -172,12 +252,10 @@ class ReadFileChunked(DuoBaseTool):
         offset: int = DEFAULT_READ_FILE_OFFSET,
         limit: int = DEFAULT_READ_FILE_LIMIT,
     ) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
-        validate_duo_context_exclusions(file_path)
+        validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
         return await _execute_action(
             self.metadata,  # type: ignore
@@ -215,7 +293,7 @@ class ReadFiles(DuoBaseTool):
         log = structlog.stdlib.get_logger("workflow")
 
         for file_path in file_paths:
-            validate_duo_context_exclusions(file_path)
+            validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
         result_dict = {}
 
@@ -253,11 +331,9 @@ class ReadFiles(DuoBaseTool):
                     )
                 raise ToolException(error_msg)
 
-        # Add excluded files with error messages
         for path in excluded_file_paths:
             result_dict[path] = {"error": CONTEXT_EXCLUSION_MESSAGE}
 
-        # Return as JSON string
         return json.dumps(result_dict)
 
     def format_display_message(
@@ -299,11 +375,9 @@ class WriteFile(DuoBaseTool):
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, file_path: str, contents: str) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
         return await _execute_action(
@@ -378,12 +452,10 @@ class FindFiles(DuoBaseTool):
             ),
         )
 
-        # Filter results based on file exclusion policy
         policy = FileExclusionPolicy(self.project)
         lines = result.strip().split("\n") if result.strip() else []
         allowed_files, _excluded_files = policy.filter_allowed(lines)
 
-        # Build the response
         response_parts = []
         if allowed_files:
             response_parts.append("\n".join(allowed_files))
@@ -523,11 +595,9 @@ Examples of batched file edits:
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, file_path: str, old_str: str, new_str: str) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
         return await _execute_action(
@@ -585,11 +655,9 @@ class ListDir(DuoBaseTool):
     args_schema: Type[BaseModel] = ListDirInput
 
     async def _execute(self, directory: str) -> str:
-        # Check file exclusion policy before executing action
         if not FileExclusionPolicy.is_allowed_for_project(self.project, directory):
             return FileExclusionPolicy.format_llm_exclusion_message([directory])
 
-        # Check path security before proceeding
         validate_duo_context_exclusions(directory)
 
         result = await _execute_action(
@@ -599,12 +667,10 @@ class ListDir(DuoBaseTool):
             ),
         )
 
-        # Filter results based on file exclusion policy
         policy = FileExclusionPolicy(self.project)
         lines = result.strip().split("\n") if result.strip() else []
         allowed_files, _excluded_files = policy.filter_allowed(lines)
 
-        # Build the response
         response_parts = []
         if allowed_files:
             response_parts.append("\n".join(allowed_files))
