@@ -116,21 +116,21 @@ include:
     inputs:
       runway_service_id: ai-gateway
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.36.0
+      runway_version: v4.40.0
     rules: *skip-if-not-security
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
       runway_service_id: duo-workflow-svc
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.36.0
+      runway_version: v4.40.0
     rules: *skip-if-not-security
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
       runway_service_id: ai-gateway-custom
       image: "$SELF_HOSTED_TARGET_IMAGE"
-      runway_version: v4.36.0
+      runway_version: v4.40.0
     rules: *skip-if-not-security
 
   # Runway (Kubernetes)
@@ -139,7 +139,7 @@ include:
     ref: v4.18.7
     inputs:
       runway_service_id: ai-gateway-eks
-      runway_version: v4.36.0
+      runway_version: v4.40.0
       runtime: eks
       app_version: "${CI_COMMIT_SHORT_SHA}"
     rules: *skip-if-not-canonical
@@ -148,7 +148,7 @@ include:
     ref: v4.18.7
     inputs:
       runway_service_id: duo-workflow-svc-eks
-      runway_version: v4.36.0
+      runway_version: v4.40.0
       runtime: eks
       app_version: "${CI_COMMIT_SHORT_SHA}"
     rules: *skip-if-not-canonical
