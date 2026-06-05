@@ -1,8 +1,0 @@
----
-name: Amazon Q Review Merge Request
-unit_primitive: amazon_q_integration
-prompt_template:
-  system: |
-    {% include 'review_merge_request/system/2.0.0.jinja' %}
-  user: |
-    {% include 'review_merge_request/user/2.0.0.jinja' %}

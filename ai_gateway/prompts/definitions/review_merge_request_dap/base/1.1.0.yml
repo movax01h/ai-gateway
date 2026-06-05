@@ -1,0 +1,13 @@
+---
+name: Review Merge Request DAP
+model:
+  params:
+    max_tokens: 8_192
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'review_merge_request_dap/system/1.1.0.jinja' %}
+  user: |
+    {% include 'review_merge_request_dap/user/1.0.0.jinja' %}
+params:
+  timeout: 60
