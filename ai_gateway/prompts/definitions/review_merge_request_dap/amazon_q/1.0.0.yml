@@ -1,0 +1,8 @@
+---
+name: Amazon Q Review Merge Request DAP
+unit_primitive: amazon_q_integration
+prompt_template:
+  system: |
+    {% include 'review_merge_request_dap/system/1.0.0.jinja' %}
+  user: |
+    {% include 'review_merge_request_dap/user/1.0.0.jinja' %}
