@@ -477,12 +477,18 @@ def user_is_debug_fixture():
     return False
 
 
+@pytest.fixture(name="jwt_realm")
+def jwt_realm_fixture(request) -> str:
+    return getattr(request, "param", "")
+
+
 @pytest.fixture(name="auth_user")
 def auth_user_fixture(
     user_is_debug: bool,
     scopes: list[str],
     issuer: str,
     claims_extra: dict[str, Any] | None,
+    jwt_realm: str,
 ):
     return CloudConnectorUser(
         authenticated=True,
@@ -492,6 +498,7 @@ def auth_user_fixture(
             gitlab_instance_uid="unique-instance-uid",
             issuer=issuer,
             extra=claims_extra,
+            gitlab_realm=jwt_realm,
         ),
     )
 

@@ -64,6 +64,14 @@ class InternalEventMiddleware:
         claims = getattr(user, "claims", None)
         unique_instance_id = claims.gitlab_instance_uid if claims else None
 
+        # Prefer the JWT-verified gitlab_realm claim over the request header.
+        # The header is client-controlled; the claim is verified by MiddlewareAuthentication.
+        # claims is None only on bypass_auth paths — header is acceptable there by design.
+        if claims is not None:
+            realm = claims.gitlab_realm
+        else:
+            realm = request.headers.get(X_GITLAB_REALM_HEADER)
+
         project_id_str = request.headers.get(X_GITLAB_PROJECT_ID)
         project_id = (
             int(project_id_str) if project_id_str and project_id_str != "null" else None
@@ -106,7 +114,7 @@ class InternalEventMiddleware:
         context = EventContext(
             environment=self.environment,
             source="ai-gateway-python",
-            realm=request.headers.get(X_GITLAB_REALM_HEADER),
+            realm=realm,
             instance_id=request.headers.get(X_GITLAB_INSTANCE_ID_HEADER),
             unique_instance_id=unique_instance_id,
             host_name=request.headers.get(X_GITLAB_HOST_NAME_HEADER),

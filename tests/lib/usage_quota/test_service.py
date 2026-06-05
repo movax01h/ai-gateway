@@ -375,6 +375,64 @@ class TestFailCloseBehavior:
         )
         mock_metrics.labels.return_value.inc.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_fail_close_cannot_be_bypassed_by_spoofed_realm_header(
+        self, service, gl_context, internal_event_context
+    ):
+        """Regression: sending X-Gitlab-Realm: self-managed with a SaaS JWT must not escape fail-close.
+
+        InternalEventMiddleware now sets realm from the JWT gitlab_realm claim (not the header).
+        This test verifies the service side: when realm="saas" is in the event context
+        (as the middleware produces for a SaaS JWT regardless of the header value), a 403
+        from the quota API raises InsufficientEntitlements — fail-close is enforced.
+        """
+        saas_context = internal_event_context.model_copy(update={"realm": "saas"})
+
+        with (
+            patch("lib.usage_quota.service.current_event_context") as mock_ctx,
+            patch.object(
+                service.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                side_effect=UsageQuotaHTTPError(403),
+            ),
+            patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
+        ):
+            mock_ctx.get.return_value = saas_context
+            with pytest.raises(InsufficientEntitlements):
+                await service.execute(
+                    gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                )
+
+        mock_metrics.labels.assert_called_once_with(result="deny", realm="saas")
+        mock_metrics.labels.return_value.inc.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fail_close_applies_for_saas_realm_on_non_403_http_error(
+        self, service, gl_context, internal_event_context
+    ):
+        """Non-403 HTTP error for saas realm (e.g. 429) raises UsageQuotaCheckUnavailable."""
+        saas_context = internal_event_context.model_copy(update={"realm": "saas"})
+
+        with (
+            patch("lib.usage_quota.service.current_event_context") as mock_ctx,
+            patch.object(
+                service.usage_quota_client,
+                "check_quota_available",
+                new_callable=AsyncMock,
+                side_effect=UsageQuotaHTTPError(429),
+            ),
+            patch("lib.usage_quota.service.USAGE_QUOTA_CHECK_TOTAL") as mock_metrics,
+        ):
+            mock_ctx.get.return_value = saas_context
+            with pytest.raises(UsageQuotaCheckUnavailable):
+                await service.execute(
+                    gl_context, UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS
+                )
+
+        mock_metrics.labels.assert_called_once_with(result="deny", realm="saas")
+        mock_metrics.labels.return_value.inc.assert_called_once()
+
 
 class TestMetrics:
     """Tests for metrics recording."""
