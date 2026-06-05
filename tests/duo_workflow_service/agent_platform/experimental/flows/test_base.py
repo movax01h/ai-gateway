@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
 
@@ -33,6 +34,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 
@@ -1059,3 +1061,36 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         state = graph.aupdate_state.call_args[0][1]
         assert state["ui_chat_log"].value[0]["content"] == "Safe message only"
+
+    @pytest.mark.asyncio
+    async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
+        self, flow_instance
+    ):
+        """GraphRecursionError is converted to NotifiableAgentException before propagating."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        notifier.send_event = AsyncMock()
+        flow_instance.checkpoint_notifier = notifier
+
+        compiled_graph = AsyncMock()
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            ),
+            pytest.raises(TraceableException) as exc_info,
+        ):
+            await flow_instance._handle_compile_and_run_exception(
+                GraphRecursionError("Recursion limit of 300 reached"),
+                compiled_graph,
+                {},
+            )
+
+        wrapped = exc_info.value.original_exception
+        assert isinstance(wrapped, NotifiableAgentException)
+        assert "300" in wrapped.internal_detail
+        assert (
+            wrapped.ui_message
+            == "The workflow reached its maximum step limit and could not complete. "
+            "Please try again with a more focused goal, or break the task into smaller steps."
+        )
