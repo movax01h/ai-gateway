@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from ai_gateway.model_metadata import (
     ModelMetadataBySize,
     build_default_code_completions_metadata,
     build_default_feature_setting_metadata,
+    completion_context_max_percent_for_model_metadata,
     create_model_metadata,
     create_model_metadata_by_size,
 )
@@ -1021,3 +1023,25 @@ class TestBuildDefaultFeatureSettingMetadata:
                 model_keys={},
                 fireworks_api_base_url="unused",
             )
+
+
+class TestCompletionContextMaxPercentForModelMetadata:
+    @staticmethod
+    def _model_metadata(custom_llm_provider):
+        params = SimpleNamespace(custom_llm_provider=custom_llm_provider)
+        return SimpleNamespace(llm_definition=SimpleNamespace(params=params))
+
+    def test_fireworks_caps_context_at_v2_value(self):
+        metadata = self._model_metadata("fireworks_ai")
+
+        assert completion_context_max_percent_for_model_metadata(metadata) == 0.3
+
+    def test_vertex_caps_context_at_v2_value(self):
+        metadata = self._model_metadata("vertex_ai")
+
+        assert completion_context_max_percent_for_model_metadata(metadata) == 0.3
+
+    def test_other_provider_uses_engine_default(self):
+        metadata = self._model_metadata("anthropic")
+
+        assert completion_context_max_percent_for_model_metadata(metadata) is None

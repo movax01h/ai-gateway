@@ -115,6 +115,8 @@ class TestEditorContentCompletionStream:
             code_context=None,
             user=mock_completions_stream.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
+            # The default (Fireworks) model caps completion context at 30%.
+            context_max_percent=0.3,
         )
 
 

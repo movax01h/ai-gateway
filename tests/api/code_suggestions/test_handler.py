@@ -183,6 +183,7 @@ class TestEditorContentCompletion:
             code_context=None,
             user=mock_completions.call_args.kwargs["user"],
             snowplow_event_context=expected_snowplow_event,
+            context_max_percent=0.3,
         )
 
     @pytest.mark.parametrize(

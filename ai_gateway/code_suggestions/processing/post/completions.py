@@ -4,6 +4,8 @@ from functools import partial
 from inspect import iscoroutinefunction
 from typing import Any, Awaitable, Callable, NewType, Optional, Union, override
 
+from dependency_injector.providers import Factory
+
 from ai_gateway.code_suggestions.processing.ops import strip_whitespaces
 from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
 from ai_gateway.code_suggestions.processing.post.ops import (
@@ -18,11 +20,13 @@ from ai_gateway.code_suggestions.processing.post.ops import (
     trim_by_min_allowed_context,
 )
 from ai_gateway.code_suggestions.processing.typing import LanguageId
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.structured_logging import get_request_logger
 
 __all__ = [
     "PostProcessorOperation",
     "PostProcessor",
+    "create_post_processor_for_model_metadata",
 ]
 
 request_log = get_request_logger("suggestion_post_processing")
@@ -182,3 +186,42 @@ class PostProcessor(PostProcessorBase):
 
     def _is_async(self, func):
         return iscoroutinefunction(func)
+
+
+def create_post_processor_for_model_metadata(
+    model_metadata: TypeModelMetadata,
+    excl_post_process: list[str],
+    fireworks_score_thresholds: dict[str, float],
+) -> Optional[Factory]:
+    """Build the completion post-processor for the resolved model.
+
+    - Fireworks: filter low-confidence scores and fix truncated output.
+    - Vertex Codestral: strip leading asterisks.
+    - Any other provider (Anthropic, self-hosted, ...): no post-processing.
+    """
+    llm_definition = model_metadata.llm_definition
+    custom_llm_provider = getattr(llm_definition.params, "custom_llm_provider", None)
+
+    if custom_llm_provider == "vertex_ai" and "codestral" in llm_definition.family:
+        return Factory(
+            PostProcessor,
+            extras=[PostProcessorOperation.STRIP_ASTERISKS],
+            exclude=excl_post_process,
+        )
+
+    if custom_llm_provider == "fireworks_ai":
+        model_name = getattr(llm_definition.params, "model", None)
+        score_threshold = (
+            fireworks_score_thresholds.get(model_name) if model_name else None
+        )
+        return Factory(
+            PostProcessor,
+            exclude=excl_post_process,
+            extras=[
+                PostProcessorOperation.FILTER_SCORE,
+                PostProcessorOperation.FIX_TRUNCATION,
+            ],
+            score_threshold=score_threshold,
+        )
+
+    return None

@@ -24,11 +24,15 @@ from ai_gateway.code_suggestions import (
     LanguageServerVersion,
 )
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
+from ai_gateway.code_suggestions.processing.post.completions import (
+    create_post_processor_for_model_metadata,
+)
 from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import (
     TypeModelMetadata,
     build_default_code_completions_metadata,
+    completion_context_max_percent_for_model_metadata,
     create_model_metadata,
 )
 from ai_gateway.models import KindModelProvider
@@ -183,7 +187,7 @@ async def code_completion(
     ],
     code_context: Optional[List[Any]] = None,
     model_metadata: TypeModelMetadata = None,
-    config: Optional[Config] = None,
+    config: Config = None,
     using_cache: bool = True,
 ):
     kwargs = {}
@@ -230,7 +234,23 @@ async def code_completion(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Unauthorized to access code suggestions",
             )
-        engine = completions_agent_factory(model__prompt=prompt)
+
+        post_processor = create_post_processor_for_model_metadata(
+            model_metadata,
+            config.feature_flags.excl_post_process(),
+            config.feature_flags.fireworks_score_threshold(),
+        )
+        engine = completions_agent_factory(
+            model__prompt=prompt,
+            post_processor=post_processor,
+            model_metadata=model_metadata,
+        )
+
+        context_max_percent = completion_context_max_percent_for_model_metadata(
+            model_metadata
+        )
+        if context_max_percent is not None:
+            kwargs["context_max_percent"] = context_max_percent
 
     suggestions = await engine.execute(
         prefix=payload.content_above_cursor,
