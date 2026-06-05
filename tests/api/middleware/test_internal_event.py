@@ -27,7 +27,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
-from lib.context.auth import StarletteUser
+from lib.context import StarletteUser
 from lib.internal_events import EventContext
 
 
@@ -104,6 +104,7 @@ async def test_middleware_skip_path(internal_event_middleware):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("jwt_realm", ["saas"], indirect=True)
 async def test_middleware_set_context(internal_event_middleware, user):
     request = Request(
         {
@@ -111,7 +112,7 @@ async def test_middleware_set_context(internal_event_middleware, user):
             "path": "/api/endpoint",
             "headers": [
                 (b"user-agent", b"TestAgent"),
-                (X_GITLAB_REALM_HEADER.lower().encode(), b"test-realm"),
+                (X_GITLAB_REALM_HEADER.lower().encode(), b"saas"),
                 (X_GITLAB_INSTANCE_ID_HEADER.lower().encode(), b"test-instance"),
                 (X_GITLAB_HOST_NAME_HEADER.lower().encode(), b"test-host"),
                 (X_GITLAB_VERSION_HEADER.lower().encode(), b"test-version"),
@@ -149,7 +150,7 @@ async def test_middleware_set_context(internal_event_middleware, user):
         expected_context = EventContext(
             environment="test",
             source="ai-gateway-python",
-            realm="test-realm",
+            realm="saas",
             instance_id="test-instance",
             unique_instance_id="unique-instance-uid",
             host_name="test-host",
@@ -820,3 +821,110 @@ async def test_middleware_missing_headers(internal_event_middleware):
         mock_event_context.set.assert_called_once_with(expected_context)
 
     internal_event_middleware.app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "jwt_realm, header_realm, expected_realm",
+    [
+        # JWT claim takes priority over header when non-empty
+        ("saas", "self-managed", "saas"),
+        ("self-managed", "saas", "self-managed"),
+        # JWT and header agree — claim is still used (same outcome)
+        ("saas", "saas", "saas"),
+        ("self-managed", "self-managed", "self-managed"),
+        # Empty JWT claim — authenticated request uses claim value directly (no header fallback)
+        ("", "saas", ""),
+        ("", "self-managed", ""),
+    ],
+    indirect=["jwt_realm"],
+)
+async def test_realm_prefers_jwt_claim_over_header(
+    internal_event_middleware,
+    user,
+    header_realm,
+    expected_realm,
+):
+    """JWT gitlab_realm claim is authoritative; header is only used when claim is absent/empty."""
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [
+                (X_GITLAB_REALM_HEADER.lower().encode(), header_realm.encode()),
+            ],
+            "user": user,
+        }
+    )
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(request.scope, AsyncMock(), AsyncMock())
+
+    set_context = mock_event_context.set.call_args[0][0]
+    assert set_context.realm == expected_realm
+
+
+@pytest.mark.asyncio
+async def test_realm_falls_back_to_header_when_no_jwt(internal_event_middleware):
+    """When request has no authenticated user (claims=None), realm comes from header."""
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [
+                (X_GITLAB_REALM_HEADER.lower().encode(), b"saas"),
+            ],
+            "user": None,
+        }
+    )
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(request.scope, AsyncMock(), AsyncMock())
+
+    set_context = mock_event_context.set.call_args[0][0]
+    assert set_context.realm == "saas"
+
+
+@pytest.mark.asyncio
+async def test_realm_bypass_auth_falls_back_to_header(internal_event_middleware):
+    """bypass_auth paths return CloudConnectorUser with claims=None.
+
+    The JWT branch is unreachable; realm comes from header unconditionally.
+    This is a documented residual risk: bypass_auth deployments reachable from
+    SaaS clients retain the header-spoofing vector.
+    """
+    bypass_user = StarletteUser(
+        CloudConnectorUser(authenticated=True, is_debug=True, claims=None)
+    )
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [
+                (X_GITLAB_REALM_HEADER.lower().encode(), b"self-managed"),
+            ],
+            "user": bypass_user,
+        }
+    )
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(request.scope, AsyncMock(), AsyncMock())
+
+    set_context = mock_event_context.set.call_args[0][0]
+    # Header is used — bypass_auth residual risk documented here
+    assert set_context.realm == "self-managed"
