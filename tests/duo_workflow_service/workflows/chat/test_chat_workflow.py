@@ -1,12 +1,13 @@
 # pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg
 import json
-from unittest.mock import ANY, MagicMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from uuid import UUID
 
 import pytest
 from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import PromptConfig
@@ -25,7 +26,9 @@ from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
 )
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools.toolset import Toolset
+from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_FLOW_TOOLS,
     CHAT_GITLAB_MUTATION_TOOLS,
@@ -1411,3 +1414,31 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     assert result["ui_chat_log"][1]["message_id"] == "request-toolu_approval_id"
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
     assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
+    workflow_with_project,
+):
+    """GraphRecursionError is converted to NotifiableException before propagating."""
+
+    notifier = MagicMock()
+    notifier.ui_chat_log = []
+    notifier.send_event = AsyncMock()
+    workflow_with_project.checkpoint_notifier = notifier
+
+    with pytest.raises(TraceableException) as exc_info:
+        await workflow_with_project._handle_compile_and_run_exception(
+            GraphRecursionError("Recursion limit reached"),
+            AsyncMock(),
+            {},
+        )
+
+    wrapped = exc_info.value.original_exception
+    assert isinstance(wrapped, NotifiableException)
+    assert (
+        str(wrapped)
+        == "The workflow reached its maximum step limit and could not complete. "
+        "Please try again with a more focused goal, or break the task into smaller steps."
+    )

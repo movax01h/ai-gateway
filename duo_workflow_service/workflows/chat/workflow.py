@@ -1,13 +1,16 @@
 # pylint: disable=attribute-defined-outside-init
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, Optional, override
+from typing import Any, Dict, List, NoReturn, Optional, override
 from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
+from langgraph.errors import (
+    GraphRecursionError,
+)
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from structlog import get_logger
@@ -31,6 +34,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
@@ -395,6 +399,20 @@ class Workflow(AbstractWorkflow):
             + utility_tools
         )
         return available_tools
+
+    @override
+    async def _handle_compile_and_run_exception(
+        self,
+        e: BaseException,
+        compiled_graph: Any,
+        graph_config: Any,
+    ) -> NoReturn:
+        if isinstance(e, GraphRecursionError):
+            e = NotifiableException(
+                "The workflow reached its maximum step limit and could not complete. "
+                "Please try again with a more focused goal, or break the task into smaller steps."
+            )
+        await super()._handle_compile_and_run_exception(e, compiled_graph, graph_config)
 
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
