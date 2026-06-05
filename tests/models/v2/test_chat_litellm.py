@@ -16,7 +16,11 @@ from langchain_core.runnables import Runnable
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
-from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
+from ai_gateway.models.v2.chat_litellm import (
+    ChatLiteLLM,
+    _force_gpt_5_max_completion_tokens,
+)
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 
 
@@ -509,6 +513,103 @@ class TestClaude46PrefillCompat:
         else:
             expected = {"role": "assistant", "content": "Thought: "}
         assert dicts[-1] == expected
+
+
+class TestGpt5MaxCompletionTokens:
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-nano"],
+    )
+    def test_gpt_5_on_custom_openai_moves_to_extra_body(self, model):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": "custom_openai",
+            "max_tokens": 12,
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["custom_llm_provider"] == "custom_openai"
+        assert "max_tokens" not in kwargs
+        assert kwargs["extra_body"] == {"max_completion_tokens": 12}
+
+    @pytest.mark.parametrize(
+        "provider",
+        ["azure", "custom_openai", "openai", "fireworks_ai", None],
+    )
+    def test_gpt_5_moves_to_extra_body_regardless_of_provider(self, provider):
+        kwargs = {
+            "model": "gpt-5",
+            "custom_llm_provider": provider,
+            "max_tokens": 12,
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["custom_llm_provider"] == provider
+        assert "max_tokens" not in kwargs
+        assert kwargs["extra_body"] == {"max_completion_tokens": 12}
+
+    @pytest.mark.parametrize(
+        "model", ["gpt-4o", "gpt-3.5-turbo", "claude-3-5-sonnet", "gpt-5-chat"]
+    )
+    @pytest.mark.parametrize("provider", ["custom_openai", "azure", "openai"])
+    def test_non_gpt_5_is_left_alone(self, model, provider):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": provider,
+            "max_tokens": 12,
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["max_tokens"] == 12
+        assert "extra_body" not in kwargs
+
+    def test_missing_model_is_noop(self):
+        kwargs = {"custom_llm_provider": "custom_openai", "max_tokens": 12}
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["max_tokens"] == 12
+
+    def test_no_max_tokens_is_noop(self):
+        kwargs = {"model": "gpt-5", "custom_llm_provider": "custom_openai"}
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert "extra_body" not in kwargs
+
+    def test_existing_extra_body_is_preserved(self):
+        kwargs = {
+            "model": "gpt-5",
+            "custom_llm_provider": "custom_openai",
+            "max_tokens": 12,
+            "extra_body": {"foo": "bar"},
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["extra_body"] == {"foo": "bar", "max_completion_tokens": 12}
+
+    @pytest.mark.asyncio
+    async def test_acompletion_with_retry_applies_before_calling_super(self):
+        chat = ChatLiteLLM(model="gpt-5", custom_llm_provider="custom_openai")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(return_value="ok"),
+        ) as super_call:
+            result = await chat.acompletion_with_retry(
+                model="gpt-5", custom_llm_provider="custom_openai", max_tokens=12
+            )
+
+        assert result == "ok"
+        super_kwargs = super_call.call_args.kwargs
+        assert super_kwargs["custom_llm_provider"] == "custom_openai"
+        assert "max_tokens" not in super_kwargs
+        assert super_kwargs["extra_body"] == {"max_completion_tokens": 12}
 
 
 class TestBedrockGuardrailConfig:

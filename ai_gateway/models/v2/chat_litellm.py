@@ -1,11 +1,13 @@
 from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union, override
 
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from litellm import OpenAIGPT5Config
 from pydantic import BaseModel
 
 from ai_gateway.models.base import validate_custom_endpoint
@@ -20,6 +22,25 @@ from ai_gateway.models.v2.litellm_model_registry import (
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
 __all__ = ["ChatLiteLLM"]
+
+
+def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
+    """GPT-5 needs max_completion_tokens, but some providers (e.g. custom_openai, azure) send the deprecated max_tokens.
+    Pass it via extra_body, which LiteLLM forwards as-is, regardless of provider.
+
+    The GPT-5 model check below is the only guard: any provider hosting a GPT-5 model gets the rewrite.
+
+    See https://github.com/karakeep-app/karakeep/issues/1969.
+    """
+    model = kwargs.get("model")
+    if not model or not OpenAIGPT5Config.is_model_gpt_5_model(model):
+        return
+    if kwargs.get("max_tokens") is None:
+        return
+    extra_body = dict(kwargs.get("extra_body") or {})
+    extra_body.setdefault("max_completion_tokens", kwargs.pop("max_tokens"))
+    kwargs["extra_body"] = extra_body
+
 
 # Register built-in model metadata for models that ship in our model_selection
 # registry but are absent from the pinned LiteLLM bundled `model_cost` registry
@@ -72,6 +93,16 @@ class ChatLiteLLM(_LChatLiteLLM):
             payload = remove_trailing_assistant_message({"messages": message_dicts})
             message_dicts = payload["messages"]
         return message_dicts, params
+
+    @override
+    async def acompletion_with_retry(
+        self,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> Any:
+        # kwargs has the merged model, provider, and max_tokens by this point.
+        _force_gpt_5_max_completion_tokens(kwargs)
+        return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
 
     @property
     @override
