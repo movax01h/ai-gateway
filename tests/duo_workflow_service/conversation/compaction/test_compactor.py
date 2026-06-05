@@ -1,9 +1,15 @@
 """Tests for ConversationCompactor class."""
 
+# pylint: disable=too-many-lines
+# Pylint's `too-many-lines` is suppressed here because this file mirrors a
+# single source module (compactor.py) and the project enforces 1:1 test/source
+# file naming via the file-naming-for-tests lint, so splitting is not an
+# option.
 from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.constants import TAG_NOSTREAM
 
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
@@ -11,6 +17,8 @@ from duo_workflow_service.conversation.compaction import (
 )
 from duo_workflow_service.conversation.compaction.compactor import (
     COMPACTION_CONTINUE_MESSAGE,
+    COMPACTION_PROMPT_ID,
+    COMPACTION_PROMPT_MANUAL_ID,
     CompactionStatus,
     ConversationCompactor,
 )
@@ -477,6 +485,31 @@ class TestConversationCompactorCompact:
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_compact_auto_no_op_when_slicing_yields_empty_to_summarize(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Auto mode logs and returns the original messages when slicing yields no messages to summarize."""
+        mock_get_max_context.return_value = 400_000
+        # complete-history tokens above threshold -> should_compact True;
+        # per-turn cost low so all turns fit in recent_to_keep -> to_summarize empty.
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        # 3 leading HumanMessages + 9 trailing alternating messages.
+        # max_recent_messages defaults to 10; remaining (9 msgs) fits entirely.
+        messages = [HumanMessage(content=f"L{i}") for i in range(3)]
+        for i in range(5):
+            messages.append(AIMessage(content=f"A{i}"))
+            if i < 4:
+                messages.append(HumanMessage(content=f"H{i}"))
+
+        result = await compactor.compact(messages)
+
+        assert result.was_compacted is False
+        assert result.messages == messages
+        mock_prompt.ainvoke.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_compact_result_has_correct_metadata(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
@@ -590,15 +623,16 @@ class TestInvokeSummarizerToolMetadataStripping:
 class TestIsCompactionCallFlag:
     """Test that is_compaction_call is set in internal_event_extra."""
 
+    @pytest.mark.asyncio
     @patch(
         "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
         return_value=None,
     )
-    def test_is_compaction_call_in_internal_event_extra(
-        self, _mock_get_model_metadata, mock_prompt_registry, user
+    async def test_is_compaction_call_in_internal_event_extra(
+        self, _mock_get_model_metadata, mock_prompt_registry, mock_prompt, user
     ):
         """The is_compaction_call flag should be in internal_event_extra."""
-        create_conversation_compactor(
+        compactor = create_conversation_compactor(
             config=CompactionConfig(),
             prompt_registry=mock_prompt_registry,
             user=user,
@@ -606,6 +640,9 @@ class TestIsCompactionCallFlag:
             workflow_id="test_workflow",
             workflow_type="test_type",
         )
+
+        mock_prompt.ainvoke.return_value = AIMessage(content="summary")
+        await compactor.compact([HumanMessage(content="x")], is_manual=True)
 
         call_kwargs = mock_prompt_registry.get_on_behalf.call_args
         extra = call_kwargs.kwargs.get(
@@ -831,3 +868,356 @@ class TestCompactorSnowplowEvents:
 
         # Should succeed without error -- no event is fired
         assert result.was_compacted is True
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    @patch(
+        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+    )
+    async def test_fire_compaction_event_noop_when_prompt_load_fails(
+        self,
+        _mock_metrics,
+        mock_count_tokens,
+        mock_get_max_context,
+        compactor_with_events,
+        mock_prompt_registry,
+        mock_internal_events_client,
+    ):
+        """_fire_compaction_event should be a no-op when the prompt failed to load.
+
+        When prompt_registry.get_on_behalf raises, the per-mode prompt cache stays empty; firing the event would require
+        re-attempting the load (which would just raise again), so the event is silently dropped.
+        """
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.return_value = int(0.8 * 400_000)
+
+        mock_prompt_registry.get_on_behalf.side_effect = RuntimeError(
+            "prompt registry failure"
+        )
+
+        messages = [HumanMessage(content="Initial query"), AIMessage(content="R1")]
+        for i in range(15):
+            messages.append(HumanMessage(content=f"M{i}"))
+            messages.append(AIMessage(content=f"R{i}"))
+
+        result = await compactor_with_events.compact(messages)
+
+        assert result.was_compacted is False
+        assert isinstance(result.error, RuntimeError)
+        mock_internal_events_client.track_event.assert_not_called()
+
+
+def _summary_message(content: str = "Summary", message_id: str | None = None):
+    usage_metadata = {
+        "input_tokens": 1000,
+        "output_tokens": 200,
+        "total_tokens": 1200,
+    }
+    if message_id is None:
+        return AIMessage(content=content, usage_metadata=usage_metadata)
+    return AIMessage(content=content, usage_metadata=usage_metadata, id=message_id)
+
+
+def _large_history():
+    messages = [HumanMessage(content="Initial query"), AIMessage(content="R1")]
+    for i in range(15):
+        messages.append(HumanMessage(content=f"M{i}"))
+        messages.append(AIMessage(content=f"R{i}"))
+    return messages
+
+
+@patch(
+    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+)
+class TestCompactManualMode:
+    """Tests for manual-mode behaviors of ConversationCompactor.compact."""
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_bypasses_should_compact(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Manual mode should compact even when below thresholds."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.1 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message(message_id="summary-1")
+
+        short_history = [HumanMessage(content=f"M{i}") for i in range(3)] + [
+            AIMessage(content="R0"),
+            HumanMessage(content="follow up"),
+            AIMessage(content="R1"),
+        ]
+
+        result = await compactor.compact(short_history, is_manual=True)
+
+        assert result.was_compacted is True
+        assert result.summary is not None
+        assert result.summary.id == "summary-1"
+        mock_prompt.ainvoke.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_propagates_user_instruction(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """user_instruction should be forwarded into prompt inputs."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(
+            _large_history(),
+            is_manual=True,
+            user_instruction="focus on auth bug",
+        )
+
+        call_args, _ = mock_prompt.ainvoke.call_args
+        inputs = call_args[0]
+        assert inputs.get("user_instruction") == "focus on auth bug"
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_omits_user_instruction_when_none(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """user_instruction key must be absent when not provided."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(_large_history(), is_manual=True)
+
+        call_args, _ = mock_prompt.ainvoke.call_args
+        inputs = call_args[0]
+        assert "user_instruction" not in inputs
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_skips_synthetic_human_message(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Manual mode must never append the synthetic COMPACTION_CONTINUE_MESSAGE."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        result = await compactor.compact(_large_history(), is_manual=True)
+
+        assert result.was_compacted is True
+        contents = [m.content for m in result.messages if isinstance(m, HumanMessage)]
+        assert COMPACTION_CONTINUE_MESSAGE not in contents
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_streams_summary_no_nostream_tag(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Manual mode should not apply the TAG_NOSTREAM tag."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(_large_history(), is_manual=True)
+
+        _, call_kwargs = mock_prompt.ainvoke.call_args
+        tags = call_kwargs["config"]["tags"]
+        assert TAG_NOSTREAM not in tags
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_auto_uses_nostream_tag(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Auto mode must keep TAG_NOSTREAM."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(_large_history(), is_manual=False)
+
+        _, call_kwargs = mock_prompt.ainvoke.call_args
+        tags = call_kwargs["config"]["tags"]
+        assert TAG_NOSTREAM in tags
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_user_instruction_included_in_prompt_overhead(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Prompt overhead must reflect the rendered template, including any user instruction, so post-compaction token
+        accounting stays accurate."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(
+            _large_history(),
+            is_manual=True,
+            user_instruction="focus on auth",
+        )
+
+        # _calculate_compacted_tokens renders the template via format_messages
+        # to size the prompt overhead. That render must carry the user_instruction
+        # so the overhead estimate matches what _invoke_summarizer actually sent.
+        format_calls = mock_prompt.prompt_tpl.format_messages.call_args_list
+        assert format_calls, "expected at least one format_messages call for overhead"
+        assert any(
+            call.kwargs.get("user_instruction") == "focus on auth"
+            for call in format_calls
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_force_summarizes_all_when_to_summarize_empty(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Manual mode summarizes the entire history when normal slicing is empty."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        mock_prompt.ainvoke.return_value = _summary_message(message_id="summary-all")
+
+        history = [HumanMessage(content=f"msg {i}") for i in range(3)]
+
+        result = await compactor.compact(history, is_manual=True)
+
+        assert result.was_compacted is True
+        call_args, _ = mock_prompt.ainvoke.call_args
+        passed_history = call_args[0]["history"]
+        assert passed_history == history
+        assert result.messages == [result.summary]
+
+
+@patch(
+    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+)
+class TestCompactorOperationType:
+    """Tests for the operation_type carried in the Snowplow event per mode."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "is_manual, expected_prompt_id, expected_operation_type",
+        [
+            (False, COMPACTION_PROMPT_ID, "compaction_auto"),
+            (True, COMPACTION_PROMPT_MANUAL_ID, "compaction_manual"),
+        ],
+        ids=["auto", "manual"],
+    )
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    @patch(
+        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+    )
+    async def test_compaction_event_uses_correct_operation_type(
+        self,
+        _mock_metrics,
+        mock_count_tokens,
+        mock_get_max_context,
+        is_manual,
+        expected_prompt_id,
+        expected_operation_type,
+        compactor_with_events,
+        mock_prompt_registry,
+        mock_prompt,
+        mock_prompt_manual,
+        mock_internal_events_client,
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+
+        def fake_get_on_behalf(_user, prompt_id, *_args, **_kwargs):
+            if prompt_id == COMPACTION_PROMPT_MANUAL_ID:
+                return mock_prompt_manual
+            return mock_prompt
+
+        mock_prompt_registry.get_on_behalf.side_effect = fake_get_on_behalf
+        mock_prompt.ainvoke.return_value = _summary_message()
+        mock_prompt_manual.ainvoke.return_value = _summary_message()
+
+        await compactor_with_events.compact(_large_history(), is_manual=is_manual)
+
+        event_call = mock_internal_events_client.track_event.call_args
+        additional_props = event_call.kwargs["additional_properties"]
+        assert additional_props.extra["operation_type"] == expected_operation_type
+
+        called_ids = [
+            c.args[1] for c in mock_prompt_registry.get_on_behalf.call_args_list
+        ]
+        assert expected_prompt_id in called_ids
+
+
+class TestCompactorLazyPromptLoad:
+    """Tests verifying prompts are only loaded on first compact() call per mode."""
+
+    @patch(
+        "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
+        return_value=None,
+    )
+    def test_init_does_not_load_any_prompt(
+        self, _mock_get_model_metadata, mock_prompt_registry, user
+    ):
+        create_conversation_compactor(
+            config=CompactionConfig(),
+            prompt_registry=mock_prompt_registry,
+            user=user,
+            agent_name="test_agent",
+            workflow_id="test_workflow",
+            workflow_type="test_type",
+        )
+        mock_prompt_registry.get_on_behalf.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    )
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_auto_compact_loads_only_auto_prompt(
+        self,
+        mock_count_tokens,
+        mock_get_max_context,
+        compactor,
+        mock_prompt_registry,
+        mock_prompt,
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(_large_history(), is_manual=False)
+
+        prompt_ids_called = [
+            c.args[1] for c in mock_prompt_registry.get_on_behalf.call_args_list
+        ]
+        assert COMPACTION_PROMPT_ID in prompt_ids_called
+        assert COMPACTION_PROMPT_MANUAL_ID not in prompt_ids_called
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    )
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_manual_compact_loads_only_manual_prompt(
+        self,
+        mock_count_tokens,
+        mock_get_max_context,
+        compactor,
+        mock_prompt_registry,
+        mock_prompt,
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        await compactor.compact(_large_history(), is_manual=True)
+
+        prompt_ids_called = [
+            c.args[1] for c in mock_prompt_registry.get_on_behalf.call_args_list
+        ]
+        assert COMPACTION_PROMPT_MANUAL_ID in prompt_ids_called
+        assert COMPACTION_PROMPT_ID not in prompt_ids_called
