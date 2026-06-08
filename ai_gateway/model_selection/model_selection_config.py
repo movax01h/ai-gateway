@@ -133,10 +133,15 @@ class UnitPrimitiveConfig(BaseModel):
 class ModelSelectionConfig:
     _instance: Optional["ModelSelectionConfig"] = None
 
-    def __init__(self, default_models_override: dict[str, list[str]]) -> None:
+    def __init__(
+        self,
+        default_models_override: dict[str, list[str]],
+        model_params_override: dict[str, dict] | None = None,
+    ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
+        self._model_params_override: dict[str, dict] = model_params_override or {}
 
     @classmethod
     def instance(cls) -> "ModelSelectionConfig":
@@ -148,7 +153,8 @@ class ModelSelectionConfig:
         if cls._instance is None:
             cfg = get_config()
             cls._instance = cls(
-                default_models_override=cfg.model_selection.default_models
+                default_models_override=cfg.model_selection.default_models,
+                model_params_override=cfg.model_selection.model_params,
             )
         return cls._instance
 
@@ -158,12 +164,18 @@ class ModelSelectionConfig:
             with open(MODELS_CONFIG_PATH, "r") as f:
                 config_data = yaml.safe_load(f)
 
-            self._llm_definitions = {
-                model_data["gitlab_identifier"]: TypeAdapter(
+            self._llm_definitions = {}
+            for model_data in config_data["models"]:
+                identifier = model_data["gitlab_identifier"]
+                if identifier in self._model_params_override:
+                    params_override = self._model_params_override[identifier]
+                    model_data = {
+                        **model_data,
+                        "params": {**model_data.get("params", {}), **params_override},
+                    }
+                self._llm_definitions[identifier] = TypeAdapter(
                     LLMDefinition
                 ).validate_python(model_data)
-                for model_data in config_data["models"]
-            }
 
         return self._llm_definitions
 

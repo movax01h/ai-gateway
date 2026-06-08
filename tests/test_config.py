@@ -850,6 +850,21 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
                 }
             ),
         ),
+        (
+            {
+                "AIGW_MODEL_SELECTION__MODEL_PARAMS": (
+                    '{"claude_sonnet_4_20250514_bedrock": '
+                    '{"model": "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"}}'
+                )
+            },
+            ConfigModelSelection(
+                model_params={
+                    "claude_sonnet_4_20250514_bedrock": {
+                        "model": "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"
+                    }
+                }
+            ),
+        ),
     ],
 )
 def test_config_model_selection(values: dict, expected: ConfigModelSelection):

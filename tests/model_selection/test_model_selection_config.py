@@ -222,6 +222,7 @@ def test_instance_uses_get_config_for_overrides():
     ModelSelectionConfig._instance = None
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {"test_config": ["gitlab-model-2"]}
+    mock_config.model_selection.model_params = {}
 
     with patch(
         "ai_gateway.model_selection.model_selection_config.get_config",
@@ -232,6 +233,100 @@ def test_instance_uses_get_config_for_overrides():
     assert instance._default_models_override == {"test_config": ["gitlab-model-2"]}
     unit_primitive_map = instance.get_unit_primitive_config_map()
     assert unit_primitive_map["test_config"].default_models == ["gitlab-model-2"]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_merges_params():
+    """Test that model_params_override merges params into the corresponding model definition."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={"gitlab-model-1": {"model": "overridden-model-id"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].params.model == "overridden-model-id"
+    # Other params should remain unchanged
+    assert llm_definitions["gitlab-model-1"].params.custom_llm_provider == "value1"
+    # Unaffected models should retain their original params
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_ignores_unknown_identifiers():
+    """Test that unknown gitlab_identifiers in model_params_override are silently ignored."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={"nonexistent-model": {"model": "some-arn"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    # All models should retain their original params
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_empty_dict_is_noop():
+    """Test that an empty model_params_override leaves all model params unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_none_is_noop():
+    """Test that None model_params_override leaves all model params unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override=None,
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_instance_uses_get_config_for_model_params():
+    """Test that ModelSelectionConfig.instance() reads model_params from get_config()."""
+    ModelSelectionConfig._instance = None
+    mock_config = MagicMock()
+    mock_config.model_selection.default_models = {}
+    mock_config.model_selection.model_params = {
+        "gitlab-model-1": {
+            "model": "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
+        }
+    }
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.get_config",
+        return_value=mock_config,
+    ):
+        instance = ModelSelectionConfig.instance()
+
+    assert instance._model_params_override == {
+        "gitlab-model-1": {
+            "model": "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
+        }
+    }
+    llm_definitions = instance.get_llm_definitions()
+    assert (
+        llm_definitions["gitlab-model-1"].params.model
+        == "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
+    )
 
 
 @pytest.mark.usefixtures("mock_fs")
