@@ -137,11 +137,13 @@ class ModelSelectionConfig:
         self,
         default_models_override: dict[str, list[str]],
         model_params_override: dict[str, dict] | None = None,
+        prompt_params_override: dict[str, dict] | None = None,
     ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
         self._model_params_override: dict[str, dict] = model_params_override or {}
+        self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
 
     @classmethod
     def instance(cls) -> "ModelSelectionConfig":
@@ -155,6 +157,7 @@ class ModelSelectionConfig:
             cls._instance = cls(
                 default_models_override=cfg.model_selection.default_models,
                 model_params_override=cfg.model_selection.model_params,
+                prompt_params_override=cfg.model_selection.prompt_params,
             )
         return cls._instance
 
@@ -172,6 +175,15 @@ class ModelSelectionConfig:
                     model_data = {
                         **model_data,
                         "params": {**model_data.get("params", {}), **params_override},
+                    }
+                if identifier in self._prompt_params_override:
+                    prompt_params_override = self._prompt_params_override[identifier]
+                    model_data = {
+                        **model_data,
+                        "prompt_params": {
+                            **model_data.get("prompt_params", {}),
+                            **prompt_params_override,
+                        },
                     }
                 self._llm_definitions[identifier] = TypeAdapter(
                     LLMDefinition

@@ -261,6 +261,16 @@ class ConfigModelSelection(BaseModel):
             '{"model_id": "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"}}\''
         ),
     )
+    prompt_params: dict[str, dict] = Field(
+        default_factory=dict,
+        description=(
+            "JSON object whose keys are gitlab_identifier values from models.yml, "
+            "and whose values are prompt_param dicts to be merged into the corresponding "
+            "model's prompt_params. Use this for params that must be passed at model "
+            "invocation rather than initialization. "
+            'Example: \'{"claude_sonnet_4_5_20250929_vertex": {"vertex_location": "us-east5"}}\''
+        ),
+    )
 
 
 class ConfigFeatureFlags(BaseModel):
