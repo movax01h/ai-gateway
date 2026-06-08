@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines  # large but cohesive test module for model selection config
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
@@ -316,6 +317,22 @@ def test_prompt_params_override_merges_prompt_params():
     assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
     # The model params should be untouched by a prompt_params override
     assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_sets_bedrock_model_id():
+    """Test that a Bedrock inference profile ARN can be set via prompt_params model_id."""
+    ModelSelectionConfig._instance = None
+    arn = "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={"gitlab-model-1": {"model_id": arn}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.model_id == arn
+    assert llm_definitions["gitlab-model-2"].prompt_params.model_id is None
 
 
 @pytest.mark.usefixtures("mock_fs")
