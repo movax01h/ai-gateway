@@ -252,6 +252,15 @@ class ConfigModelSelection(BaseModel):
             'Example: \'{"duo_chat": ["claude_sonnet_4_5_20250929_vertex"]}\''
         ),
     )
+    model_params: dict[str, dict] = Field(
+        default_factory=dict,
+        description=(
+            "JSON object whose keys are gitlab_identifier values from models.yml, "
+            "and whose values are param dicts to be merged into the corresponding model's params. "
+            'Example: \'{"claude_sonnet_4_20250514_bedrock": '
+            '{"model_id": "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"}}\''
+        ),
+    )
 
 
 class ConfigFeatureFlags(BaseModel):
