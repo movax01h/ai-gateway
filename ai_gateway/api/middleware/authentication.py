@@ -52,7 +52,7 @@ class MiddlewareAuthentication(Middleware):
             Ref: https://www.starlette.io/authentication/
             """
 
-            if self.path_resolver.skip_path(conn.url.path):
+            if self.path_resolver.skip_path(conn.scope["path"]):
                 return None
 
             if self.bypass_auth:
