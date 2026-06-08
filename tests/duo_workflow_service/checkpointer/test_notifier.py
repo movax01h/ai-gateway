@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+import asyncio
 from json import dumps
 from unittest.mock import MagicMock, Mock, patch
 
@@ -807,6 +809,14 @@ async def test_throttle_trailing_edge_delivers_last_chunk(checkpoint_notifier):
         # Verify the trailing task will eventually fire (without real sleep to avoid flakiness)
         assert not trailing_task.done()
 
+        # Clean up: cancel the pending trailing task so it does not leak into
+        # subsequent tests or cause the event loop to wait for it.
+        trailing_task.cancel()
+        try:
+            await trailing_task
+        except asyncio.CancelledError:
+            pass
+
 
 @pytest.mark.asyncio
 async def test_throttle_trailing_edge_replaced_by_new_chunk(checkpoint_notifier):
@@ -826,6 +836,16 @@ async def test_throttle_trailing_edge_replaced_by_new_chunk(checkpoint_notifier)
     assert second_task is not first_task
     assert first_task is not None
     assert second_task is not None
+
+    # Clean up: cancel the pending trailing task so it does not leak into
+    # subsequent tests or cause the event loop to wait for it.
+    # Note: first_task was already cancelled by the third send_event call above.
+    if second_task and not second_task.done():
+        second_task.cancel()
+        try:
+            await second_task
+        except asyncio.CancelledError:
+            pass
 
 
 @pytest.mark.asyncio
