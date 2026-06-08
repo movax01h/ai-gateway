@@ -109,6 +109,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         ui_history: Optional UI log history writer.  When provided, reasoning
             text from mid-loop ``AIMessage``s is emitted as
             ``ON_AGENT_REASONING`` entries (if that event is enabled).
+        max_context_tokens: Context-window limit of the model this agent runs on.
+            When set, it is stamped into ``agent_context_limits`` (keyed by the
+            agent's conversation-history slot) so checkpoints can report per-agent
+            context utilisation.  When ``None``, no limit is stamped and the
+            notifier falls back to the global context-window limit.
     """
 
     name: str
@@ -125,6 +130,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _error_handler: ModelErrorHandler
     _compactor: ConversationCompactor | None
     _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
+    _max_context_tokens: Optional[int]
 
     def __init__(
         self,
@@ -138,6 +144,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         compactor: ConversationCompactor | None = None,
         response_schema: Optional[Type[BaseAgentOutput]] = None,
         ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]] = None,
+        max_context_tokens: Optional[int] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -150,6 +157,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._conversation_history_key = conversation_history_key
         self._response_schema = response_schema
         self._ui_history = ui_history
+        self._max_context_tokens = max_context_tokens
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
@@ -283,9 +291,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 ui_updates = (
                     self._ui_history.pop_state_updates() if self._ui_history else {}
                 )
-                return merge_nested_dict(
+                state_update = merge_nested_dict(
                     ui_updates,
                     history_iokey.to_nested_dict(history + [completion]),
+                )
+                return merge_nested_dict(
+                    state_update,
+                    self._agent_context_limits_update(history_iokey),
                 )
             except APIStatusError as e:
                 error_message = str(e)
@@ -297,6 +309,22 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 )
 
                 await self._error_handler.handle_error(model_error)
+
+    def _agent_context_limits_update(self, history_iokey: IOKey) -> dict:
+        """Stamp ``{agent_key: max_context_tokens}`` keyed off ``history_iokey``.
+
+        Keying off the conversation_history slot (not ``self.name``) keeps the
+        limit aligned with the notifier's token-total map, including supervisor
+        subagents. Returns an empty dict when no limit was supplied.
+        """
+        if self._max_context_tokens is None:
+            return {}
+
+        limits_iokey = IOKey(
+            target="agent_context_limits",
+            subkeys=history_iokey.subkeys,
+        )
+        return limits_iokey.to_nested_dict(self._max_context_tokens)
 
     def _final_answer_validate(self, completion: AIMessage) -> list:
         if self._response_schema is None:

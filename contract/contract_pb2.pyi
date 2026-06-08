@@ -272,17 +272,34 @@ class ListFlowsResponse(_message.Message):
     configs: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
     def __init__(self, configs: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
 
+class TokenBreakdown(_message.Message):
+    __slots__ = ("total_tokens", "max_tokens")
+    TOTAL_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    total_tokens: int
+    max_tokens: int
+    def __init__(self, total_tokens: _Optional[int] = ..., max_tokens: _Optional[int] = ...) -> None: ...
+
 class NewCheckpoint(_message.Message):
-    __slots__ = ("status", "checkpoint", "goal", "errors")
+    __slots__ = ("status", "checkpoint", "goal", "errors", "agent_context_usage")
+    class AgentContextUsageEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: TokenBreakdown
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[TokenBreakdown, _Mapping]] = ...) -> None: ...
     STATUS_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
     GOAL_FIELD_NUMBER: _ClassVar[int]
     ERRORS_FIELD_NUMBER: _ClassVar[int]
+    AGENT_CONTEXT_USAGE_FIELD_NUMBER: _ClassVar[int]
     status: str
     checkpoint: str
     goal: str
     errors: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, status: _Optional[str] = ..., checkpoint: _Optional[str] = ..., goal: _Optional[str] = ..., errors: _Optional[_Iterable[str]] = ...) -> None: ...
+    agent_context_usage: _containers.MessageMap[str, TokenBreakdown]
+    def __init__(self, status: _Optional[str] = ..., checkpoint: _Optional[str] = ..., goal: _Optional[str] = ..., errors: _Optional[_Iterable[str]] = ..., agent_context_usage: _Optional[_Mapping[str, TokenBreakdown]] = ...) -> None: ...
 
 class ListDirectory(_message.Message):
     __slots__ = ("directory",)

@@ -10,7 +10,7 @@ from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.context import current_model_metadata_context
+from lib.context import ModelSizeBucket, get_model_metadata
 
 logger = structlog.stdlib.get_logger("workflow")
 
@@ -156,17 +156,29 @@ def _conversation_history_reducer(
     return reduced
 
 
-def get_model_max_context_token_limit() -> int:
-    # Returns model-specific max_context_tokens if model_metadata is available and
-    # AI_PER_MODEL_CONTEXT_WINDOW feature flag is enabled, otherwise LEGACY_MAX_CONTEXT_TOKENS.
-    model_metadata = current_model_metadata_context.get()
+def get_model_max_context_token_limit(
+    model_size: Optional[ModelSizeBucket] = None,
+) -> int:
+    # Returns the context-window limit for the given model size (None = the current
+    # default model), or LEGACY_MAX_CONTEXT_TOKENS when no model metadata is set.
+    model_metadata = get_model_metadata(model_size)
     token_limit = (
         model_metadata.llm_definition.max_context_tokens
         if model_metadata is not None
         else LEGACY_MAX_CONTEXT_TOKENS
     )
-    logger.info("Current model context window limit.", token_limit=token_limit)
+    logger.info(
+        "Model context window limit.",
+        model_size=model_size,
+        token_limit=token_limit,
+    )
     return token_limit
+
+
+def get_current_model_max_context_token_limit() -> int:
+    # Convenience wrapper for the current default model (the None = current-model
+    # convention of get_model_max_context_token_limit).
+    return get_model_max_context_token_limit(None)
 
 
 def _ui_chat_log_reducer(

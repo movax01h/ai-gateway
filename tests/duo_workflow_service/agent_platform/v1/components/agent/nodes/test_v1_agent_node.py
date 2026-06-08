@@ -491,6 +491,50 @@ class TestAgentNode:
         )
 
 
+class TestAgentNodeContextLimits:
+    """Test suite for AgentNode stamping per-agent context-window limits."""
+
+    @pytest.fixture(name="agent_node_with_limit")
+    def agent_node_with_limit_fixture(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+    ):
+        """AgentNode constructed with an explicit per-agent max_context_tokens."""
+        return AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history",
+                factory=lambda _: conversation_history_key,
+            ),
+            internal_event_client=mock_internal_event_client,
+            max_context_tokens=64000,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_stamps_agent_context_limits_keyed_by_history_slot(
+        self,
+        agent_node_with_limit,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """The resolved max is stamped into agent_context_limits under the conversation_history key."""
+        result = await agent_node_with_limit.run(base_flow_state)
+
+        assert FlowStateKeys.AGENT_CONTEXT_LIMITS in result
+        assert result[FlowStateKeys.AGENT_CONTEXT_LIMITS] == {component_name: 64000}
+
+
 class TestAgentNodeCompaction:
     """Test suite for AgentNode compaction support."""
 

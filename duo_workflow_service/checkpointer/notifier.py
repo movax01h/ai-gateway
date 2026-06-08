@@ -14,10 +14,12 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
 from duo_workflow_service.client_capabilities import is_client_capable
+from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     UiChatLog,
     WorkflowStatusEnum,
+    get_current_model_max_context_token_limit,
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
@@ -25,6 +27,18 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 log = structlog.stdlib.get_logger("notifier")
 
 CHECKPOINT_THROTTLE_SECONDS = 0.05
+
+_token_estimator = TokenEstimator()
+
+
+def _agent_token_totals(
+    conversation_history: dict[str, list[BaseMessage]],
+) -> dict[str, int]:
+    return {
+        agent: _token_estimator.count(msgs, is_complete_history=True)
+        for agent, msgs in conversation_history.items()
+        if msgs
+    }
 
 
 class _ThrottleState:
@@ -53,6 +67,8 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self.last_sent_ui_message_id: Optional[str] = None
         self.current_resp_id: Optional[str] = None
         self._throttle = _ThrottleState()
+        self._agent_token_totals: dict[str, int] = {}
+        self._agent_context_limits: dict[str, int] = {}
 
     async def send_event(
         self,
@@ -69,6 +85,10 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             self.status = state["status"]
             self.steps = state.get("plan", {}).get("steps", [])
             self.ui_chat_log = deepcopy(state["ui_chat_log"])
+            self._agent_token_totals = _agent_token_totals(
+                state.get("conversation_history") or {}
+            )
+            self._agent_context_limits = state.get("agent_context_limits") or {}
 
             collector = get_audit_collector()
             if collector and self.ui_chat_log:
@@ -161,7 +181,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
     def most_recent_new_checkpoint(self):
         recent_ui_chat_log_changes = self._pop_recent_ui_chat_log_changes()
 
-        return contract_pb2.NewCheckpoint(
+        checkpoint = contract_pb2.NewCheckpoint(
             goal=self.goal,
             status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self.status],
             checkpoint=dumps(
@@ -174,6 +194,17 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 cls=CustomEncoder,
             ),
         )
+
+        if self._agent_token_totals:
+            global_max_limit = get_current_model_max_context_token_limit()
+            for agent, total in self._agent_token_totals.items():
+                checkpoint.agent_context_usage[agent].total_tokens = total
+                # Prefer the per-agent limit; fall back to the global for legacy flows.
+                checkpoint.agent_context_usage[agent].max_tokens = (
+                    self._agent_context_limits.get(agent) or global_max_limit
+                )
+
+        return checkpoint
 
     def _pop_recent_ui_chat_log_changes(self) -> list[UiChatLog]:
         """Extract UI chat log messages that need to be sent or re-rendered.

@@ -7,7 +7,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
-from duo_workflow_service.checkpointer.notifier import UserInterface
+from duo_workflow_service.checkpointer.notifier import (
+    UserInterface,
+    _agent_token_totals,
+)
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
@@ -891,3 +894,93 @@ def test_most_recent_new_checkpoint_with_missing_message_ids(checkpoint_notifier
     )
     assert checkpoint2.checkpoint == expected_checkpoint2
     assert checkpoint_notifier.last_sent_ui_message_id == "msg-6"
+
+
+def _ai(total_tokens: int) -> AIMessage:
+    """Build a token-bearing AIMessage with the given cumulative total."""
+    return AIMessage(
+        content="response",
+        usage_metadata={
+            "input_tokens": total_tokens - 1,
+            "output_tokens": 1,
+            "total_tokens": total_tokens,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("conversation_history", "expected"),
+    [
+        ({}, {}),
+        ({"agent": []}, {}),  # empty list skipped
+        (
+            {"agent": [_ai(1234)], "executor": [_ai(5678)]},
+            {"agent": 1234, "executor": 5678},
+        ),
+    ],
+)
+def test_agent_token_totals(conversation_history, expected):
+    assert _agent_token_totals(conversation_history) == expected
+
+
+@pytest.mark.asyncio
+async def test_agent_context_usage_emission(checkpoint_notifier):
+    """Stamped per-agent limit wins; unstamped agents fall back to global; empty agents skipped."""
+    state = {
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "plan": {},
+        "conversation_history": {
+            "agent": [_ai(1234)],
+            "developer_agent": [_ai(5678)],
+            "empty_agent": [],
+        },
+        # Only "agent" runs a non-default model; developer_agent falls back.
+        "agent_context_limits": {"agent": 64_000},
+    }
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.get_current_model_max_context_token_limit",
+        return_value=200_000,
+    ):
+        await checkpoint_notifier.send_event("values", state, False)
+        checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    usage = checkpoint.agent_context_usage
+    assert "empty_agent" not in usage and len(usage) == 2
+    assert usage["agent"].total_tokens == 1234
+    assert usage["agent"].max_tokens == 64_000
+    assert usage["developer_agent"].total_tokens == 5678
+    assert usage["developer_agent"].max_tokens == 200_000
+
+
+@pytest.mark.asyncio
+async def test_agent_context_usage_reset_on_subsequent_event(checkpoint_notifier):
+    """A later values event with no conversation_history clears the map."""
+    populated_state = {
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "plan": {},
+        "conversation_history": {"agent": [_ai(1234)]},
+    }
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.get_current_model_max_context_token_limit",
+        return_value=200_000,
+    ):
+        await checkpoint_notifier.send_event("values", populated_state, False)
+        first_checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    assert "agent" in first_checkpoint.agent_context_usage
+    assert first_checkpoint.agent_context_usage["agent"].total_tokens == 1234
+
+    # Second event without conversation_history must clear the stored map.
+    reset_state = {
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "plan": {},
+    }
+    await checkpoint_notifier.send_event("values", reset_state, False)
+    second_checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    assert len(second_checkpoint.agent_context_usage) == 0

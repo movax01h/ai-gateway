@@ -41,7 +41,7 @@ def _token_count_side_effect(history_tokens: int, per_turn_tokens: int = 100):
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
 )
 @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
 class TestConversationCompactorShouldCompact:
@@ -340,7 +340,7 @@ class TestConversationCompactorShouldCompact:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
 )
 class TestConversationCompactorCompact:
     """Test suite for ConversationCompactor.compact method."""
@@ -656,7 +656,7 @@ class TestIsCompactionCallFlag:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
 )
 @patch("duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics")
 class TestCompactorPrometheusMetrics:
@@ -734,7 +734,7 @@ class TestCompactorPrometheusMetrics:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
 )
 class TestCompactorSnowplowEvents:
     """Test Snowplow event firing during compaction."""
@@ -927,7 +927,7 @@ def _large_history():
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
 )
 class TestCompactManualMode:
     """Tests for manual-mode behaviors of ConversationCompactor.compact."""
@@ -1096,7 +1096,7 @@ class TestCompactManualMode:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
 )
 class TestCompactorOperationType:
     """Tests for the operation_type carried in the Snowplow event per mode."""
@@ -1174,7 +1174,7 @@ class TestCompactorLazyPromptLoad:
 
     @pytest.mark.asyncio
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+        "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
     )
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_auto_compact_loads_only_auto_prompt(
@@ -1199,7 +1199,7 @@ class TestCompactorLazyPromptLoad:
 
     @pytest.mark.asyncio
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_max_context_token_limit"
+        "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
     )
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_manual_compact_loads_only_manual_prompt(
