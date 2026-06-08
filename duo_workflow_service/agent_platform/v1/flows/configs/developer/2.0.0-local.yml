@@ -1,0 +1,120 @@
+version: "v1"
+environment: chat
+
+# Local/interactive variant of the developer flow, tailored for chat
+# environments such as the Duo CLI. It mirrors `developer_unstable` (same
+# concise system prompt via the shared `common/developer/system` partial, no
+# subagents) but:
+#   * runs in the `chat` environment and loops through a HumanInputComponent so
+#     the user can steer the agent turn by turn,
+#   * requires tool approval, and
+#   * overrides the operating-mode and git-push blocks so the agent treats the
+#     user as present and leaves committing/pushing under the user's control.
+# No git_setup/git_unshallow steps: the user already has a full local checkout.
+
+components:
+  - name: "developer_agent"
+    type: AgentComponent
+    prompt_id: "developer_agent_prompt"
+    require_tool_approval: true
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: True
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: True
+    toolset:
+      - "read_file"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "create_file_with_contents"
+      - "edit_file"
+      - "mkdir"
+      - "todo_write"
+      - "run_command"
+      - "gitlab_api_get"
+      - "create_issue_note"
+      - "create_merge_request_note"
+      - "create_work_item_note"
+      - "create_merge_request"
+      - "update_merge_request"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  - name: "user_input"
+    type: HumanInputComponent
+    sends_response_to: "developer_agent"
+    interaction_type: "input"
+    message_template: ""
+    ui_log_events:
+      - on_user_response
+
+routers:
+  - from: "developer_agent"
+    to: "user_input"
+  - from: "user_input"
+    to: "developer_agent"
+
+flow:
+  entry_point: "developer_agent"
+  inputs:
+    - category: agent_platform_standard_context
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+
+prompts:
+  - name: "developer_agent_prompt"
+    prompt_id: "developer_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% extends 'common/developer/system/1.0.0.jinja' %}
+        {% block operating_mode_instructions -%}
+        You work interactively with a developer in their local environment. They can see your messages and reply in real time, so communicate with them directly. Ask clarifying questions when the task is ambiguous or a decision has meaningful trade-offs rather than guessing, and keep the developer in the loop as you work.
+        {%- endblock %}
+        {% block git_push_instructions -%}
+        The developer owns their local repository and decides when work lands. Edit files freely in the working tree, but do not stage, commit, push, or create merge requests unless the developer explicitly asks. When they do ask you to commit or push, never force push or rewrite history (amend, squash, rebase) without their explicit go-ahead.
+        {%- endblock %}
+        {% block environment_details -%}
+          Today's date: {{ today }}
+          {%- if project_id %}
+          Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
+          {%- endif %}
+          {%- if agent_user_environment %}
+          Execution environment: {{ agent_user_environment }}
+          {%- endif %}
+        {%- endblock %}
+      user: |
+        {{ goal }}
