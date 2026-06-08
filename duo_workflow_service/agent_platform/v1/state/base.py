@@ -34,6 +34,7 @@ __all__ = [
     "create_nested_dict",
     "merge_nested_dict_reducer",
     "conversation_history_replace_reducer",
+    "agent_context_limits_reducer",
     "BaseIOKey",
     "IOKey",
     "IOKeyTemplate",
@@ -126,11 +127,22 @@ def conversation_history_replace_reducer(
     return reduced
 
 
+def agent_context_limits_reducer(
+    current: dict[str, int], new: Optional[dict[str, int]]
+) -> dict[str, int]:
+    """Per-agent merge reducer for ``agent_context_limits``; later updates win."""
+    if not new:
+        return {**(current or {})}
+
+    return {**(current or {}), **new}
+
+
 class FlowStateKeys:
     STATUS: Literal["status"] = "status"
     CONVERSATION_HISTORY: Literal["conversation_history"] = "conversation_history"
     UI_CHAT_LOG: Final[str] = "ui_chat_log"
     CONTEXT: Final[str] = "context"
+    AGENT_CONTEXT_LIMITS: Final[str] = "agent_context_limits"
 
 
 class FlowState(TypedDict):
@@ -140,6 +152,7 @@ class FlowState(TypedDict):
     ]
     ui_chat_log: Annotated[list[UiChatLog], _ui_chat_log_reducer]
     context: Annotated[dict[str, Any], merge_nested_dict_reducer]
+    agent_context_limits: Annotated[dict[str, int], agent_context_limits_reducer]
 
 
 class BaseIOKey(BaseModel):

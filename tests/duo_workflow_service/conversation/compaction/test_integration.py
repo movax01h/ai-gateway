@@ -32,7 +32,7 @@ class TestMaybeCompactHistory:
         "duo_workflow_service.conversation.compaction.integration.apply_token_based_trim"
     )
     @patch(
-        "duo_workflow_service.conversation.compaction.integration.get_model_max_context_token_limit"
+        "duo_workflow_service.conversation.compaction.integration.get_current_model_max_context_token_limit"
     )
     async def test_compactor_none_falls_back_to_trimming(
         self,
@@ -121,7 +121,7 @@ class TestMaybeCompactHistory:
         "duo_workflow_service.conversation.compaction.integration.apply_token_based_trim"
     )
     @patch(
-        "duo_workflow_service.conversation.compaction.integration.get_model_max_context_token_limit"
+        "duo_workflow_service.conversation.compaction.integration.get_current_model_max_context_token_limit"
     )
     async def test_empty_history_with_compactor_none(
         self,
@@ -150,7 +150,7 @@ class TestMaybeCompactHistory:
         "duo_workflow_service.conversation.compaction.integration.apply_token_based_trim"
     )
     @patch(
-        "duo_workflow_service.conversation.compaction.integration.get_model_max_context_token_limit"
+        "duo_workflow_service.conversation.compaction.integration.get_current_model_max_context_token_limit"
     )
     async def test_legacy_trim_event_fires_when_trimmed(
         self,
@@ -209,7 +209,7 @@ class TestMaybeCompactHistory:
         "duo_workflow_service.conversation.compaction.integration.apply_token_based_trim"
     )
     @patch(
-        "duo_workflow_service.conversation.compaction.integration.get_model_max_context_token_limit"
+        "duo_workflow_service.conversation.compaction.integration.get_current_model_max_context_token_limit"
     )
     async def test_legacy_trim_event_does_not_fire_when_not_trimmed(
         self,

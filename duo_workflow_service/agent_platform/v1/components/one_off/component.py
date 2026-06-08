@@ -48,6 +48,7 @@ from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
+from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.tools import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
@@ -189,6 +190,9 @@ class OneOffComponent(BaseComponent):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            max_context_tokens=get_model_max_context_token_limit(
+                self.model_size_preference
+            ),
             compactor=(
                 create_conversation_compactor(
                     config=(

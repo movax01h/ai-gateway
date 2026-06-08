@@ -20,7 +20,9 @@ from duo_workflow_service.conversation.compaction.utils import (
     strip_tool_metadata,
 )
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
-from duo_workflow_service.entities.state import get_model_max_context_token_limit
+from duo_workflow_service.entities.state import (
+    get_current_model_max_context_token_limit,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.context import StarletteUser, is_gitlab_team_member
 from lib.context.model import get_model_metadata
@@ -122,7 +124,9 @@ class ConversationCompactor:
             return False
 
         token_count = self._token_estimator.count(messages, is_complete_history=True)
-        threshold = self._config.trim_threshold * get_model_max_context_token_limit()
+        threshold = (
+            self._config.trim_threshold * get_current_model_max_context_token_limit()
+        )
         log.info(
             "Checking if compact is needed.",
             message_token=token_count,
@@ -259,7 +263,7 @@ class ConversationCompactor:
         compaction_input_tokens = usage.get("input_tokens", 0) if usage else 0
         compaction_output_tokens = usage.get("output_tokens", 0) if usage else 0
 
-        max_context_tokens = get_model_max_context_token_limit()
+        max_context_tokens = get_current_model_max_context_token_limit()
         self._fire_compaction_event(
             is_manual=is_manual,
             status=CompactionStatus.SUCCESS,

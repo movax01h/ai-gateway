@@ -277,6 +277,7 @@ class Flow(AbstractWorkflow):
                 ),
                 **gitlab_service_context,
             },
+            agent_context_limits={},
         )
 
     @override

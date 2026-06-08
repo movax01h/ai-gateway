@@ -195,11 +195,22 @@ export interface ListFlowsResponse {
   configs: { [key: string]: any }[];
 }
 
+export interface TokenBreakdown {
+  total_tokens: number;
+  max_tokens: number;
+}
+
 export interface NewCheckpoint {
   status: string;
   checkpoint: string;
   goal: string;
   errors: string[];
+  agent_context_usage: { [key: string]: TokenBreakdown };
+}
+
+export interface NewCheckpoint_AgentContextUsageEntry {
+  key: string;
+  value: TokenBreakdown | undefined;
 }
 
 export interface ListDirectory {
@@ -2853,8 +2864,84 @@ export const ListFlowsResponse: MessageFns<ListFlowsResponse> = {
   },
 };
 
+function createBaseTokenBreakdown(): TokenBreakdown {
+  return { total_tokens: 0, max_tokens: 0 };
+}
+
+export const TokenBreakdown: MessageFns<TokenBreakdown> = {
+  encode(message: TokenBreakdown, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.total_tokens !== 0) {
+      writer.uint32(8).int32(message.total_tokens);
+    }
+    if (message.max_tokens !== 0) {
+      writer.uint32(16).int32(message.max_tokens);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TokenBreakdown {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTokenBreakdown();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.total_tokens = reader.int32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.max_tokens = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TokenBreakdown {
+    return {
+      total_tokens: isSet(object.total_tokens) ? globalThis.Number(object.total_tokens) : 0,
+      max_tokens: isSet(object.max_tokens) ? globalThis.Number(object.max_tokens) : 0,
+    };
+  },
+
+  toJSON(message: TokenBreakdown): unknown {
+    const obj: any = {};
+    if (message.total_tokens !== 0) {
+      obj.total_tokens = Math.round(message.total_tokens);
+    }
+    if (message.max_tokens !== 0) {
+      obj.max_tokens = Math.round(message.max_tokens);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TokenBreakdown>, I>>(base?: I): TokenBreakdown {
+    return TokenBreakdown.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TokenBreakdown>, I>>(object: I): TokenBreakdown {
+    const message = createBaseTokenBreakdown();
+    message.total_tokens = object.total_tokens ?? 0;
+    message.max_tokens = object.max_tokens ?? 0;
+    return message;
+  },
+};
+
 function createBaseNewCheckpoint(): NewCheckpoint {
-  return { status: "", checkpoint: "", goal: "", errors: [] };
+  return { status: "", checkpoint: "", goal: "", errors: [], agent_context_usage: {} };
 }
 
 export const NewCheckpoint: MessageFns<NewCheckpoint> = {
@@ -2871,6 +2958,9 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     for (const v of message.errors) {
       writer.uint32(34).string(v!);
     }
+    Object.entries(message.agent_context_usage).forEach(([key, value]) => {
+      NewCheckpoint_AgentContextUsageEntry.encode({ key: key as any, value }, writer.uint32(42).fork()).join();
+    });
     return writer;
   },
 
@@ -2913,6 +3003,17 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
           message.errors.push(reader.string());
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          const entry5 = NewCheckpoint_AgentContextUsageEntry.decode(reader, reader.uint32());
+          if (entry5.value !== undefined) {
+            message.agent_context_usage[entry5.key] = entry5.value;
+          }
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2928,6 +3029,12 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
       checkpoint: isSet(object.checkpoint) ? globalThis.String(object.checkpoint) : "",
       goal: isSet(object.goal) ? globalThis.String(object.goal) : "",
       errors: globalThis.Array.isArray(object?.errors) ? object.errors.map((e: any) => globalThis.String(e)) : [],
+      agent_context_usage: isObject(object.agent_context_usage)
+        ? Object.entries(object.agent_context_usage).reduce<{ [key: string]: TokenBreakdown }>((acc, [key, value]) => {
+          acc[key] = TokenBreakdown.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2945,6 +3052,15 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     if (message.errors?.length) {
       obj.errors = message.errors;
     }
+    if (message.agent_context_usage) {
+      const entries = Object.entries(message.agent_context_usage);
+      if (entries.length > 0) {
+        obj.agent_context_usage = {};
+        entries.forEach(([k, v]) => {
+          obj.agent_context_usage[k] = TokenBreakdown.toJSON(v);
+        });
+      }
+    }
     return obj;
   },
 
@@ -2957,6 +3073,96 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     message.checkpoint = object.checkpoint ?? "";
     message.goal = object.goal ?? "";
     message.errors = object.errors?.map((e) => e) || [];
+    message.agent_context_usage = Object.entries(object.agent_context_usage ?? {}).reduce<
+      { [key: string]: TokenBreakdown }
+    >((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = TokenBreakdown.fromPartial(value);
+      }
+      return acc;
+    }, {});
+    return message;
+  },
+};
+
+function createBaseNewCheckpoint_AgentContextUsageEntry(): NewCheckpoint_AgentContextUsageEntry {
+  return { key: "", value: undefined };
+}
+
+export const NewCheckpoint_AgentContextUsageEntry: MessageFns<NewCheckpoint_AgentContextUsageEntry> = {
+  encode(message: NewCheckpoint_AgentContextUsageEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      TokenBreakdown.encode(message.value, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): NewCheckpoint_AgentContextUsageEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNewCheckpoint_AgentContextUsageEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = TokenBreakdown.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NewCheckpoint_AgentContextUsageEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? TokenBreakdown.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: NewCheckpoint_AgentContextUsageEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = TokenBreakdown.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<NewCheckpoint_AgentContextUsageEntry>, I>>(
+    base?: I,
+  ): NewCheckpoint_AgentContextUsageEntry {
+    return NewCheckpoint_AgentContextUsageEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<NewCheckpoint_AgentContextUsageEntry>, I>>(
+    object: I,
+  ): NewCheckpoint_AgentContextUsageEntry {
+    const message = createBaseNewCheckpoint_AgentContextUsageEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TokenBreakdown.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };

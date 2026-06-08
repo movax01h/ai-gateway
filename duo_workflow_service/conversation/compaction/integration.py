@@ -6,7 +6,9 @@ from ai_gateway.config import get_config
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.conversation.compaction.compactor import ConversationCompactor
 from duo_workflow_service.conversation.trimmer import apply_token_based_trim
-from duo_workflow_service.entities.state import get_model_max_context_token_limit
+from duo_workflow_service.entities.state import (
+    get_current_model_max_context_token_limit,
+)
 from lib.context import is_gitlab_team_member
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import InternalEventAdditionalProperties
@@ -51,7 +53,7 @@ async def maybe_compact_history(
     trim_result = apply_token_based_trim(
         messages=history,
         component_name=agent_name,
-        max_context_tokens=get_model_max_context_token_limit(),
+        max_context_tokens=get_current_model_max_context_token_limit(),
     )
 
     if trim_result.was_trimmed:

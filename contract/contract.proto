@@ -180,11 +180,17 @@ message ListFlowsResponse {
   repeated google.protobuf.Struct configs = 1;
 }
 
+message TokenBreakdown {
+    int32 total_tokens = 1;
+    int32 max_tokens = 2;
+}
+
 message NewCheckpoint {
     string status = 1;
     string checkpoint = 2;
     string goal = 3;
     repeated string errors = 4;
+    map<string, TokenBreakdown> agent_context_usage = 5;
 }
 
 message ListDirectory {
