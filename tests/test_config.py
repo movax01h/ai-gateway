@@ -865,6 +865,18 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
                 }
             ),
         ),
+        (
+            {
+                "AIGW_MODEL_SELECTION__PROMPT_PARAMS": (
+                    '{"claude_sonnet_4_5_20250929_vertex": {"vertex_location": "us-east5"}}'
+                )
+            },
+            ConfigModelSelection(
+                prompt_params={
+                    "claude_sonnet_4_5_20250929_vertex": {"vertex_location": "us-east5"}
+                }
+            ),
+        ),
     ],
 )
 def test_config_model_selection(values: dict, expected: ConfigModelSelection):

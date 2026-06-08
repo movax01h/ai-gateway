@@ -223,6 +223,7 @@ def test_instance_uses_get_config_for_overrides():
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {"test_config": ["gitlab-model-2"]}
     mock_config.model_selection.model_params = {}
+    mock_config.model_selection.prompt_params = {}
 
     with patch(
         "ai_gateway.model_selection.model_selection_config.get_config",
@@ -300,11 +301,84 @@ def test_model_params_override_none_is_noop():
 
 
 @pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_merges_prompt_params():
+    """Test that prompt_params_override merges into the corresponding model definition."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={"gitlab-model-1": {"vertex_location": "us-east5"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location == "us-east5"
+    # Unaffected models should retain their original (empty) prompt_params
+    assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
+    # The model params should be untouched by a prompt_params override
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_ignores_unknown_identifiers():
+    """Test that unknown gitlab_identifiers in prompt_params_override are silently ignored."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={"nonexistent-model": {"vertex_location": "us-east5"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location is None
+    assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_none_is_noop():
+    """Test that None prompt_params_override leaves all prompt_params unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override=None,
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location is None
+    assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_instance_uses_get_config_for_prompt_params():
+    """Test that ModelSelectionConfig.instance() reads prompt_params from get_config()."""
+    ModelSelectionConfig._instance = None
+    mock_config = MagicMock()
+    mock_config.model_selection.default_models = {}
+    mock_config.model_selection.model_params = {}
+    mock_config.model_selection.prompt_params = {
+        "gitlab-model-1": {"vertex_location": "us-east5"}
+    }
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.get_config",
+        return_value=mock_config,
+    ):
+        instance = ModelSelectionConfig.instance()
+
+    assert instance._prompt_params_override == {
+        "gitlab-model-1": {"vertex_location": "us-east5"}
+    }
+    llm_definitions = instance.get_llm_definitions()
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location == "us-east5"
+
+
+@pytest.mark.usefixtures("mock_fs")
 def test_instance_uses_get_config_for_model_params():
     """Test that ModelSelectionConfig.instance() reads model_params from get_config()."""
     ModelSelectionConfig._instance = None
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {}
+    mock_config.model_selection.prompt_params = {}
     mock_config.model_selection.model_params = {
         "gitlab-model-1": {
             "model": "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
