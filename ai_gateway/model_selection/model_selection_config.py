@@ -38,6 +38,10 @@ class PromptParams(BaseModel):
     vertex_location: str | None = None
     cache_control_injection_points: list[dict] | None = None
     context_management: dict | None = None
+    # Bedrock expects the inference profile / model ARN to be passed at
+    # invocation time via model_id, not at client initialization.
+    # See https://docs.litellm.ai/docs/providers/bedrock#set-via-model_id
+    model_id: str | None = None
 
 
 class BaseLLMDefinition(BaseModel):
