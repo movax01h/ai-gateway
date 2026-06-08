@@ -51,7 +51,7 @@ class InternalEventMiddleware:
 
         request = Request(scope)
 
-        if self.path_resolver.skip_path(request.url.path):
+        if self.path_resolver.skip_path(scope["path"]):
             await self.app(scope, receive, send)
             return
 
@@ -139,7 +139,7 @@ class InternalEventMiddleware:
             deployment_type=request.headers.get(X_GITLAB_DEPLOYMENT_TYPE),
             organization_id=organization_id,
         )
-        validate_event_context(context, endpoint=request.url.path)
+        validate_event_context(context, endpoint=scope["path"])
 
         current_event_context.set(context)
         tracked_internal_events.set(set())

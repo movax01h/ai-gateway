@@ -50,7 +50,7 @@ class AccessLogMiddleware:
 
         request = Request(scope)
 
-        if self.path_resolver.skip_path(request.url.path):
+        if self.path_resolver.skip_path(scope["path"]):
             await self.app(scope, receive, send)
             return
 
