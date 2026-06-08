@@ -25,6 +25,10 @@ Use the value inside `<source_branch_name>` from the user prompt as the source b
   merge requests. When those rules condition on the source of the Fix Pipeline run, read the
   `<fix_pipeline_source>` block in the user prompt — it contains exactly one of: `merge_request`,
   `default_branch`, or `branch`. Otherwise, do not pass a "labels" parameter.
+
+  Include the following in the footer of the description:
+
+  Have feedback on Fix Pipeline? [Let us know here](https://gitlab.com/gitlab-org/gitlab/-/work_items/601991).
 </step>
 
 {% if merge_request_url %}
