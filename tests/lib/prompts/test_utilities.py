@@ -212,6 +212,57 @@ class TestSecuritySuffix:
         assert results[0] != results[1]
 
 
+class TestPromptTemplateToMessagesListSupport:
+    """Tests for list[str] values in prompt_template_to_messages."""
+
+    @pytest.fixture(autouse=True)
+    def mock_security_suffix(self):
+        with patch("lib.prompts.utilities._security_suffix", return_value="test"):
+            yield
+
+    def test_list_system_expands_to_multiple_messages(self):
+        """A list value for 'system' produces one message per element."""
+        tpl = {"system": ["Static part", "Dynamic part"], "user": "Hello"}
+
+        result = prompt_template_to_messages(tpl)
+
+        assert result[0] == ("system", render_security_block() + "Static part")
+        assert result[1] == ("system", "Dynamic part")
+        assert result[2] == ("user", "Hello")
+
+    def test_single_element_list_behaves_like_string(self):
+        """A single-element list produces the same output as a plain string."""
+        tpl_list = {"system": ["Only one"], "user": "Hi"}
+        tpl_str = {"system": "Only one", "user": "Hi"}
+
+        result_list = prompt_template_to_messages(tpl_list)
+        result_str = prompt_template_to_messages(tpl_str)
+
+        assert result_list == result_str
+
+    def test_list_for_non_system_role_expands_correctly(self):
+        """A list value for a non-system role expands without security injection."""
+        tpl = {"user": ["Turn 1", "Turn 2"]}
+
+        result = prompt_template_to_messages(tpl)
+
+        assert result[0] == ("user", "Turn 1")
+        assert result[1] == ("user", "Turn 2")
+
+    def test_total_message_count_with_list_system(self):
+        """Correct total number of messages when system is a two-element list."""
+        tpl = {
+            "system": ["Part 1", "Part 2"],
+            "placeholder": "history",
+            "user": "Hello",
+        }
+
+        result = prompt_template_to_messages(tpl)
+
+        assert len(result) == 4
+        assert isinstance(result[2], MessagesPlaceholder)
+
+
 class TestAutoAddHistoryPlaceholder:
     """Tests for the auto-add history placeholder behavior.
 

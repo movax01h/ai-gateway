@@ -353,3 +353,51 @@ class TestGetRequiredVariables:
         mock_shared_registry.get_required_variables.assert_called_once_with(
             "my_prompt", "^1.0.0"
         )
+
+    def test_list_system_extracts_variables_from_all_items(self, in_memory_registry):
+        """Variables are collected from every element in a list-valued system field."""
+        in_memory_registry.register_prompt(
+            "list_prompt",
+            {
+                "prompt_template": {
+                    "system": [
+                        "Static: {{ static_var }}",
+                        "Dynamic: {{ dynamic_var }}",
+                    ]
+                }
+            },
+        )
+        result = in_memory_registry.get_required_variables(
+            "list_prompt", prompt_version=None
+        )
+        assert result == {"static_var", "dynamic_var"}
+
+    def test_list_system_with_no_variables_returns_empty_set(self, in_memory_registry):
+        """A list-valued system field with no Jinja2 variables returns an empty set."""
+        in_memory_registry.register_prompt(
+            "static_list_prompt",
+            {
+                "prompt_template": {
+                    "system": ["No variables here", "Or here either"],
+                }
+            },
+        )
+        result = in_memory_registry.get_required_variables(
+            "static_list_prompt", prompt_version=None
+        )
+        assert result == set()
+
+    def test_list_with_duplicate_variables_deduplicated(self, in_memory_registry):
+        """Variables appearing in multiple list items are deduplicated in the result."""
+        in_memory_registry.register_prompt(
+            "dup_list_prompt",
+            {
+                "prompt_template": {
+                    "system": ["Hello {{ name }}", "Goodbye {{ name }}"],
+                }
+            },
+        )
+        result = in_memory_registry.get_required_variables(
+            "dup_list_prompt", prompt_version=None
+        )
+        assert result == {"name"}

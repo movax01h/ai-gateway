@@ -20,7 +20,7 @@ class PromptConfig(BaseModel):
     name: str
     model: ModelConfig = ModelConfig()
     unit_primitive: GitLabUnitPrimitive
-    prompt_template: dict[str, str]
+    prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
 
@@ -33,7 +33,7 @@ class InMemoryPromptConfig(BaseModel):
     name: str
     model: ModelConfig | None = None
     unit_primitives: list[GitLabUnitPrimitive]
-    prompt_template: dict[str, str]
+    prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
 

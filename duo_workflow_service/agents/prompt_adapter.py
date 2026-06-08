@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Optional, override
+from typing import Any, Optional, cast, override
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue, PromptValue
@@ -85,7 +85,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
 
             if isinstance(system_template_override, str):
                 base_agentic_chat_system = jinja2_formatter(
-                    self.prompt_template["system_static"],
+                    cast(str, self.prompt_template["system_static"]),
                     system_template_override=None,
                     **static_template_context,
                 )
@@ -99,7 +99,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                 )
 
             static_content_text = jinja2_formatter(
-                self.prompt_template["system_static"],
+                cast(str, self.prompt_template["system_static"]),
                 system_template_override=system_template_override,
                 **static_template_context,
             )
@@ -139,7 +139,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             )
 
             dynamic_content = jinja2_formatter(
-                self.prompt_template["system_dynamic"],
+                cast(str, self.prompt_template["system_dynamic"]),
                 current_date=datetime.now().strftime("%Y-%m-%d"),
                 current_time=datetime.now().strftime("%H:%M:%S"),
                 current_timezone=datetime.now().astimezone().tzname(),
@@ -172,7 +172,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                 messages.append(
                     HumanMessage(
                         jinja2_formatter(
-                            self.prompt_template["user"],
+                            cast(str, self.prompt_template["user"]),
                             message=m,
                             slash_command=slash_command,
                         )

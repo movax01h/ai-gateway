@@ -1603,6 +1603,82 @@ class TestGetRequiredVariables:
                 "unknown_step", "1.0.0", is_graph_node=False
             )
 
+    def test_list_system_extracts_variables_from_all_items(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables from every item in a list-valued system field are collected."""
+        path = self._PROMPT_BASE_DIR / "test/list_system" / "base" / "1.0.0.yml"
+        fs.create_file(
+            path,
+            contents="\n".join(
+                [
+                    "---",
+                    "name: List system prompt",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  system:",
+                    "    - 'Static: {{ static_var }}'",
+                    "    - 'Dynamic: {{ dynamic_var }}'",
+                    "",
+                ]
+            ),
+        )
+        result = registry.get_required_variables(
+            "test/list_system", prompt_version="^1.0.0"
+        )
+        assert result == {"static_var", "dynamic_var"}
+
+    def test_list_system_with_no_variables_returns_empty_set(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """A list-valued system field with no Jinja2 variables returns an empty set."""
+        path = self._PROMPT_BASE_DIR / "test/list_no_vars" / "base" / "1.0.0.yml"
+        fs.create_file(
+            path,
+            contents="\n".join(
+                [
+                    "---",
+                    "name: List no vars",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  system:",
+                    "    - 'Static content only'",
+                    "    - 'More static content'",
+                    "",
+                ]
+            ),
+        )
+        result = registry.get_required_variables(
+            "test/list_no_vars", prompt_version="^1.0.0"
+        )
+        assert result == set()
+
+    def test_mixed_string_and_list_fields_extract_all_variables(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables from both str and list[str] fields are combined in the result."""
+        path = self._PROMPT_BASE_DIR / "test/mixed_fields" / "base" / "1.0.0.yml"
+        fs.create_file(
+            path,
+            contents="\n".join(
+                [
+                    "---",
+                    "name: Mixed fields prompt",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  system:",
+                    "    - 'Part1: {{ sys_var }}'",
+                    "    - 'Part2: {{ sys_var2 }}'",
+                    "  user: 'Hello {{ user_var }}'",
+                    "",
+                ]
+            ),
+        )
+        result = registry.get_required_variables(
+            "test/mixed_fields", prompt_version="^1.0.0"
+        )
+        assert result == {"sys_var", "sys_var2", "user_var"}
+
 
 # Prompt IDs that are exclusively invoked as DAP graph nodes (is_graph_node=True).
 # is_graph_node=True bypasses feature_setting_for_prompt_id entirely and provides

@@ -209,6 +209,9 @@ def _validate_flow_config_prompts(
             if role not in prompt_text_roles:
                 continue
 
+            if isinstance(text, list):
+                text = "\n".join(text)
+
             if text and isinstance(text, str):
                 try:
                     # Validate using PromptSecurity with validate_only=True.
