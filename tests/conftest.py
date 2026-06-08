@@ -385,7 +385,7 @@ def prompt_config_fixture(
     prompt_name: str,
     model_config: ModelConfig,
     unit_primitive: GitLabUnitPrimitive,
-    prompt_template: dict[str, str],
+    prompt_template: dict[str, str | list[str]],
     prompt_params: PromptParams,
 ):
     return PromptConfig(

@@ -458,7 +458,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     def _build_model_kwargs(
         params: PromptParams | None,
         model_metadata: Optional[TypeModelMetadata],
-        prompt_template: dict[str, str] | None = None,
+        prompt_template: dict[str, str | list[str]] | None = None,
         model_class_provider: str | None = None,
     ) -> MutableMapping[str, Any]:
         model_kwargs = {

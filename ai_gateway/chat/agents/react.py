@@ -146,7 +146,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
 
         if "system" in self.prompt_template:
             content = jinja2_formatter(
-                self.prompt_template["system"],
+                cast(str, self.prompt_template["system"]),
                 tools=input.tools,
                 unavailable_resources=input.unavailable_resources,
                 current_date=input.current_date,
@@ -167,7 +167,9 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
             if m.role is Role.USER:
                 messages.append(
                     HumanMessage(
-                        jinja2_formatter(self.prompt_template["user"], message=m)
+                        jinja2_formatter(
+                            cast(str, self.prompt_template["user"]), message=m
+                        )
                     )
                 )
             elif m.role is Role.ASSISTANT:
@@ -176,7 +178,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
                 messages.append(
                     AIMessage(
                         jinja2_formatter(
-                            self.prompt_template["assistant"],
+                            cast(str, self.prompt_template["assistant"]),
                             agent_scratchpad=m.agent_scratchpad,
                             final_answer=m.content,
                         )
@@ -192,7 +194,7 @@ class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
             messages.append(
                 AIMessage(
                     jinja2_formatter(
-                        self.prompt_template["assistant"],
+                        cast(str, self.prompt_template["assistant"]),
                         agent_scratchpad=input.agent_scratchpad,
                     )
                 )
