@@ -506,7 +506,7 @@ graph TD;
     fix_pipeline_next_context -.->|add_comment| fix_pipeline_add_comment;
     fix_pipeline_next_context -.->|create_plan| fix_pipeline_next_checkout_existing_branch;
     fix_pipeline_next_context -.->|no_action| __end__;
-    fix_pipeline_next_context -.->|default_route| fix_pipeline_add_comment;
+    fix_pipeline_next_context -.->|default_route| __end__;
     fix_pipeline_next_checkout_existing_branch --> fix_pipeline_next_execution;
     fix_pipeline_add_comment --> __end__;
     fix_pipeline_next_execution --> fix_pipeline_next_check_diff;

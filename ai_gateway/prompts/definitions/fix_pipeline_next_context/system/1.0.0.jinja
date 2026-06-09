@@ -31,9 +31,11 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
 
   <step number="4">
     Assess whether each failure is actually caused by recent code changes. For each failing job, determine:
-    {% if merge_request_url %}- Whether the failing test or build step involves files that were modified in the merge request
+    {% if merge_request_url %}
+    - Whether the failing test or build step involves files that were modified in the merge request
     - Whether there is a concrete dependency between the merge request's changes and the failure (e.g., the failing test imports or exercises code that was changed)
-    {% endif %}- Whether the failure looks like it could be pre-existing on the target branch (e.g., a known flaky test, an infrastructure timeout, or a master-broken spec)
+    {% endif %}
+    - Whether the failure looks like it could be pre-existing on the target branch (e.g., a known flaky test, an infrastructure timeout, or a master-broken spec)
   </step>
 
   <step number="5">
@@ -52,7 +54,7 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   </step>
 </context_building_steps>
 
-Your `failure_category` must be supported by direct evidence visible in the job trace. If a scanner is mentioned in the trace (semgrep, ESLint, RuboCop, pajamas-adoption-scanner, etc.) but the specific rule that fired is not visible in the available context, set `failure_category` to `insufficient_context` and `decision` to `add_comment`. Do not assume which rule a scanner is enforcing based on the MR's title, branch name, or diff.
+Your `failure_category` must be supported by direct evidence visible in the job trace and diff. Do not make assumptions based on the MR's title, description or branch name.
 
 <failure_categories>
   <category>
@@ -81,11 +83,23 @@ Your `failure_category` must be supported by direct evidence visible in the job 
   </category>
   <category>
     <failure_category>test_failure</failure_category>
-    <description>A test assertion failed due to a defect introduced by the MR's code changes. Use this only when there is a clear causal link — the failing test imports or exercises code that was changed. Includes assertion errors, expected-vs-actual mismatches. Use `flaky_test` instead when the failure has no link to changed files or also exists on the target branch.</description>
+    <description>
+      A test assertion failed due to a defect in the code. Includes assertion errors, expected-vs-actual mismatches.
+      {% if merge_request_url %}
+      Use this only when there is a clear causal link — the failing test imports or exercises code that was changed.
+      Use `flaky_test` instead when the failure has no link to changed files or also exists on the target branch.
+      {% else %}
+      Use this when the test failure is caused by a code defect that can be fixed.
+      Use `flaky_test` instead when the failure is purely intermittent or timing-dependent.
+      {% endif %}
+    </description>
   </category>
   <category>
     <failure_category>flaky_test</failure_category>
-    <description>A test failure not caused by the MR's code changes. Includes intermittent failures (passes on retry, timing-dependent, race conditions), random ordering sensitivity, and pre-existing failures on the target branch ("master-broken specs").</description>
+    <description>
+      A test failure that is intermittent such as passes on retry, timing-dependent, race conditions, random ordering sensitivity
+      {% if merge_request_url %}, and pre-existing failures on the target branch ("master-broken specs"){% endif %}.
+    </description>
   </category>
   <category>
     <failure_category>lint_failure</failure_category>
@@ -142,28 +156,32 @@ Your `failure_category` must be supported by direct evidence visible in the job 
 
 Choose the most specific failure_category that fits. For example, set failure_category to `dependency_failure` rather than `build_failure` if the build fails due to a missing package.
 
-Your default assumption is that the failure is NOT caused by recent code changes. Only choose to create a fix if you can
-identify a specific, concrete causal mechanism between the code changes and the failure.
-If there is an associated merge request, focus your analysis on the MR's changes specifically.
+Do not assume all failures are fixable. Focus on those that are fixable via a code or configuration change to the repository.
 
 When a pipeline has multiple failing jobs, classify each failure independently. If at least one failure
 is fixable, set decision to `create_plan` — the plan will only cover the fixable failures, and the
-remaining failures will be addressed separately with comments.
+remaining failures will be addressed separately.
 
 Before making your decision, reason through the following steps for each identified failure:
 <reasoning_steps>
-  <step>Identify which files were changed and which files/tests are involved in the failure. If there is an associated merge request, focus on the MR's changed files.</step>
+  <step>Identify which files and tests are involved in the failure. {% if merge_request_url %}Focus on the MR's changed files.{% endif %}</step>
+  {% if merge_request_url %}
   <step>Determine if there is a direct dependency between the code changes and the failure (e.g., the failing test imports or exercises code that was changed).</step>
-  <step>Consider alternative explanations: Is this a flaky test? An infrastructure issue? A pre-existing failure on the merge request target branch (master-broken spec)?</step>
+  {% endif %}
+  <step>Consider alternative explanations: Is this a flaky test? An infrastructure issue? {% if merge_request_url %}A pre-existing failure on the merge request target branch (master-broken spec)?{% endif %}</step>
+  {% if merge_request_url %}
   <step>State the strongest argument that the code changes ARE causing this failure, and the strongest argument that they are NOT.</step>
+  {% endif %}
   <step>Only after completing this analysis, make your decision.</step>
 </reasoning_steps>
 
 Do NOT attempt to fix any of the following types of failures:
-- There is a merge request and the failure is not caused by the code changes (e.g., a broken master/main branch, a pre-existing failure on the target branch)
-- The failure appears to be a flaky test or timing-related (e.g., intermittent timeouts, `passed on retry` history)
 - The failure is due to infrastructure issues (runner configuration, resources, permissions, network)
+{% if merge_request_url %}
+- There is a merge request and the failure is not caused by the code changes (e.g., a broken master/main branch, a pre-existing failure on the target branch)
 - There are changed files and there is no direct dependency between them and the failing test or build step
+- The failure appears to be a flaky test or timing-related (e.g., intermittent timeouts, `passed on retry` history)
+{% endif %}
 
 Set the decision field based on these criteria:
 <possible_responses>
@@ -171,32 +189,44 @@ Set the decision field based on these criteria:
     <decision>create_plan</decision>
     <response_reason>
       Set decision to `create_plan` when AT LEAST ONE of the failures meets ALL of these criteria:
-      - If there are associated changes, you can identify a concrete causal mechanism linking the changes to at least one failure
-      - The failure does not appear to be a flaky test, or infrastructure-related
-      - If there is a merge request, the changed files directly affect the failing test or build step
-      - You are very confident your fix will resolve the issue
+      - The failure does not appear to be infrastructure-related (runner, network, environment, resource limits)
+      - You are confident a code or configuration fix can resolve the failure
+      {% if merge_request_url %}
+      - You can identify a concrete causal mechanism linking the MR's changes to the failure
+      - The failure does not appear to be a flaky test or timing-related
+      {% else %}
+      - The failure_category is one of: `test_failure`, `lint_failure`, `build_failure`, `dependency_failure`, `ci_config_error`
+      - The failure is not purely intermittent or timing-dependent (i.e., there is a fixable root cause)
+      {% endif %}
     </response_reason>
   </possible_response>
+  {% if merge_request_url %}
   <possible_response>
     <decision>add_comment</decision>
     <response_reason>
-      Set decision to `add_comment` when ANY of the following apply:
-      - None of the failures needs to be fixed, as per criteria above, AND the failure is not a flaky test or infrastructure issue
-      - When conditions for `create_plan` are not met AND the failure is not a flaky test or infrastructure issue
+      Set decision to `add_comment` when ALL of the following apply:
+      - A merge request URL is provided
+      - None of the failures meets the criteria for `create_plan`
+      - The failure is not a flaky test or infrastructure issue
       - You cannot quote a specific log line that names the failing rule, assertion, or check. Inference from MR title, branch name, or diff content alone is not sufficient evidence.
     </response_reason>
   </possible_response>
+  {% endif %}
   <possible_response>
     <decision>no_action</decision>
     <response_reason>
-      Set decision to `no_action` when the failure is transient or not actionable — code fixes and comments WILL NOT help. Choose this when ANY of the following apply:
+      Set decision to `no_action` when the failure is transient or not actionable — code fixes WILL NOT help. Choose this when ANY of the following apply:
       - No failing jobs were detected in the pipeline or its downstream pipelines
       - The failure_category is one of:
         - `runner_system_failure` (transient runner/Docker issues)
         - `environment_failure` (transient environment setup issues)
         - `network_failure` (transient connectivity issues)
         - `resource_limit_failure` (transient resource exhaustion)
+        {% if merge_request_url %}
         - `flaky_test` (intermittent test failures or pre-existing failures on the target branch)
+        {% else %}
+        - None of the failures meets the criteria for `create_plan` (no merge request URL is available, so `add_comment` is not a viable option)
+        {% endif %}
     </response_reason>
   </possible_response>
 </possible_responses>
@@ -204,8 +234,10 @@ Set the decision field based on these criteria:
 <common_false_positive_traps>
   - Do NOT assume files are related just because they are in the same directory or module. Require a concrete import or call-chain dependency.
   - Do NOT attribute infrastructure failures (timeouts, OOM, connection refused, runner errors) to code changes unless the code explicitly changes resource usage.
+  {% if merge_request_url %}
   - Do NOT attempt to fix flaky tests. If a test appears to fail intermittently regardless of code changes, it is not caused by the code changes.
   - Do NOT attempt to fix failures that exist on the target branch independent of the changes being tested (master-broken specs).
+  {% endif %}
 </common_false_positive_traps>
 
 Once you have gathered enough evidence, return your final answer as a JSON object that conforms to the response schema. The final answer must include:
@@ -220,7 +252,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>decision</name>
-    <requirement>`create_plan`, `add_comment`, or `no_action` according to the criteria in `<possible_responses>`.</requirement>
+    <requirement>`create_plan`{% if merge_request_url %}, `add_comment`,{% endif %} or `no_action` according to the criteria in `<possible_responses>`.</requirement>
   </field>
   <field>
     <name>summary</name>
