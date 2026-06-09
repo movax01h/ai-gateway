@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+import json
 from datetime import datetime, timezone
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
@@ -132,6 +133,200 @@ async def test_run(chat_agent, input):
         )
     ]
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_run_tags_agent_message_after_tier_access_denied(chat_agent, input):
+    tier_denied_payload = json.dumps(
+        {
+            "error": "tier_access_denied",
+            "required_plan": "ultimate",
+            "message": "Feature requires Ultimate.",
+            "link_url": "https://docs.gitlab.com/user/duo_agent_platform/",
+        }
+    )
+    input["conversation_history"]["Chat Agent"] = [
+        HumanMessage(content="list vulnerabilities"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "list_vulnerabilities",
+                    "args": {},
+                    "id": "call_1",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        ToolMessage(content=tier_denied_payload, tool_call_id="call_1"),
+    ]
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(
+            content="This feature requires **GitLab Ultimate**.",
+            id="agent-msg-tier",
+        )
+    )
+
+    result = await chat_agent.run(input)
+
+    assert len(result["ui_chat_log"]) == 1
+    log_entry = result["ui_chat_log"][0]
+    assert log_entry["message_type"] == MessageTypeEnum.AGENT
+    assert log_entry["message_sub_type"] == "tier_access_denied"
+    assert log_entry["required_plan"] == "ultimate"
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_tag_agent_message_without_tier_access_denied(
+    chat_agent, input
+):
+    input["conversation_history"]["Chat Agent"] = [
+        HumanMessage(content="list issues"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "list_issues",
+                    "args": {},
+                    "id": "call_2",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        ToolMessage(content='{"issues": []}', tool_call_id="call_2"),
+    ]
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(content="No issues found.", id="agent-msg-ok")
+    )
+
+    result = await chat_agent.run(input)
+
+    assert len(result["ui_chat_log"]) == 1
+    log_entry = result["ui_chat_log"][0]
+    assert log_entry["message_sub_type"] is None
+    assert "required_plan" not in log_entry
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_tag_when_tier_denied_in_prior_turn(chat_agent, input):
+    tier_denied_payload = json.dumps(
+        {
+            "error": "tier_access_denied",
+            "required_plan": "ultimate",
+        }
+    )
+    # tier_denied happened in a prior turn; current turn has no tool calls
+    input["conversation_history"]["Chat Agent"] = [
+        HumanMessage(content="list vulnerabilities"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "list_vulnerabilities",
+                    "args": {},
+                    "id": "call_old",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        ToolMessage(content=tier_denied_payload, tool_call_id="call_old"),
+        AIMessage(content="Needs Ultimate.", id="agent-prior"),
+        HumanMessage(content="ok thanks, anything else?"),
+    ]
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(content="Sure, ask away.", id="agent-msg-followup")
+    )
+
+    result = await chat_agent.run(input)
+
+    assert len(result["ui_chat_log"]) == 1
+    log_entry = result["ui_chat_log"][0]
+    assert log_entry["message_sub_type"] is None
+    assert "required_plan" not in log_entry
+
+
+@pytest.mark.asyncio
+async def test_run_tags_agent_message_when_tier_denied_not_last_in_batch(
+    chat_agent, input
+):
+    tier_denied_payload = json.dumps(
+        {
+            "error": "tier_access_denied",
+            "required_plan": "ultimate",
+        }
+    )
+    # Multi-tool batch: tier_denied tool ran before a successful tool in the
+    # same turn. The tier_denied ToolMessage is not the last message.
+    input["conversation_history"]["Chat Agent"] = [
+        HumanMessage(content="list vulnerabilities and list issues"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "list_vulnerabilities",
+                    "args": {},
+                    "id": "call_tier",
+                    "type": "tool_call",
+                },
+                {
+                    "name": "list_issues",
+                    "args": {},
+                    "id": "call_ok",
+                    "type": "tool_call",
+                },
+            ],
+        ),
+        ToolMessage(content=tier_denied_payload, tool_call_id="call_tier"),
+        ToolMessage(content='{"issues": []}', tool_call_id="call_ok"),
+    ]
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(
+            content="Vulnerabilities require **Ultimate**. No issues found.",
+            id="agent-msg-mixed",
+        )
+    )
+
+    result = await chat_agent.run(input)
+
+    assert len(result["ui_chat_log"]) == 1
+    log_entry = result["ui_chat_log"][0]
+    assert log_entry["message_type"] == MessageTypeEnum.AGENT
+    assert log_entry["message_sub_type"] == "tier_access_denied"
+    assert log_entry["required_plan"] == "ultimate"
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_tag_when_tier_denied_content_is_malformed_json(
+    chat_agent, input
+):
+    input["conversation_history"]["Chat Agent"] = [
+        HumanMessage(content="list vulnerabilities"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "list_vulnerabilities",
+                    "args": {},
+                    "id": "call_bad",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        ToolMessage(
+            content="tier_access_denied: not valid json",
+            tool_call_id="call_bad",
+        ),
+    ]
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(content="Something went wrong.", id="agent-msg-bad")
+    )
+
+    result = await chat_agent.run(input)
+
+    assert len(result["ui_chat_log"]) == 1
+    log_entry = result["ui_chat_log"][0]
+    assert log_entry["message_sub_type"] is None
+    assert "required_plan" not in log_entry
 
 
 class TestChatAgentToolCallMessageOrdering:

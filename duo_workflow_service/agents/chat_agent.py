@@ -1,5 +1,6 @@
+import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import structlog
@@ -18,6 +19,7 @@ from duo_workflow_service.conversation.compaction import (
     maybe_compact_history,
 )
 from duo_workflow_service.entities.state import (
+    TIER_ACCESS_DENIED_SUB_TYPE,
     ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
@@ -255,32 +257,72 @@ class ChatAgent:
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
         }
 
-        self._build_text_response(agent_response, result)
+        self._build_text_response(agent_response, state, result)
         if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
             await self._build_tool_response(agent_response, state, result)
 
         return result
 
-    def _build_text_response(self, agent_response: BaseMessage, result: Dict[str, Any]):
+    def _build_text_response(
+        self,
+        agent_response: BaseMessage,
+        state: ChatWorkflowState,
+        result: Dict[str, Any],
+    ):
         content = agent_response.text()
         ui_chat_log = []
 
         if content:
-            ui_chat_log.append(
-                UiChatLog(
-                    message_type=MessageTypeEnum.AGENT,
-                    message_sub_type=None,
-                    content=content,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    status=ToolStatus.SUCCESS,
-                    correlation_id=None,
-                    tool_info=None,
-                    additional_context=None,
-                    message_id=agent_response.id,
-                )
+            tier_payload = self._extract_tier_access_denied(state)
+            chat_log = UiChatLog(
+                message_type=MessageTypeEnum.AGENT,
+                message_sub_type=(
+                    TIER_ACCESS_DENIED_SUB_TYPE if tier_payload else None
+                ),
+                content=content,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id=agent_response.id,
             )
+            if tier_payload and tier_payload.get("required_plan") is not None:
+                chat_log["required_plan"] = tier_payload["required_plan"]
+            ui_chat_log.append(chat_log)
 
         result["ui_chat_log"] = ui_chat_log
+
+    def _extract_tier_access_denied(
+        self, state: ChatWorkflowState
+    ) -> Optional[Dict[str, Any]]:
+        """Return tier_access_denied payload from the current turn's ToolMessages, else None.
+
+        Relies on the new agent_response NOT yet being in state["conversation_history"]
+        """
+        history = state.get("conversation_history", {}).get(self.name, [])
+        for msg in reversed(history):
+            if isinstance(msg, AIMessage):
+                return None
+            if not isinstance(msg, ToolMessage):
+                continue
+            content = msg.content
+            if (
+                not isinstance(content, str)
+                or TIER_ACCESS_DENIED_SUB_TYPE
+                not in content  # fast path: skip json.loads when payload can't match
+            ):
+                continue
+            try:
+                payload = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if (
+                isinstance(payload, dict)
+                and payload.get("error") == TIER_ACCESS_DENIED_SUB_TYPE
+            ):
+                return payload
+        return None
 
     async def _build_tool_response(
         self,
