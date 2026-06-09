@@ -323,7 +323,7 @@ routers:
         "add_comment": "fix_pipeline_add_comment"
         "create_plan": "fix_pipeline_next_checkout_existing_branch"
         "no_action": "end"
-        "default_route": "fix_pipeline_add_comment"
+        "default_route": "end"
   - from: "fix_pipeline_next_checkout_existing_branch"
     to: "fix_pipeline_next_execution"
   - from: "fix_pipeline_add_comment"
