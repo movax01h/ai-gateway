@@ -736,6 +736,10 @@ class TestAgentComponentAttachNodes:
         assert agent_call_kwargs["flow_id"] == flow_id
         assert agent_call_kwargs["flow_type"] == flow_type
         assert agent_call_kwargs["internal_event_client"] == mock_internal_event_client
+        # Agent Node UI logging
+        assert "ui_history" in agent_call_kwargs
+        assert isinstance(agent_call_kwargs["ui_history"], UIHistory)
+        assert agent_call_kwargs["ui_history"].events == ui_log_events
         # Wiring guard: attach passes the resolved per-agent limit through.
         assert "max_context_tokens" in agent_call_kwargs
 
