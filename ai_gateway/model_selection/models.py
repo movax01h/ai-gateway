@@ -52,6 +52,10 @@ class ChatLiteLLMParams(BaseModelParams):
 class ChatAnthropicParams(BaseModelParams):
     default_headers: Mapping[str, str] | None = None
 
+    # This allows us to override the API key per model via `AIGW_MODEL_SELECTION__MODEL_PARAMS`, which enable us to
+    # switch between Anthropic organizations/workspaces when needed.
+    api_key: str | None = None
+
 
 class ChatAmazonQParams(BaseModelParams):
     default_headers: Mapping[str, str] | None = None
