@@ -723,8 +723,8 @@ def test_restore_message_consistency_tool_message_not_immediately_after_ai():
 def test_restore_message_consistency_adds_missing_thinking_field():
     """Test that thinking blocks without a 'thinking' key get it set to empty string.
 
-    This happens when claude-fable-5 returns a thinking block with only a signature
-    and no thinking text. The Anthropic API requires the 'thinking' field to be present.
+    This happens when claude-fable-5 returns a thinking block with only a signature and no thinking text. The Anthropic
+    API requires the 'thinking' field to be present.
     """
     messages = [
         HumanMessage(content="who is the owner?"),
@@ -765,7 +765,11 @@ def test_restore_message_consistency_preserves_existing_thinking_field():
         HumanMessage(content="hello"),
         AIMessage(
             content=[
-                {"type": "thinking", "thinking": "Let me think...", "signature": "sig1"},
+                {
+                    "type": "thinking",
+                    "thinking": "Let me think...",
+                    "signature": "sig1",
+                },
                 {"type": "text", "text": "Here is my answer."},
             ],
         ),
