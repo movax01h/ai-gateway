@@ -1174,7 +1174,11 @@ async def test_generate_token(
     mock_generate_token_response.assert_called_once_with(
         token="token",
         expiresAt=one_hour_later,
-        server_capabilities=["tool_call_approval", "flow_semantic_versioning"],
+        server_capabilities=[
+            "tool_call_approval",
+            "tool_call_pattern_approval",
+            "flow_semantic_versioning",
+        ],
     )
 
 
@@ -1305,7 +1309,11 @@ async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
     mock_generate_token_response.assert_called_once_with(
         token="token",
         expiresAt=one_hour_later,
-        server_capabilities=["tool_call_approval", "flow_semantic_versioning"],
+        server_capabilities=[
+            "tool_call_approval",
+            "tool_call_pattern_approval",
+            "flow_semantic_versioning",
+        ],
     )
 
 
@@ -1331,6 +1339,7 @@ async def test_generate_token_returns_server_capabilities(
     assert response.expiresAt == expires_at_timestamp
     assert response.server_capabilities == [
         "tool_call_approval",
+        "tool_call_pattern_approval",
         "flow_semantic_versioning",
     ]
 

@@ -12,7 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from duo_workflow_service.agents.chat_agent import ChatAgent
+from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import WorkflowStatusEnum
@@ -795,6 +795,50 @@ async def test_approval_enriches_tool_info_with_project_name(input):
 
 
 @pytest.mark.asyncio
+async def test_approval_includes_suggested_patterns_for_commands(input, mock_toolset):
+    """Test that run_command tool calls with 3+ word commands include suggested_patterns."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    mock_tools_registry.approval_required = AsyncMock(return_value=True)
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+    )
+
+    ai_message = AIMessage(
+        content="Running a command",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "git checkout feature/branch"},
+                "id": "call_1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    result = await chat_agent.run(input)
+
+    approval_messages = [
+        msg
+        for msg in result["ui_chat_log"]
+        if msg["message_type"] == MessageTypeEnum.REQUEST
+    ]
+    assert len(approval_messages) == 1
+    assert approval_messages[0]["tool_info"]["suggested_patterns"] == ["git checkout *"]
+
+
+@pytest.mark.asyncio
 async def test_chat_agent_notifiable_exception_handling(chat_agent, input):
     """Test that ChatAgent raises NotifiableException for LLM errors."""
     error_message = "LLM service temporarily unavailable"
@@ -1084,3 +1128,88 @@ class TestChatAgentCompaction:
 
         called_state = mock_prompt_adapter.get_response.call_args[0][0]
         assert called_state["conversation_history"]["Chat Agent"] == compacted_history
+
+
+class TestSuggestPatterns:
+    """Tests for _suggest_patterns helper."""
+
+    def test_command_tool_shell_form(self):
+        patterns = _suggest_patterns(
+            "run_command", {"command": "git checkout feature/branch"}
+        )
+        assert patterns == ["git checkout *"]
+
+    def test_command_tool_split_args_form(self):
+        patterns = _suggest_patterns(
+            "run_command", {"program": "npm", "args": "install lodash"}
+        )
+        assert patterns == ["npm install *"]
+
+    def test_command_tool_single_word(self):
+        patterns = _suggest_patterns("run_command", {"command": "ls"})
+        assert not patterns
+
+    def test_command_tool_two_words(self):
+        patterns = _suggest_patterns("run_command", {"command": "git status"})
+        assert not patterns
+
+    def test_non_command_tool(self):
+        patterns = _suggest_patterns("read_file", {"path": "/tmp/test.txt"})
+        assert not patterns
+
+    def test_empty_command(self):
+        patterns = _suggest_patterns("run_command", {"command": ""})
+        assert not patterns
+
+    def test_program_only_no_args(self):
+        patterns = _suggest_patterns("run_command", {"program": "ls"})
+        assert not patterns
+
+    def test_long_command(self):
+        patterns = _suggest_patterns(
+            "run_command", {"command": "docker compose -f dev.yml up -d"}
+        )
+        assert patterns == [
+            "docker compose -f dev.yml up *",
+            "docker compose *",
+        ]
+
+    def test_git_command_tool(self):
+        patterns = _suggest_patterns(
+            "run_git_command",
+            {
+                "command": "checkout",
+                "args": "feature/my-branch",
+                "repository_url": "https://example.com/repo.git",
+            },
+        )
+        assert patterns == ["git checkout *"]
+
+    def test_git_command_tool_long_args(self):
+        patterns = _suggest_patterns(
+            "run_git_command",
+            {
+                "command": "push",
+                "args": "origin feature/my-branch",
+                "repository_url": "https://example.com/repo.git",
+            },
+        )
+        assert patterns == ["git push origin *", "git push *"]
+
+    def test_git_command_tool_no_args(self):
+        patterns = _suggest_patterns(
+            "run_git_command",
+            {"command": "status", "repository_url": "https://example.com/repo.git"},
+        )
+        assert not patterns
+
+    def test_git_command_tool_simple_args(self):
+        patterns = _suggest_patterns(
+            "run_git_command",
+            {
+                "command": "add",
+                "args": ".",
+                "repository_url": "https://example.com/repo.git",
+            },
+        )
+        assert patterns == ["git add *"]

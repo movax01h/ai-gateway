@@ -164,7 +164,7 @@ def _router(
         if last_message.tool_calls[0]["name"] == HandoverTool.tool_title:
             return Routes.HANDOVER
         if any(
-            tool_registry.approval_required(call["name"])
+            not tool_registry.is_preapproved(call["name"])
             for call in last_message.tool_calls
         ):
             return Routes.TOOLS_APPROVAL

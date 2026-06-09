@@ -13,6 +13,7 @@ def get_dws_capabilities() -> list[str]:
     """
     capabilities = [
         "tool_call_approval",
+        "tool_call_pattern_approval",
         "flow_semantic_versioning",
     ]
 

@@ -1,16 +1,19 @@
 import copy
-import hashlib
 import json
-import logging
 from typing import Any, Optional, Sequence, Type, TypedDict, Union
 
+import structlog
 from langchain.tools import BaseTool
 from pydantic import BaseModel
 
 from duo_workflow_service import tools
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.executor.outbox import Outbox
-from duo_workflow_service.gitlab.gitlab_api import Project, WorkflowConfig
+from duo_workflow_service.gitlab.gitlab_api import (
+    Project,
+    WorkflowConfig,
+    workflow_global_id,
+)
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
 from duo_workflow_service.tools.code_review import (
@@ -39,7 +42,7 @@ from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitla
 )
 from lib.language_server import LanguageServerVersion
 
-logger = logging.getLogger(__name__)
+log = structlog.stdlib.get_logger("tools_registry")
 
 
 class ToolMetadata(TypedDict):
@@ -201,11 +204,21 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
 }
 
 
+TOOL_CALL_APPROVED_QUERY = """
+query($workflowId: AiDuoWorkflowsWorkflowID!, $toolName: String!, $toolCallArgs: String!) {
+    duoWorkflowWorkflows(workflowId: $workflowId) {
+        nodes {
+            toolCallApproved(toolName: $toolName, toolCallArgs: $toolCallArgs)
+        }
+    }
+}
+"""
+
+
 class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
     _mcp_tool_names: list[str]
-    _tool_call_approvals: dict
 
     @classmethod
     async def configure(
@@ -214,6 +227,7 @@ class ToolsRegistry:
         gl_http_client: GitlabHttpClient,
         outbox: Outbox,
         project: Optional[Project],
+        workflow_id: Optional[str] = None,
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
@@ -244,16 +258,18 @@ class ToolsRegistry:
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
             language_server_version=language_server_version,
-            tool_call_approvals=workflow_config.get("tool_call_approvals", {}),
             denied_tools=denied_tools or [],
+            gl_http_client=gl_http_client,
+            workflow_id=workflow_id,
         )
 
     def __init__(
         self,
         enabled_tools: list[str],
         preapproved_tools: list[str],
-        tool_call_approvals: dict,
         tool_metadata: ToolMetadata,
+        gl_http_client: Optional[GitlabHttpClient] = None,
+        workflow_id: Optional[str] = None,
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
@@ -275,7 +291,8 @@ class ToolsRegistry:
         self._denied_tools: set[str] = set(denied_tools or [])
         self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
 
-        self._tool_call_approvals = tool_call_approvals
+        self._gl_http_client = gl_http_client
+        self._workflow_id = workflow_id
 
         for privilege in enabled_tools:
             for tool_cls_or_config in tools_for_agent_privileges.get(privilege, []):
@@ -359,18 +376,29 @@ class ToolsRegistry:
 
         return tool_handlers
 
-    def approval_required(
+    def is_preapproved(self, tool_name: str) -> bool:
+        """Check if a tool is preapproved (no approval ever needed).
+
+        This is a local check against the privilege-level preapproval list. Use this for routing decisions where you
+        don't need per-call checks.
+        """
+        return tool_name in self._preapproved_tool_names
+
+    async def approval_required(
         self, tool_name: str, tool_args: dict[Any, Any] | None = None
     ) -> bool:
-        """Check if a tool requires human approval before execution.
+        """Check if a specific tool call requires human approval.
+
+        Preapproved tools are checked locally. For all other tools,
+        delegates to Rails which owns the approval logic (hash matching,
+        pattern matching, match-target extraction).
 
         Args:
             tool_name: The name of the tool to check
             tool_args: The arguments passed to the tool
 
         Returns:
-            False if the tool is in the preapproved list,
-            True otherwise.
+            False if the tool is approved, True if approval is required.
         """
         if tool_args is None:
             tool_args = {}
@@ -378,39 +406,50 @@ class ToolsRegistry:
         if tool_name in self._preapproved_tool_names:
             return False
 
-        approved_tool_calls_config = self._tool_call_approvals.get(tool_name, None)
-        if approved_tool_calls_config is None:
+        if not self._gl_http_client or not self._workflow_id:
             return True
 
-        if "call_args" not in approved_tool_calls_config:
-            logger.warning(
-                "Approved tool calls do not comply with expected format",
+        try:
+            tool_args_json = json.dumps(tool_args, separators=(",", ":"))
+        except TypeError:
+            log.warning(
+                "Tool args not JSON-serializable, defaulting to requiring approval",
                 extra={
-                    "approved_tool_calls": approved_tool_calls_config,
+                    "tool_name": tool_name,
+                    "arg_types": {k: type(v).__name__ for k, v in tool_args.items()},
                 },
             )
             return True
 
-        approved_tool_calls = approved_tool_calls_config["call_args"]
+        try:
+            response = await self._gl_http_client.graphql(
+                TOOL_CALL_APPROVED_QUERY,
+                {
+                    "workflowId": workflow_global_id(self._workflow_id),
+                    "toolName": tool_name,
+                    "toolCallArgs": tool_args_json,
+                },
+            )
 
-        # Convert tool_args to SHA256 hexdigest for comparison
-        # Match Rails JSON serialization: compact format
-        tool_args_json = json.dumps(tool_args, separators=(",", ":"))
-        tool_args_hash = hashlib.sha256(tool_args_json.encode()).hexdigest()
+            nodes = response.get("duoWorkflowWorkflows", {}).get("nodes", [])
+            if nodes:
+                approved = nodes[0].get("toolCallApproved", False)
+                return not approved
 
-        logger.debug(
-            "Searching for tool call approval",
-            extra={
-                "tool_name": tool_name,
-                "tool_args_hash": tool_args_hash,
-                "tool_call_approvals": approved_tool_calls,
-            },
-        )
+            log.warning(
+                "GraphQL returned empty nodes for tool approval check",
+                extra={"tool_name": tool_name, "workflow_id": self._workflow_id},
+            )
 
-        return not any(
-            tool_args_hash == approved_call_hash
-            for approved_call_hash in approved_tool_calls
-        )
+        # graphql() raises bare Exceptions for timeout/decode/query errors
+        except Exception as exc:
+            log.warning(
+                "Failed to check tool approval via GraphQL, defaulting to requiring approval",
+                extra={"tool_name": tool_name, "workflow_id": self._workflow_id},
+                exc_info=exc,
+            )
+
+        return True
 
     def toolset(
         self,

@@ -165,7 +165,8 @@ def tool_approval_required_fixture():
 def mock_tools_registry_fixture(tool_approval_required):
     mock = MagicMock(spec=ToolsRegistry)
 
-    mock.approval_required.return_value = tool_approval_required
+    mock.approval_required = AsyncMock(return_value=tool_approval_required)
+    mock.is_preapproved.return_value = not bool(tool_approval_required)
 
     return mock
 

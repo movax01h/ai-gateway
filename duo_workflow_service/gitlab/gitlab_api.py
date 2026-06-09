@@ -10,6 +10,11 @@ from duo_workflow_service.tracking.errors import log_exception
 from lib.context import gitlab_version
 
 
+def workflow_global_id(workflow_id: str) -> str:
+    """Build a GitLab global ID for a Duo Workflows workflow."""
+    return f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"
+
+
 class Language(TypedDict):
     name: str
     share: float
@@ -45,7 +50,6 @@ class WorkflowConfig(TypedDict):
     workflow_id: str
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
-    tool_call_approvals: dict
     workflow_status: str
     mcp_enabled: bool
     allow_agent_to_request_user: bool
@@ -232,7 +236,6 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
             }
             agentPrivilegesNames
             preApprovedAgentPrivilegesNames
-            toolCallApprovals
             mcpEnabled
             allowAgentToRequestUser
             latestCheckpoint {
@@ -290,7 +293,6 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
             }
             agentPrivilegesNames
             preApprovedAgentPrivilegesNames
-            toolCallApprovals
             mcpEnabled
             allowAgentToRequestUser
             latestCheckpoint {
@@ -346,7 +348,7 @@ async def fetch_workflow_and_container_data(
 ) -> Tuple[Project | None, Namespace | None, WorkflowConfig]:
     query = fetch_workflow_and_container_query()
 
-    variables = {"workflowId": f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"}
+    variables = {"workflowId": workflow_global_id(workflow_id)}
 
     try:
         response = await client.graphql(query, variables)
@@ -430,7 +432,6 @@ async def fetch_workflow_and_container_data(
         pre_approved_agent_privileges_names=workflow.get(
             "preApprovedAgentPrivilegesNames", []
         ),
-        tool_call_approvals=workflow.get("toolCallApprovals", {}),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
@@ -473,7 +474,6 @@ def empty_workflow_config() -> WorkflowConfig:
         "workflow_id": "",
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
-        "tool_call_approvals": {},
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "first_checkpoint": None,
