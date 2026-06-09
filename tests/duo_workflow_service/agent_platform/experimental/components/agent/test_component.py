@@ -664,6 +664,10 @@ class TestAgentComponentAttachNodes:
         assert agent_call_kwargs["flow_id"] == flow_id
         assert agent_call_kwargs["flow_type"] == flow_type
         assert agent_call_kwargs["internal_event_client"] == mock_internal_event_client
+        # Agent Node UI logging
+        assert "ui_history" in agent_call_kwargs
+        assert isinstance(agent_call_kwargs["ui_history"], UIHistory)
+        assert agent_call_kwargs["ui_history"].events == ui_log_events
 
         # Verify ToolNode creation
         mock_tool_node_cls.assert_called_once()

@@ -29,6 +29,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
+    agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
@@ -503,6 +504,12 @@ class AgentComponent(AgentComponentBase):
                 else None
             ),
             response_schema=self._response_schema,
+            ui_history=UIHistory(
+                events=self.ui_log_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
+            ),
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
@@ -514,7 +521,10 @@ class AgentComponent(AgentComponentBase):
             conversation_history_key=self._conversation_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
-                events=self.ui_log_events, writer_class=UILogWriterAgentTools
+                events=self.ui_log_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
             ),
             tracker=tracker,
             session_id_key=self._session_id_key,
