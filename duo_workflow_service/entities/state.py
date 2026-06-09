@@ -76,6 +76,11 @@ class SlashCommandStatus(StrEnum):
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
 TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
+# Shared sub_type / JSON-payload error code used to tag tier-access-denied
+# events. Read by ChatAgent when tagging the AGENT UiChatLog and by
+# ToolsExecutor when serializing the tool_response payload.
+TIER_ACCESS_DENIED_SUB_TYPE = "tier_access_denied"
+
 
 class ToolInfo(TypedDict):
     name: str

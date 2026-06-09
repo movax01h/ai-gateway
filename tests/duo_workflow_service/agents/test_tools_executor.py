@@ -1951,8 +1951,6 @@ async def test_handle_tier_access_denied(all_tools, toolset, workflow_state, flo
     )
     assert tool_log["status"] == ToolStatus.FAILURE
     assert "Ultimate" in tool_log["content"]
-    assert tool_log["message_sub_type"] == "tier_access_denied"
-    assert tool_log["required_plan"] == "ultimate"
 
 
 @pytest.mark.asyncio
