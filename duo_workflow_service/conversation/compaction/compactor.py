@@ -342,7 +342,7 @@ class ConversationCompactor:
         }
 
         inputs: dict[str, object] = {"history": messages}
-        if is_manual and user_instruction:
+        if is_manual:
             inputs["user_instruction"] = user_instruction
 
         prompt = self._get_prompt(is_manual)
@@ -366,7 +366,7 @@ class ConversationCompactor:
         output_tokens = usage_metadata.get("output_tokens", 0) if usage_metadata else 0
 
         overhead_inputs: dict[str, object] = {"history": []}
-        if is_manual and user_instruction:
+        if is_manual:
             overhead_inputs["user_instruction"] = user_instruction
         prompt_tpl = cast(ChatPromptTemplate, self._get_prompt(is_manual).prompt_tpl)
         overhead = self._token_estimator.count(
