@@ -280,6 +280,7 @@ async def test_compile_and_run_graph(
         workflow_config=workflow._workflow_config,
         gl_http_client=workflow._http_client,
         project=project,
+        workflow_id="id",
         mcp_tools=[mcp_tool] if mcp_enabled else [],
         language_server_version=None,
         denied_tools=[],

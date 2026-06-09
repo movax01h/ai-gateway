@@ -455,6 +455,27 @@ def test_most_recent_new_checkpoint(checkpoint_notifier):
     assert checkpoint3.checkpoint == expected_checkpoint3
 
 
+def test_most_recent_new_checkpoint_logs_tool_approval_request(checkpoint_notifier):
+    """Checkpoint with a REQUEST tool_info triggers the approval logging path."""
+    checkpoint_notifier.status = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+    checkpoint_notifier.ui_chat_log = [
+        {
+            "message_type": MessageTypeEnum.REQUEST,
+            "tool_info": {
+                "name": "run_command",
+                "args": {"command": "git checkout feature/x"},
+                "suggested_patterns": ["git checkout *"],
+            },
+            "message_id": "msg-1",
+        }
+    ]
+
+    checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+    data = checkpoint.checkpoint
+    assert "suggested_patterns" in data
+    assert "git checkout *" in data
+
+
 @pytest.mark.asyncio
 async def test_send_event_with_values_type_without_incremental_streaming(
     checkpoint_notifier,

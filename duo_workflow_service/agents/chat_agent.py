@@ -40,6 +40,58 @@ from lib.context import LLMFinishReason, extract_finish_reason
 
 log = structlog.stdlib.get_logger("chat_agent")
 
+_COMMAND_TOOL_NAMES = {"run_command", "run_git_command"}
+_GIT_COMMAND_TOOL_NAME = "run_git_command"
+
+
+def _suggest_patterns(tool_name: str, tool_args: dict[str, Any]) -> list[str]:
+    """Suggest glob patterns for a tool call.
+
+    For command tools, suggests up to two patterns: the most specific prefix
+    (one level broader than the exact command) and the broadest useful prefix
+    (program + subcommand). Users can also type a custom glob in the UI.
+
+    Example: 'docker compose -f dev.yml up -d'
+    suggests: ['docker compose -f dev.yml up *', 'docker compose *']
+
+    Note: uses naive whitespace splitting, so commands with quoted arguments
+    (e.g. echo "hello world") may produce imprecise patterns. This is
+    acceptable — patterns are suggestions, not security boundaries.
+    """
+    if tool_name not in _COMMAND_TOOL_NAMES:
+        return []
+
+    if tool_name == _GIT_COMMAND_TOOL_NAME:
+        # run_git_command uses command (subcommand) + args schema.
+        # Prepend "git" so patterns like "git checkout *" work intuitively.
+        subcommand = tool_args.get("command") or ""
+        args = tool_args.get("args") or ""
+        command = (
+            f"git {subcommand} {args}".strip() if args else f"git {subcommand}".strip()
+        )
+    else:
+        # run_command uses either "command" (current schema) or "program"+"args" (legacy)
+        command = tool_args.get("command") or ""
+        if not command and "program" in tool_args:
+            program = tool_args.get("program", "")
+            args = tool_args.get("args", "")
+            command = f"{program} {args}".strip() if args else program
+
+    if not command:
+        return []
+
+    parts = command.split()
+    if len(parts) <= 2:
+        return []
+
+    most_specific = " ".join(parts[:-1]) + " *"
+    broadest = " ".join(parts[:2]) + " *"
+
+    if most_specific == broadest:
+        return [most_specific]
+
+    return [most_specific, broadest]
+
 
 class ChatAgent:
     def __init__(
@@ -58,7 +110,7 @@ class ChatAgent:
         self._compactor = compactor
         self.toolset = toolset
 
-    def _get_approvals(
+    async def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
     ) -> tuple[bool, list[UiChatLog]]:
         approval_required = False
@@ -74,7 +126,7 @@ class ChatAgent:
             )
             needs_approval = (
                 self.tools_registry
-                and self.tools_registry.approval_required(tool_name, tool_args)
+                and await self.tools_registry.approval_required(tool_name, tool_args)
                 and tool_name not in preapproved_tools
                 and not auto_approved_by_agentic_mock_model
             )
@@ -90,6 +142,20 @@ class ChatAgent:
                     }
                 else:
                     tool_info_args = tool_args
+                tool_info = ToolInfo(name=tool_name, args=tool_info_args)
+                suggested = _suggest_patterns(tool_name, tool_args)
+                if suggested:
+                    tool_info["suggested_patterns"] = suggested
+
+                log.debug(
+                    "Tool call requires approval",
+                    extra={
+                        "tool_name": tool_name,
+                        "tool_info_keys": list(tool_info.keys()),
+                        "suggested_patterns": suggested,
+                    },
+                )
+
                 approval_messages.append(
                     UiChatLog(
                         message_type=MessageTypeEnum.REQUEST,
@@ -98,7 +164,7 @@ class ChatAgent:
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
-                        tool_info=ToolInfo(name=tool_name, args=tool_info_args),
+                        tool_info=tool_info,
                         additional_context=None,
                         message_id=f'request-{call["id"]}',
                     )
@@ -177,7 +243,7 @@ class ChatAgent:
             state, system_template_override=self.system_template_override
         )
 
-    def _build_response(
+    async def _build_response(
         self, agent_response: BaseMessage, state: ChatWorkflowState
     ) -> Dict[str, Any]:
         result = {
@@ -187,7 +253,7 @@ class ChatAgent:
 
         self._build_text_response(agent_response, result)
         if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
-            self._build_tool_response(agent_response, state, result)
+            await self._build_tool_response(agent_response, state, result)
 
         return result
 
@@ -212,7 +278,7 @@ class ChatAgent:
 
         result["ui_chat_log"] = ui_chat_log
 
-    def _build_tool_response(
+    async def _build_tool_response(
         self,
         agent_response: AIMessage,
         state: ChatWorkflowState,
@@ -221,7 +287,7 @@ class ChatAgent:
         result["status"] = WorkflowStatusEnum.EXECUTION
 
         preapproved_tools = state.get("preapproved_tools") or []
-        tools_need_approval, approval_messages = self._get_approvals(
+        tools_need_approval, approval_messages = await self._get_approvals(
             agent_response, preapproved_tools, state
         )
 
@@ -331,7 +397,7 @@ class ChatAgent:
                             get_agent_response=self._get_agent_response,
                         )
 
-            return self._build_response(agent_response, state)
+            return await self._build_response(agent_response, state)
 
         except SlashCommandValidationError as error:
             log_exception(

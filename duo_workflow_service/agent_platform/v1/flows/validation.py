@@ -174,7 +174,6 @@ def _make_validation_tools_registry() -> ToolsRegistry:
         return ToolsRegistry(
             enabled_tools=all_privileges,
             preapproved_tools=all_privileges,
-            tool_call_approvals={},
             tool_metadata=stub_metadata,
             mcp_tools=[],
         )

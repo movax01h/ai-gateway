@@ -81,6 +81,7 @@ class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
     tool_response: NotRequired[Any]
+    suggested_patterns: NotRequired[list[str]]
 
 
 class UiChatLog(TypedDict):
