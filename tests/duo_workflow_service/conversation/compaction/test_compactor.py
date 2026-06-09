@@ -979,10 +979,10 @@ class TestCompactManualMode:
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
-    async def test_manual_omits_user_instruction_when_none(
+    async def test_manual_passes_user_instruction_as_none_when_not_provided(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
-        """user_instruction key must be absent when not provided."""
+        """Manual mode always supplies ``user_instruction`` to the prompt template, passing ``None`` when absent."""
         mock_get_max_context.return_value = 400_000
         mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
 
@@ -992,7 +992,7 @@ class TestCompactManualMode:
 
         call_args, _ = mock_prompt.ainvoke.call_args
         inputs = call_args[0]
-        assert "user_instruction" not in inputs
+        assert inputs["user_instruction"] is None
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
@@ -1046,31 +1046,37 @@ class TestCompactManualMode:
         assert TAG_NOSTREAM in tags
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "user_instruction",
+        [
+            pytest.param("focus on auth", id="with_instruction"),
+            pytest.param(None, id="without_instruction"),
+        ],
+    )
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
-    async def test_manual_user_instruction_included_in_prompt_overhead(
-        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    async def test_manual_prompt_overhead_passes_user_instruction(
+        self,
+        mock_count_tokens,
+        mock_get_max_context,
+        compactor,
+        mock_prompt,
+        user_instruction,
     ):
-        """Prompt overhead must reflect the rendered template, including any user instruction, so post-compaction token
-        accounting stays accurate."""
+        """Overhead accounting always passes ``user_instruction`` (``None`` when absent) to the manual template."""
         mock_get_max_context.return_value = 400_000
         mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
 
         mock_prompt.ainvoke.return_value = _summary_message()
 
         await compactor.compact(
-            _large_history(),
-            is_manual=True,
-            user_instruction="focus on auth",
+            _large_history(), is_manual=True, user_instruction=user_instruction
         )
 
-        # _calculate_compacted_tokens renders the template via format_messages
-        # to size the prompt overhead. That render must carry the user_instruction
-        # so the overhead estimate matches what _invoke_summarizer actually sent.
         format_calls = mock_prompt.prompt_tpl.format_messages.call_args_list
         assert format_calls, "expected at least one format_messages call for overhead"
-        assert any(
-            call.kwargs.get("user_instruction") == "focus on auth"
-            for call in format_calls
+        assert all("user_instruction" in call.kwargs for call in format_calls)
+        assert all(
+            call.kwargs["user_instruction"] == user_instruction for call in format_calls
         )
 
     @pytest.mark.asyncio

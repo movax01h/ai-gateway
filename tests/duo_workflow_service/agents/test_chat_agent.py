@@ -15,6 +15,7 @@ from langchain_core.messages import (
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.conversation.compaction.schema import CompactionResult
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     ChatWorkflowState,
@@ -1128,6 +1129,245 @@ class TestChatAgentCompaction:
 
         called_state = mock_prompt_adapter.get_response.call_args[0][0]
         assert called_state["conversation_history"]["Chat Agent"] == compacted_history
+
+
+def _successful_compaction_result() -> CompactionResult:
+    summary = AIMessage(content="Summary text", id="summary-msg-id")
+    return CompactionResult(
+        messages=[summary, HumanMessage(content="recent")],
+        was_compacted=True,
+        summary=summary,
+    )
+
+
+class TestChatAgentManualCompaction:
+    """Test suite for /compact slash command handling in ChatAgent."""
+
+    @pytest.fixture(name="mock_compactor")
+    def mock_compactor_fixture(self):
+        mock = Mock()
+        mock.compact = AsyncMock(return_value=_successful_compaction_result())
+        return mock
+
+    @pytest.fixture(name="chat_agent")
+    def chat_agent_fixture(
+        self, system_template_override, mock_toolset, mock_compactor
+    ):
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="LLM response", id="llm-msg-id")
+        )
+        mock_prompt_adapter.get_model.return_value = Mock()
+        return ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=Mock(spec=ToolsRegistry),
+            system_template_override=system_template_override,
+            compactor=mock_compactor,
+            toolset=mock_toolset,
+        )
+
+    @staticmethod
+    def _state_with_history(input_state, history):
+        return {**input_state, "conversation_history": {"Chat Agent": list(history)}}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "last_user_message, expected_compaction_called, expected_llm_called",
+        [
+            pytest.param("/compact", True, False, id="compact_no_args"),
+            pytest.param(
+                "/compact focus on the auth bug",
+                True,
+                False,
+                id="compact_with_trailing_text",
+            ),
+            pytest.param("  /compact  ", True, False, id="compact_with_whitespace"),
+            pytest.param("/explain this code", False, True, id="explain_falls_through"),
+            pytest.param("hello", False, True, id="plain_text_falls_through"),
+            pytest.param(
+                "/home/user/file.py", False, True, id="file_path_not_a_command"
+            ),
+        ],
+    )
+    async def test_routes_compact_slash_command(
+        self,
+        last_user_message,
+        expected_compaction_called,
+        expected_llm_called,
+        chat_agent,
+        mock_compactor,
+        input,
+    ):
+        prior_history = [
+            HumanMessage(content="earlier"),
+            AIMessage(content="reply"),
+        ]
+        full_history = prior_history + [HumanMessage(content=last_user_message)]
+        state = self._state_with_history(input, full_history)
+
+        with patch(
+            "duo_workflow_service.agents.chat_agent.maybe_compact_history",
+            new=AsyncMock(return_value=full_history),
+        ):
+            await chat_agent.run(state)
+
+        assert mock_compactor.compact.called is expected_compaction_called
+        if expected_compaction_called:
+            assert mock_compactor.compact.call_args.kwargs["is_manual"] is True
+
+        assert chat_agent.prompt_adapter.get_response.called is expected_llm_called
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "last_user_message, expected_user_instruction",
+        [
+            pytest.param("/compact", None, id="no_trailing_text"),
+            pytest.param(
+                "/compact focus on auth bug",
+                "focus on auth bug",
+                id="with_trailing_text",
+            ),
+        ],
+    )
+    async def test_success_path_invocation_and_outcome(
+        self,
+        last_user_message,
+        expected_user_instruction,
+        chat_agent,
+        mock_compactor,
+        input,
+    ):
+        """On success the /compact command is stripped, user_instruction is forwarded, the UI log carries the summary,
+        and conversation_history is replaced in place."""
+        prior_history = [
+            HumanMessage(content="task"),
+            AIMessage(content="working on it"),
+        ]
+        state = self._state_with_history(
+            input, prior_history + [HumanMessage(content=last_user_message)]
+        )
+        compactor_result = mock_compactor.compact.return_value
+
+        result = await chat_agent.run(state)
+
+        # The /compact message is stripped before being passed to the compactor.
+        assert mock_compactor.compact.call_args.args[0] == prior_history
+        assert (
+            mock_compactor.compact.call_args.kwargs["user_instruction"]
+            == expected_user_instruction
+        )
+        assert mock_compactor.compact.call_args.kwargs["is_manual"] is True
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert result["ui_chat_log"] == [
+            UiChatLog(
+                message_type=MessageTypeEnum.AGENT,
+                message_sub_type="compaction",
+                content="Summary text",
+                timestamp=ANY,
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id="summary-msg-id",
+            )
+        ]
+        # History is replaced in place with the compacted messages.
+        assert state["conversation_history"]["Chat Agent"] == compactor_result.messages
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "compactor_result, expected_error_type",
+        [
+            pytest.param(
+                CompactionResult(
+                    messages=[HumanMessage(content="orig")],
+                    was_compacted=False,
+                    error=RuntimeError("boom"),
+                ),
+                "RuntimeError",
+                id="llm_error",
+            ),
+            pytest.param(
+                CompactionResult(
+                    messages=[HumanMessage(content="orig")],
+                    was_compacted=False,
+                    summary=None,
+                ),
+                None,
+                id="no_summary_field",
+            ),
+        ],
+    )
+    async def test_failure_leaves_history_unchanged(
+        self,
+        compactor_result,
+        expected_error_type,
+        chat_agent,
+        mock_compactor,
+        input,
+    ):
+        mock_compactor.compact.return_value = compactor_result
+        full_history = [
+            HumanMessage(content="initial"),
+            AIMessage(content="reply"),
+            HumanMessage(content="/compact"),
+        ]
+        state = self._state_with_history(input, full_history)
+
+        with patch("duo_workflow_service.agents.chat_agent.log") as mock_log:
+            result = await chat_agent.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert len(result["ui_chat_log"]) == 1
+        entry = result["ui_chat_log"][0]
+        assert entry["message_sub_type"] == "compaction"
+        assert entry["status"] == ToolStatus.FAILURE
+        assert "failed" in entry["content"].lower()
+        # History is unchanged
+        assert state["conversation_history"]["Chat Agent"] == full_history
+        mock_log.warning.assert_called_once()
+        assert mock_log.warning.call_args.kwargs["error_type"] == expected_error_type
+
+    @pytest.mark.asyncio
+    async def test_no_prior_history_returns_friendly_notice(
+        self, chat_agent, mock_compactor, input
+    ):
+        """When /compact is the only message, return a friendly notice without invoking the compactor."""
+        state = self._state_with_history(input, [HumanMessage(content="/compact")])
+
+        result = await chat_agent.run(state)
+
+        mock_compactor.compact.assert_not_called()
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert len(result["ui_chat_log"]) == 1
+        entry = result["ui_chat_log"][0]
+        assert entry["message_sub_type"] == "compaction"
+        assert entry["status"] == ToolStatus.SUCCESS
+        assert "no conversation history" in entry["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_compactor_is_none_returns_error(
+        self, system_template_override, mock_toolset, input
+    ):
+        chat_agent = ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=Mock(),
+            tools_registry=Mock(spec=ToolsRegistry),
+            system_template_override=system_template_override,
+            compactor=None,
+            toolset=mock_toolset,
+        )
+        state = self._state_with_history(input, [HumanMessage(content="/compact")])
+
+        result = await chat_agent.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+        assert len(result["ui_chat_log"]) == 1
+        entry = result["ui_chat_log"][0]
+        assert entry["status"] == ToolStatus.FAILURE
+        assert "not available" in entry["content"].lower()
 
 
 class TestSuggestPatterns:

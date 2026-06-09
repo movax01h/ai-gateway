@@ -34,6 +34,10 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from duo_workflow_service.slash_commands.goal_parser import (
+    is_slash_command,
+)
+from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import LLMFinishReason, extract_finish_reason
@@ -311,6 +315,136 @@ class ChatAgent:
 
         raise NotifiableException(ui_content) from error
 
+    @staticmethod
+    def _build_compaction_ui_chat_log(
+        content: str,
+        status: ToolStatus,
+        message_id: str | None,
+    ) -> UiChatLog:
+        """Build a ``UiChatLog`` entry for a manual-compaction event.
+
+        Centralizes the shared fields (``message_type``, ``message_sub_type``,
+        ``timestamp``, and the ``None`` defaults) across the success, generic
+        failure, and ``compactor is None`` paths.
+        """
+        return UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type="compaction",
+            content=content,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=status,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+            message_id=message_id,
+        )
+
+    def _detect_compact_command(
+        self, state: ChatWorkflowState
+    ) -> tuple[bool, str | None]:
+        """Detect a trailing ``/compact`` slash command in conversation history.
+
+        Returns:
+            A ``(detected, user_instruction)`` tuple. ``detected`` is True when
+            the last ``HumanMessage`` is ``/compact`` (with any trailing text).
+            ``user_instruction`` is the text after ``/compact`` (or ``None`` if
+            absent or not detected), forwarded to the manual compaction prompt.
+        """
+        history = state.get("conversation_history", {}).get(self.name, [])
+        if not history or not isinstance(history[-1], HumanMessage):
+            return False, None
+        last_content = history[-1].content
+        if not isinstance(last_content, str) or not is_slash_command(last_content):
+            return False, None
+        command_name, remaining_text = slash_command_parse(last_content)
+        if command_name != "compact":
+            return False, None
+        return True, remaining_text
+
+    async def _handle_manual_compaction(
+        self,
+        state: ChatWorkflowState,
+        user_instruction: str | None,
+    ) -> Dict[str, Any]:
+        """Handle a user-initiated /compact slash command.
+
+        Triggers compaction in manual mode, mutates conversation_history in place with the compacted messages, and
+        returns a UiChatLog entry carrying the streamed summary. On failure, returns a generic error message and leaves
+        history unchanged.
+        """
+        if self._compactor is None:
+            return {
+                "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                "ui_chat_log": [
+                    self._build_compaction_ui_chat_log(
+                        content="Compaction is not available.",
+                        status=ToolStatus.FAILURE,
+                        message_id=None,
+                    )
+                ],
+            }
+
+        history = state["conversation_history"].get(self.name, [])
+
+        # Remove the trailing /compact HumanMessage from the history before
+        # summarizing -- it's a command, not conversation content.
+        history_to_compact = history[:-1]
+
+        # Nothing to compact: the /compact message was the only entry.
+        if not history_to_compact:
+            return {
+                "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                "ui_chat_log": [
+                    self._build_compaction_ui_chat_log(
+                        content="There is no conversation history to compact yet.",
+                        status=ToolStatus.SUCCESS,
+                        message_id=None,
+                    )
+                ],
+            }
+
+        result = await self._compactor.compact(
+            history_to_compact,
+            is_manual=True,
+            user_instruction=user_instruction,
+        )
+
+        if result.error is not None or result.summary is None:
+            log.warning(
+                "Manual compaction did not produce a summary",
+                agent_name=self.name,
+                error_type=(
+                    type(result.error).__name__ if result.error is not None else None
+                ),
+                was_compacted=result.was_compacted,
+            )
+            return {
+                "status": WorkflowStatusEnum.INPUT_REQUIRED,
+                "ui_chat_log": [
+                    self._build_compaction_ui_chat_log(
+                        content="Failed to compact conversation. Please try again.",
+                        status=ToolStatus.FAILURE,
+                        message_id=None,
+                    )
+                ],
+            }
+
+        # Replace conversation_history in place. The reducer appends, so
+        # returning `conversation_history` in the dict would duplicate. This
+        # matches the auto-compaction pattern.
+        state["conversation_history"][self.name] = result.messages
+
+        return {
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "ui_chat_log": [
+                self._build_compaction_ui_chat_log(
+                    content=result.summary.text(),
+                    status=ToolStatus.SUCCESS,
+                    message_id=result.summary.id,
+                )
+            ],
+        }
+
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = state.get("approval", None)
 
@@ -354,6 +488,10 @@ class ChatAgent:
                         "status": WorkflowStatusEnum.INPUT_REQUIRED,
                         "ui_chat_log": [],
                     }
+
+        is_compact, compact_user_instruction = self._detect_compact_command(state)
+        if is_compact:
+            return await self._handle_manual_compaction(state, compact_user_instruction)
 
         self._handle_wrong_messages_order_for_tool_execution(state)
 
