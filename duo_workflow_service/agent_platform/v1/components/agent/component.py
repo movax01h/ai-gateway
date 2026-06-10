@@ -193,6 +193,16 @@ class AgentComponentBase(BaseComponent):
         required -= self._RUNTIME_INJECTED_VARS
         provided = {inp.template_variable_name for inp in self.inputs}
 
+        # Note: Currently `get_required_variables` returns optional variables as well
+        # e.g. `{% if context %}{{ context }}{% endif %}`
+        optional_component_inputs = {
+            inp.template_variable_name for inp in self.inputs if inp.optional
+        }
+        required -= optional_component_inputs
+        # We need to remove optional inputs from provided as well to not trigger
+        # an ExtraInputVariablesError
+        provided -= optional_component_inputs
+
         if missing := required - provided:
             raise MissingInputVariablesError(
                 f"Component '{self.name}' (prompt '{self.prompt_id}'): "

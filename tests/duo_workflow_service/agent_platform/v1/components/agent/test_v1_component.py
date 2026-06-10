@@ -1354,6 +1354,90 @@ class TestPromptVariableValidation:
                 strict_validation=True,
             )
 
+    def test_optional_inputs_excluded_from_both_required_and_extra_checks(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        # `project` IS referenced by the template (e.g. `{% if project %}`);
+        # `namespace` is NOT referenced by the template.
+        mock_prompt_registry.get_required_variables.return_value = {"goal", "project"}
+
+        comp = AgentComponent(
+            name="comp",
+            flow_id="test",
+            flow_type=flow_type,
+            user=user,
+            inputs=[
+                "context:goal",
+                {"from": "context:project", "as": "project", "optional": True},
+                {"from": "context:namespace", "as": "namespace", "optional": True},
+            ],
+            prompt_id="p",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            strict_validation=True,
+        )
+        assert comp is not None
+
+    def test_optional_input_excluded_from_extra_check_in_strict_mode(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        mock_prompt_registry.get_required_variables.return_value = {"goal"}
+        comp = AgentComponent(
+            name="comp",
+            flow_id="test",
+            flow_type=flow_type,
+            user=user,
+            inputs=[
+                "context:goal",
+                {"from": "context:project", "as": "project", "optional": True},
+            ],
+            prompt_id="p",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            strict_validation=True,
+        )
+        assert comp is not None
+
+    def test_missing_required_input_still_raises_when_optional_present(
+        self,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_toolset,
+    ):
+        mock_prompt_registry.get_required_variables.return_value = {
+            "goal",
+            "required_var",
+        }
+        with pytest.raises(ValidationError, match="missing input variables"):
+            AgentComponent(
+                name="comp",
+                flow_id="test",
+                flow_type=flow_type,
+                user=user,
+                inputs=[
+                    "context:goal",
+                    {"from": "context:project", "as": "project", "optional": True},
+                ],
+                prompt_id="p",
+                toolset=mock_toolset,
+                prompt_registry=mock_prompt_registry,
+                internal_event_client=mock_internal_event_client,
+            )
+
 
 class TestAgentComponentCompaction:
     """Test suite for AgentComponent compaction configuration."""

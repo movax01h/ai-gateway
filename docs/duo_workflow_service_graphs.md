@@ -250,6 +250,27 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `agentic_chat 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> chat_agent;
+    chat_agent(chat_agent<br>#91;AgentComponent#93;);
+    user_input(user_input<br>#91;HumanInputComponent#93;);
+    chat_agent --> user_input;
+    user_input --> chat_agent;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `analytics_agent 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
