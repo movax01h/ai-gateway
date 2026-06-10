@@ -4,6 +4,8 @@ include:
 tests:unit:
   extends: .poetry
   stage: test
+  tags:
+    - saas-linux-large-amd64
   needs:
     - install
   script:
