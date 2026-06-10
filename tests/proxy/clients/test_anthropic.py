@@ -1,10 +1,13 @@
 import json
+from unittest.mock import patch
 
 import fastapi
 import pytest
 from fastapi import status
 
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.proxy.clients import AnthropicProxyModelFactory, ProxyClient
+from ai_gateway.proxy.clients.anthropic import _resolve_api_key
 
 
 @pytest.fixture(name="anthropic_factory")
@@ -273,3 +276,101 @@ class TestAnthropicTokenUsageExtraction:
         """Fixture to create an AnthropicProxyModelFactory instance for usage tests."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
         return AnthropicProxyModelFactory()
+
+
+class TestAnthropicApiKeyResolution:
+    """Test cases for per-model Anthropic API key resolution."""
+
+    def test_resolves_per_model_api_key(self, monkeypatch):
+        """A model with a configured api_key override uses that key."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(
+            default_models_override={},
+            model_params_override={
+                "claude_fable_5": {"api_key": "fable-workspace-key"}
+            },
+        )
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            assert _resolve_api_key("claude-fable-5") == "fable-workspace-key"
+
+    def test_falls_back_to_env_when_no_override(self, monkeypatch):
+        """A model without an api_key override falls back to ANTHROPIC_API_KEY."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(default_models_override={})
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            assert _resolve_api_key("claude-haiku-4-5-20251001") == "env-key"
+
+    def test_empty_per_model_api_key_falls_back_to_env(self, monkeypatch):
+        """An empty-string api_key override falls back to ANTHROPIC_API_KEY."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(
+            default_models_override={},
+            model_params_override={"claude_fable_5": {"api_key": ""}},
+        )
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            assert _resolve_api_key("claude-fable-5") == "env-key"
+
+    def test_raises_when_no_key_available(self, monkeypatch):
+        """Missing both per-model key and env var raises HTTP 400."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(default_models_override={})
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            with pytest.raises(fastapi.HTTPException) as excinfo:
+                _resolve_api_key("claude-haiku-4-5-20251001")
+
+        assert excinfo.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert excinfo.value.detail == "API key not found"
+
+    @pytest.mark.asyncio
+    async def test_factory_forwards_per_model_api_key_to_upstream(
+        self,
+        mock_proxy_async_client,
+        monkeypatch,
+        limits,
+        internal_event_client,
+        billing_event_service,
+        request_factory,
+        request_headers,
+    ):
+        """The per-model api_key is forwarded as x-api-key to the upstream request."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(
+            default_models_override={},
+            model_params_override={
+                "claude_fable_5": {"api_key": "fable-workspace-key"}
+            },
+        )
+
+        request_params = {
+            "model": "claude-fable-5",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True,
+        }
+        request = request_factory(
+            request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
+            request_body=json.dumps(request_params).encode("utf-8"),
+            request_headers=request_headers,
+        )
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            factory = AnthropicProxyModelFactory()
+            proxy_client = ProxyClient(
+                limits, internal_event_client, billing_event_service
+            )
+            model = await factory.factory(request)
+            assert model.headers_to_upstream["x-api-key"] == "fable-workspace-key"
+
+            await proxy_client.proxy(request, model)
+
+        upstream_request = mock_proxy_async_client.send.call_args[0][0]
+        assert upstream_request.headers["x-api-key"] == "fable-workspace-key"
