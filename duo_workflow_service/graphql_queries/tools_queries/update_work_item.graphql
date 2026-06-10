@@ -43,6 +43,12 @@ mutation updateWorkItem($input: WorkItemUpdateInput!) {
                         }
                     }
                 }
+                ... on WorkItemWidgetStatus {
+                    status {
+                        id
+                        name
+                    }
+                }
                 # AGENT_PLAN_WIDGET_PLACEHOLDER
             }
         }

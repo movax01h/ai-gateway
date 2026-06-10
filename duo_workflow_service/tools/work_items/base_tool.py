@@ -275,6 +275,11 @@ class WorkItemBaseTool(DuoBaseTool):
         if todo_widget:
             input_data["currentUserTodosWidget"] = todo_widget
 
+        status_widget = WorkItemBaseTool._build_status_widget(kwargs, warnings)
+
+        if status_widget:
+            input_data["statusWidget"] = status_widget
+
         if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
             input_data["agentPlanWidget"] = {"content": kwargs["agent_plan"]}
 
@@ -477,6 +482,37 @@ class WorkItemBaseTool(DuoBaseTool):
                 widget["todoId"] = todo_id
 
         return widget
+
+    @staticmethod
+    def _build_status_widget(
+        kwargs: Dict[str, Any], warnings: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build statusWidget input for work item create/update.
+
+        Args:
+            kwargs: Input parameters that may contain ``status_id``.
+            warnings: List to collect validation warnings.
+
+        Returns:
+            Dictionary with ``{"status": <gid>}`` or ``None`` if ``status_id`` is
+            not provided. ``status_id`` must be the global ID of an existing
+            status, which can be looked up with the ``get_work_item_statuses``
+            tool.
+        """
+        status_id = kwargs.get("status_id")
+        if not status_id:
+            return None
+
+        if not str(status_id).startswith("gid://gitlab/"):
+            warnings.append(
+                f"Invalid status_id: '{status_id}' is not a global ID "
+                "(e.g. 'gid://gitlab/WorkItems::Statuses::SystemDefined::Status/1'). "
+                "Look up the valid status global IDs for this namespace before "
+                "retrying the update."
+            )
+            return None
+
+        return {"status": status_id}
 
     @staticmethod
     def _normalize_gids(ids: list[Any], gid_type: str) -> tuple[list[str], list[Any]]:

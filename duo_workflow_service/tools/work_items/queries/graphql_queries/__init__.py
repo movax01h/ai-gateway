@@ -45,6 +45,9 @@ UPDATE_WORK_ITEM_MUTATION = load_graphql_query(
     str(_GRAPHQL_DIR / "update_work_item.graphql")
 )
 GET_NOTE_QUERY = load_graphql_query(str(_GRAPHQL_DIR / "get_note.graphql"))
+GET_WORK_ITEM_STATUSES_QUERY = load_graphql_query(
+    str(_GRAPHQL_DIR / "get_work_item_statuses.graphql")
+)
 
 __all__ = [
     "GET_GROUP_WORK_ITEM_QUERY",
@@ -58,4 +61,5 @@ __all__ = [
     "CREATE_NOTE_MUTATION",
     "UPDATE_WORK_ITEM_MUTATION",
     "GET_NOTE_QUERY",
+    "GET_WORK_ITEM_STATUSES_QUERY",
 ]
