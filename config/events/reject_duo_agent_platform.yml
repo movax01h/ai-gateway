@@ -2,7 +2,9 @@
 description: Tracks rejected Duo Agent Platform sessions
 internal_events: true
 action: reject_duo_agent_platform
-product_group: duo_workflow
+product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: Workflow event type label

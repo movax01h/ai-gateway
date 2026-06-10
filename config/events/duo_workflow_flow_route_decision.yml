@@ -3,6 +3,8 @@ description: Tracks when a flow routes through a conditional branch
 internal_events: true
 action: duo_workflow_flow_route_decision
 product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: The component name that produced the routing decision
