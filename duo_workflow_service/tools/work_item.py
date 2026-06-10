@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field, StringConstraints
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
-    QUICK_ACTIONS_WARNING,
 )
 from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedWorkItem,
@@ -546,8 +545,6 @@ class CreateWorkItem(WorkItemBaseTool):
     name: str = "create_work_item"
     description: str = f"""Create a new work item in a GitLab group or project.
 
-    {QUICK_ACTIONS_WARNING}
-
     {PARENT_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -653,8 +650,6 @@ class UpdateWorkItem(WorkItemBaseTool):
     name: str = "update_work_item"
     description: str = f"""Update an existing work item in a GitLab group or project.
 
-    {QUICK_ACTIONS_WARNING}
-
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     Supports updating title, description, assignees, labels, state, health status,
@@ -710,8 +705,6 @@ class CreateWorkItemNoteInput(WorkItemResourceInput):
 class CreateWorkItemNote(WorkItemBaseTool):
     name: str = "create_work_item_note"
     description: str = f"""Create a new note (comment) on a GitLab work item or reply to an existing comment.
-
-    {QUICK_ACTIONS_WARNING}
 
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
