@@ -281,6 +281,7 @@ def test_resolve_flow_with_chat_flow_config_success(config_params):
             "tools_override": ["tool1", "tool2"],
             "system_template_override": None,
             "agent_name_override": None,  # Default component has no name
+            "component_inputs_config": None,
         }
         assert result.keywords == expected_kwargs
 
@@ -325,8 +326,51 @@ def test_resolve_flow_with_chat_flow_config_extracts_agent_name():
             "tools_override": ["tool1", "tool2"],
             "system_template_override": None,
             "agent_name_override": "348/0",
+            "component_inputs_config": None,
         }
         assert result.keywords == expected_kwargs
+
+
+def test_resolve_flow_with_chat_flow_config_forwards_component_inputs():
+    """Test that component inputs config is forwarded to chat.Workflow."""
+    component_inputs = [
+        {"from": "context:goal", "as": "goal"},
+        {
+            "from": "context:inputs.orbit_context.orbit_enabled",
+            "as": "orbit_enabled",
+            "optional": True,
+        },
+    ]
+    components = [
+        {
+            "type": "AgentComponent",
+            "toolset": ["tool1"],
+            "inputs": component_inputs,
+        }
+    ]
+    mocks = build_chat_flow_config(components=components)
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=mocks["expected_dict"],
+        ),
+    ):
+        result = resolve_flow(
+            InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
+        )
+
+    assert result.keywords["component_inputs_config"] == component_inputs
 
 
 @pytest.mark.parametrize(

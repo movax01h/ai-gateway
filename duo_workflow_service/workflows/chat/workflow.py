@@ -1,4 +1,5 @@
 # pylint: disable=attribute-defined-outside-init
+import json
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Dict, List, NoReturn, Optional, override
@@ -6,6 +7,7 @@ from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
+from jinja2 import DebugUndefined
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.errors import (
@@ -16,6 +18,7 @@ from langgraph.types import Command
 from structlog import get_logger
 
 from ai_gateway.container import ContainerApplication
+from ai_gateway.prompts.base import PromptSandboxedEnvironment as _JinjaEnv
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
 from duo_workflow_service.agents.chat_agent import ChatAgent
@@ -45,6 +48,51 @@ from lib.internal_events.client import InternalEventsClient
 from lib.mcp_server_tools.context import get_enabled_mcp_server_tools
 
 logger = get_logger("chat.workflow")
+
+_INPUTS_PREFIX = "context:inputs."
+
+
+def _resolve_additional_context_vars(
+    component_inputs: list[dict],
+    additional_context: list,
+) -> dict[str, Any]:
+    """Resolve Jinja2 template variables from additional_context using component input mappings.
+
+    Handles IOKey entries whose ``from`` path starts with ``context:inputs.``,
+    mirroring what V1Flow's _process_additional_context + IOKey resolution does
+    for ambient flows — but evaluated at template-render time rather than at
+    graph-execution time.
+    """
+    parsed: dict[str, Any] = {}
+    for item in additional_context:
+        if item.content:
+            try:
+                parsed[item.category] = json.loads(item.content)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+    template_vars: dict[str, Any] = {}
+    for spec in component_inputs:
+        if not isinstance(spec, dict):
+            continue
+        from_key = spec.get("from", "")
+        if not from_key.startswith(_INPUTS_PREFIX):
+            continue
+
+        path = from_key[len(_INPUTS_PREFIX) :].split(".")
+        var_name = spec.get("as") or path[-1]
+        optional = spec.get("optional", False)
+
+        try:
+            current: Any = parsed
+            for key in path:
+                current = current[key]
+            template_vars[var_name] = current
+        except (KeyError, TypeError):
+            if optional:
+                template_vars[var_name] = None
+
+    return template_vars
 
 
 class Routes(StrEnum):
@@ -167,9 +215,21 @@ class Workflow(AbstractWorkflow):
     ):
         self._tools_override = kwargs.pop("tools_override", None)
         self._agent_name_override = kwargs.pop("agent_name_override", None)
-        self.system_template_override = system_template_override
+        component_inputs_config = kwargs.pop("component_inputs_config", None)
         self._workflow_id = workflow_id
         self._workflow_type = workflow_type
+
+        if system_template_override and component_inputs_config:
+            template_vars = _resolve_additional_context_vars(
+                component_inputs_config, additional_context or []
+            )
+            if template_vars:
+                _env = _JinjaEnv(undefined=DebugUndefined)
+                system_template_override = _env.from_string(
+                    system_template_override
+                ).render(**template_vars)
+
+        self.system_template_override = system_template_override
 
         super().__init__(
             workflow_id=workflow_id,
