@@ -282,6 +282,7 @@ def flow_factory(
     args = {
         "tools_override": agent_component["toolset"],
         "agent_name_override": agent_name,
+        "component_inputs_config": agent_component.get("inputs"),
     }
 
     if prompt_template_override := (config.prompts[0] if config.prompts else None):

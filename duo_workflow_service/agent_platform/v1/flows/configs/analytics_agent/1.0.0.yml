@@ -12,6 +12,9 @@ components:
     inputs:
       - from: "context:goal"
         as: "goal"
+      - from: "context:inputs.orbit_context.orbit_enabled"
+        as: "orbit_enabled"
+        optional: true
     toolset:
       - "get_current_user"
       - "get_glql_schema"
@@ -27,6 +30,12 @@ components:
 routers: []
 flow:
   entry_point: "analytics_agent"
+  inputs:
+    - category: orbit_context
+      input_schema:
+        orbit_enabled:
+          type: boolean
+          description: Whether Orbit is available for this user
 prompts:
   - name: "analytics_agent_prompt"
     prompt_id: "analytics_agent_prompt"
@@ -49,8 +58,8 @@ prompts:
           2. **Determine scope** - Project, group, or cross-project analysis
           3. **Check for ambiguous concepts** - Does the question contain terms like "team", "quarter", "bugs" that need clarification?
           4. **Select data source** - By default, identify which GLQL data source the user is asking about (WorkItem, MergeRequest, Pipeline, Job, or Project) and call `get_glql_schema` to retrieve its schema.
-            - **Switch to Orbit instead** when the question spans relationships across entities (files, commits, code owners, cross-project dependencies), needs full-text/substring search, or asks about anything not covered by GLQL. See `<orbit_integration>`.
-            - **Use both** when one tool answers part of the question and the other fills the gap (e.g. GLQL for the list of MRs, Orbit to traverse the files they touched). Still call `get_glql_schema` for the GLQL portion.
+            {% if orbit_enabled %}- **Switch to Orbit instead** when the question spans relationships across entities (files, commits, code owners, cross-project dependencies), needs full-text/substring search, or asks about anything not covered by GLQL. See `<orbit_integration>`.
+            - **Use both** when one tool answers part of the question and the other fills the gap (e.g. GLQL for the list of MRs, Orbit to traverse the files they touched). Still call `get_glql_schema` for the GLQL portion.{% endif %}
           5. **Build query** - Refer to the glql_syntax section to build the appropriate query based on the schema returned by the tool.
           6. **Generate insights or queries** - Based on user intent
         </core_function>
@@ -388,6 +397,7 @@ prompts:
           - limit scope: use `project` instead of `group` when possible
         </performance>
 
+        {% if orbit_enabled %}
         <orbit_integration>
           In addition to GLQL, you have access to GitLab Orbit (Knowledge Graph) if the dedicated Orbit tools are available.
 
@@ -407,6 +417,7 @@ prompts:
           - Questions about entity types not covered by GLQL's data sources
           - Anything answerable by traversing relationships across entities e.g. projects, users, MRs, issues, pipelines, files, commits
         </orbit_integration>
+        {% endif %}
 
         <post_to_gitlab>
           When users ask to add the data on an issue, epic, work items or merge request, use the appropriate tool to post a note.
@@ -482,5 +493,22 @@ prompts:
 
           **Don't include feedback links** for normal successful queries or when the issue is user error, not a tool limitation.
         </feedback>
+
+        {% if orbit_enabled %}
+        <orbit_integration>
+          You also have access to Orbit commands via `orbit_list_commands` and `orbit_invoke_command`.
+          Use Orbit for questions that GLQL cannot answer, such as cross-project dependency graphs,
+          code-structure traversal, or relationship queries across the GitLab entity graph.
+
+          **When to use Orbit instead of GLQL:**
+          - Cross-project or cross-group relationship queries
+          - Code structure and dependency analysis
+          - Questions GLQL fails to answer after one retry
+
+          **How to use Orbit:**
+          1. Call `orbit_list_commands` to discover available commands.
+          2. Call `orbit_invoke_command` with the chosen command and its parameters.
+        </orbit_integration>
+        {% endif %}
       user: |
         {{goal}}

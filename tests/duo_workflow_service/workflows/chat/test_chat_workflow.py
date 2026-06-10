@@ -38,6 +38,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     RUN_COMMAND_TOOLS,
     Routes,
     Workflow,
+    _resolve_additional_context_vars,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
@@ -1442,3 +1443,236 @@ async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
         == "The workflow reached its maximum step limit and could not complete. "
         "Please try again with a more focused goal, or break the task into smaller steps."
     )
+
+
+class TestResolveAdditionalContextVars:
+    def _make_ctx(self, category, content):
+        return AdditionalContext(category=category, content=content)
+
+    def test_extracts_value_from_matching_inputs_path(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": true}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"orbit_enabled": True}
+
+    def test_non_dict_spec_is_skipped(self):
+        component_inputs = [
+            "not-a-dict",
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": true}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"orbit_enabled": True}
+
+    def test_skips_non_inputs_keys(self):
+        component_inputs = [
+            {"from": "context:goal", "as": "goal"},
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": false}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert "goal" not in result
+        assert result == {"orbit_enabled": False}
+
+    def test_optional_missing_key_returns_none(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, [])
+
+        assert result == {"orbit_enabled": None}
+
+    def test_non_optional_missing_key_is_excluded(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, [])
+
+        assert not result
+
+    def test_uses_last_path_segment_when_no_alias(self):
+        component_inputs = [
+            {"from": "context:inputs.my_context.my_flag"},
+        ]
+        additional_context = [
+            self._make_ctx("my_context", '{"my_flag": true}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"my_flag": True}
+
+    def test_invalid_json_content_is_skipped(self):
+        component_inputs = [
+            {"from": "context:inputs.bad_ctx.value", "as": "value", "optional": True},
+        ]
+        additional_context = [
+            self._make_ctx("bad_ctx", "not-json"),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"value": None}
+
+    def test_multiple_categories_resolved_independently(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+            {"from": "context:inputs.feature_flags.flag_a", "as": "flag_a"},
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": true}'),
+            self._make_ctx("feature_flags", '{"flag_a": false}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"orbit_enabled": True, "flag_a": False}
+
+
+class TestWorkflowSystemTemplatePreRender:
+    def test_component_inputs_config_pre_renders_template(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        additional_context = [
+            AdditionalContext(
+                category="orbit_context", content='{"orbit_enabled": true}'
+            ),
+        ]
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=additional_context,
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit on"
+
+    def test_orbit_disabled_renders_else_branch(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        additional_context = [
+            AdditionalContext(
+                category="orbit_context", content='{"orbit_enabled": false}'
+            ),
+        ]
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=additional_context,
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit off"
+
+    def test_missing_optional_context_renders_falsy(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=[],
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit off"
+
+    def test_no_component_inputs_config_skips_pre_render(self, flow_type):
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=[],
+        )
+
+        assert workflow.system_template_override == template
+
+    def test_unknown_variables_preserved_for_later_render(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        additional_context = [
+            AdditionalContext(
+                category="orbit_context", content='{"orbit_enabled": true}'
+            ),
+        ]
+        template = "{% if orbit_enabled %}orbit on{% endif %} goal={{ goal }}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=additional_context,
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit on goal={{ goal }}"
