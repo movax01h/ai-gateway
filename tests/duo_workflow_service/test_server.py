@@ -1433,9 +1433,10 @@ async def test_grpc_server(
     mock_server.wait_for_termination.return_value = None
 
     env = {
+        "DUO_WORKFLOW_AUTH__ENABLED": "true",
         "DUO_WORKFLOW_GRPC_REFLECTION_ENABLED": (
             "true" if reflection_enabled else "false"
-        )
+        ),
     }
 
     with (
@@ -1493,7 +1494,7 @@ async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready
         return instance
 
     with (
-        patch.dict(os.environ, {}),
+        patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"}),
         patch(
             "duo_workflow_service.server.grpc.aio.server",
             return_value=mock_server,

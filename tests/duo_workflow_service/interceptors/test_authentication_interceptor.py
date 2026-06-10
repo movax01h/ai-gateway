@@ -29,6 +29,7 @@ def handler_call_details_fixture():
     return mock_details
 
 
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
 @patch(
     "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
     return_value=(
@@ -61,6 +62,7 @@ async def test_intercept_service_health_check_prefetches_keys_but_bypasses_auth(
     mock_authenticate.assert_called_once_with({}, None, bypass_auth=True)
 
 
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
 @patch(
     "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
     return_value=(
@@ -96,6 +98,7 @@ async def test_intercept_service_reflection_prefetches_keys_but_bypasses_auth_wh
     mock_authenticate.assert_called_once_with({}, None, bypass_auth=True)
 
 
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
 @pytest.mark.parametrize(
     "method",
     [
