@@ -3,6 +3,8 @@ description: Tracks token usage per LLM call in Duo Workflow
 internal_events: true
 action: tokens_per_user_request_prompt
 product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: Duo Workflow Agent Name

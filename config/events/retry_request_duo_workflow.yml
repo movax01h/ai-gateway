@@ -3,6 +3,8 @@ description: Tracks Duo Workflow retries
 internal_events: true
 action: retry_request_duo_workflow
 product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: Workflow event type label

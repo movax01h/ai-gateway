@@ -3,6 +3,8 @@ description: Tracks when a start request is received by the Duo Agent Platform
 internal_events: true
 action: receive_start_duo_workflow
 product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: The type of workflow being started (flow_type)
