@@ -118,6 +118,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetWorkItem,
     tools.ListWorkItems,
     tools.GetWorkItemNotes,
+    tools.GetWorkItemStatuses,
     tools.ListInstanceAuditEvents,
     tools.ListGroupAuditEvents,
     tools.ListProjectAuditEvents,

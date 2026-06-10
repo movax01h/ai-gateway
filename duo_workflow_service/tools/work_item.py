@@ -17,6 +17,7 @@ from duo_workflow_service.tools.work_items.base_tool import (
 from duo_workflow_service.tools.work_items.queries.graphql_queries import GET_NOTE_QUERY
 from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_NOTE_MUTATION,
+    GET_WORK_ITEM_STATUSES_QUERY,
 )
 from duo_workflow_service.tools.work_items.version_compatibility import (
     get_query_variables_for_version,
@@ -642,6 +643,14 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         description="Global ID of the to-do item to mark as done (e.g., 'gid://gitlab/Todo/123'). "
         "Optional when todo_action is 'mark_as_done'. If omitted, all to-dos for the work item are marked as done.",
     )
+    status_id: Optional[str] = Field(
+        default=None,
+        description="""Global ID of the status to set on the work item's status widget
+        (e.g. 'gid://gitlab/WorkItems::Statuses::SystemDefined::Status/1').
+        This is the status category (e.g. New, In Progress, Done), which is distinct
+        from 'state' (opened / closed). Use the 'get_work_item_statuses' tool first to
+        look up the available statuses and their IDs for the work item's namespace.""",
+    )
     agent_plan: Optional[str] = Field(
         default=None,
         description="""A plan on how the work should be implemented.
@@ -657,8 +666,15 @@ class UpdateWorkItem(WorkItemBaseTool):
 
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
-    Supports updating title, description, assignees, labels, state, health status,
-    weight, dates, hierarchy, to-do items and agent plan.
+    Supports updating title, description, assignees, labels, state, status, health
+    status, weight, dates, hierarchy, to-do items and agent plan.
+
+    Note: 'state' (opened / closed) is different from 'status_id' (the status
+    category widget, e.g. New / In Progress / Done). To set a status, first call
+    'get_work_item_statuses' to find the available statuses and their global IDs,
+    then pass the matching status global ID as 'status_id'. If the requested
+    status does not exist, inform the user and list the available statuses instead
+    of guessing.
 
     For example:
     - update_work_item(group_id='parent/child', work_item_iid=42, title="Updated title")
@@ -837,3 +853,63 @@ class CreateWorkItemNote(WorkItemBaseTool):
             )
 
         return {"replyId": discussion.get("replyId")}
+
+
+class GetWorkItemStatuses(WorkItemBaseTool):
+    name: str = "get_work_item_statuses"
+    description: str = f"""Get the available work item statuses for a GitLab group or project.
+
+    Use this tool before updating a work item's status (via 'update_work_item' with
+    'status_id') to discover which statuses exist and their global IDs. Statuses are
+    the status category widget (e.g. New, In Progress, Done) and are distinct from the
+    'state' field (opened / closed).
+
+    Returns the lifecycles for the namespace, each containing its statuses with both a
+    'name' and an 'id' (the global ID to pass as 'status_id' when updating a work item).
+    If a requested status is not present in the results, inform the user and list the
+    available statuses instead of guessing.
+
+    {PARENT_IDENTIFICATION_DESCRIPTION}
+
+    For example:
+    - Given group_id 42, the tool call would be:
+        get_work_item_statuses(group_id=42)
+    - Given project_id 13, the tool call would be:
+        get_work_item_statuses(project_id=13)
+    - Given a group path 'namespace/group', the tool call would be:
+        get_work_item_statuses(group_id='namespace/group')
+    - Given the URL https://gitlab.com/groups/namespace/group, the tool call would be:
+        get_work_item_statuses(url="https://gitlab.com/groups/namespace/group")
+    """
+    args_schema: Type[BaseModel] = ParentResourceInput
+
+    async def _execute(self, **kwargs: Any) -> str:
+        url = kwargs.pop("url", None)
+        group_id = kwargs.pop("group_id", None)
+        project_id = kwargs.pop("project_id", None)
+
+        resolved = await self._validate_parent_url(url, group_id, project_id)
+
+        response = await self.gitlab_client.graphql(
+            GET_WORK_ITEM_STATUSES_QUERY, {"fullPath": resolved.full_path}
+        )
+
+        if "errors" in response:
+            raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
+
+        namespace = response.get("namespace")
+        if not namespace:
+            raise ToolException("No namespace found in response")
+
+        lifecycles = namespace.get("lifecycles", {}).get("nodes", [])
+
+        return json.dumps({"lifecycles": lifecycles})
+
+    def format_display_message(
+        self, args: ParentResourceInput, _tool_response: Any = None
+    ) -> str:
+        if args.url:
+            return f"Get available work item statuses in {args.url}"
+        if args.group_id:
+            return f"Get available work item statuses in group {args.group_id}"
+        return f"Get available work item statuses in project {args.project_id}"
