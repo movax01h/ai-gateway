@@ -17,6 +17,13 @@ from zipfile import ZipFile
 
 import requests
 from langchain_community.docstore.document import Document
+from requests.exceptions import HTTPError
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,12 +78,20 @@ def candidate_version_tags(version_tag: str) -> list[str]:
     return [f"v{major}.{minor}.{p}{suffix}" for p in range(patch, -1, -1)]
 
 
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=3, min=3, max=30),
+    retry=retry_if_exception_type(HTTPError),
+)
 def _download_docs_archive(version_tag: str) -> Optional[bytes]:
     docs_url = f"https://gitlab.com/gitlab-org/gitlab/-/archive/{version_tag}/gitlab-{version_tag}.zip?path=doc"
     logger.info("Fetching documents from %s", docs_url)
     response = requests.get(docs_url, timeout=100)
     if response.status_code == 200:
         return response.content
+    if response.status_code == 429:
+        response.raise_for_status()
     logger.warning(
         "Failed to download documents for %s. Status code: %d",
         version_tag,
@@ -101,7 +116,14 @@ def fetch_documents(version_tag: str) -> Path:
     """
     content: Optional[bytes] = None
     for candidate in candidate_version_tags(version_tag):
-        content = _download_docs_archive(candidate)
+        try:
+            content = _download_docs_archive(candidate)
+        except HTTPError:
+            logger.warning(
+                "Rate-limited for %s after all retries; trying next candidate.",
+                candidate,
+            )
+            content = None
         if content is not None:
             if candidate != version_tag:
                 logger.warning(
