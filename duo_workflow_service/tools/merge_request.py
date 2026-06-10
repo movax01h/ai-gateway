@@ -9,7 +9,6 @@ from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPol
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
-    QUICK_ACTIONS_WARNING,
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
@@ -43,11 +42,6 @@ MERGE_REQUEST_IDENTIFICATION_DESCRIPTION = """To identify a merge request you mu
   - https://gitlab.example.com/namespace/project/-/merge_requests/42
   - https://gitlab.example.com/group/subgroup/project/-/merge_requests/42
 """
-
-MERGE_REQUEST_QUICK_ACTIONS_WARNING = (
-    QUICK_ACTIONS_WARNING.rstrip()
-    + ' To create a draft merge request, prefix the title with "Draft:" instead of using /draft.\n'
-)
 # editorconfig-checker-enable
 
 
@@ -95,8 +89,6 @@ class CreateMergeRequest(DuoBaseTool):
     This tool creates a merge request using the REMOTE source and target branches.
     Make sure the source branch has been pushed to the remote repository before calling this tool,
     otherwise the merge request will have an empty diff.
-
-    {MERGE_REQUEST_QUICK_ACTIONS_WARNING}
 
     {PROJECT_IDENTIFICATION_DESCRIPTION}
 
@@ -524,8 +516,6 @@ class UpdateMergeRequest(DuoBaseTool):
     # pylint: disable=line-too-long
     description: str = f"""Updates an existing merge request. You can change the target branch, title, or even close the MR.
 Max character limit of {DESCRIPTION_CHARACTER_LIMIT} characters.
-
-{MERGE_REQUEST_QUICK_ACTIONS_WARNING}
 
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 

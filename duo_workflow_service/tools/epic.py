@@ -9,7 +9,6 @@ from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUr
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
-    QUICK_ACTIONS_WARNING,
     DuoBaseTool,
 )
 from duo_workflow_service.tools.queries.epics import GET_EPIC_NOTES_QUERY
@@ -200,8 +199,6 @@ class WriteEpicInput(EpicResourceInput):
 class CreateEpic(EpicBaseTool):
     name: str = "create_epic"
     description: str = f"""Create a new epic in a GitLab group.
-
-    {QUICK_ACTIONS_WARNING}
 
     {GROUP_IDENTIFICATION_DESCRIPTION}
 
@@ -440,8 +437,6 @@ class UpdateEpicInput(WriteEpicInput):
 class UpdateEpic(EpicBaseTool):
     name: str = "update_epic"
     description: str = f"""Update an existing epic in a GitLab group.
-
-{QUICK_ACTIONS_WARNING}
 
 {EPIC_IDENTIFICATION_DESCRIPTION}
 
