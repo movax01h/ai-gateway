@@ -1,8 +1,10 @@
 install:
   extends: .poetry
   stage: build
+  cache:
+    policy: push
   script:
-    - poetry install
+    - poetry install --with lint,test
 
 .docker-build-arch:
   extends:

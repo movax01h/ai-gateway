@@ -147,7 +147,7 @@ clean:
 .PHONY: install-lint-deps
 install-lint-deps:
 	@echo "Installing lint dependencies..."
-	@poetry install --with lint,test # Install all relevant dependencies so pylint has access to them
+	@test "$$CI" = "true" -a -d .venv || poetry install --with lint,test # Install all relevant dependencies so pylint has access to them
 
 .PHONY: codespell
 codespell: install-lint-deps
@@ -171,13 +171,13 @@ docformatter: install-lint-deps
 
 .PHONY: check-model-selection
 check-model-selection:
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run validate-model-selection-config
 
 .PHONY: check-pricing-multipliers
 check-pricing-multipliers:
 	@echo "Verifying pricing multipliers sync with CustomersDot..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run verify-pricing-multipliers
 
 .PHONY: format
@@ -248,7 +248,7 @@ check-graphql:
 .PHONY: install-test-deps
 install-test-deps:
 	@echo "Installing test dependencies..."
-	@poetry install --with test
+	@test "$$CI" = "true" -a -d .venv || poetry install --with test
 
 .PHONY: test
 test: install-test-deps
