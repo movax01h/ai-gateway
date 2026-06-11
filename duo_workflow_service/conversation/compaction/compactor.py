@@ -255,13 +255,17 @@ class ConversationCompactor:
             # naturally satisfies the constraint without a synthetic marker.
             compacted_messages.append(HumanMessage(content=COMPACTION_CONTINUE_MESSAGE))
 
-        compacted_tokens = self._calculate_compacted_tokens(
-            original_tokens, summary, is_manual, user_instruction
-        )
-
         usage = summary.usage_metadata
         compaction_input_tokens = usage.get("input_tokens", 0) if usage else 0
         compaction_output_tokens = usage.get("output_tokens", 0) if usage else 0
+
+        compacted_tokens = self._calculate_compacted_tokens(
+            original_tokens,
+            compaction_input_tokens,
+            compaction_output_tokens,
+            is_manual,
+            user_instruction,
+        )
 
         max_context_tokens = get_current_model_max_context_token_limit()
         self._fire_compaction_event(
@@ -308,6 +312,8 @@ class ConversationCompactor:
             tokens_before=original_tokens,
             tokens_after=compacted_tokens,
             messages_summarized=len(slices.to_summarize),
+            compaction_input_tokens=compaction_input_tokens,
+            compaction_output_tokens=compaction_output_tokens,
             summary=summary,
         )
 
@@ -319,25 +325,19 @@ class ConversationCompactor:
     ) -> AIMessage:
         """Invoke the LLM to summarize messages.
 
-        In auto mode, the "nostream" tag prevents LangGraph from streaming the summarization to the UI (recommended
-        LangGraph pattern for hiding internal LLM calls from stream_mode="messages" output; see
-        langgraph.constants.TAG_NOSTREAM). In manual mode the tag is omitted so summary tokens stream to the UI.
+        The "nostream" tag suppresses summarization tokens from LangGraph's stream_mode="messages" channel for both auto
+        and manual modes; the compaction outcome is surfaced as a single terminal UI entry instead. See
+        langgraph.constants.TAG_NOSTREAM.
         """
         log.info(
             "Start compaction summarization llm call.",
             is_manual=is_manual,
             is_gitlab_team_member=is_gitlab_team_member.get(),
         )
-        # Strip tool metadata from messages before summarization.
-        # The summarizer only needs text content, and some LLM providers
-        # reject messages with tool_calls when no tools= param is specified.
-        # Stripping unconditionally is safe since we convert tool call/result
-        # info to human-readable text.
         messages = strip_tool_metadata(messages)
 
-        tags: list[str] = [] if is_manual else [TAG_NOSTREAM]
         config: RunnableConfig = {
-            "tags": tags,
+            "tags": [TAG_NOSTREAM],
             "run_name": "Compaction Summarization",
         }
 
@@ -352,7 +352,8 @@ class ConversationCompactor:
     def _calculate_compacted_tokens(
         self,
         original_tokens: int,
-        summary: AIMessage,
+        input_tokens: int,
+        output_tokens: int,
         is_manual: bool,
         user_instruction: str | None = None,
     ) -> int:
@@ -361,10 +362,6 @@ class ConversationCompactor:
         The prompt-template overhead is rendered from the same inputs ``_invoke_summarizer`` uses, so the estimate
         stays consistent with the actual LLM call. ``user_instruction`` only affects rendering in manual mode.
         """
-        usage_metadata = summary.usage_metadata
-        input_tokens = usage_metadata.get("input_tokens", 0) if usage_metadata else 0
-        output_tokens = usage_metadata.get("output_tokens", 0) if usage_metadata else 0
-
         overhead_inputs: dict[str, object] = {"history": []}
         if is_manual:
             overhead_inputs["user_instruction"] = user_instruction

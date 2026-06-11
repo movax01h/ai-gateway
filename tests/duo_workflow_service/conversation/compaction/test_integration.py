@@ -46,7 +46,7 @@ class TestMaybeCompactHistory:
         mock_get_max_context.return_value = 400_000
         mock_trim.return_value = TrimResult(messages=messages, was_trimmed=False)
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=None,
             history=messages,
             agent_name="test_agent",
@@ -54,6 +54,7 @@ class TestMaybeCompactHistory:
         )
 
         assert result == messages
+        assert compaction_result is None
         mock_trim.assert_called_once_with(
             messages=messages,
             component_name="test_agent",
@@ -74,13 +75,14 @@ class TestMaybeCompactHistory:
         messages = [HumanMessage(content="test")]
         compacted_messages = [HumanMessage(content="compacted")]
 
-        mock_compactor = AsyncMock()
-        mock_compactor.compact.return_value = CompactionResult(
+        compaction_result_obj = CompactionResult(
             messages=compacted_messages,
             was_compacted=True,
         )
+        mock_compactor = AsyncMock()
+        mock_compactor.compact.return_value = compaction_result_obj
 
-        result = await maybe_compact_history(
+        result, returned_result = await maybe_compact_history(
             compactor=mock_compactor,
             history=messages,
             agent_name="test_agent",
@@ -88,6 +90,7 @@ class TestMaybeCompactHistory:
         )
 
         assert result == compacted_messages
+        assert returned_result is compaction_result_obj
         mock_compactor.compact.assert_called_once_with(messages=messages)
         mock_trim.assert_not_called()
 
@@ -97,16 +100,14 @@ class TestMaybeCompactHistory:
         _mock_get_config,
         _mock_is_gitlab_team_member,
     ):
-        """When compaction decides not to compact, should return original messages."""
+        """When compaction decides not to compact, should return original messages and the no-op result."""
         messages = [HumanMessage(content="test")]
 
+        noop_result = CompactionResult(messages=messages, was_compacted=False)
         mock_compactor = AsyncMock()
-        mock_compactor.compact.return_value = CompactionResult(
-            messages=messages,
-            was_compacted=False,
-        )
+        mock_compactor.compact.return_value = noop_result
 
-        result = await maybe_compact_history(
+        result, returned_result = await maybe_compact_history(
             compactor=mock_compactor,
             history=messages,
             agent_name="test_agent",
@@ -114,6 +115,8 @@ class TestMaybeCompactHistory:
         )
 
         assert result == messages
+        assert returned_result is noop_result
+        assert returned_result.was_compacted is False
         mock_compactor.compact.assert_called_once_with(messages=messages)
 
     @pytest.mark.asyncio
@@ -135,7 +138,7 @@ class TestMaybeCompactHistory:
         mock_get_max_context.return_value = 400_000
         mock_trim.return_value = TrimResult(messages=messages, was_trimmed=False)
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=None,
             history=messages,
             agent_name="test_agent",
@@ -143,6 +146,7 @@ class TestMaybeCompactHistory:
         )
 
         assert result == []
+        assert compaction_result is None
         mock_trim.assert_called_once()
 
     @pytest.mark.asyncio
@@ -181,7 +185,7 @@ class TestMaybeCompactHistory:
 
         mock_events_client = MagicMock()
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=None,
             history=messages,
             agent_name="test_agent",
@@ -189,6 +193,7 @@ class TestMaybeCompactHistory:
         )
 
         assert result == trimmed
+        assert compaction_result is None
         mock_events_client.track_event.assert_called_once()
         call_kwargs = mock_events_client.track_event.call_args.kwargs
         assert call_kwargs["event_name"] == "duo_workflow_legacy_trim_executed"
@@ -225,7 +230,7 @@ class TestMaybeCompactHistory:
 
         mock_events_client = MagicMock()
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=None,
             history=messages,
             agent_name="test_agent",
@@ -233,6 +238,7 @@ class TestMaybeCompactHistory:
         )
 
         assert result == messages
+        assert compaction_result is None
         mock_events_client.track_event.assert_not_called()
 
     @pytest.mark.asyncio
@@ -256,7 +262,7 @@ class TestMaybeCompactHistory:
         )
         mock_events_client = MagicMock()
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=mock_compactor,
             history=messages,
             agent_name="test_agent",
@@ -264,6 +270,8 @@ class TestMaybeCompactHistory:
         )
 
         assert result == compacted_messages
+        assert compaction_result is not None
+        assert compaction_result.was_compacted is True
         mock_trim.assert_not_called()
         mock_events_client.track_event.assert_not_called()
 
@@ -296,7 +304,7 @@ class TestMaybeCompactHistorySelfHosted:
             was_compacted=True,
         )
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=mock_compactor,
             history=messages,
             agent_name="test_agent",
@@ -304,6 +312,7 @@ class TestMaybeCompactHistorySelfHosted:
         )
 
         assert result == compacted_messages
+        assert compaction_result is not None
         mock_compactor.compact.assert_called_once_with(messages=messages)
         mock_trim.assert_not_called()
 
@@ -331,12 +340,14 @@ class TestMaybeCompactHistorySelfHosted:
             was_compacted=True,
         )
 
-        result = await maybe_compact_history(
+        result, compaction_result = await maybe_compact_history(
             compactor=mock_compactor,
             history=messages,
             agent_name="test_agent",
             internal_events_client=MagicMock(),
         )
+
+        assert compaction_result is not None
 
         assert result == compacted_messages
         mock_compactor.compact.assert_called_once_with(messages=messages)

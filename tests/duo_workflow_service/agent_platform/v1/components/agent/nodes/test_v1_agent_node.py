@@ -127,7 +127,7 @@ def _mock_maybe_compact_history_fixture():
 
         async def return_history(*, compactor, history, agent_name):
             _ = compactor, agent_name
-            return history
+            return history, None
 
         mock_compact.side_effect = return_history
         yield mock_compact
@@ -595,7 +595,7 @@ class TestAgentNodeCompaction:
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
             new_callable=AsyncMock,
         ) as mock_compact:
-            mock_compact.return_value = []
+            mock_compact.return_value = ([], None)
 
             await agent_node_with_compactor.run(base_flow_state)
 
@@ -617,7 +617,7 @@ class TestAgentNodeCompaction:
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
             new_callable=AsyncMock,
         ) as mock_compact:
-            mock_compact.return_value = []
+            mock_compact.return_value = ([], None)
 
             await agent_node.run(base_flow_state)
 

@@ -99,7 +99,7 @@ class Agent(BaseAgent):
 
             try:
                 history = state["conversation_history"].get(self.name, [])
-                compacted_history = await maybe_compact_history(
+                compacted_history, _ = await maybe_compact_history(
                     compactor=self.compactor,
                     history=history,
                     agent_name=self.name,

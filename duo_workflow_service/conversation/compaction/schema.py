@@ -1,11 +1,7 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel, ConfigDict, field_validator
-
-from duo_workflow_service.entities.state import MessageTypeEnum, UiChatLog
 
 
 class CompactionConfig(BaseModel):
@@ -57,22 +53,7 @@ class CompactionResult:
     tokens_before: int = 0
     tokens_after: int = 0
     messages_summarized: int = 0
+    compaction_input_tokens: int = 0
+    compaction_output_tokens: int = 0
     error: Exception | None = field(default=None, repr=False)
     summary: AIMessage | None = None
-
-    def build_ui_chat_log(self) -> UiChatLog | None:
-        """Build a UI chat log message if compaction occurred."""
-        if not self.was_compacted:
-            return None
-
-        return UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
-            content="I summarized the previous conversation to fit in the context window.",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            status=None,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
-            message_id=f"agent-{str(uuid4())}",
-        )

@@ -517,7 +517,7 @@ class TestAgentCompaction:
         mock_compactor = Mock(spec=ConversationCompactor)
         original_messages = [HumanMessage(content="test message")]
         compacted_messages = [HumanMessage(content="compacted")]
-        mock_maybe_compact.return_value = compacted_messages
+        mock_maybe_compact.return_value = (compacted_messages, None)
 
         workflow_state["conversation_history"][prompt_name] = original_messages  # type: ignore[assignment]
 
@@ -554,7 +554,7 @@ class TestAgentCompaction:
         prompt_name: str,
     ):
         original_messages = [HumanMessage(content="test message")]
-        mock_maybe_compact.return_value = original_messages
+        mock_maybe_compact.return_value = (original_messages, None)
 
         workflow_state["conversation_history"][prompt_name] = original_messages  # type: ignore[assignment]
 
@@ -588,7 +588,7 @@ class TestAgentCompaction:
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
-        mock_maybe_compact.return_value = []
+        mock_maybe_compact.return_value = ([], None)
         workflow_state["conversation_history"] = {}
 
         agent = Agent(
