@@ -1,5 +1,5 @@
 # pylint: disable=file-naming-for-tests,unsubscriptable-object
-"""Tests for the developer and developer_unstable flow user prompt template rendering."""
+"""Tests for the developer flow user prompt template rendering."""
 
 import pytest
 from langchain_core.prompts import ChatPromptTemplate
@@ -43,7 +43,7 @@ def _load_user_prompt_template(flow_name: str, flow_version: str | None = None) 
     name="user_prompt_template",
 )
 def user_prompt_template_fixture(request):
-    """User prompt template for configs that have goal-routing logic."""
+    """User prompt template for the developer flow config."""
     flow_name, flow_version = request.param
     return _load_user_prompt_template(flow_name, flow_version)
 
@@ -62,9 +62,8 @@ def render(template_str, **kwargs):
     "flow_name,flow_version",
     [
         ("developer", None),
-        ("developer_unstable", None),
     ],
-    ids=["developer-1.0.0", "developer_unstable-1.0.0"],
+    ids=["developer-1.0.0"],
 )
 class TestLangChainTemplateCompatibility:
     """Ensure the prompt template works end-to-end through LangChain's ChatPromptTemplate.

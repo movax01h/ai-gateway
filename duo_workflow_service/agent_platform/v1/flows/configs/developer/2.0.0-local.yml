@@ -2,9 +2,8 @@ version: "v1"
 environment: chat
 
 # Local/interactive variant of the developer flow, tailored for chat
-# environments such as the Duo CLI. It mirrors `developer_unstable` (same
-# concise system prompt via the shared `common/developer/system` partial, no
-# subagents) but:
+# environments such as the Duo CLI. It uses the same concise system prompt
+# via the shared `common/developer/system` partial (no subagents) but:
 #   * runs in the `chat` environment and loops through a HumanInputComponent so
 #     the user can steer the agent turn by turn,
 #   * requires tool approval, and
