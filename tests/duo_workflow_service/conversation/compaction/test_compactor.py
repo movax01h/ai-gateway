@@ -540,6 +540,8 @@ class TestConversationCompactorCompact:
         assert result.was_compacted is True
         assert result.tokens_before > 0
         assert result.messages_summarized > 0
+        assert result.compaction_input_tokens == 1000
+        assert result.compaction_output_tokens == 200
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
@@ -1012,34 +1014,23 @@ class TestCompactManualMode:
         assert COMPACTION_CONTINUE_MESSAGE not in contents
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("is_manual", [True, False])
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
-    async def test_manual_streams_summary_no_nostream_tag(
-        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    async def test_compaction_always_uses_nostream_tag(
+        self,
+        mock_count_tokens,
+        mock_get_max_context,
+        compactor,
+        mock_prompt,
+        is_manual,
     ):
-        """Manual mode should not apply the TAG_NOSTREAM tag."""
+        """Both auto and manual compaction suppress streaming to the UI."""
         mock_get_max_context.return_value = 400_000
         mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
 
         mock_prompt.ainvoke.return_value = _summary_message()
 
-        await compactor.compact(_large_history(), is_manual=True)
-
-        _, call_kwargs = mock_prompt.ainvoke.call_args
-        tags = call_kwargs["config"]["tags"]
-        assert TAG_NOSTREAM not in tags
-
-    @pytest.mark.asyncio
-    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
-    async def test_auto_uses_nostream_tag(
-        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
-    ):
-        """Auto mode must keep TAG_NOSTREAM."""
-        mock_get_max_context.return_value = 400_000
-        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
-
-        mock_prompt.ainvoke.return_value = _summary_message()
-
-        await compactor.compact(_large_history(), is_manual=False)
+        await compactor.compact(_large_history(), is_manual=is_manual)
 
         _, call_kwargs = mock_prompt.ainvoke.call_args
         tags = call_kwargs["config"]["tags"]

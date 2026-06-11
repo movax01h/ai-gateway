@@ -231,7 +231,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
 
-        history = await maybe_compact_history(
+        history, _ = await maybe_compact_history(
             compactor=self._compactor, history=history, agent_name=self.name
         )
 

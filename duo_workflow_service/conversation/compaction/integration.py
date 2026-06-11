@@ -5,6 +5,7 @@ from structlog import get_logger
 from ai_gateway.config import get_config
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.conversation.compaction.compactor import ConversationCompactor
+from duo_workflow_service.conversation.compaction.schema import CompactionResult
 from duo_workflow_service.conversation.trimmer import apply_token_based_trim
 from duo_workflow_service.entities.state import (
     get_current_model_max_context_token_limit,
@@ -25,11 +26,13 @@ async def maybe_compact_history(
     internal_events_client: InternalEventsClient = Provide[
         ContainerApplication.internal_event.client
     ],
-) -> list[BaseMessage]:
+) -> tuple[list[BaseMessage], CompactionResult | None]:
     """Compact or trim conversation history.
 
-    Uses compaction (LLM summarization) when a compactor is supplied, otherwise falls back to legacy token-based
-    trimming. Compaction is available for both cloud-hosted and self-hosted deployments.
+    Returns ``(messages, result)``. ``result`` is a ``CompactionResult`` when
+    LLM-driven compaction was attempted (success or no-op), or ``None`` when
+    the legacy token-based trim fallback ran (no compactor configured).
+    Callers wanting to surface a UI artifact read ``result``; others discard it.
     """
     config = get_config()
     is_self_hosted = config.custom_models.enabled
@@ -42,7 +45,7 @@ async def maybe_compact_history(
             agent_name=agent_name,
         )
         result = await compactor.compact(messages=history)
-        return result.messages
+        return result.messages, result
 
     log.info(
         "Fallback to legacy trim messages",
@@ -73,4 +76,4 @@ async def maybe_compact_history(
             category="legacy_trimmer",
         )
 
-    return trim_result.messages
+    return trim_result.messages, None
