@@ -1,3 +1,4 @@
+# pylint: disable=direct-environment-variable-reference,too-many-lines
 import os
 from unittest import mock
 
@@ -26,12 +27,11 @@ from ai_gateway.config import (
     ConfigModelSelection,
     ConfigProcessLevelFeatureFlags,
     ConfigSnowplow,
+    ConfigTLS,
     ConfigVertexSearch,
     ConfigVertexTextModel,
     setup_litellm,
 )
-
-# pylint: disable=direct-environment-variable-reference
 
 
 @pytest.mark.parametrize(
@@ -932,4 +932,104 @@ def test_config_mock_usage_quota_server_uses_documented_env_var():
     assert config.mock_usage_quota_server.port == 9999
 
 
-# pylint: enable=direct-environment-variable-reference
+class TestConfigTLS:
+    def test_defaults(self):
+        tls = ConfigTLS()
+        assert tls.enabled is False
+        assert tls.cert_file is None
+        assert tls.key_file is None
+
+    def test_enabled_with_files(self, tmp_path):
+        cert = tmp_path / "server.crt"
+        key = tmp_path / "server.key"
+        cert.touch()
+        key.touch()
+        tls = ConfigTLS(enabled=True, cert_file=str(cert), key_file=str(key))
+        assert tls.enabled is True
+        assert tls.cert_file == str(cert)
+        assert tls.key_file == str(key)
+
+    def test_enabled_without_files_raises(self):
+        with pytest.raises(
+            ValidationError, match="cert_file and key_file must both be set"
+        ):
+            ConfigTLS(enabled=True)
+
+    def test_cert_file_nonexistent_raises(self, tmp_path):
+        key_path = tmp_path / "server.key"
+        key_path.touch()
+        with pytest.raises(ValidationError, match="cert_file does not point to a file"):
+            ConfigTLS(
+                enabled=True,
+                cert_file=str(tmp_path / "missing.crt"),
+                key_file=str(key_path),
+            )
+
+    def test_key_file_nonexistent_raises(self, tmp_path):
+        cert_path = tmp_path / "server.cert"
+        cert_path.touch()
+        with pytest.raises(ValidationError, match="key_file does not point to a file"):
+            ConfigTLS(
+                enabled=True,
+                cert_file=str(cert_path),
+                key_file=str(tmp_path / "missing.key"),
+            )
+
+    def test_disabled_with_nonexistent_files_does_not_raise(self):
+        tls = ConfigTLS(
+            enabled=False,
+            cert_file="/nonexistent/cert.pem",
+            key_file="/nonexistent/key.pem",
+        )
+        assert tls.enabled is False
+
+
+class TestConfigFastApiTLS:
+    def test_tls_defaults_to_disabled(self, monkeypatch):
+        # Ensure no env vars bleed in from the environment
+        monkeypatch.delenv("AIGW_FASTAPI__TLS__ENABLED", raising=False)
+        monkeypatch.delenv("AIGW_FASTAPI__TLS__CERT_FILE", raising=False)
+        monkeypatch.delenv("AIGW_FASTAPI__TLS__KEY_FILE", raising=False)
+        cfg = ConfigFastApi()
+        assert cfg.tls.enabled is False
+        assert cfg.tls.cert_file is None
+        assert cfg.tls.key_file is None
+
+    def test_tls_reads_from_env_via_top_level_config(self, monkeypatch, tmp_path):
+        """ConfigFastApi is a plain BaseModel; TLS env vars are read via the top-level Config."""
+        cert = tmp_path / "server.crt"
+        key = tmp_path / "server.key"
+        cert.touch()
+        key.touch()
+        monkeypatch.setenv("AIGW_FASTAPI__TLS__ENABLED", "true")
+        monkeypatch.setenv("AIGW_FASTAPI__TLS__CERT_FILE", str(cert))
+        monkeypatch.setenv("AIGW_FASTAPI__TLS__KEY_FILE", str(key))
+        cfg = Config(_env_file=None)
+        assert cfg.fastapi.tls.enabled is True
+        assert cfg.fastapi.tls.cert_file == str(cert)
+        assert cfg.fastapi.tls.key_file == str(key)
+
+
+class TestConfigDuoWorkflowTLS:
+    def test_tls_defaults_to_disabled(self, monkeypatch):
+        # Ensure no env vars bleed in from the environment
+        monkeypatch.delenv("DUO_WORKFLOW_TLS__ENABLED", raising=False)
+        monkeypatch.delenv("DUO_WORKFLOW_TLS__CERT_FILE", raising=False)
+        monkeypatch.delenv("DUO_WORKFLOW_TLS__KEY_FILE", raising=False)
+        cfg = ConfigDuoWorkflow()
+        assert cfg.tls.enabled is False
+        assert cfg.tls.cert_file is None
+        assert cfg.tls.key_file is None
+
+    def test_tls_reads_from_env(self, monkeypatch, tmp_path):
+        cert = tmp_path / "server.crt"
+        key = tmp_path / "server.key"
+        cert.touch()
+        key.touch()
+        monkeypatch.setenv("DUO_WORKFLOW_TLS__ENABLED", "true")
+        monkeypatch.setenv("DUO_WORKFLOW_TLS__CERT_FILE", str(cert))
+        monkeypatch.setenv("DUO_WORKFLOW_TLS__KEY_FILE", str(key))
+        cfg = ConfigDuoWorkflow()
+        assert cfg.tls.enabled is True
+        assert cfg.tls.cert_file == str(cert)
+        assert cfg.tls.key_file == str(key)

@@ -20,7 +20,12 @@ from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
 from packaging.version import Version
 
-from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
+from ai_gateway.config import (
+    Config,
+    ConfigCustomModels,
+    ConfigGoogleCloudPlatform,
+    ConfigTLS,
+)
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
@@ -130,6 +135,14 @@ def create_mock_internal_event_client():
     mock_client = MagicMock()
     mock_client.track_event = MagicMock()
     return mock_client
+
+
+def create_mock_default_config():
+    """Helper function to create a mock default config for tests."""
+    mock_config = MagicMock(spec=Config)
+    mock_config.duo_workflow = MagicMock()
+    mock_config.duo_workflow.tls = ConfigTLS()
+    return mock_config
 
 
 @pytest.fixture(name="servicer")
@@ -1457,7 +1470,7 @@ async def test_grpc_server(
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
         mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
 
-        mock_config = MagicMock(spec=Config)
+        mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
     mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
@@ -1512,7 +1525,7 @@ async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
         mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
 
-        mock_config = MagicMock(spec=Config)
+        mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
     health_servicer = captured["instance"]
@@ -1586,6 +1599,180 @@ async def test_signal_handler_sets_not_serving_on_shutdown(signal_type):
         health_servicer._server_status["DuoWorkflow"]
         == health_pb2.HealthCheckResponse.NOT_SERVING
     )
+
+
+class TestServeTLS:
+    """Tests for TLS/gRPCS support in duo_workflow_service.server.serve()."""
+
+    @staticmethod
+    def _make_tls_config(tls_enabled: bool, cert_file=None, key_file=None):
+        """Return a minimal mock Config with TLS settings for duo_workflow."""
+
+        mock_config = MagicMock(spec=Config)
+        mock_config.duo_workflow = MagicMock()
+        mock_config.duo_workflow.tls = ConfigTLS(
+            enabled=tls_enabled, cert_file=cert_file, key_file=key_file
+        )
+        return mock_config
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.server.setup_signal_handlers")
+    @patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+        return_value=True,
+    )
+    async def test_serve_insecure_when_tls_disabled(
+        self, mock_cloud_connector_ready, _
+    ):
+        mock_server = AsyncMock()
+        mock_server.add_secure_port.return_value = None
+        mock_server.start.return_value = None
+        mock_server.wait_for_termination.return_value = None
+
+        mock_config = self._make_tls_config(tls_enabled=False)
+
+        with (
+            patch(
+                "duo_workflow_service.server.grpc.aio.server",
+                return_value=mock_server,
+            ),
+            patch(
+                "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+            ),
+            patch("duo_workflow_service.server.MonitoringInterceptor"),
+            patch(
+                "duo_workflow_service.server.connection_pool"
+            ) as mock_connection_pool,
+        ):
+            mock_connection_pool.__aenter__ = AsyncMock(
+                return_value=mock_connection_pool
+            )
+            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+            await serve(mock_config, 50052)
+
+        mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
+        mock_server.add_secure_port.assert_not_called()
+        mock_cloud_connector_ready.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.server.setup_signal_handlers")
+    @patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+        return_value=True,
+    )
+    async def test_serve_secure_when_tls_enabled(
+        self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
+    ):
+        cert_file = tmp_path / "server.crt"
+        key_file = tmp_path / "server.key"
+        cert_file.write_bytes(b"CERT_DATA")
+        key_file.write_bytes(b"KEY_DATA")
+
+        mock_server = AsyncMock()
+        mock_server.add_insecure_port.return_value = None
+        mock_server.add_secure_port.return_value = None
+        mock_server.start.return_value = None
+        mock_server.wait_for_termination.return_value = None
+
+        mock_config = self._make_tls_config(
+            tls_enabled=True,
+            cert_file=str(cert_file),
+            key_file=str(key_file),
+        )
+        mock_credentials = MagicMock()
+
+        with (
+            patch(
+                "duo_workflow_service.server.grpc.aio.server",
+                return_value=mock_server,
+            ),
+            patch(
+                "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+            ),
+            patch(
+                "duo_workflow_service.server.grpc.ssl_server_credentials",
+                return_value=mock_credentials,
+            ),
+            patch("duo_workflow_service.server.MonitoringInterceptor"),
+            patch(
+                "duo_workflow_service.server.connection_pool"
+            ) as mock_connection_pool,
+        ):
+            mock_connection_pool.__aenter__ = AsyncMock(
+                return_value=mock_connection_pool
+            )
+            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+            await serve(mock_config, 50052)
+
+        mock_server.add_secure_port.assert_called_once_with(
+            "[::]:50052", mock_credentials
+        )
+        mock_server.add_insecure_port.assert_not_called()
+        mock_setup_signal_handlers.assert_called_once()
+        mock_cloud_connector_ready.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.server.setup_signal_handlers")
+    @patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+        return_value=True,
+    )
+    async def test_serve_tls_enabled_reads_cert_and_key_files(
+        self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
+    ):
+        cert_file = tmp_path / "server.crt"
+        key_file = tmp_path / "server.key"
+        cert_file.write_bytes(b"MY_CERT")
+        key_file.write_bytes(b"MY_KEY")
+
+        mock_server = AsyncMock()
+        mock_server.add_insecure_port.return_value = None
+        mock_server.add_secure_port.return_value = None
+        mock_server.start.return_value = None
+        mock_server.wait_for_termination.return_value = None
+
+        mock_config = self._make_tls_config(
+            tls_enabled=True,
+            cert_file=str(cert_file),
+            key_file=str(key_file),
+        )
+        captured_credentials_args = {}
+
+        def capture_credentials(pairs):
+            captured_credentials_args["pairs"] = pairs
+            return MagicMock()
+
+        with (
+            patch(
+                "duo_workflow_service.server.grpc.aio.server",
+                return_value=mock_server,
+            ),
+            patch(
+                "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+            ),
+            patch(
+                "duo_workflow_service.server.grpc.ssl_server_credentials",
+                side_effect=capture_credentials,
+            ),
+            patch("duo_workflow_service.server.MonitoringInterceptor"),
+            patch(
+                "duo_workflow_service.server.connection_pool"
+            ) as mock_connection_pool,
+        ):
+            mock_connection_pool.__aenter__ = AsyncMock(
+                return_value=mock_connection_pool
+            )
+            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+            await serve(mock_config, 50052)
+
+        mock_setup_signal_handlers.assert_called_once()
+        mock_cloud_connector_ready.assert_called_once()
+        private_key, certificate_chain = captured_credentials_args["pairs"][0]
+        assert private_key == b"MY_KEY"
+        assert certificate_chain == b"MY_CERT"
 
 
 @pytest.mark.asyncio

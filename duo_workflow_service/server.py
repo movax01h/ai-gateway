@@ -909,7 +909,22 @@ async def serve(config: Config, port: int) -> None:
         health_servicer = health.aio.HealthServicer()
         await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
         health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-        server.add_insecure_port(f"[::]:{port}")
+
+        duo_workflow_config = config.duo_workflow
+        if duo_workflow_config.tls.enabled:
+            cert_file = duo_workflow_config.tls.cert_file or ""
+            key_file = duo_workflow_config.tls.key_file or ""
+            with open(cert_file, "rb") as f:
+                certificate_chain = f.read()
+            with open(key_file, "rb") as f:
+                private_key = f.read()
+            server_credentials = grpc.ssl_server_credentials(
+                [(private_key, certificate_chain)]
+            )
+            server.add_secure_port(f"[::]:{port}", server_credentials)
+            log.info("TLS enabled: gRPC server will use secure port (gRPCS)")
+        else:
+            server.add_insecure_port(f"[::]:{port}")
         if reflection_enabled:
             service_names = (
                 contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
