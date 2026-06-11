@@ -1,0 +1,83 @@
+query PipelineFindings(
+    $fullPath: ID!
+    $ref: String!
+    $first: Int
+    $after: String
+    $severity: [String!]
+    $reportType: [String!]
+    $scanner: [String!]
+    $state: [VulnerabilityState!]
+) {
+    project(fullPath: $fullPath) {
+        id
+        pipelines(first: 1, ref: $ref) {
+            nodes {
+                id
+                iid
+                sha
+                ref
+                status
+                securityReportFindings(
+                    after: $after
+                    first: $first
+                    severity: $severity
+                    reportType: $reportType
+                    scanner: $scanner
+                    state: $state
+                ) {
+                    nodes {
+                        uuid
+                        title
+                        description
+                        severity
+                        state
+                        reportType
+                        dismissalReason
+                        falsePositive
+                        aiResolutionAvailable
+                        aiResolutionEnabled
+
+                        identifiers {
+                            externalType
+                            name
+                        }
+
+                        scanner {
+                            id
+                            name
+                            vendor
+                        }
+
+                        location {
+                            ... on VulnerabilityLocationSast {
+                                file
+                                startLine
+                                endLine
+                            }
+                            ... on VulnerabilityLocationSecretDetection {
+                                file
+                                startLine
+                            }
+                            ... on VulnerabilityLocationDependencyScanning {
+                                file
+                            }
+                            ... on VulnerabilityLocationContainerScanning {
+                                image
+                                operatingSystem
+                            }
+                        }
+
+                        vulnerability {
+                            id
+                            state
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
+            }
+        }
+    }
+}
