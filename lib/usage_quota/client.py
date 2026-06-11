@@ -149,13 +149,14 @@ class UsageQuotaClient:
         """
         if self._http_client is None:
             async with self._client_lock:
-                self._http_client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(self.request_timeout),
-                    limits=httpx.Limits(
-                        max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
-                        max_connections=MAX_CONNECTIONS,
-                    ),
-                )
+                if self._http_client is None:
+                    self._http_client = httpx.AsyncClient(
+                        timeout=httpx.Timeout(self.request_timeout),
+                        limits=httpx.Limits(
+                            max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
+                            max_connections=MAX_CONNECTIONS,
+                        ),
+                    )
                 log.debug(
                     "Created persistent HTTP client",
                     client_id=id(self._http_client),
