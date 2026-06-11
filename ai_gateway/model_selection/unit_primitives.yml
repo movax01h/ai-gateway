@@ -186,6 +186,7 @@ configurable_unit_primitives:
       - "glab_ask_git_command"
     default_models:
       - "claude_haiku_4_5_20251001"
+      - "claude_haiku_4_5_20251001_bedrock"
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
