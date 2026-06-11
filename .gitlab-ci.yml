@@ -169,19 +169,20 @@ Internal event definitions validation:
   rules:
     - if: $CI_SERVER_HOST == "gitlab.com"
 
-cache:
-  key:
-    files:
-      - poetry.lock
-      - .gitlab-ci.yml
-  paths:
-    - $PIP_CACHE_DIR
-    - $POETRY_CACHE_DIR
-    - requirements.txt
-    - scripts/lib/
-    - scripts/vendor/
-
 .poetry:
+  cache:
+    key:
+      files:
+        - poetry.lock
+        - .gitlab-ci.yml
+    policy: pull
+    paths:
+      - $PIP_CACHE_DIR
+      - $POETRY_CACHE_DIR
+      - .venv/
+      - requirements.txt
+      - scripts/lib/
+      - scripts/vendor/
   before_script:
     - pip install poetry==${POETRY_VERSION}
     - poetry config virtualenvs.in-project true
