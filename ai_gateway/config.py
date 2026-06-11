@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 import litellm
 from dotenv import find_dotenv
-from pydantic import BaseModel, Field, Json, RootModel
+from pydantic import BaseModel, Field, Json, RootModel, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     "Config",
     "ConfigLogging",
     "ConfigFastApi",
+    "ConfigTLS",
     "ConfigAuth",
     "ConfigProcessLevelFeatureFlags",
     "ConfigGoogleCloudProfiler",
@@ -47,6 +48,28 @@ class ConfigSelfSignedJwt(BaseModel):
     validation_key: str = ""
 
 
+class ConfigTLS(BaseModel):
+    """TLS configuration for enabling HTTPS / gRPCS."""
+
+    enabled: bool = False
+    cert_file: Optional[str] = None
+    key_file: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_when_enabled(self) -> "ConfigTLS":
+        if not self.enabled:
+            return self
+        if not (self.cert_file and self.key_file):
+            raise ValueError(
+                "cert_file and key_file must both be set when TLS is enabled"
+            )
+        if not os.path.isfile(self.cert_file):
+            raise ValueError(f"cert_file does not point to a file: {self.cert_file}")
+        if not os.path.isfile(self.key_file):
+            raise ValueError(f"key_file does not point to a file: {self.key_file}")
+        return self
+
+
 class ConfigFastApi(BaseModel):
     api_host: str = "0.0.0.0"
     api_port: int = 5000
@@ -57,6 +80,7 @@ class ConfigFastApi(BaseModel):
     openapi_url: Optional[str] = None
     redoc_url: Optional[str] = None
     reload: bool = False
+    tls: ConfigTLS = Field(default_factory=ConfigTLS)
 
 
 class ConfigAuth(BaseModel):
@@ -317,6 +341,7 @@ class ConfigDuoWorkflow(BaseSettings):
         description="Enable routing requests through caching proxy for load testing",
     )
     caching_proxy: ConfigCachingProxy = Field(default_factory=ConfigCachingProxy)
+    tls: ConfigTLS = Field(default_factory=ConfigTLS)
 
     def caching_proxy_url(self) -> str | None:
         if self.use_caching_proxy:
