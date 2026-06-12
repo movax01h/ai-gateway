@@ -76,6 +76,8 @@ components:
         as: "merge_request_url"
       - from: "context:project_id"
         as: "project_id"
+      - from: "context:fix_pipeline_next_context.final_answer.summary"
+        as: "context_summary"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -302,6 +304,7 @@ routers:
       routes:
         "add_comment": "fix_pipeline_add_comment"
         "create_plan": "fix_pipeline_next_checkout_existing_branch"
+        "direct_code_suggestions": "fix_pipeline_next_code_suggestions"
         "no_action": "end"
         "default_route": "end"
   - from: "fix_pipeline_next_checkout_existing_branch"

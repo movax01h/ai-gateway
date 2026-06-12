@@ -504,6 +504,7 @@ graph TD;
     fix_pipeline_next_create_new_mr(fix_pipeline_next_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_next_context -.->|add_comment| fix_pipeline_add_comment;
     fix_pipeline_next_context -.->|create_plan| fix_pipeline_next_checkout_existing_branch;
+    fix_pipeline_next_context -.->|direct_code_suggestions| fix_pipeline_next_code_suggestions;
     fix_pipeline_next_context -.->|no_action| __end__;
     fix_pipeline_next_context -.->|default_route| __end__;
     fix_pipeline_next_checkout_existing_branch --> fix_pipeline_next_execution;
