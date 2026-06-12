@@ -180,18 +180,22 @@ class AbstractWorkflow(ABC):
             workflow_type=self._workflow_type.value
         ):
             extended_logging = self._workflow_metadata.get("extended_logging", False)
+            monitoring_context: MonitoringContext = current_monitoring_context.get()
+
             tracing_metadata = {
                 "git_url": self._workflow_metadata.get("git_url", ""),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
                 "workflow_type": self._workflow_type.value,
                 "thread_id": self._workflow_id,
+                # Flow versioning identifiers, populated for registry/inline flows only
+                # (legacy flows leave these unset, so they are omitted).
+                **monitoring_context.flow_versioning_fields(),
             }
 
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
             tracing_enabled = extended_logging and (langsmith_tracing_v2_env != "false")
 
-            monitoring_context: MonitoringContext = current_monitoring_context.get()
             monitoring_context.tracing_enabled = str(tracing_enabled)
             monitoring_context.use_ai_prompt_scanning = is_feature_enabled(
                 FeatureFlag.AI_PROMPT_SCANNING

@@ -44,6 +44,14 @@ class BaseFlowRequest(BaseModel):
         follow-up should migrate those consumers to accept FlowRequest directly, at which point this method is deleted.
         """
 
+    def tracking_fields(self) -> dict[str, str]:
+        """Return flow identity fields for monitoring and LangSmith tracing.
+
+        Only fields available on the concrete request type are returned, so legacy requests (which carry no versioning)
+        contribute nothing.
+        """
+        return {}
+
 
 class RegistryFlowRequest(BaseFlowRequest):
     """Resolve a flow from the YAML registry by name + version."""
@@ -83,6 +91,13 @@ class RegistryFlowRequest(BaseFlowRequest):
     def to_legacy_identifier(self) -> str:
         return f"{self.config_id}/{self.schema_version}"
 
+    def tracking_fields(self) -> dict[str, str]:
+        return {
+            "flow_id": self.config_id,
+            "schema_version": self.schema_version,
+            "flow_version": self.version,
+        }
+
 
 class InlineFlowRequest(BaseFlowRequest):
     """Resolve a flow from an inline protobuf Struct config."""
@@ -95,6 +110,9 @@ class InlineFlowRequest(BaseFlowRequest):
 
     def to_legacy_identifier(self) -> str:
         return self.workflow_definition
+
+    def tracking_fields(self) -> dict[str, str]:
+        return {"schema_version": self.schema_version}
 
 
 class LegacyWorkflowRequest(BaseFlowRequest):
