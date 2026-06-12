@@ -1,3 +1,13 @@
+.performance-changes: &performance-changes
+  - ai_gateway/**/*
+  - lib/**/*
+  - Dockerfile
+  - docker/**/*
+  - pyproject.toml
+  - poetry.lock
+  - performance_tests/**/*
+  - .gitlab/ci/performance.gitlab-ci.yml
+
 dotenv-vars:
   image: alpine:3.23.3
   stage: test
@@ -21,6 +31,7 @@ dotenv-vars:
     - if: $CI_PROJECT_NAMESPACE =~ /^gitlab-org\/security.*/
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_NAMESPACE =~ /^gitlab-org?($|\/)/'
+      changes: *performance-changes
       when: always
     - if: $CI_COMMIT_BRANCH == "main"
       when: always
@@ -54,6 +65,7 @@ tests:performance:
     - if: $CI_PROJECT_NAMESPACE =~ /^gitlab-org\/security.*/
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_NAMESPACE =~ /^gitlab-org?($|\/)/'
+      changes: *performance-changes
       variables:
         PARENT_PIPELINE_CONTEXT: $CI_MERGE_REQUEST_IID
       when: always
