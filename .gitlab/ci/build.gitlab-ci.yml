@@ -61,6 +61,16 @@ build:ingest-image:
         --tag "${INGEST_IMAGE}"
         --push
         .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - scripts/ingest/**/*
+        - Makefile
+        - poetry.lock
+        - pyproject.toml
+        - .tool-versions
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "ingest"
 
 build:self-hosted-ai-gateway-image-arch:
   stage: build

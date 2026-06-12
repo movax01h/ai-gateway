@@ -97,6 +97,13 @@ ingest:dry-run:
     - ./scripts/ingest/gitlab-docs/test.sh
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - scripts/ingest/**/*
+        - Makefile
+        - poetry.lock
+        - pyproject.toml
+        - .tool-versions
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   artifacts:
     # can only pack files inside $CI_PROJECT_DIR
     # https://docs.gitlab.com/ee/ci/yaml/index.html#artifactspaths
