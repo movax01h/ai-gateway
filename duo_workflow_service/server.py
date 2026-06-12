@@ -185,6 +185,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
+        monitoring_context.set_flow_identity(**flow_request.tracking_fields())
+
         workflow_definition = map_workflow_definition(
             flow_request.to_legacy_identifier()
         )

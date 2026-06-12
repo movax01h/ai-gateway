@@ -18,6 +18,10 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
+from duo_workflow_service.tracking import (
+    MonitoringContext,
+    current_monitoring_context,
+)
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
@@ -613,6 +617,37 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     assert metadata["git_sha"] == "abc123"
     assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value
     assert metadata["thread_id"] == workflow._workflow_id
+    # Flow versioning identifiers are unset for legacy flows and must not leak in.
+    assert "flow_id" not in metadata
+    assert "flow_version" not in metadata
+    assert "schema_version" not in metadata
+
+
+@pytest.mark.asyncio
+# pylint: disable=direct-environment-variable-reference
+@patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"})
+# pylint: enable=direct-environment-variable-reference
+@patch.object(MockWorkflow, "_compile_and_run_graph")
+async def test_run_passes_flow_versioning_metadata_to_langsmith_extra(
+    mock_compile_and_run_graph, workflow
+):
+    token = current_monitoring_context.set(
+        MonitoringContext(
+            flow_id="developer",
+            flow_version="1.2.3",
+            schema_version="v1",
+        )
+    )
+    try:
+        await workflow.run("Test goal")
+    finally:
+        current_monitoring_context.reset(token)
+
+    _, kwargs = mock_compile_and_run_graph.call_args
+    metadata = kwargs["langsmith_extra"]["metadata"]
+    assert metadata["flow_id"] == "developer"
+    assert metadata["flow_version"] == "1.2.3"
+    assert metadata["schema_version"] == "v1"
 
 
 @pytest.mark.asyncio
