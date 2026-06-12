@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
+from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_gateway.response_schemas import (
@@ -20,11 +21,17 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
+    RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, RuntimeIOKey
+from duo_workflow_service.agent_platform.v1.state import (
+    FlowEventType,
+    FlowState,
+    FlowStateKeys,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.v1.state.base import IOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.compaction import CompactionConfig
@@ -1620,12 +1627,14 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         # Bind to supervisor
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # Keys should now be set to the provided values
@@ -1664,11 +1673,13 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         new_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=new_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # The old goal key should have been removed and replaced by the new one
@@ -1702,12 +1713,14 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         with pytest.raises(ValueError, match="must have a description"):
             component.bind_to_supervisor(
                 conversation_history_key=mock_history_key,
                 output_key=mock_output_key,
                 goal_key=mock_goal_key,
+                tool_approval_decision_key=mock_approval_key,
             )
 
     def test_outputs_returns_empty_when_bound(
@@ -1741,10 +1754,12 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # After binding, outputs should be empty
@@ -1783,12 +1798,14 @@ class TestAgentComponentBindToSupervisor:
         mock_session_id_key = IOKey(
             target="context", subkeys=["supervisor", "active_subsession"], optional=True
         )
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
             session_id_key=mock_session_id_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # session_id_key should now be set to the provided value
@@ -1821,13 +1838,335 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         # Bind without session_id_key
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # session_id_key should be NoneIOKey (always resolves to None)
         assert isinstance(component._session_id_key, NoneIOKey)
+
+    def test_standalone_tool_approval_decision_key_is_component_scoped(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        base_flow_state,
+    ):
+        """Test that standalone component uses a component-scoped tool approval decision key."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+
+        # Standalone: key should be component-scoped (no subsession namespace)
+        assert isinstance(component._tool_approval_decision_key, RuntimeIOKey)
+        resolved = component._tool_approval_decision_key.to_iokey(base_flow_state)
+        assert resolved.target == "context"
+        assert resolved.subkeys == [component_name, "tool_approval_decision"]
+
+    def test_bind_to_supervisor_sets_tool_approval_decision_key(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Test that bind_to_supervisor stores the provided tool_approval_decision_key."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            description="Test agent for supervisor",
+        )
+
+        mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
+        mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
+        mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+
+        component.bind_to_supervisor(
+            conversation_history_key=mock_history_key,
+            output_key=mock_output_key,
+            goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
+        )
+
+        # tool_approval_decision_key should now be set to the provided value
+        assert component._tool_approval_decision_key is mock_approval_key
+
+
+_AGENT_COMPONENT_MODULE = (
+    "duo_workflow_service.agent_platform.v1.components.agent.component"
+)
+
+
+class TestAgentComponentToolApprovalExecutionFlow:
+    """Tests for AgentComponent tool-approval routing via a real compiled graph.
+
+    Follows the same pattern as ``TestSupervisorExecutionFlow``: the component
+    is attached to a real ``StateGraph``, the graph is compiled, and assertions
+    are made on which nodes are actually invoked — rather than extracting and
+    calling private router functions directly.
+    """
+
+    @pytest.fixture(name="mock_agent_node_cls")
+    def mock_agent_node_cls_fixture(self, component_name):
+        """Patch AgentNode in the agent component module."""
+        with patch(f"{_AGENT_COMPONENT_MODULE}.AgentNode") as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#agent"
+            yield mock_cls
+
+    @pytest.fixture(name="mock_tool_node_cls")
+    def mock_tool_node_cls_fixture(self, component_name):
+        """Patch ToolNode in the agent component module."""
+        with patch(f"{_AGENT_COMPONENT_MODULE}.ToolNode") as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#tools"
+            yield mock_cls
+
+    @pytest.fixture(name="mock_final_response_node_cls")
+    def mock_final_response_node_cls_fixture(self, component_name):
+        """Patch FinalResponseNode in the agent component module."""
+        with patch(f"{_AGENT_COMPONENT_MODULE}.FinalResponseNode") as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#final_response"
+            yield mock_cls
+
+    @pytest.fixture(name="mock_tool_approval_request_node_cls")
+    def mock_tool_approval_request_node_cls_fixture(self, component_name):
+        """Patch ToolApprovalRequestNode in the agent component module."""
+        with patch(f"{_AGENT_COMPONENT_MODULE}.ToolApprovalRequestNode") as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#tool_approval_request"
+            yield mock_cls
+
+    @pytest.fixture(name="mock_tool_approval_fetch_node_cls")
+    def mock_tool_approval_fetch_node_cls_fixture(self, component_name):
+        """Patch ToolApprovalFetchNode in the agent component module."""
+        with patch(f"{_AGENT_COMPONENT_MODULE}.ToolApprovalFetchNode") as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#tool_approval_fetch"
+            yield mock_cls
+
+    @pytest.fixture(name="all_node_mocks")
+    def all_node_mocks_fixture(
+        self,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        mock_final_response_node_cls,
+        mock_tool_approval_request_node_cls,
+        mock_tool_approval_fetch_node_cls,
+    ):
+        """Activate all node mocks and return them keyed by short name."""
+        return {
+            "agent": mock_agent_node_cls.return_value,
+            "tools": mock_tool_node_cls.return_value,
+            "final_response": mock_final_response_node_cls.return_value,
+            "tool_approval_request": mock_tool_approval_request_node_cls.return_value,
+            "tool_approval_fetch": mock_tool_approval_fetch_node_cls.return_value,
+        }
+
+    @pytest.fixture(name="agent_component_with_tool_approval")
+    def agent_component_with_tool_approval_fixture(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """AgentComponent with tool approval enabled."""
+        return AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=["context:user_input"],
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            require_tool_approval=True,
+            pre_approved_tools=[],
+        )
+
+    def _compile(self, component, mock_router):
+        """Attach component to a real StateGraph with entry at tool_approval_fetch."""
+        graph = StateGraph(FlowState)
+        component.attach(graph, mock_router)
+        # Start execution directly at the fetch node so we exercise its router
+        graph.set_entry_point(f"{component.name}#tool_approval_fetch")
+        return graph.compile()
+
+    def _state_with_decision(self, base_flow_state, component_name, decision):
+        """Return a copy of base_flow_state with the approval decision set in context."""
+        return {
+            **base_flow_state,
+            FlowStateKeys.CONTEXT: {
+                **base_flow_state.get(FlowStateKeys.CONTEXT, {}),
+                component_name: {"tool_approval_decision": decision},
+            },
+        }
+
+    def test_approve_decision_routes_to_tools(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        component_name,
+        agent_component_with_tool_approval,
+    ):
+        """APPROVE decision: fetch node routes execution to the tools node."""
+        nodes = all_node_mocks
+        state = self._state_with_decision(
+            base_flow_state, component_name, FlowEventType.APPROVE
+        )
+
+        # fetch node returns state unchanged; tools node terminates via agent → final_response → router
+        nodes["tool_approval_fetch"].run.return_value = state
+        nodes["tools"].run.return_value = {**base_flow_state}
+        nodes["agent"].run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="Done.")]
+            },
+        }
+        nodes["final_response"].run.return_value = {**base_flow_state}
+        mock_router.route.return_value = END
+
+        compiled = self._compile(agent_component_with_tool_approval, mock_router)
+        compiled.invoke(state)
+
+        nodes["tool_approval_fetch"].run.assert_called_once()
+        nodes["tools"].run.assert_called_once()
+
+    def test_reject_decision_routes_to_agent(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        component_name,
+        agent_component_with_tool_approval,
+    ):
+        """REJECT decision: fetch node routes execution back to the agent node."""
+        nodes = all_node_mocks
+        state = self._state_with_decision(
+            base_flow_state, component_name, FlowEventType.REJECT
+        )
+
+        # fetch node returns state with REJECT decision; agent then produces a final response
+        nodes["tool_approval_fetch"].run.return_value = state
+        nodes["agent"].run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="Rejected, stopping.")]
+            },
+        }
+        nodes["final_response"].run.return_value = {**base_flow_state}
+        mock_router.route.return_value = END
+
+        compiled = self._compile(agent_component_with_tool_approval, mock_router)
+        compiled.invoke(state)
+
+        nodes["tool_approval_fetch"].run.assert_called_once()
+        nodes["agent"].run.assert_called_once()
+        nodes["tools"].run.assert_not_called()
+
+    def test_modify_decision_routes_to_agent(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        component_name,
+        agent_component_with_tool_approval,
+    ):
+        """MODIFY decision: fetch node routes execution back to the agent node."""
+        nodes = all_node_mocks
+        state = self._state_with_decision(
+            base_flow_state, component_name, FlowEventType.MODIFY
+        )
+
+        nodes["tool_approval_fetch"].run.return_value = state
+        nodes["agent"].run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="Modified, stopping.")]
+            },
+        }
+        nodes["final_response"].run.return_value = {**base_flow_state}
+        mock_router.route.return_value = END
+
+        compiled = self._compile(agent_component_with_tool_approval, mock_router)
+        compiled.invoke(state)
+
+        nodes["tool_approval_fetch"].run.assert_called_once()
+        nodes["agent"].run.assert_called_once()
+        nodes["tools"].run.assert_not_called()
+
+    def test_missing_decision_raises_routing_error(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        agent_component_with_tool_approval,
+    ):
+        """Missing approval decision: the fetch router raises RoutingError."""
+        nodes = all_node_mocks
+        # No approval decision in context
+        state = {
+            **base_flow_state,
+            FlowStateKeys.CONTEXT: {},
+        }
+
+        nodes["tool_approval_fetch"].run.return_value = state
+
+        compiled = self._compile(agent_component_with_tool_approval, mock_router)
+
+        with pytest.raises(RoutingError, match="No approval decision found in state"):
+            compiled.invoke(state)
+
+    def test_unexpected_decision_raises_routing_error(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        component_name,
+        agent_component_with_tool_approval,
+    ):
+        """Unrecognised approval decision value: the fetch router raises RoutingError."""
+        nodes = all_node_mocks
+        state = self._state_with_decision(
+            base_flow_state, component_name, "unknown_decision"
+        )
+
+        nodes["tool_approval_fetch"].run.return_value = state
+
+        compiled = self._compile(agent_component_with_tool_approval, mock_router)
+
+        with pytest.raises(RoutingError, match="Unexpected approval decision"):
+            compiled.invoke(state)
