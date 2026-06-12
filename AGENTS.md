@@ -170,6 +170,21 @@ make gen-proto-node
 make clean-proto
 ```
 
+> **Apple Silicon (arm64) note:** `make gen-proto-ruby` runs `grpc_tools_ruby_protoc`
+> from the `grpc-tools` gem, which ships an **x86_64-only** `protoc`/`grpc_ruby_plugin`.
+> On Apple Silicon you must have Rosetta 2 installed to execute it, otherwise the step
+> fails with `Bad CPU type in executable`. Install it once with:
+>
+> ```shell
+> softwareupdate --install-rosetta --agree-to-license
+> ```
+>
+> The Makefile runs the Ruby generator via `bundle exec` against `clients/ruby/Gemfile`,
+> so it uses the **pinned** `grpc-tools` version (matching CI) rather than any globally
+> installed gem. Don't substitute Homebrew's `protoc` — its protoc version differs and
+> produces a diff (e.g. `::Google::Protobuf` vs `Google::Protobuf`) that breaks the
+> `check-proto-ruby` CI job.
+
 ### Other Utilities
 
 ```shell
