@@ -722,3 +722,30 @@ graph TD;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
 ```
+
+## Graph: `software_development 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> context_builder;
+    context_builder(context_builder<br>#91;AgentComponent#93;);
+    planner(planner<br>#91;AgentComponent#93;);
+    plan_approval(plan_approval<br>#91;HumanInputComponent#93;);
+    executor(executor<br>#91;AgentComponent#93;);
+    context_builder --> planner;
+    planner --> plan_approval;
+    plan_approval -.->|approve| executor;
+    plan_approval -.->|modify| planner;
+    plan_approval -.->|default_route| __end__;
+    executor --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
