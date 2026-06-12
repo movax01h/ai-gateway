@@ -183,11 +183,11 @@ window trimming for long-running conversations (e.g., agentic workflows with man
 
 ```yaml
 models:
-  - name: "Claude Sonnet 4"
-    gitlab_identifier: "claude_sonnet_4_20250514"
+  - name: "Claude Sonnet 4.5"
+    gitlab_identifier: "claude_sonnet_4_5_20250929"
     model_class_provider: "anthropic"
     params:
-      model: "claude-sonnet-4-20250514"
+      model: "claude-sonnet-4-5-20250929"
       temperature: 0.0
       max_tokens: 16384
     prompt_params:

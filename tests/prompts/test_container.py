@@ -98,7 +98,10 @@ def test_container(
                     # To be able to test `base` prompt versions that aren't tied to a specific model, we select an
                     # arbitrary model identifier that we know will fetch the `base` prompt
                     model_metadata = create_model_metadata(
-                        {"provider": "gitlab", "identifier": "claude_sonnet_4_20250514"}
+                        {
+                            "provider": "gitlab",
+                            "identifier": "claude_sonnet_4_5_20250929",
+                        }
                     )
             else:
                 # Skip directories that are prompt families (like claude_4_5) rather than model families

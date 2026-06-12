@@ -139,21 +139,6 @@ models:
       deprecation_date: "2026-03-01"
       removal_version: "19.5"
 
-  - name: "Claude Opus 4.0"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_opus_4_20250514"
-    description: "Earlier generation model for coding, reasoning, and agentic workflows."
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#legacy-models
-    model_class_provider: anthropic
-    supports_assistant_prefill: true
-    params:
-      model: "claude-opus-4-20250514"
-      temperature: 0.0
-      max_tokens: 32_000
-    deprecation:
-      deprecation_date: "2026-04-14"
-      removal_version: "19.1"
-
   - name: "Claude Opus 4.1"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_1_20250805"
@@ -506,61 +491,6 @@ models:
       temperature: 0.0
       max_tokens: 64_000
       max_retries: 1
-
-  - name: "Claude Sonnet 4.0"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_sonnet_4_20250514"
-    description: "Earlier generation model for coding, reasoning, and agentic workflows."
-    cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#legacy-models
-    proxy_provider: anthropic
-    model_class_provider: anthropic
-    supports_assistant_prefill: true
-    params:
-      model: "claude-sonnet-4-20250514"
-      temperature: 0.0
-      max_tokens: 64_000
-    deprecation:
-      deprecation_date: "2026-04-14"
-      removal_version: "19.1"
-
-  - name: "Claude Sonnet 4.0"
-    provider: "Vertex"
-    gitlab_identifier: "claude_sonnet_4_20250514_vertex"
-    description: "Earlier generation model for coding, reasoning, and agentic workflows."
-    cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4
-    model_class_provider: litellm
-    supports_assistant_prefill: true
-    params:
-      model: "claude-sonnet-4@20250514"
-      custom_llm_provider: "vertex_ai"
-      temperature: 0.0
-      max_tokens: 64_000
-      max_retries: 1
-    prompt_params:
-      vertex_location: global
-    deprecation:
-      deprecation_date: "2026-04-14"
-      removal_version: "19.1"
-
-  - name: "Claude Sonnet 4.0"
-    provider: "Bedrock"
-    gitlab_identifier: "claude_sonnet_4_20250514_bedrock"
-    description: "Earlier generation model for coding, reasoning, and agentic workflows."
-    cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-20250514-v1:0
-    model_class_provider: litellm
-    supports_assistant_prefill: true
-    params:
-      model: bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0
-      custom_llm_provider: bedrock
-      temperature: 0.0
-      max_tokens: 64_000
-      max_retries: 1
-    deprecation:
-      deprecation_date: "2026-04-14"
-      removal_version: "19.1"
 
   - name: "Gemini 3.1 Pro Preview"
     provider: "Vertex"

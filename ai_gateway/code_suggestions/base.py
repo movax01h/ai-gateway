@@ -54,7 +54,8 @@ PROVIDERS_MODELS_MAP = {
 
 USE_CASES_MODELS_MAP = {
     KindUseCase.CODE_COMPLETIONS: {
-        KindAnthropicModel.CLAUDE_SONNET_4,
+        KindAnthropicModel.CLAUDE_SONNET_4_5,
+        KindAnthropicModel.CLAUDE_SONNET_4_5_VERTEX,
         KindVertexTextModel.CODESTRAL_2501,
         KindLiteLlmModel.CODESTRAL_2501,
         KindLiteLlmModel.CODESTRAL_2508,
@@ -74,15 +75,12 @@ USE_CASES_MODELS_MAP = {
         KindGitLabModel.CODESTRAL_2501_VERTEX,
         KindGitLabModel.CODESTRAL_2508_VERTEX,
         KindGitLabModel.GITLAB_DEFAULT_MODEL,
-        KindGitLabModel.CLAUDE_4_SONNET,
-        KindGitLabModel.CLAUDE_4_SONNET_VERTEX,
         KindGitLabModel.CLAUDE_4_5_SONNET,
         KindGitLabModel.CLAUDE_4_5_SONNET_VERTEX,
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,
         KindVertexTextModel.GEMINI_2_5_FLASH,
-        KindAnthropicModel.CLAUDE_SONNET_4,
         KindLiteLlmModel.CODEGEMMA,
         KindLiteLlmModel.CODELLAMA,
         KindLiteLlmModel.CODESTRAL,
@@ -107,7 +105,7 @@ SAAS_PROMPT_MODEL_MAP = {
     },
     "1.1.0-dev": {
         "model_provider": ModelProvider.ANTHROPIC,
-        "model_version": KindAnthropicModel.CLAUDE_SONNET_4,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_5,
     },
     "1.2.0-dev": {
         "model_provider": ModelProvider.VERTEX_AI,

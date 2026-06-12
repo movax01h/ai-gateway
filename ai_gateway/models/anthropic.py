@@ -68,8 +68,6 @@ class AnthropicAPITimeoutError(ModelAPIError):
 class KindAnthropicModel(StrEnum):
     # Avoid using model versions that only specify the major version number.
     # More info - https://docs.anthropic.com/claude/reference/selecting-a-model
-    CLAUDE_SONNET_4 = "claude-sonnet-4-20250514"
-    CLAUDE_SONNET_4_VERTEX = "claude-sonnet-4@20250514"
     CLAUDE_SONNET_4_5 = "claude-sonnet-4-5-20250929"
     CLAUDE_SONNET_4_5_VERTEX = "claude-sonnet-4-5@20250929"
     CLAUDE_SONNET_4_6 = "claude-sonnet-4-6"

@@ -14,7 +14,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from eval.routing.schema import ToolRoutingEvaluation
 
 CHAT = ChatAnthropic(
-    model_name="claude-sonnet-4-20250514",
+    model_name="claude-sonnet-4-5-20250929",
     temperature=0,
     betas=[],
     timeout=30,
