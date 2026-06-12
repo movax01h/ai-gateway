@@ -6,7 +6,7 @@ Make sure to follow these guidelines:
 <guidelines>
   <guideline>Use the available tools to gather evidence — failing jobs, logs, MR diffs, CI config, source files — before classifying the failure.</guideline>
   <guideline>Classify the failure and decide whether to attempt a fix as part of the same final answer; you do not need a separate turn to produce them.</guideline>
-  <guideline>You must set the failure_category, suggested_fix_type, decision, and summary fields.</guideline>
+  <guideline>You must set the failure_category, suggested_fix_type, decision, confidence, and summary fields.</guideline>
 </guidelines>
 
 Follow these steps. IMPORTANT: When steps are marked as parallel, call all of those tools together in a single response to minimize round-trips. Do NOT call them one at a time.
@@ -198,14 +198,24 @@ Set the decision field based on these criteria:
       - The failure_category is one of: `test_failure`, `lint_failure`, `build_failure`, `dependency_failure`, `ci_config_error`
       - The failure is not purely intermittent or timing-dependent (i.e., there is a fixable root cause)
       {% endif %}
+      Use this whenever validation by executing the fix locally is warranted — multi-file changes, test failures, build failures, anything where the diff might surprise the reviewer.
     </response_reason>
   </possible_response>
   {% if merge_request_url %}
   <possible_response>
+    <decision>direct_code_suggestions</decision>
+    <response_reason>
+      Set decision to `direct_code_suggestions` ONLY when ALL of the following hold:
+      - confidence is `high` (see <confidence_criteria>)
+      - The fix is narrow enough that the corrected lines can be written from the failure summary alone (a single-file lint or CI-config edit is the canonical case)
+      - The failing rule or assertion is quoted verbatim in the trace and the corrected line is unambiguous
+      Choosing this bypasses local execution and posts inline suggestions directly. If in doubt, prefer `create_plan`.
+    </response_reason>
+  </possible_response>
+  <possible_response>
     <decision>add_comment</decision>
     <response_reason>
       Set decision to `add_comment` when ALL of the following apply:
-      - A merge request URL is provided
       - None of the failures meets the criteria for `create_plan`
       - The failure is not a flaky test or infrastructure issue
       - You cannot quote a specific log line that names the failing rule, assertion, or check. Inference from MR title, branch name, or diff content alone is not sufficient evidence.
@@ -240,6 +250,25 @@ Set the decision field based on these criteria:
   {% endif %}
 </common_false_positive_traps>
 
+<confidence_criteria>
+  Set `confidence` to `high` ONLY when ALL of the following hold:
+  - `failure_category` is `lint_failure` or `ci_config_error`
+  - The fix touches a single file
+  - The failing rule, assertion, or syntax error is quoted verbatim in the job trace
+  - The specific line number(s) where the fix should be applied is identifiable from the job trace or MR diff (an inline code suggestion cannot be posted without one)
+  - There is no `insufficient_context` signal
+  - The `agents_dot_md` content (if any) does NOT direct you to always validate
+
+  Set `confidence` to `low` otherwise. In particular, set it to `low` for:
+  - multi-file `test_failure` or `build_failure`
+  - any cascade across multiple failing jobs
+  - any `insufficient_context` signal
+  - any case where the failing line number cannot be pinned down
+  - any `agents_dot_md` directive that requires validation before suggesting a fix
+
+  `confidence: high` is a precondition for `decision: direct_code_suggestions` — if `confidence` is `low`, you MUST NOT choose `direct_code_suggestions`.
+</confidence_criteria>
+
 Once you have gathered enough evidence, return your final answer as a JSON object that conforms to the response schema. The final answer must include:
 <final_answer_contract>
   <field>
@@ -252,7 +281,11 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>decision</name>
-    <requirement>`create_plan`{% if merge_request_url %}, `add_comment`,{% endif %} or `no_action` according to the criteria in `<possible_responses>`.</requirement>
+    <requirement>{% if merge_request_url %}`create_plan`, `direct_code_suggestions`, `add_comment`, or `no_action`{% else %}`create_plan` or `no_action`{% endif %} according to the criteria in `<possible_responses>`.</requirement>
+  </field>
+  <field>
+    <name>confidence</name>
+    <requirement>`high` or `low` according to `<confidence_criteria>`. `direct_code_suggestions` requires `high`.</requirement>
   </field>
   <field>
     <name>summary</name>
