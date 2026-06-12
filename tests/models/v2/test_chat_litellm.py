@@ -541,7 +541,6 @@ class TestClaude46PrefillCompat:
                 id="4.7-opus-bedrock",
             ),
             # Claude <= 4.5: prefill supported, payload untouched
-            pytest.param("claude-sonnet-4@20250514", False, id="4.0-sonnet-vertex"),
             pytest.param("claude-sonnet-4-5@20250929", False, id="4.5-sonnet-vertex"),
             pytest.param("claude-haiku-4-5@20251001", False, id="4.5-haiku-vertex"),
             pytest.param("claude-opus-4-5@20251101", False, id="4.5-opus-vertex"),

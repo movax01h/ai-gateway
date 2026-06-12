@@ -46,7 +46,7 @@ class TestInMemoryPromptRegistry:
             "model": {
                 "params": {
                     "model_class_provider": ModelClassProvider.LITE_LLM,
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-5-20250929",
                     "max_tokens": 1000,
                 },
             },
@@ -212,7 +212,7 @@ class TestInMemoryPromptRegistry:
             "model": {
                 "params": {
                     "model_class_provider": ModelClassProvider.LITE_LLM,
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-5-20250929",
                     "max_tokens": 1000,
                 },
             }
@@ -247,7 +247,7 @@ class TestInMemoryPromptRegistry:
                         name="claude",
                         max_context_tokens=200000,
                         params=ChatLiteLLMParams(
-                            model="claude-sonnet-4-20250514",
+                            model="claude-sonnet-4-5-20250929",
                         ),
                     ),
                 ),
@@ -269,7 +269,7 @@ class TestInMemoryPromptRegistry:
                         name="claude",
                         max_context_tokens=200000,
                         params=ChatLiteLLMParams(
-                            model="claude-sonnet-4-20250514",
+                            model="claude-sonnet-4-5-20250929",
                         ),
                     ),
                 ),

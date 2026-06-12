@@ -85,12 +85,12 @@ class TestMockedModels:
                 "prompt": [
                     {"role": "user", "content": "Generate a hello world function in Go"}
                 ],
-                "model_provider": "anthropic",
-                "model_name": "claude-sonnet-4-20250514",
+                "model_provider": "litellm",
+                "model_name": "mistral",
             },
         )
 
         assert response.status_code == 200
 
         body = response.json()
-        assert body["choices"][0]["text"].startswith("echo:")
+        assert body["choices"][0]["text"].startswith("\necho:")

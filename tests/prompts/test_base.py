@@ -1046,7 +1046,7 @@ configurable_unit_primitives:
             (
                 ModelClassProvider.LITE_LLM,
                 ChatLiteLLMParams(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-4-5-20250929",
                     custom_llm_provider="anthropic",
                 ),
                 PromptParams(
@@ -2007,7 +2007,7 @@ class TestContextManagementTokenReduction:
     def model_params_fixture(self):
         return ChatLiteLLMParams(
             custom_llm_provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=100,
         )
 
