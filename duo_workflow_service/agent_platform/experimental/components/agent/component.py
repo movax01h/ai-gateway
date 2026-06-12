@@ -86,6 +86,12 @@ class AgentComponentBase(BaseComponent):
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "final_answer"],
     )
 
+    _tool_approval_decision_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_approval_decision"],
+        optional=True,
+    )
+
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         IOKeyTemplate(
             target="conversation_history",
@@ -244,6 +250,7 @@ class AgentComponent(AgentComponentBase):
     _conversation_history_key: RuntimeIOKey = PrivateAttr()
     _output_key: RuntimeIOKey = PrivateAttr()
     _session_id_key: BaseIOKey = PrivateAttr()
+    _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
     _is_bound_to_supervisor: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
@@ -268,6 +275,19 @@ class AgentComponent(AgentComponentBase):
         # when used as a subagent to attribute tool calls to subsessions in UI logs.
         self._session_id_key = NoneIOKey(alias="session_id")
 
+        # Default tool approval decision key is component-scoped (no subsession namespace).
+        # Overridden by bind_to_supervisor to be subsession-scoped when used as a subagent,
+        # preventing race conditions when the same subagent runs in multiple subsessions.
+        static_tool_approval_decision_key = (
+            self._tool_approval_decision_key_template.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            )
+        )
+        self._tool_approval_decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: static_tool_approval_decision_key,
+        )
+
         return self
 
     def bind_to_supervisor(
@@ -277,6 +297,7 @@ class AgentComponent(AgentComponentBase):
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
         session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        tool_approval_decision_key: RuntimeIOKey,
     ) -> None:
         """Bind this agent to a supervisor.
 
@@ -300,6 +321,11 @@ class AgentComponent(AgentComponentBase):
             session_id_key: ``BaseIOKey`` that resolves the subsession ID at
                 runtime.  Used to attribute tool calls to subsessions in UI
                 logs.  Defaults to a no-op key when not provided.
+            tool_approval_decision_key: ``RuntimeIOKey`` that resolves the
+                subsession-scoped tool approval decision key at runtime.  The
+                tool approval decision is stored under a subsession-scoped key,
+                preventing race conditions when the same subagent runs in
+                multiple subsessions in parallel.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -311,6 +337,7 @@ class AgentComponent(AgentComponentBase):
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
         self._session_id_key = session_id_key
+        self._tool_approval_decision_key = tool_approval_decision_key
         self._is_bound_to_supervisor = True
 
         # Ensure subagent does not read shared `context:goal` directly
@@ -394,14 +421,7 @@ class AgentComponent(AgentComponentBase):
             - tools: If approval was granted (decision=APPROVE)
             - agent: If approval was rejected (decision=REJECT or MODIFY)
         """
-        approval_decision_iokey = RuntimeIOKey(
-            alias="tool_approval_decision",
-            factory=lambda _: IOKey(
-                target="context",
-                subkeys=[f"{self.name}__tool_approval_decision"],
-                optional=True,
-            ),
-        ).to_iokey(state)
+        approval_decision_iokey = self._tool_approval_decision_key.to_iokey(state)
 
         decision = approval_decision_iokey.value_from_state(state)
 
@@ -575,14 +595,7 @@ class AgentComponent(AgentComponentBase):
                     alias="status",
                     factory=lambda _: IOKey(target="status"),
                 ),
-                approval_decision_key=RuntimeIOKey(
-                    alias="tool_approval_decision",
-                    factory=lambda _: IOKey(
-                        target="context",
-                        subkeys=[f"{self.name}__tool_approval_decision"],
-                        optional=True,
-                    ),
-                ),
+                approval_decision_key=self._tool_approval_decision_key,
             )
 
             # Add approval nodes to graph

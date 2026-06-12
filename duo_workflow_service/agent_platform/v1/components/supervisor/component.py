@@ -192,6 +192,16 @@ class SupervisorAgentComponent(AgentComponentBase):
             "final_answer",
         ],
     )
+    _subsession_tool_approval_decision_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[
+            IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE,
+            IOKeyTemplate.COMPONENT_NAME_TEMPLATE,
+            IOKeyTemplate.SUBSESSION_ID_TEMPLATE,
+            "tool_approval_decision",
+        ],
+        optional=True,
+    )
 
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         # Supervisor's own conversation history and final answer
@@ -510,6 +520,33 @@ class SupervisorAgentComponent(AgentComponentBase):
             ),
         )
 
+    def _subagent_tool_approval_decision_key_for(
+        self, subagent_name: str
+    ) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` that resolves the tool_approval_decision IOKey for a specific subagent.
+
+        The returned ``RuntimeIOKey`` reads the active subsession ID from state at runtime
+        and builds the IOKey for the given subagent_name.  Passed into
+        ``AgentComponent.bind_to_supervisor`` so the subagent's tool approval nodes
+        store and read the decision under a subsession-scoped key, preventing race
+        conditions when the same subagent runs in multiple subsessions.
+
+        Args:
+            subagent_name: The name of the subagent this key is scoped to.
+        """
+        return RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda state: self._subsession_tool_approval_decision_key.to_iokey(
+                {
+                    IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
+                    IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,
+                    IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(
+                        self._resolved_active_subsession_key.value_from_state(state)
+                    ),
+                }
+            ),
+        )
+
     @property
     def _active_subagent_final_answer_key(self) -> RuntimeIOKey:
         """Return a ``RuntimeIOKey`` that resolves the final_answer IOKey for the currently active subagent.
@@ -717,5 +754,8 @@ class SupervisorAgentComponent(AgentComponentBase):
                 output_key=self._subagent_final_answer_key_for(agent_name),
                 goal_key=self._subsession_goal_key_for(agent_name),
                 session_id_key=self._resolved_active_subsession_key,
+                tool_approval_decision_key=self._subagent_tool_approval_decision_key_for(
+                    agent_name
+                ),
             )
             subagent.attach(graph, subagent_router)

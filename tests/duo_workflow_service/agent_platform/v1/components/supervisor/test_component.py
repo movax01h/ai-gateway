@@ -13,7 +13,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor.component impo
     SupervisorAgentComponent,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
-from duo_workflow_service.agent_platform.v1.state.base import FlowState
+from duo_workflow_service.agent_platform.v1.state.base import FlowState, RuntimeIOKey
 
 _SUPERVISOR_MODULE = (
     "duo_workflow_service.agent_platform.v1.components.supervisor.component"
@@ -659,6 +659,84 @@ class TestSupervisorExecutionFlow:
         mock_sub_agents[tester_name].bind_to_supervisor.assert_called_once()
         mock_sub_agents[developer_name].attach.assert_called_once()
         mock_sub_agents[tester_name].attach.assert_called_once()
+
+    def test_bind_to_supervisor_passes_subsession_scoped_tool_approval_decision_key(
+        self,
+        all_node_mocks,
+        mock_router,
+        mock_sub_agents,
+        base_flow_state,
+        supervisor_name,
+        developer_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        subagent_names,
+        max_delegations,
+        mock_schema_registry,
+    ):
+        """Attach() passes a subsession-scoped tool_approval_decision_key to each subagent.
+
+        The key must resolve to a path that includes the supervisor name, subagent name, and subsession ID — not just
+        the component name — to prevent race conditions when the same subagent runs in multiple subsessions.
+        """
+        nodes = all_node_mocks
+
+        supervisor = _make_supervisor(
+            supervisor_name,
+            flow_id,
+            flow_type,
+            user,
+            mock_toolset,
+            mock_prompt_registry,
+            mock_internal_event_client,
+            subagent_names,
+            max_delegations,
+            mock_sub_agents,
+            mock_schema_registry,
+        )
+
+        nodes["agent"].run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                supervisor_name: [AIMessage(content="All done.", tool_calls=[])]
+            },
+        }
+        nodes["final_response"].run.return_value = {**base_flow_state}
+        mock_router.route.return_value = END
+
+        self._compile(supervisor, mock_router)
+
+        # Verify that bind_to_supervisor was called with a tool_approval_decision_key
+        # for the developer subagent
+        dev_call_kwargs = mock_sub_agents[developer_name].bind_to_supervisor.call_args[
+            1
+        ]
+        assert "tool_approval_decision_key" in dev_call_kwargs
+
+        # The key should be a RuntimeIOKey that resolves to a subsession-scoped path
+        tool_approval_key = dev_call_kwargs["tool_approval_decision_key"]
+        assert isinstance(tool_approval_key, RuntimeIOKey)
+
+        # Simulate a state with an active subsession to verify the resolved key path
+        state_with_subsession = {
+            **base_flow_state,
+            "context": {
+                supervisor_name: {
+                    "active_subsession": 1,
+                }
+            },
+        }
+        resolved_key = tool_approval_key.to_iokey(state_with_subsession)
+        assert resolved_key.target == "context"
+        # Key should be namespaced with supervisor, subagent, and subsession ID as separate subkeys
+        assert resolved_key.subkeys[0] == supervisor_name
+        assert resolved_key.subkeys[1] == developer_name
+        assert resolved_key.subkeys[2] == "1"
+        assert resolved_key.subkeys[3] == "tool_approval_decision"
 
     def test_subagent_router_routes_back_to_subagent_return(
         self,

@@ -1092,12 +1092,14 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         # Bind to supervisor
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # Keys should now be set to the provided values
@@ -1136,11 +1138,13 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         new_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=new_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # The old goal key should have been removed and replaced by the new one
@@ -1174,12 +1178,14 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
 
         with pytest.raises(ValueError, match="must have a description"):
             component.bind_to_supervisor(
                 conversation_history_key=mock_history_key,
                 output_key=mock_output_key,
                 goal_key=mock_goal_key,
+                tool_approval_decision_key=mock_approval_key,
             )
 
     def test_outputs_returns_empty_when_bound(
@@ -1213,10 +1219,12 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
         )
 
         # After binding, outputs should be empty
@@ -1276,10 +1284,10 @@ class TestAgentComponentToolApprovalRouter:
         state_with_tool_message[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_tool_message]
         }
-        # Add approval decision to context
-        state_with_tool_message[FlowStateKeys.CONTEXT][
-            f"{component_name}__tool_approval_decision"
-        ] = "reject"
+        # Add approval decision to context (nested under component name)
+        state_with_tool_message[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_decision": "reject"
+        }
 
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
@@ -1313,10 +1321,10 @@ class TestAgentComponentToolApprovalRouter:
         state_with_human_message[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_human_message]
         }
-        # Add approval decision to context (MODIFY case)
-        state_with_human_message[FlowStateKeys.CONTEXT][
-            f"{component_name}__tool_approval_decision"
-        ] = "modify"
+        # Add approval decision to context (MODIFY case, nested under component name)
+        state_with_human_message[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_decision": "modify"
+        }
 
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
@@ -1351,10 +1359,10 @@ class TestAgentComponentToolApprovalRouter:
         state_with_ai_message[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_ai_message]
         }
-        # Add approval decision to context (APPROVE case)
-        state_with_ai_message[FlowStateKeys.CONTEXT][
-            f"{component_name}__tool_approval_decision"
-        ] = "approve"
+        # Add approval decision to context (APPROVE case, nested under component name)
+        state_with_ai_message[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_decision": "approve"
+        }
 
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
