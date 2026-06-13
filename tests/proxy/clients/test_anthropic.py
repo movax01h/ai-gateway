@@ -288,12 +288,14 @@ class TestAnthropicApiKeyResolution:
         config = ModelSelectionConfig(
             default_models_override={},
             model_params_override={
-                "claude_fable_5": {"api_key": "fable-workspace-key"}
+                "claude_haiku_4_5_20251001": {"api_key": "fable-workspace-key"}
             },
         )
 
         with patch.object(ModelSelectionConfig, "instance", return_value=config):
-            assert _resolve_api_key("claude-fable-5") == "fable-workspace-key"
+            assert (
+                _resolve_api_key("claude-haiku-4-5-20251001") == "fable-workspace-key"
+            )
 
     def test_falls_back_to_env_when_no_override(self, monkeypatch):
         """A model without an api_key override falls back to ANTHROPIC_API_KEY."""
@@ -310,11 +312,11 @@ class TestAnthropicApiKeyResolution:
         monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
         config = ModelSelectionConfig(
             default_models_override={},
-            model_params_override={"claude_fable_5": {"api_key": ""}},
+            model_params_override={"claude_haiku_4_5_20251001": {"api_key": ""}},
         )
 
         with patch.object(ModelSelectionConfig, "instance", return_value=config):
-            assert _resolve_api_key("claude-fable-5") == "env-key"
+            assert _resolve_api_key("claude-haiku-4-5-20251001") == "env-key"
 
     def test_raises_when_no_key_available(self, monkeypatch):
         """Missing both per-model key and env var raises HTTP 400."""
@@ -346,12 +348,12 @@ class TestAnthropicApiKeyResolution:
         config = ModelSelectionConfig(
             default_models_override={},
             model_params_override={
-                "claude_fable_5": {"api_key": "fable-workspace-key"}
+                "claude_haiku_4_5_20251001": {"api_key": "fable-workspace-key"}
             },
         )
 
         request_params = {
-            "model": "claude-fable-5",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 1024,
             "messages": [{"role": "user", "content": "Hi"}],
             "stream": True,
