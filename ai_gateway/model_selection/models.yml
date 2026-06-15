@@ -76,7 +76,7 @@ models:
       max_retries: 10
 
   - name: "Codestral 25.08"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "codestral_2508_vertex"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
@@ -111,7 +111,7 @@ models:
       max_retries: 10
 
   - name: "Gemini 1.5 Flash"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_1_5_flash_vertex"
     description: "Multimodal for high-volume tasks."
     max_context_tokens: 1_000_000 # https://gemini-api.apidog.io/doc-965857
@@ -125,7 +125,7 @@ models:
       max_tokens: 8_192
 
   - name: "Gemini 2.5 Flash"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_2_5_flash_vertex"
     description: "Multimodal reasoning with extended context."
     cost_indicator: "$"
@@ -168,7 +168,7 @@ models:
       max_tokens: 64_000
 
   - name: "Claude Opus 4.5"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_5_20251101_vertex"
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
@@ -202,7 +202,7 @@ models:
       max_tokens: 128_000
 
   - name: "Claude Opus 4.6"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_6_vertex"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
@@ -220,7 +220,7 @@ models:
       vertex_location: global
 
   - name: "Claude Opus 4.7"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_7_vertex"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
@@ -294,7 +294,7 @@ models:
       max_tokens: 128_000
 
   - name: "Claude Opus 4.8"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_8_vertex"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
@@ -355,7 +355,7 @@ models:
       max_tokens: 64_000
 
   - name: "Claude Sonnet 4.6"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_sonnet_4_6_vertex"
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
@@ -405,7 +405,7 @@ models:
       max_tokens: 64_000
 
   - name: "Claude Sonnet 4.5"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_sonnet_4_5_20250929_vertex"
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
@@ -457,7 +457,7 @@ models:
       max_tokens: 64_000
 
   - name: "Claude Haiku 4.5"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_haiku_4_5_20251001_vertex"
     description: "Fast, cost-effective responses."
     cost_indicator: "$"
@@ -493,7 +493,7 @@ models:
       max_retries: 1
 
   - name: "Gemini 3.1 Pro Preview"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_1_pro_preview_vertex"
     description: "Designed to deliver strong agentic capabilities (near-Pro level) at substantial speed and value."
     cost_indicator: "$" # To be confirmed
@@ -509,7 +509,7 @@ models:
       streaming: "true"
 
   - name: "Gemini 3.5 Flash"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_5_flash_vertex"
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
     cost_indicator: "$" # To be confirmed
@@ -834,7 +834,7 @@ models:
       max_tokens: 4_096
 
   - name: "text-embedding-005"
-    provider: "Vertex"
+    provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "text_embedding_005_vertex"
     description: "Natural language processing technique that converts textual data into numerical vectors."
     cost_indicator: "$"

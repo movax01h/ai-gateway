@@ -84,7 +84,7 @@ class KindModelProvider(StrEnum):
     def from_definition_provider(cls, provider: str) -> "KindModelProvider":
         if provider == "Anthropic":
             return KindModelProvider.ANTHROPIC
-        if provider == "Vertex":
+        if provider == "Gemini Enterprise Agent Platform":
             return KindModelProvider.VERTEX_AI
         if provider == "Fireworks":
             return KindModelProvider.FIREWORKS

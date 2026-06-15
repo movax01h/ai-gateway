@@ -1781,7 +1781,7 @@ class TestGitLabModelProvider:
             max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
-            provider="Vertex",
+            provider="Gemini Enterprise Agent Platform",
             params=ChatLiteLLMParams(temperature=0.0, max_tokens=4096),
         )
 
@@ -1837,7 +1837,7 @@ class TestGitLabModelProvider:
         [
             (
                 "codestral_2508_vertex",
-                "Vertex",
+                "Gemini Enterprise Agent Platform",
                 {"temperature": 0.0, "max_tokens": 4096},
             ),
             (

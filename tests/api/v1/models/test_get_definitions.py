@@ -39,7 +39,7 @@ def mock_model_config_fixture():
             "model2": ChatLiteLLMDefinition(
                 name="Model 2",
                 gitlab_identifier="model2",
-                provider="Vertex",
+                provider="Gemini Enterprise Agent Platform",
                 max_context_tokens=200000,
                 description="Fast, cost-effective responses.",
                 cost_indicator="$$",
@@ -107,9 +107,9 @@ def test_get_models_returns_correct_data(client):
         "cost_indicator": "$",
     }
     assert data["models"][1] == {
-        "name": "Model 2 - Vertex",
+        "name": "Model 2 - Gemini Enterprise Agent Platform",
         "identifier": "model2",
-        "provider": "Vertex",
+        "provider": "Gemini Enterprise Agent Platform",
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$$",
