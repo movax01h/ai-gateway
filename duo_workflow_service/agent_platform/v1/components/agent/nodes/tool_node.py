@@ -23,6 +23,11 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import (
+    is_orbit_tool,
+    orbit_tool_call_count,
+    total_tool_call_count,
+)
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events.event_enum import EventEnum
 
@@ -150,6 +155,10 @@ class ToolNode:
         tool: BaseTool,
         session_id: Optional[str] = None,
     ) -> str:
+        total_tool_call_count.set(total_tool_call_count.get() + 1)
+        if is_orbit_tool(tool.name):
+            orbit_tool_call_count.set(orbit_tool_call_count.get() + 1)
+
         try:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._tracker._flow_type.value
@@ -160,6 +169,12 @@ class ToolNode:
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,
                 tool_name=tool.name,
             )
+
+            if is_orbit_tool(tool.name):
+                self._tracker.track_internal_event(
+                    event_name=EventEnum.ORBIT_DAP_TOOL_CALLED,
+                    tool_name=tool.name,
+                )
 
             self._ui_history.log.success(
                 tool=tool,
@@ -191,6 +206,16 @@ class ToolNode:
             else:
                 err_format = self._tracker.handle_execution_error(
                     tool_name=tool.name, error=e
+                )
+
+            if is_orbit_tool(tool.name):
+                self._tracker.track_internal_event(
+                    event_name=EventEnum.ORBIT_DAP_TOOL_FAILED,
+                    tool_name=tool.name,
+                    extra={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
                 )
 
             return err_format

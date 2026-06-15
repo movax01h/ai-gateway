@@ -14,7 +14,7 @@ additional_properties:
   workflow_type:
     description: Type of DAP flow (e.g., developer, chat)
   orbit_calls_count:
-    description: Number of successful Orbit tool calls in the session
+    description: Number of Orbit tool call attempts in the session (includes both successes and failures)
   non_orbit_tool_calls:
     description: Number of non-Orbit tool calls in the session
   total_tool_calls:
