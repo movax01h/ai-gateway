@@ -194,9 +194,6 @@ Set the decision field based on these criteria:
       {% if merge_request_url %}
       - You can identify a concrete causal mechanism linking the MR's changes to the failure
       - The failure does not appear to be a flaky test or timing-related
-      {% else %}
-      - The failure_category is one of: `test_failure`, `lint_failure`, `build_failure`, `dependency_failure`, `ci_config_error`
-      - The failure is not purely intermittent or timing-dependent (i.e., there is a fixable root cause)
       {% endif %}
       Use this whenever validation by executing the fix locally is warranted — multi-file changes, test failures, build failures, anything where the diff might surprise the reviewer.
     </response_reason>
