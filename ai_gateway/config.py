@@ -30,6 +30,7 @@ __all__ = [
     "ConfigCachingProxy",
     "ConfigDuoWorkflow",
     "ConfigMockUsageQuotaServer",
+    "ConfigProxyEndpoints",
 ]
 
 ENV_PREFIX = "AIGW"
@@ -303,6 +304,56 @@ class ConfigFeatureFlags(BaseModel):
     fireworks_score_threshold: dict[str, float] = {}
 
 
+class ConfigProxyEndpoints(BaseModel):
+    """Configuration for allowing proxy endpoints per realm (allowlist model).
+
+    Each realm is controlled by a single environment variable accepting a
+    comma-separated list of IDs:
+
+    - Absent or empty string → all instances/namespaces are allowed (no restriction).
+    - ``"id1,id2"`` → only those instance UIDs (self-managed) or root namespace IDs (SaaS) are allowed.
+
+    Environment variables::
+
+        # Allow only specific self-managed instance UIDs
+        AIGW_PROXY_ENDPOINTS__SELF_MANAGED_ENABLED="uid-a,uid-b"
+
+        # Allow only specific SaaS root namespace IDs
+        AIGW_PROXY_ENDPOINTS__SAAS_ENABLED="12345,67890"
+    """
+
+    self_managed_enabled: str = Field(
+        default="",
+        description=(
+            "Controls which self-managed instances have proxy endpoints enabled. "
+            "Comma-separated instance UIDs allow only those instances; "
+            "empty string (default) allows all."
+        ),
+    )
+    saas_enabled: str = Field(
+        default="",
+        description=(
+            "Controls which SaaS namespaces have proxy endpoints enabled. "
+            "Comma-separated root namespace IDs allow only those namespaces; "
+            "empty string (default) allows all."
+        ),
+    )
+
+    def self_managed_enabled_ids(self) -> list[str]:
+        """Return the parsed allowlist of self-managed instance UIDs.
+
+        Returns an empty list when the value is absent or empty (meaning all allowed).
+        """
+        return [v.strip() for v in self.self_managed_enabled.split(",") if v.strip()]
+
+    def saas_enabled_ids(self) -> list[str]:
+        """Return the parsed allowlist of SaaS root namespace IDs.
+
+        Returns an empty list when the value is absent or empty (meaning all allowed).
+        """
+        return [v.strip() for v in self.saas_enabled.split(",") if v.strip()]
+
+
 class ModelLimits(TypedDict, total=False):
     concurrency: int
     input_tokens: int
@@ -443,6 +494,9 @@ class Config(BaseSettings):
     duo_workflow: Annotated[ConfigDuoWorkflow, Field(default_factory=ConfigDuoWorkflow)]
     mock_usage_quota_server: Annotated[
         ConfigMockUsageQuotaServer, Field(default_factory=ConfigMockUsageQuotaServer)
+    ]
+    proxy_endpoints: Annotated[
+        ConfigProxyEndpoints, Field(default_factory=ConfigProxyEndpoints)
     ]
 
     def __init__(self, *args, **kwargs):

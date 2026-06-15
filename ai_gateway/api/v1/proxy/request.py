@@ -1,6 +1,7 @@
 import functools
 import typing
 
+from dependency_injector.wiring import Provide, inject
 from fastapi import HTTPException, Request, status
 from gitlab_cloud_connector import (
     FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
@@ -10,8 +11,10 @@ from gitlab_cloud_connector import (
 )
 
 from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
+from ai_gateway.config import ConfigProxyEndpoints
+from ai_gateway.container import ContainerApplication
 from lib.context import StarletteUser
-from lib.internal_events.context import EventContext, current_event_context
+from lib.internal_events.context import current_event_context
 
 # It's implemented here, because eventually we want to restrict this endpoint to
 # ai_gateway_model_provider_proxy unit primitive only, so we won't rely on
@@ -27,6 +30,72 @@ EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS = {
         GitLabUnitPrimitive.AI_GATEWAY_MODEL_PROVIDER_PROXY: GitLabFeatureCategory.DUO_AGENT_PLATFORM
     },
 }
+
+
+@inject
+async def _check_proxy_endpoints_enabled(
+    request: Request,
+    proxy_cfg: dict = Provide[ContainerApplication.config.proxy_endpoints],
+) -> None:
+    """Raise HTTP 402 if the request realm is not on the proxy endpoint allowlist.
+
+    Reads ``AIGW_PROXY_ENDPOINTS__SELF_MANAGED_ENABLED`` and
+    ``AIGW_PROXY_ENDPOINTS__SAAS_ENABLED`` from the DI config. Each accepts:
+
+    - Absent or empty string → all instances/namespaces are allowed (no restriction).
+    - ``"id1,id2"`` → only those instance UIDs (self-managed) or root namespace IDs (SaaS) are allowed.
+
+    SaaS realms are checked against ``saas_enabled``; all other realms (including
+    ``self-managed``, unrecognised realms, and empty realm) are checked against
+    ``self_managed_enabled``.
+    """
+    user_claims = request.user.claims or UserClaims()
+    realm = user_claims.gitlab_realm or ""
+
+    cfg = (
+        ConfigProxyEndpoints(**proxy_cfg) if isinstance(proxy_cfg, dict) else proxy_cfg
+    )
+
+    if realm == "saas":
+        allowed_ids = cfg.saas_enabled_ids()
+        if allowed_ids:
+            extra_claims = user_claims.extra or {}
+            namespace_id = str(extra_claims.get("gitlab_root_namespace_id") or "")
+            if namespace_id not in allowed_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Proxy endpoints are not enabled for this namespace",
+                )
+    else:
+        allowed_ids = cfg.self_managed_enabled_ids()
+        if allowed_ids:
+            instance_id = str(user_claims.gitlab_instance_uid or "")
+            if instance_id not in allowed_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Proxy endpoints are not enabled for this instance",
+                )
+
+
+def check_proxy_endpoints_enabled():
+    """Decorator enforcing the proxy endpoint allowlist via DI-injected config.
+
+    See ``_check_proxy_endpoints_enabled`` for the enforcement logic.
+    """
+
+    def decorator(func: typing.Callable) -> typing.Callable:
+        @functools.wraps(func)
+        async def wrapper(
+            request: Request,
+            *args: typing.Any,
+            **kwargs: typing.Any,
+        ) -> typing.Any:
+            await _check_proxy_endpoints_enabled(request)
+            return await func(request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def authorize_with_unit_primitive_header():
@@ -92,7 +161,7 @@ def verify_project_namespace_metadata():
             *args: typing.Any,
             **kwargs: typing.Any,
         ) -> typing.Any:
-            internal_context: EventContext = current_event_context.get()
+            internal_context = current_event_context.get()
             user_claims = request.user.claims or UserClaims()
 
             extra_claims = user_claims.extra or {}
