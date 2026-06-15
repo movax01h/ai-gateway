@@ -52,16 +52,14 @@ class StartWorkflowRequest(_message.Message):
     def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
-    __slots__ = ("requestID", "response", "plainTextResponse", "httpResponse")
+    __slots__ = ("requestID", "plainTextResponse", "httpResponse")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
-    RESPONSE_FIELD_NUMBER: _ClassVar[int]
     PLAINTEXTRESPONSE_FIELD_NUMBER: _ClassVar[int]
     HTTPRESPONSE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
-    response: str
     plainTextResponse: PlainTextResponse
     httpResponse: HttpResponse
-    def __init__(self, requestID: _Optional[str] = ..., response: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ...) -> None: ...
+    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("timestamp",)

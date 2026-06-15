@@ -62,7 +62,6 @@ export interface StartWorkflowRequest {
 
 export interface ActionResponse {
   requestID: string;
-  response?: string | undefined;
   plainTextResponse?: PlainTextResponse | undefined;
   httpResponse?: HttpResponse | undefined;
 }
@@ -737,16 +736,13 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
 };
 
 function createBaseActionResponse(): ActionResponse {
-  return { requestID: "", response: undefined, plainTextResponse: undefined, httpResponse: undefined };
+  return { requestID: "", plainTextResponse: undefined, httpResponse: undefined };
 }
 
 export const ActionResponse: MessageFns<ActionResponse> = {
   encode(message: ActionResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.requestID !== "") {
       writer.uint32(10).string(message.requestID);
-    }
-    if (message.response !== undefined) {
-      writer.uint32(18).string(message.response);
     }
     if (message.plainTextResponse !== undefined) {
       PlainTextResponse.encode(message.plainTextResponse, writer.uint32(26).fork()).join();
@@ -770,14 +766,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
           }
 
           message.requestID = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.response = reader.string();
           continue;
         }
         case 3: {
@@ -808,7 +796,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
   fromJSON(object: any): ActionResponse {
     return {
       requestID: isSet(object.requestID) ? globalThis.String(object.requestID) : "",
-      response: isSet(object.response) ? globalThis.String(object.response) : undefined,
       plainTextResponse: isSet(object.plainTextResponse)
         ? PlainTextResponse.fromJSON(object.plainTextResponse)
         : undefined,
@@ -820,9 +807,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     const obj: any = {};
     if (message.requestID !== "") {
       obj.requestID = message.requestID;
-    }
-    if (message.response !== undefined) {
-      obj.response = message.response;
     }
     if (message.plainTextResponse !== undefined) {
       obj.plainTextResponse = PlainTextResponse.toJSON(message.plainTextResponse);
@@ -839,7 +823,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
   fromPartial<I extends Exact<DeepPartial<ActionResponse>, I>>(object: I): ActionResponse {
     const message = createBaseActionResponse();
     message.requestID = object.requestID ?? "";
-    message.response = object.response ?? undefined;
     message.plainTextResponse = (object.plainTextResponse !== undefined && object.plainTextResponse !== null)
       ? PlainTextResponse.fromPartial(object.plainTextResponse)
       : undefined;

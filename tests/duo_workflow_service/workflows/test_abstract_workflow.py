@@ -231,7 +231,10 @@ async def test_set_action_response(workflow):
     workflow.set_action_response(
         contract_pb2.ClientEvent(
             actionResponse=contract_pb2.ActionResponse(
-                response="the response", requestID=request_id
+                plainTextResponse=contract_pb2.PlainTextResponse(
+                    response="the response"
+                ),
+                requestID=request_id,
             )
         )
     )
