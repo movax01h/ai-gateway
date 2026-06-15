@@ -70,6 +70,7 @@ CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.monitoring",
     "ai_gateway.async_dependency_resolver",
     "ai_gateway.api.middleware.route.usage_quota",
+    "ai_gateway.api.v1.proxy.request",
 ]
 
 ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
