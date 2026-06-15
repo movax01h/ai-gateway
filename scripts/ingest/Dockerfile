@@ -22,7 +22,7 @@ ENV MISE_CONFIG_DIR="/mise"
 ENV MISE_CACHE_DIR="/mise/cache"
 ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 ENV PATH="/mise/shims:$PATH"
-RUN curl https://mise.run | sh
+RUN curl https://mise.run | MISE_VERSION=v2026.6.9 sh
 
 COPY .tool-versions /app/.tool-versions
 
