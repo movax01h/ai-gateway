@@ -1963,3 +1963,85 @@ async def test_track_workflow_completion_with_billing_event_includes_tool_names(
             "workflow_id": workflow_id,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_fires_orbit_session_summary(
+    gitlab_workflow,
+    internal_event_client,
+    workflow_id,
+    workflow_type,
+):
+    """Test that orbit_dap_session_summary fires when orbit tools were used."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(3)
+    total_tool_call_count.set(7)
+
+    await gitlab_workflow._track_workflow_completion("finished")
+
+    assert internal_event_client.track_event.call_count == 2
+
+    orbit_calls = [
+        c
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"] == EventEnum.ORBIT_DAP_SESSION_SUMMARY.value
+    ]
+    assert len(orbit_calls) == 1
+    orbit_call = orbit_calls[0]
+
+    additional_props = orbit_call[1]["additional_properties"]
+    assert additional_props.value == workflow_id
+    assert additional_props.extra["workflow_type"] == workflow_type.value
+    assert additional_props.extra["orbit_calls_count"] == 3
+    assert additional_props.extra["non_orbit_tool_calls"] == 4
+    assert additional_props.extra["total_tool_calls"] == 7
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_skips_orbit_summary_when_no_orbit_calls(
+    gitlab_workflow,
+    internal_event_client,
+):
+    """Test that orbit_dap_session_summary does NOT fire when no orbit tools were used."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(0)
+    total_tool_call_count.set(5)
+
+    await gitlab_workflow._track_workflow_completion("finished")
+
+    assert internal_event_client.track_event.call_count == 1
+    call_args = internal_event_client.track_event.call_args
+    assert call_args[1]["event_name"] != EventEnum.ORBIT_DAP_SESSION_SUMMARY.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pause_status",
+    [WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED],
+)
+async def test_track_workflow_completion_skips_orbit_summary_on_pause(
+    gitlab_workflow,
+    internal_event_client,
+    pause_status,
+):
+    """Orbit summary must not fire on pause statuses — counters reset on each resume, so firing here would produce
+    partial summaries instead of one session-level summary."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(2)
+    total_tool_call_count.set(4)
+
+    await gitlab_workflow._track_workflow_completion(pause_status)
+
+    event_names = [
+        c[1]["event_name"] for c in internal_event_client.track_event.call_args_list
+    ]
+    assert EventEnum.ORBIT_DAP_SESSION_SUMMARY.value not in event_names

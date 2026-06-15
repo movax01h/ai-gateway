@@ -80,7 +80,13 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
-from lib.context import current_model_metadata_context, init_llm_operations
+from lib.context import (
+    build_orbit_session_summary_extras,
+    current_model_metadata_context,
+    init_llm_operations,
+    init_orbit_counters,
+    is_orbit_tool,
+)
 from lib.context.tool_executions import get_tool_executions, init_tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -115,15 +121,12 @@ def _attribute_dirty(
     return False, None
 
 
-ORBIT_TOOL_IDENTIFIER = "orbit"
-
-
 def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
     """Check if any Orbit tools were called in the checkpoint state."""
     channel_values = checkpoint.get("channel_values", {})
     ui_chat_log = channel_values.get("ui_chat_log", [])
     return any(
-        ORBIT_TOOL_IDENTIFIER in (entry.get("tool_info") or {}).get("name", "")
+        is_orbit_tool((entry.get("tool_info") or {}).get("name", ""))
         for entry in ui_chat_log
     )
 
@@ -294,6 +297,8 @@ class GitLabWorkflow(
             response_schema_tracking_results.set({})
 
             init_tool_executions()
+
+            init_orbit_counters()
 
             self._flow_start_time = time.time()
 
@@ -609,6 +614,23 @@ class GitLabWorkflow(
                 label=label, property=prop, value=self._workflow_id, **extra_kwargs
             ),
         )
+
+        # Only fire orbit session summary on terminal statuses. Pause statuses
+        # (INPUT_REQUIRED, PLAN_APPROVAL_REQUIRED) would produce partial summaries
+        # because init_orbit_counters() resets the counters on each resume.
+        if status in ("finished", "stopped"):
+            # label/property are intentionally omitted: they are validator-required
+            # placeholders that will be dropped once the schema is published. See
+            # orbit_dap_session_summary.yml and
+            # https://gitlab.com/gitlab-org/gitlab/-/work_items/596959
+            orbit_extras = build_orbit_session_summary_extras(
+                self._workflow_id, self._workflow_type.value
+            )
+            if orbit_extras is not None:
+                self._track_internal_event(
+                    EventEnum.ORBIT_DAP_SESSION_SUMMARY,
+                    InternalEventAdditionalProperties(**orbit_extras),
+                )
 
     async def _update_workflow_status_safely(
         self, status: WorkflowStatusEventEnum = WorkflowStatusEventEnum.DROP

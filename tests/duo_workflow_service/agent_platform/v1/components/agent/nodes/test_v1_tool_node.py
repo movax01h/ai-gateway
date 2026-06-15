@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests
+# pylint: disable=file-naming-for-tests,too-many-lines
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
@@ -24,6 +24,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.security.prompt_security import SecurityException
+from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (
     assert_security_called_with,
@@ -820,3 +821,207 @@ class TestToolNodeComponentIdentity:
         logs = result.get("ui_chat_log", [])
         assert len(logs) == 1
         assert logs[0]["subsession_id"] is None
+
+
+class TestToolNodeOrbitTracking:
+    """Test suite for Orbit-specific event tracking in ToolNode."""
+
+    @pytest.fixture(name="orbit_tool")
+    def orbit_tool_fixture(self):
+        mock_tool = Mock(spec=BaseTool)
+        mock_tool.name = "orbit_query_graph"
+        mock_tool.ainvoke = AsyncMock(return_value="Orbit query result")
+        return mock_tool
+
+    @pytest.fixture(name="orbit_toolset")
+    def orbit_toolset_fixture(self, orbit_tool):
+        mock_toolset = Mock()
+        mock_toolset.__contains__ = Mock(return_value=True)
+        mock_toolset.__getitem__ = Mock(return_value=orbit_tool)
+        mock_toolset.get = Mock(return_value=orbit_tool)
+        mock_toolset.bindable = [orbit_tool]
+        return mock_toolset
+
+    @pytest.fixture(name="orbit_tool_node")
+    def orbit_tool_node_fixture(
+        self,
+        component_name,
+        orbit_toolset,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
+        static_key = IOKey(
+            target="conversation_history",
+            subkeys=[component_name],
+            optional=True,
+        )
+        conversation_history_key = RuntimeIOKey(
+            alias="conversation_history", factory=lambda _: static_key
+        )
+        return ToolNode(
+            name="test_tool_node",
+            conversation_history_key=conversation_history_key,
+            toolset=orbit_toolset,
+            ui_history=ui_history,
+            tracker=tracker,
+        )
+
+    @pytest.fixture(name="orbit_flow_state")
+    def orbit_flow_state_fixture(self, base_flow_state, component_name):
+        orbit_tool_call = {
+            "name": "orbit_query_graph",
+            "args": {"query": "MATCH (p:Project) RETURN p"},
+            "id": "orbit_tool_call_id",
+        }
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [orbit_tool_call]
+        state = base_flow_state.copy()
+        state["conversation_history"] = {component_name: [mock_message]}
+        return state
+
+    @pytest.fixture(autouse=True)
+    def reset_orbit_counters(self):
+        orbit_tool_call_count.set(0)
+        total_tool_call_count.set(0)
+        yield
+
+    @pytest.mark.asyncio
+    async def test_orbit_tool_success_fires_orbit_event(
+        self,
+        orbit_tool_node,
+        orbit_flow_state,
+        mock_internal_event_client,
+    ):
+        """Orbit tool success fires both WORKFLOW_TOOL_SUCCESS and ORBIT_DAP_TOOL_CALLED."""
+        await orbit_tool_node.run(orbit_flow_state)
+
+        assert mock_internal_event_client.track_event.call_count == 2
+        event_names = [
+            call[1]["event_name"]
+            for call in mock_internal_event_client.track_event.call_args_list
+        ]
+        assert EventEnum.WORKFLOW_TOOL_SUCCESS.value in event_names
+        assert EventEnum.ORBIT_DAP_TOOL_CALLED.value in event_names
+
+    @pytest.mark.asyncio
+    async def test_orbit_tool_success_increments_counters(
+        self,
+        orbit_tool_node,
+        orbit_flow_state,
+    ):
+        """Orbit tool success increments both orbit and total counters."""
+        await orbit_tool_node.run(orbit_flow_state)
+
+        assert orbit_tool_call_count.get() == 1
+        assert total_tool_call_count.get() == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error_kind",
+        ["generic_exception", "type_error", "validation_error"],
+    )
+    async def test_orbit_tool_failure_fires_orbit_failed_event(
+        self,
+        orbit_tool_node,
+        orbit_flow_state,
+        orbit_tool,
+        mock_internal_event_client,
+        error_kind,
+    ):
+        """Orbit failure fires WORKFLOW_TOOL_FAILURE + ORBIT_DAP_TOOL_FAILED for all three error branches."""
+        if error_kind == "generic_exception":
+            orbit_tool.ainvoke = AsyncMock(side_effect=Exception("GKG query timeout"))
+        elif error_kind == "type_error":
+            orbit_tool.ainvoke = AsyncMock(side_effect=TypeError("bad arg type"))
+            orbit_tool.args_schema = Mock()
+            orbit_tool.args_schema.model_json_schema.return_value = {
+                "type": "object",
+                "properties": {},
+            }
+        else:
+            orbit_tool.ainvoke = AsyncMock(
+                side_effect=ValidationError.from_exception_data(
+                    "ValidationError",
+                    [{"type": "missing", "loc": ["field"], "msg": "Field required"}],
+                )
+            )
+
+        await orbit_tool_node.run(orbit_flow_state)
+
+        assert mock_internal_event_client.track_event.call_count == 2
+        event_names = [
+            call[1]["event_name"]
+            for call in mock_internal_event_client.track_event.call_args_list
+        ]
+        assert EventEnum.WORKFLOW_TOOL_FAILURE.value in event_names
+        assert EventEnum.ORBIT_DAP_TOOL_FAILED.value in event_names
+
+    @pytest.mark.asyncio
+    async def test_orbit_tool_failure_increments_counters(
+        self,
+        orbit_tool_node,
+        orbit_flow_state,
+        orbit_tool,
+    ):
+        """Orbit tool failure still increments orbit and total counters."""
+        orbit_tool.ainvoke = AsyncMock(side_effect=Exception("GKG query timeout"))
+
+        await orbit_tool_node.run(orbit_flow_state)
+
+        assert orbit_tool_call_count.get() == 1
+        assert total_tool_call_count.get() == 1
+
+    @pytest.mark.asyncio
+    async def test_non_orbit_tool_does_not_fire_orbit_events(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_internal_event_client,
+    ):
+        """Non-orbit tool only fires WORKFLOW_TOOL_SUCCESS, not orbit events."""
+        await tool_node.run(flow_state_with_tool_calls)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_args = mock_internal_event_client.track_event.call_args
+        assert call_args[1]["event_name"] == EventEnum.WORKFLOW_TOOL_SUCCESS.value
+
+    @pytest.mark.asyncio
+    async def test_non_orbit_tool_increments_total_only(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+    ):
+        """Non-orbit tool increments total counter but not orbit counter."""
+        await tool_node.run(flow_state_with_tool_calls)
+
+        assert orbit_tool_call_count.get() == 0
+        assert total_tool_call_count.get() == 1
+
+    @pytest.mark.asyncio
+    async def test_orbit_event_carries_required_properties(
+        self,
+        orbit_tool_node,
+        orbit_flow_state,
+        mock_internal_event_client,
+        flow_id,
+    ):
+        """ORBIT_DAP_TOOL_CALLED carries label/property/value/client_capabilities per YAML."""
+        await orbit_tool_node.run(orbit_flow_state)
+
+        orbit_call = next(
+            call
+            for call in mock_internal_event_client.track_event.call_args_list
+            if call[1]["event_name"] == EventEnum.ORBIT_DAP_TOOL_CALLED.value
+        )
+        props = orbit_call[1]["additional_properties"]
+        assert props.label == "workflow_tool_call"
+        assert props.property == "orbit_query_graph"
+        assert props.value == flow_id
+        assert "client_capabilities" in props.extra

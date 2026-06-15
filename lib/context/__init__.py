@@ -22,7 +22,9 @@ from lib.context.model import (
     get_model_metadata,
 )
 from lib.context.orbit import (
-    ORBIT_TOOL_PREFIX,
+    build_orbit_session_summary_extras,
+    init_orbit_counters,
+    is_orbit_tool,
     orbit_tool_call_count,
     total_tool_call_count,
 )
@@ -87,9 +89,11 @@ __all__ = [
     "get_model_metadata",
     "ModelSizeBucket",
     # orbit
-    "ORBIT_TOOL_PREFIX",
+    "is_orbit_tool",
+    "init_orbit_counters",
     "orbit_tool_call_count",
     "total_tool_call_count",
+    "build_orbit_session_summary_extras",
     # workflow
     "get_workflow_id",
     "set_workflow_id",
