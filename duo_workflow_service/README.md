@@ -13,7 +13,7 @@ infrastructure.
 
 ## Local development with GDK
 
-You should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/duo_agent_platform.md).
+You should [set up GitLab Duo Workflow with the GitLab Development Kit (GDK)](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/ai/duo_agent_platform.md).
 
 The GDK setup documentation also explains how to ensure that all feature flags and
 settings are enabled so that Duo Workflow works.
@@ -24,9 +24,7 @@ You can also manually set up Duo Workflow by following these steps:
 
 1. Ensure you have met all prerequisites locally (this list may not be exhaustive, GDK setup script is)
    - [GitLab Ultimate cloud license](https://docs.gitlab.com/development/ai_features/ai_development_license)
-   - [Experiment and beta features setting](https://docs.gitlab.com/user/gitlab_duo/turn_on_off/#turn-on-beta-and-experimental-features)
-     enabled
-   - Feature flag enabled: `Feature.enable(:duo_workflow)`
+
 
 1. Install dependencies with [poetry](https://python-poetry.org/docs/#installing-with-pipx).
 
@@ -37,7 +35,7 @@ You can also manually set up Duo Workflow by following these steps:
 1. Copy the example env file in the Service repo.
 
    ```shell
-   cp .env.example .env
+   cp example.env .env
    ```
 
 1. Install [`gcloud`](https://cloud.google.com/sdk/docs/install)
@@ -75,7 +73,7 @@ You can also manually set up Duo Workflow by following these steps:
 1. Run the Duo Workflow Service server.
 
    ```shell
-   poetry run python -m duo_workflow_service.server
+   poetry run duo-workflow-service
    ```
 
 1. If you can correctly connect to Claude, you should see something
@@ -87,7 +85,7 @@ You can also manually set up Duo Workflow by following these steps:
 
 ## Debugging and troubleshooting
 
-See the Duo Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/development/data-science/ai-powered/duo-workflow/troubleshooting/)
+See the Duo Workflow [troubleshooting handbook page](https://handbook.gitlab.com/handbook/engineering/ai/agent-foundations/troubleshooting/)
 and the [Duo Workflow Service runbook](https://runbooks.gitlab.com/duo-workflow-svc/) (useful for working with logs and operational tasks).
 
 ### Debugging production flow failures
@@ -231,8 +229,9 @@ future extensibility.
 1. **Workflows Layer**
    - Houses ready-to-use workflow configurations.
    - Built by combining components from the Components layer.
-   - Configured with prompts and agent configurations from `AgentRegistry`.
    - Serves as a simplified entry point for building agentic features
+   - Configured with prompts and agent configurations defined as YAML flow configs, managed by the [Flow Registry framework](../docs/flow_registry/index.md).
+   - Some flows do not use the Flow Registry abstraction, but have their own python classes: `chat` and `software_development`. These are located in the `duo_workflow_service/workflows/` directory. New flows should use the Flow Registry only.
 
 Each layer is restricted to using only entities from the layer directly below it, enforced through static scanning in
 CI. This architecture ensures:
@@ -243,7 +242,7 @@ CI. This architecture ensures:
 
 ### Current Graph structure
 
-To visualise current graphs, you can check [the current structure](../docs/duo_workflow_service_graphs.md), or if you've
+To see currently available Flow Registry graphs, you can check [the current structure](../docs/duo_workflow_service_graphs.md), or if you've
 made changes, run `make duo-workflow-docs`. This will generate updated mermaid diagrams.
 
 ## Using memory checkpointer
@@ -262,8 +261,12 @@ Production logs are
 [collected via LangSmith](https://smith.langchain.com/o/477de7ad-583e-47b6-a1c4-c4a0300e7aca/projects/p/5409132b-2cf3-4df8-9f14-70204f90ed9b?timeModel=%7B%22duration%22%3A%227d%22%7D&searchModel=%7B%22filter%22%3A%22and%28eq%28is_root%2C+true%29%2C+eq%28run_type%2C+%5C%22chain%5C%22%29%29%22%7D).
 
 You will need access to LangSmith to view the logs. Please fill out
-an [Access Request](https://handbook.gitlab.com/handbook/it/end-user-services/onboarding-access-requests/access-requests/)
-to get access to LangSmith.
+an Access Request to get access to LangSmith. See the handbook
+[Access Requests (ARs)](https://handbook.gitlab.com/handbook/security/corporate/end-user-services/access-requests/)
+and [Access Requests (AR) Services](https://handbook.gitlab.com/handbook/security/corporate/services/access-requests/)
+pages.
+
+Note that you should never publicly share LangSmith traces, you should just share the URL as described in [Sharing your LangSmith traces](https://docs.gitlab.com/development/ai_features/duo_chat/#sharing-your-langsmith-traces-for-internal-team-members).
 
 On local environment, set `DEBUG=1` to enable extended log output.
 
