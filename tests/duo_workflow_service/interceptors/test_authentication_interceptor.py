@@ -130,15 +130,46 @@ async def test_intercept_service_reflection_requires_auth_by_default(
     mock_cloud_connector_ready.assert_called_once()
 
 
-@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "false"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+    return_value=(
+        CloudConnectorUser(True, claims=UserClaims(gitlab_realm="test-realm")),
+        None,
+    ),
+)
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.asyncio
+async def test_intercept_service_auth_enabled_by_default(
+    mock_cloud_connector_ready,
+    _mock_authenticate,
+    monkeypatch,
+    mock_continuation,
+    handler_call_details,
+):
+    """Auth is enabled when DUO_WORKFLOW_AUTH__ENABLED is not set."""
+    monkeypatch.delenv("DUO_WORKFLOW_AUTH__ENABLED", raising=False)
+    interceptor = AuthenticationInterceptor()
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+    mock_cloud_connector_ready.assert_called_once()
+
+
+@pytest.mark.parametrize("auth_enabled_value", ["false", "False", "FALSE"])
 @patch(
     "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
     return_value=True,
 )
 @pytest.mark.asyncio
 async def test_intercept_service_auth_disabled(
-    mock_cloud_connector_ready, mock_continuation, handler_call_details
+    mock_cloud_connector_ready,
+    auth_enabled_value,
+    monkeypatch,
+    mock_continuation,
+    handler_call_details,
 ):
+    monkeypatch.setenv("DUO_WORKFLOW_AUTH__ENABLED", auth_enabled_value)
     interceptor = AuthenticationInterceptor()
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     user = current_user.get()
