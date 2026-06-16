@@ -8,6 +8,7 @@ import structlog
 from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -39,6 +40,18 @@ def _agent_token_totals(
         for agent, msgs in conversation_history.items()
         if msgs
     }
+
+
+def _component_name_from_node(node_name: Optional[str]) -> Optional[str]:
+    """Recover the design-time component name from a runtime LangGraph node name.
+
+    v1 components compile to nodes named ``{component}{NODE_ROLE_SEPARATOR}{role}`` (e.g. ``"researcher#agent"``); the
+    segment before the separator is the component name. Names without it (e.g. legacy workflow nodes) are returned
+    unchanged.
+    """
+    if not node_name:
+        return None
+    return node_name.partition(NODE_ROLE_SEPARATOR)[0]
 
 
 class _ThrottleState:
@@ -109,9 +122,14 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             return
 
         if type == "messages":
-            message, _ = state
+            message, metadata = state
+            node_name = (
+                metadata.get("langgraph_node") if isinstance(metadata, dict) else None
+            )
 
-            self._append_chunk_to_ui_chat_log(message)
+            self._append_chunk_to_ui_chat_log(
+                message, component_name=_component_name_from_node(node_name)
+            )
 
             return await self._execute_action(throttle=True)
 
@@ -246,7 +264,9 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         return self.ui_chat_log[ui_chat_log_diff_idx:]
 
-    def _append_chunk_to_ui_chat_log(self, message: BaseMessage):
+    def _append_chunk_to_ui_chat_log(
+        self, message: BaseMessage, component_name: Optional[str] = None
+    ) -> None:
         """Append a message chunk to the UI chat log.
 
         Processes incoming message chunks and either creates a new chat log entry
@@ -254,6 +274,10 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         Args:
             message (BaseMessage): The message chunk to be processed and added to the log.
+            component_name (Optional[str]): The component (graph node) that produced
+                the chunk, so streamed output is attributable to a node. Only stamped
+                on newly created entries; continuations inherit it from the entry they
+                extend.
         """
         if not isinstance(message, AIMessageChunk):
             return
@@ -275,6 +299,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 content=message.text(),
                 tool_info=None,
                 additional_context=None,
+                component_name=component_name,
             )
             self.ui_chat_log.append(last_ui_message)
 
