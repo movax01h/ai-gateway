@@ -51,7 +51,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             current_user.set(cloud_connector_user)
             return await continuation(handler_call_details)
 
-        if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
+        if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", "true").lower() == "false":
             logger.warn("[WARN] Auth is disabled, all users allowed")
             cloud_connector_user, _cloud_connector_error = authenticate(
                 {}, None, bypass_auth=True
@@ -122,7 +122,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
                 structlog,
             )
 
-            if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", True) == "false":
+            if os.environ.get("DUO_WORKFLOW_AUTH__ENABLED", "true").lower() == "false":
                 logger.warn("Auth is disabled, will not prefetch keys")
                 return provider
 
