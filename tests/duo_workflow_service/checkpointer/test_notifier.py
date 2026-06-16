@@ -12,6 +12,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 from duo_workflow_service.checkpointer.notifier import (
     UserInterface,
     _agent_token_totals,
+    _component_name_from_node,
 )
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox
@@ -286,6 +287,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "New message",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 }
             ],
         ),
@@ -307,6 +309,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "Nested content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 }
             ],
         ),
@@ -326,6 +329,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "Different content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 },
                 {
                     "message_id": "agent-msg-id",
@@ -337,6 +341,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "New content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 },
             ],
         ),
@@ -356,6 +361,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "Existing content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 },
             ],
         ),
@@ -391,6 +397,82 @@ async def test_send_event_messages_stream(
 
         assert action.newCheckpoint.goal == "test_goal"
         assert action.newCheckpoint.checkpoint is not None
+
+
+@pytest.mark.asyncio
+async def test_send_event_messages_stream_attributes_component_from_node(
+    checkpoint_notifier,
+):
+    # The messages stream yields (chunk, metadata); metadata["langgraph_node"] is
+    # the runtime node, e.g. "researcher#agent". The streamed entry must be stamped
+    # with the bare component name so the client can attribute it to a graph node.
+    await checkpoint_notifier.send_event(
+        "messages",
+        (
+            AIMessageChunk(id="agent-msg-id", content="hello"),
+            {"langgraph_node": "researcher#agent"},
+        ),
+        True,
+    )
+
+    assert checkpoint_notifier.ui_chat_log[-1]["component_name"] == "researcher"
+
+
+@pytest.mark.asyncio
+async def test_send_event_messages_stream_non_dict_metadata_yields_no_component(
+    checkpoint_notifier,
+):
+    # When the messages-stream metadata is not a dict, attribution is skipped
+    # gracefully: the entry is still created with component_name=None and no
+    # exception is raised.
+    await checkpoint_notifier.send_event(
+        "messages",
+        (AIMessageChunk(id="agent-msg-id", content="hello"), None),
+        True,
+    )
+
+    assert checkpoint_notifier.ui_chat_log[-1]["component_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_event_messages_stream_continuation_keeps_component(
+    checkpoint_notifier,
+):
+    # The first chunk stamps component_name; a continuation chunk with the same
+    # message id extends that entry and must not overwrite it, even when the
+    # continuation carries no node metadata.
+    await checkpoint_notifier.send_event(
+        "messages",
+        (
+            AIMessageChunk(id="agent-msg-id", content="hello "),
+            {"langgraph_node": "researcher#agent"},
+        ),
+        True,
+    )
+    await checkpoint_notifier.send_event(
+        "messages",
+        (AIMessageChunk(id="agent-msg-id", content="world"), {}),
+        True,
+    )
+
+    assert len(checkpoint_notifier.ui_chat_log) == 1
+    assert checkpoint_notifier.ui_chat_log[-1]["component_name"] == "researcher"
+    assert checkpoint_notifier.ui_chat_log[-1]["content"] == "hello world"
+
+
+@pytest.mark.parametrize(
+    ("node_name", "expected"),
+    [
+        ("researcher#agent", "researcher"),
+        ("researcher#tools", "researcher"),
+        ("planner#final_response", "planner"),
+        ("build_context", "build_context"),  # legacy node without a role suffix
+        (None, None),
+        ("", None),
+    ],
+)
+def test_component_name_from_node(node_name, expected):
+    assert _component_name_from_node(node_name) == expected
 
 
 @pytest.mark.asyncio
