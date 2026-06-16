@@ -1,4 +1,4 @@
-# pylint: disable=super-init-not-called,direct-environment-variable-reference,broad-exception-raised,attribute-defined-outside-init
+# pylint: disable=super-init-not-called,direct-environment-variable-reference,broad-exception-raised,attribute-defined-outside-init,too-many-lines
 
 import asyncio
 import base64
@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import time
+import zlib
 from contextlib import AbstractAsyncContextManager
 from typing import (
     Any,
@@ -13,6 +14,8 @@ from typing import (
     Callable,
     Dict,
     Iterator,
+    List,
+    NamedTuple,
     NoReturn,
     Optional,
     Sequence,
@@ -33,6 +36,7 @@ from langgraph.checkpoint.base import (
     CheckpointTuple,
 )
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.base import SerializerProtocol
 
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.audit_events.context import get_audit_collector
@@ -49,6 +53,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     uncompress_checkpoint,
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
@@ -94,6 +99,8 @@ from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPrope
 
 T = TypeVar("T", bound=callable)  # type: ignore
 
+_logger = structlog.stdlib.get_logger("workflow_checkpointer")
+
 
 def not_implemented_sync_method(func: T) -> T:
     @functools.wraps(func)
@@ -121,6 +128,11 @@ def _attribute_dirty(
     return False, None
 
 
+class ListDelta(NamedTuple):
+    values: Any
+    is_append: bool
+
+
 def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
     """Check if any Orbit tools were called in the checkpoint state."""
     channel_values = checkpoint.get("channel_values", {})
@@ -129,6 +141,135 @@ def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
         is_orbit_tool((entry.get("tool_info") or {}).get("name", ""))
         for entry in ui_chat_log
     )
+
+
+def _list_delta(prev: List[Any], current: List[Any]) -> Optional[ListDelta]:
+    """Compute a delta for a list channel.
+
+    Returns a ListDelta(values, is_append) or None if unchanged. is_append=True means values is only the newly appended
+    tail; is_append=False means values is the full current list (shrink, reorder, or content change).
+    """
+    if len(current) > len(prev) and current[: len(prev)] == prev:
+        return ListDelta(current[len(prev) :], True)
+    if current != prev:
+        return ListDelta(current, False)
+    return None
+
+
+def _dict_of_list_delta(
+    prev: Dict[str, Any], current: Dict[str, Any]
+) -> Optional[ListDelta]:
+    """Compute a delta for a dict-of-lists channel (e.g. conversation_history).
+
+    Returns a ListDelta(values, is_append) or None if unchanged. is_append=True means values is a per-key dict of only
+    newly appended items (or changed non-list values); is_append=False means values is the full current dict (a list
+    shrunk or its prefix changed for at least one key — i.e. compaction).
+    """
+    for key, val in current.items():
+        prev_val = prev.get(key)
+        if (
+            isinstance(val, list)
+            and isinstance(prev_val, list)
+            and not (len(val) >= len(prev_val) and val[: len(prev_val)] == prev_val)
+        ):
+            return ListDelta(current, False)
+
+    delta: Dict[str, Any] = {}
+    for key, val in current.items():
+        prev_val = prev.get(key)
+        if isinstance(val, list) and isinstance(prev_val, list):
+            list_delta = _list_delta(prev_val, val)
+            if list_delta is not None:
+                delta[key] = list_delta.values
+        elif val != prev_val:
+            delta[key] = val
+
+    if not delta:
+        return None
+    return ListDelta(delta, True)
+
+
+def _serialize_channel_blobs(
+    checkpoint: Checkpoint,
+    new_versions: ChannelVersions,
+    serde: SerializerProtocol,
+    prev_channel_values: Dict[str, Any],
+    *,
+    force_rewrite: bool = False,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Serialize only the channels that changed in this step as blobs.
+
+    Uses new_versions to identify changed channels. Scalar channels are excluded (see inline comment). Each blob carries
+    a step_action field ("conversation" for deltas, "compaction" for full replacements) which is the authoritative
+    append-vs-replace signal for Rails. current_thread in the payload is a grouping hint only — it cannot be used as the
+    sole signal because it resets to 0 on gateway restart, whereas step_action is derived from the actual channel values
+    and remains correct regardless.
+
+    When force_rewrite is True, delta computation is skipped and each blob is serialized as a full replacement with
+    step_action='compaction'. is_compaction in the return is then False — the caller asked for the rewrite and is
+    responsible for bumping current_thread itself.
+
+    Returns (blobs, is_compaction) where is_compaction is True when delta analysis found a shrink or non-prefix change.
+    """
+    channel_values = checkpoint.get("channel_values", {})
+    blobs = []
+    is_compaction = False
+
+    for channel, version in new_versions.items():
+        if channel not in channel_values:
+            _logger.warning(
+                "Channel declared changed in new_versions but absent from channel_values",
+                channel=channel,
+            )
+            continue
+
+        val = channel_values[channel]
+        # Scalar channels (status, goal, project, etc.) are always full
+        # replacements and are tiny — incremental savings come entirely from
+        # append-heavy list/dict-of-list channels like conversation_history.
+        # Scalars are always recoverable from compressed_checkpoint, so
+        # excluding them keeps channel_blobs small without information loss.
+        if not isinstance(val, (list, dict)):
+            continue
+
+        prev = prev_channel_values.get(channel)
+        step_action = "compaction"
+
+        if force_rewrite:
+            pass
+        elif isinstance(val, list) and isinstance(prev, list):
+            delta = _list_delta(prev, val)
+            if delta is None:
+                continue
+            new_val, is_append = delta
+            if is_append:
+                val = new_val
+                step_action = "conversation"
+            else:
+                is_compaction = True
+        elif isinstance(val, dict) and isinstance(prev, dict):
+            dict_delta = _dict_of_list_delta(prev, val)
+            if dict_delta is None:
+                continue
+            new_val, is_append = dict_delta
+            if is_append:
+                val = new_val
+                step_action = "conversation"
+            else:
+                is_compaction = True
+
+        t, bval = serde.dumps_typed(val)
+        blobs.append(
+            {
+                "channel": channel,
+                "version": str(version),
+                "data": base64.b64encode(zlib.compress(bval)).decode("utf-8"),
+                "write_type": t,
+                "step_action": step_action,
+            }
+        )
+
+    return blobs, is_compaction
 
 
 class GitLabWorkflow(
@@ -168,6 +309,9 @@ class GitLabWorkflow(
         self._billing_event_service = billing_event_service
         self._orbit_called = False
         self.serde = CheckpointSerializer()
+        self._prev_channel_values: Dict[str, Any] = {}
+        self._prev_checkpoint_id: Optional[str] = None
+        self._current_thread: int = 0
 
     @override
     @not_implemented_sync_method
@@ -834,6 +978,42 @@ class GitLabWorkflow(
             "metadata": metadata,
             "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
+
+        if is_client_capable("incremental_checkpoints"):
+            parent_checkpoint_id = configurable.get("checkpoint_id")
+            stale_cache = (
+                self._prev_checkpoint_id is not None
+                and parent_checkpoint_id != self._prev_checkpoint_id
+            )
+            if stale_cache:
+                self._logger.warning(
+                    "Stale incremental checkpoint cache detected; resetting to full values",
+                    expected_prev_checkpoint_id=parent_checkpoint_id,
+                    cached_prev_checkpoint_id=self._prev_checkpoint_id,
+                )
+                self._prev_channel_values = {}
+
+            channel_blobs, is_compaction = _serialize_channel_blobs(
+                checkpoint,
+                new_versions,
+                self.serde,
+                self._prev_channel_values,
+                force_rewrite=stale_cache,
+            )
+            if stale_cache or is_compaction:
+                self._current_thread += 1
+            self._prev_channel_values = dict(checkpoint.get("channel_values", {}))
+            self._prev_checkpoint_id = checkpoint["id"]
+            payload["channel_blobs"] = channel_blobs
+            payload["current_thread"] = self._current_thread
+            self._logger.info(
+                "Incremental checkpoint sizes",
+                thread_ts=checkpoint["id"],
+                current_thread=self._current_thread,
+                compressed_checkpoint_bytes=len(payload["compressed_checkpoint"]),
+                channel_blobs_total_bytes=sum(len(b["data"]) for b in channel_blobs),
+                channel_blob_count=len(channel_blobs),
+            )
 
         if (model_metadata := current_model_metadata_context.get()) is not None:
             payload["model_metadata_json"] = model_metadata.model_dump_json(
