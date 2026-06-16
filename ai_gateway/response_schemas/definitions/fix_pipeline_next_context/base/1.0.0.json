@@ -38,7 +38,7 @@
         },
         "decision": {
             "type": "string",
-            "description": "Use 'create_plan' when confident a fix can be created and validation via local execution is warranted. Use 'direct_code_suggestions' ONLY when (a) a merge_request_url is provided AND (b) confidence is 'high' AND the fix is narrow enough that the model can write the corrected lines straight from the summary without executing them; the flow then bypasses execution and posts inline suggestions directly. Use 'add_comment' when not confident or unable to create a fix. Use 'no_action' when the failure is a flaky test or infrastructure issue that requires no intervention.",
+            "description": "Use 'create_plan' when confident a fix can be created and validation via local execution is warranted. Use 'direct_code_suggestions' ONLY when (a) a merge_request_url is provided AND (b) confidence is 'high' AND (c) the fix is narrow enough that the model can write the corrected lines straight from the summary without executing them; the flow then bypasses execution and posts inline suggestions directly. Use 'add_comment' when not confident or unable to create a fix. Use 'no_action' when the failure is a flaky test or infrastructure issue that requires no intervention.",
             "enum": ["add_comment", "create_plan", "direct_code_suggestions", "no_action"],
             "examples": ["add_comment", "create_plan", "direct_code_suggestions", "no_action"]
         },
