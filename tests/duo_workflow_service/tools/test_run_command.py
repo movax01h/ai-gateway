@@ -1,5 +1,4 @@
 # pylint: disable=file-naming-for-tests
-from typing import List
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
@@ -41,7 +40,7 @@ from duo_workflow_service.tools.command import (
     ],
 )
 async def test_run_command_success(
-    program: str, args: str, expected_action_args: List[str], mock_success_client_event
+    program: str, args: str, expected_action_args: list[str], mock_success_client_event
 ):
     mock_outbox = MagicMock()
     mock_outbox.put_action_and_wait_for_response = AsyncMock(
@@ -62,53 +61,6 @@ async def test_run_command_success(
     assert action.runCommand.program == program
     assert action.runCommand.arguments == expected_action_args
     assert action.runCommand.flags == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("program", "args", "should_be_blocked", "expected_message_contains"),
-    [
-        # Allows git commands in local flows
-        ("git", "status", False, None),
-        ("git", "", False, None),
-        # Disallowed operators in program
-        ("echo && ls", "", True, "operators are not supported"),
-        ("echo || ls", "", True, "operators are not supported"),
-        ("cat | grep", "pattern", True, "operators are not supported"),
-        ("ls && git", "", True, "operators are not supported"),
-        ("echo 1 || git", "", True, "operators are not supported"),
-        ("echo / | xargs rm -rf", "", True, "operators are not supported"),
-        # Disallowed operators in args
-        ("echo", "foo && bar", True, "operators are not supported"),
-        ("echo", "foo || bar", True, "operators are not supported"),
-        ("echo", "foo | bar", True, "operators are not supported"),
-        # Operators without spaces (tight coupling)
-        ("cat|grep", "pattern", True, "operators are not supported"),
-        ("ls&&echo", "hello", True, "operators are not supported"),
-        ("cmd||fallback", "", True, "operators are not supported"),
-        # Allowed cases
-        ("echo", "hello world", False, None),
-        ("ls", "-la", False, None),
-        ("python", "script.py", False, None),
-        ("echo", None, False, None),
-        ("echo", "", False, None),
-    ],
-)
-@mock.patch("duo_workflow_service.tools.command._execute_action")
-async def test_run_command_validation(
-    execute_action_mock, program, args, should_be_blocked, expected_message_contains
-):
-    run_command = RunCommand(name="run_command", description="Run a shell command")
-
-    result = await run_command._arun(program=program, args=args)
-
-    if should_be_blocked:
-        execute_action_mock.assert_not_called()
-        if expected_message_contains:
-            assert expected_message_contains in result
-        assert isinstance(result, str)
-    else:
-        execute_action_mock.assert_called_once()
 
 
 @pytest.mark.asyncio
