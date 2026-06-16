@@ -262,9 +262,7 @@ Production logs are
 
 You will need access to LangSmith to view the logs. Please fill out
 an Access Request to get access to LangSmith. See the handbook
-[Access Requests (ARs)](https://handbook.gitlab.com/handbook/security/corporate/end-user-services/access-requests/)
-and [Access Requests (AR) Services](https://handbook.gitlab.com/handbook/security/corporate/services/access-requests/)
-pages.
+[Access Requests (ARs)](https://handbook.gitlab.com/handbook/security/corporate/end-user-services/access-requests/) page.
 
 Note that you should never publicly share LangSmith traces, you should just share the URL as described in [Sharing your LangSmith traces](https://docs.gitlab.com/development/ai_features/duo_chat/#sharing-your-langsmith-traces-for-internal-team-members).
 
