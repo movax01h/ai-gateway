@@ -61,28 +61,6 @@ class TestRegistryFlowRequest:
         with pytest.raises(ValueError, match="Invalid API version"):
             RegistryFlowRequest.from_legacy_definition("developer/v99")
 
-    def test_tracking_fields(self):
-        req = RegistryFlowRequest(
-            config_id="developer", schema_version="v1", version="1.2.3"
-        )
-        assert req.tracking_fields() == {
-            "flow_id": "developer",
-            "schema_version": "v1",
-            "flow_version": "1.2.3",
-        }
-
-
-class TestFlowRequestTrackingFields:
-    def test_inline_request_only_exposes_schema_version(self):
-        flow_config = Struct()
-        flow_config.update({"version": "v1", "environment": "test"})
-        req = InlineFlowRequest(config_struct=flow_config, schema_version="v1")
-        assert req.tracking_fields() == {"schema_version": "v1"}
-
-    def test_legacy_request_exposes_no_tracking_fields(self):
-        req = LegacyWorkflowRequest(workflow_definition="chat")
-        assert not req.tracking_fields()
-
 
 class TestNormalizeFlowRequest:
     def test_structured_fields_return_registry_request(self):

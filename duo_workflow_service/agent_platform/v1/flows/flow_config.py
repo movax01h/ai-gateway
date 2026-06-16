@@ -84,6 +84,12 @@ class BaseFlowConfig(BaseModel):
     routers: list[dict]
     environment: str
     version: str
+    # The concrete semver this config represents (e.g. "2.1.0"), set when loaded via
+    # ``from_yaml_config`` from the filename stem. This is the flow's own identity — the
+    # version actually run — as opposed to ``version`` (the schema version, e.g. "v1") or
+    # the constraint a client requested (e.g. "^2.0.0"). ``None`` for configs built
+    # directly (inline flows, tests), which have no registry resolution step.
+    resolved_version: Optional[str] = None
     prompts: Optional[list] = None
     response_schemas: Optional[list] = None
     name: Optional[str] = None
@@ -126,6 +132,10 @@ class BaseFlowConfig(BaseModel):
                 Supports the same constraint syntax as Poetry — see
                 https://python-poetry.org/docs/dependency-specification/#version-constraints
                 Path traversal is prevented by _safe_resolve.
+
+        Returns:
+            The loaded config, with ``resolved_version`` set to the concrete semver the
+            constraint resolved to (e.g. "2.1.0").
         """
         version_query = flow_version or DEFAULT_FLOW_VERSION
         base_path = cls.DIRECTORY_PATH.resolve()
@@ -142,7 +152,7 @@ class BaseFlowConfig(BaseModel):
             yaml_path = _safe_resolve(flow_dir / f"{version}.yml", base_path)
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)
-            return cls(**yaml_content)
+            return cls(**yaml_content, resolved_version=version)
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"{flow_id}/{version} file not found in {cls.DIRECTORY_PATH}"

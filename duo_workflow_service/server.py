@@ -82,7 +82,7 @@ from duo_workflow_service.tracking import MonitoringContext, current_monitoring_
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
-from duo_workflow_service.workflows.registry import FlowFactory, resolve_flow
+from duo_workflow_service.workflows.registry import ResolvedFlow, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
@@ -185,8 +185,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
-        monitoring_context.set_flow_identity(**flow_request.tracking_fields())
-
         workflow_definition = map_workflow_definition(
             flow_request.to_legacy_identifier()
         )
@@ -268,7 +266,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             mcp_tools = list(start_req.mcpTools)
 
         try:
-            workflow_class: FlowFactory = resolve_flow(flow_request)
+            resolved_flow: ResolvedFlow = resolve_flow(flow_request)
         except SecurityException as e:
             log.error(
                 "Flow config security validation failed",
@@ -289,7 +287,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             )
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
-        workflow: AbstractWorkflow = workflow_class(
+        monitoring_context.set_flow_identity(**resolved_flow.tracking_fields())
+
+        workflow: AbstractWorkflow = resolved_flow.factory(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=gl_event_context,

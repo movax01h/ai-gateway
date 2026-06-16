@@ -283,6 +283,7 @@ class TestFlowConfig:
         assert config.flow.entry_point == "test_agent"
         assert config.environment == "chat"
         assert config.version == "v1"
+        assert config.resolved_version == "1.0.0"
 
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises ValueError for missing flow."""
@@ -868,6 +869,7 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "2.0.0")
         assert result.environment == "ambient"
+        assert result.resolved_version == "2.0.0"
 
     def test_caret_constraint_picks_highest(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml", environment="ambient")
@@ -876,6 +878,7 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "^1.0.0")
         assert result.environment == "chat"
+        assert result.resolved_version == "1.2.0"
 
     def test_tilde_constraint(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml", environment="ambient")
@@ -884,6 +887,7 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "~1.0.0")
         assert result.environment == "chat"
+        assert result.resolved_version == "1.0.5"
 
     def test_no_compatible_version_raises(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml")
@@ -897,15 +901,18 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "^1.0.0")
         assert result.environment == "ambient"
+        assert result.resolved_version == "1.0.0"
 
     def test_exact_prerelease_still_works(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.1.0-rc1.yml", environment="chat")
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "1.1.0-rc1")
         assert result.environment == "chat"
+        assert result.resolved_version == "1.1.0-rc1"
 
     def test_default_version_used_when_none(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml")
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow")
         assert result.environment == "ambient"
+        assert result.resolved_version == "1.0.0"
