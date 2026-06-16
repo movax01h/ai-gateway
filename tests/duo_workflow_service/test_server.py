@@ -52,6 +52,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tracking import MonitoringContext
+from duo_workflow_service.workflows.registry import ResolvedFlow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
@@ -717,7 +718,7 @@ async def test_execute_workflow_when_no_events_ends(
     mock_context,
     servicer,
 ):
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -746,7 +747,7 @@ async def test_execute_workflow_when_message_too_large_cancels_workflow(
     mock_context,
     servicer,
 ):
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -794,7 +795,7 @@ async def test_execute_workflow_when_nothing_in_outbox(
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     def side_effect():
         mock_workflow.is_done = True
@@ -828,7 +829,7 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
     mock_workflow.last_gitlab_status = "running"
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     mock_workflow.get_from_outbox = AsyncMock(
         side_effect=asyncio.CancelledError("Task cancelled")
@@ -966,7 +967,7 @@ async def test_execute_workflow_status_codes(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     mock_monitoring_context = MagicMock()
     mock_monitoring_context.workflow_stop_reason = stop_reason
@@ -1041,7 +1042,7 @@ async def test_execute_workflow_cancellation_handling(
     mock_workflow.get_from_outbox = AsyncMock(
         side_effect=asyncio.CancelledError(cancel_error_message)
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     result = servicer.ExecuteWorkflow(
         start_request_iterator,
@@ -1117,7 +1118,7 @@ async def test_execute_workflow(
             OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
         ]
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield start_workflow_client_event
@@ -1795,7 +1796,7 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     result = servicer.ExecuteWorkflow(
         start_request_iterator,
@@ -1839,7 +1840,7 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mcp_tools = [
         contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
     ]
@@ -2404,7 +2405,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -2460,7 +2461,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     # Setup user and context
 
@@ -2605,7 +2606,7 @@ async def test_workflow_definition_mapping(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_gl_event_context_cls.from_workflow_definition.return_value = MagicMock(
         value="test"
     )
@@ -2640,7 +2641,7 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     servicer,
 ):
     """Server resolves flowConfigId + flowConfigSchemaVersion + flowVersion correctly."""
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -3010,3 +3011,81 @@ async def test_monitoring_context_populated_before_empty_workflow_id_abort(
         grpc.StatusCode.INVALID_ARGUMENT, "workflowID must not be empty"
     )
     assert monitoring_context.workflow_definition == "duo_planner/v1"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.current_monitoring_context")
+async def test_flow_versioning_identity_not_stamped_on_early_abort(
+    mock_current_monitoring_context,
+    mock_context,
+    servicer,
+):
+    """Flow versioning identity is stamped only after a flow is resolved.
+
+    A request that aborts before resolution (here: empty workflowID) must not carry flow_id / flow_version /
+    schema_version, since no concrete flow was resolved.
+    """
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="",
+                workflowDefinition="duo_planner/v1",
+                goal="test",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.INVALID_ARGUMENT, "workflowID must not be empty"
+    )
+    assert monitoring_context.flow_id is None
+    assert monitoring_context.flow_version is None
+    assert monitoring_context.schema_version is None
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.current_monitoring_context")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
+    mock_resolve_flow,
+    mock_current_monitoring_context,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """Identity is not stamped when resolve_flow raises.
+
+    ``set_flow_identity`` runs only after a successful resolution; if ``resolve_flow``
+    raises (e.g. unknown flow), ``context.abort()`` fires first and the flow versioning
+    fields stay unset.
+    """
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+    mock_resolve_flow.side_effect = ValueError("Unknown flow: bad/v1")
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    mock_context.abort.assert_called_with(
+        grpc.StatusCode.INVALID_ARGUMENT, "Unknown flow: bad/v1"
+    )
+    assert monitoring_context.flow_id is None
+    assert monitoring_context.flow_version is None
+    assert monitoring_context.schema_version is None

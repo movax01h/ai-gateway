@@ -29,11 +29,11 @@ class MonitoringContext(BaseModel):
         flow_version: Optional[str] = None,
         schema_version: Optional[str] = None,
     ) -> None:
-        """Record flow identity fields from a FlowRequest.
+        """Record resolved flow identity fields.
 
         Only truthy values are stored, so empty strings and None are ignored.
-        The keyword signature acts as a contract with ``FlowRequest.tracking_fields()``:
-        if a request returns an unknown key, the ``**`` unpacking raises ``TypeError``.
+        The keyword-only signature is a contract with ``ResolvedFlow.tracking_fields``:
+        an unknown key raises ``TypeError`` on ``**`` unpacking.
         """
         if flow_id:
             self.flow_id = flow_id

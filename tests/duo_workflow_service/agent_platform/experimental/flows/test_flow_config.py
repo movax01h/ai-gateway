@@ -283,6 +283,7 @@ class TestFlowConfig:
         assert config.flow.entry_point == "test_agent"
         assert config.environment == "local"
         assert config.version == "experimental"
+        assert config.resolved_version == "1.0.0"
 
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises ValueError for missing flow."""

@@ -13,6 +13,7 @@ from duo_workflow_service import server as server_module
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import DuoWorkflowService
+from duo_workflow_service.workflows.registry import ResolvedFlow
 
 
 def create_mock_internal_event_client():
@@ -66,7 +67,9 @@ async def test_execute_workflow_enhanced_logging_with_context(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = ResolvedFlow(
+        factory=mock_abstract_workflow_class
+    )
 
     # Setup event context with test data
     test_event_context = EventContext(
@@ -158,7 +161,9 @@ async def test_execute_workflow_enhanced_logging_without_context(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = ResolvedFlow(
+        factory=mock_abstract_workflow_class
+    )
 
     # Setup event context to return None
     mock_current_event_context.get.return_value = None
