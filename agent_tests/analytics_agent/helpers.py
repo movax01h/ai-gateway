@@ -294,40 +294,40 @@ SAMPLE_CODE_SUGGESTIONS_BY_IDE = [
     },
 ]
 
-SAMPLE_CODE_SUGGESTIONS_BY_USER = [
+SAMPLE_PIPELINE_ANALYTICS_BY_REF = [
     {
-        "user": {
-            "id": "gid://gitlab/User/1",
-            "username": "alice",
-            "name": "Alice Smith",
-            "avatarUrl": "https://gitlab.com/uploads/-/avatar/alice.png",
-            "webUrl": "https://gitlab.com/alice",
-        },
-        "totalCount": 500,
-        "usersCount": 1,
-        "acceptanceRate": 0.82,
-        "suggestionSizeSum": 15000,
-        "acceptedCount": 410,
-        "rejectedCount": 90,
-        "shownCount": 500,
+        "ref": "main",
+        "totalCount": 420,
+        "successRate": 0.92,
+        "failureRate": 0.06,
+        "canceledRate": 0.01,
+        "skippedRate": 0.01,
+        "durationQuantile": 540,
     },
     {
-        "user": {
-            "id": "gid://gitlab/User/2",
-            "username": "bob",
-            "name": "Bob Jones",
-            "avatarUrl": "https://gitlab.com/uploads/-/avatar/bob.png",
-            "webUrl": "https://gitlab.com/bob",
-        },
-        "totalCount": 350,
-        "usersCount": 1,
-        "acceptanceRate": 0.71,
-        "suggestionSizeSum": 10500,
-        "acceptedCount": 249,
-        "rejectedCount": 101,
-        "shownCount": 350,
+        "ref": "develop",
+        "totalCount": 215,
+        "successRate": 0.81,
+        "failureRate": 0.15,
+        "canceledRate": 0.02,
+        "skippedRate": 0.02,
+        "durationQuantile": 612,
     },
 ]
+
+SAMPLE_PIPELINE_ANALYTICS_BY_STATUS = [
+    {"status": "success", "totalCount": 850},
+    {"status": "failed", "totalCount": 92},
+    {"status": "canceled", "totalCount": 18},
+    {"status": "skipped", "totalCount": 4},
+]
+
+SAMPLE_PIPELINE_ANALYTICS_WEEKLY = [
+    {"finished": "2026-04-13T00:00:00Z", "totalCount": 210, "successRate": 0.90},
+    {"finished": "2026-04-20T00:00:00Z", "totalCount": 245, "successRate": 0.87},
+    {"finished": "2026-04-27T00:00:00Z", "totalCount": 198, "successRate": 0.93},
+]
+
 
 EMPTY_RESPONSE: list[dict[str, Any]] = []
 
