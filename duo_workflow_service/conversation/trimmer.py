@@ -188,6 +188,16 @@ def restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage
                 result.append(msg)
             i += 1
 
+    for msg in result:
+        if isinstance(msg, AIMessage) and isinstance(msg.content, list):
+            for block in msg.content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "thinking"
+                    and "thinking" not in block
+                ):
+                    block["thinking"] = ""
+
     return result
 
 

@@ -234,6 +234,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history, _ = await maybe_compact_history(
             compactor=self._compactor, history=history, agent_name=self.name
         )
+        history = restore_message_consistency(history)
 
         truncation_retries: int = 0
 
