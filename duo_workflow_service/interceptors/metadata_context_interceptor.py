@@ -17,7 +17,6 @@ from lib.context import (
     client_type,
     gitlab_realm,
     gitlab_version,
-    ip_address,
     is_gitlab_team_member,
 )
 from lib.context import language_server_version as language_server_version_context
@@ -60,7 +59,6 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
     """
 
     X_GITLAB_CLIENT_TYPE_HEADER = "x-gitlab-client-type"
-    X_GITLAB_CLIENT_IP_HEADER = "x-gitlab-client-ip"
     X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
 
     def __init__(self, config: Config):
@@ -89,10 +87,6 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         # GitLab version
         if value := metadata.get(X_GITLAB_VERSION_HEADER.lower()):
             gitlab_version.set(value)
-
-        # Client IP (end-user's IP, forwarded by Rails)
-        if value := metadata.get(self.X_GITLAB_CLIENT_IP_HEADER):
-            ip_address.set(value)
 
         # GitLab team member
         team_member_value: str | None = metadata.get(

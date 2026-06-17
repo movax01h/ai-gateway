@@ -23,7 +23,6 @@ language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVa
 is_gitlab_team_member: ContextVar[Optional[bool]] = ContextVar(
     "is_gitlab_team_member", default=None
 )
-ip_address: ContextVar[Optional[str]] = ContextVar("ip_address", default=None)
 
 # client_capabilities is used to make backwards compatible changes to our
 # communication protocol. This is needed usually when we're adding new

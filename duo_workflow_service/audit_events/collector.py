@@ -5,7 +5,6 @@ import structlog
 
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import AuditEvent
-from lib.context import ip_address
 
 logger = structlog.stdlib.get_logger("audit_event_collector")
 
@@ -34,9 +33,6 @@ class AuditEventCollector:
     def capture(self, event: AuditEvent) -> None:
         self._sequence += 1
         event.sequence = self._sequence
-        if event.ip_address is None:
-            if (ip := ip_address.get()) is not None:
-                event.ip_address = ip
         self._buffer.append(event)
         if len(self._buffer) >= self._buffer_size:
             try:

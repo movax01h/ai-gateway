@@ -146,44 +146,6 @@ async def test_is_gitlab_team_member_both_headers_conflicting(interceptor_setup)
 
 
 @pytest.mark.asyncio
-async def test_ip_address_metadata_propagation(interceptor_setup):
-    """Test that x-gitlab-client-ip header is propagated to the ip_address context var."""
-    interceptor, handler_call_details, continuation = interceptor_setup(
-        [
-            ("x-gitlab-client-ip", "203.0.113.7"),
-        ]
-    )
-
-    with patch(
-        "duo_workflow_service.interceptors.metadata_context_interceptor.ip_address"
-    ) as mock_ip_address:
-        result = await interceptor.intercept_service(continuation, handler_call_details)
-
-        mock_ip_address.set.assert_called_once_with("203.0.113.7")
-        continuation.assert_called_once_with(handler_call_details)
-        assert result == "mocked_response"
-
-
-@pytest.mark.asyncio
-async def test_ip_address_absent_leaves_default(interceptor_setup):
-    """Test that a missing x-gitlab-client-ip header leaves the context var untouched."""
-    interceptor, handler_call_details, continuation = interceptor_setup(
-        [
-            ("other-header", "other-value"),
-        ]
-    )
-
-    with patch(
-        "duo_workflow_service.interceptors.metadata_context_interceptor.ip_address"
-    ) as mock_ip_address:
-        result = await interceptor.intercept_service(continuation, handler_call_details)
-
-        mock_ip_address.set.assert_not_called()
-        continuation.assert_called_once_with(handler_call_details)
-        assert result == "mocked_response"
-
-
-@pytest.mark.asyncio
 async def test_gitlab_version_header(interceptor_setup):
     """Test that GitLab version header is properly set."""
     interceptor, handler_call_details, continuation = interceptor_setup(
