@@ -95,6 +95,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListAllMergeRequestNotes,
     tools.GetPipelineFailingJobs,
     tools.GetDownstreamPipelines,
+    tools.GetFailingBridgeJobs,
     tools.GetProject,
     tools.GroupProjectSearch,
     tools.IssueSearch,

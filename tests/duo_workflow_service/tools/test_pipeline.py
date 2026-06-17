@@ -8,6 +8,7 @@ from langchain_core.tools import ToolException
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.pipeline import (
     GetDownstreamPipelines,
+    GetFailingBridgeJobs,
     GetPipelineFailingJobs,
     GetPipelineFailingJobsInput,
 )
@@ -1224,3 +1225,307 @@ async def test_get_downstream_pipelines_with_malformed_url(
         assert "Failed to parse URL" in str(exc_info.value)
 
     gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_success(gitlab_client_mock, metadata):
+    """Returns only bridges whose own status is failed, with downstream pipeline URLs."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "trigger_downstream",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "downstream_pipeline_creation_failed",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+                "web_url": "https://gitlab.com/namespace/project/-/pipelines/1233",
+            },
+        },
+        {
+            "id": 1002,
+            "name": "trigger_other",
+            "status": "success",
+            "stage": "test",
+            "failure_reason": None,
+            "downstream_pipeline": {
+                "id": 2002,
+                "status": "success",
+                "web_url": "https://gitlab.com/namespace/project/-/pipelines/1232",
+            },
+        },
+    ]
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert response_json == [
+        {
+            "id": 1001,
+            "name": "trigger_downstream",
+            "stage": "test",
+            "failure_reason": "downstream_pipeline_creation_failed",
+            "downstream_pipeline_url": "https://gitlab.com/namespace/project/-/pipelines/1233",
+        }
+    ]
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_no_failed(gitlab_client_mock, metadata):
+    """Empty list when no bridges have failed."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "trigger_downstream",
+            "status": "success",
+            "stage": "test",
+            "failure_reason": None,
+            "downstream_pipeline": None,
+        },
+    ]
+
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+
+    assert json.loads(response) == []
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_no_bridges(gitlab_client_mock, metadata):
+    """Empty list when the pipeline has no bridges at all."""
+    mock_response = GitLabHttpResponse(status_code=200, body=[])
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+
+    assert json.loads(response) == []
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_excludes_multi_project(
+    gitlab_client_mock, metadata
+):
+    """Failed bridge with cross-project downstream returns no downstream_pipeline_url."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "trigger_multi_project",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "script_failure",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+                "web_url": "https://gitlab.com/namespace/different_project/-/pipelines/1233",
+            },
+        },
+    ]
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert len(response_json) == 1
+    assert response_json[0]["downstream_pipeline_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_no_downstream_pipeline(
+    gitlab_client_mock, metadata
+):
+    """Failed bridge with no downstream_pipeline object surfaces as null URL."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "trigger_downstream",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "downstream_pipeline_creation_failed",
+            "downstream_pipeline": None,
+        },
+    ]
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert len(response_json) == 1
+    assert response_json[0]["downstream_pipeline_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_downstream_without_web_url(
+    gitlab_client_mock, metadata
+):
+    """Failed bridge whose downstream_pipeline lacks web_url surfaces as null URL."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "trigger_downstream",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "script_failure",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+            },
+        },
+    ]
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert len(response_json) == 1
+    assert response_json[0]["downstream_pipeline_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_invalid_downstream_url(
+    gitlab_client_mock, metadata
+):
+    """Failed bridge with a malformed downstream URL surfaces as null URL, not a ToolException — one bad URL must not
+    abort the whole tool call."""
+    bridges_response = [
+        {
+            "id": 1001,
+            "name": "trigger_downstream",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "script_failure",
+            "downstream_pipeline": {
+                "id": 2001,
+                "status": "failed",
+                "web_url": "not-a-valid-pipeline-url",
+            },
+        },
+    ]
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    assert len(response_json) == 1
+    assert response_json[0]["downstream_pipeline_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_api_error(gitlab_client_mock, metadata):
+    """Raises ToolException on non-success API response."""
+    mock_response = GitLabHttpResponse(status_code=500, body={"message": "boom"})
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
+
+    assert "Failed to fetch failing bridge jobs" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_invalid_url(gitlab_client_mock, metadata):
+    """Invalid pipeline URL raises ToolException."""
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project")
+
+    assert "Failed to parse URL" in str(exc_info.value)
+    gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_invalid_response_format(
+    gitlab_client_mock, metadata
+):
+    """Non-list response body raises ToolException."""
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body={"error": "Invalid response"},
+    )
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
+
+    assert "Failed to fetch failing bridge jobs for url" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_get_failing_bridge_jobs_caps_at_max(gitlab_client_mock, metadata):
+    """Returned list is capped at MAX_JOBS_RETURNED."""
+    from duo_workflow_service.tools.pipeline import MAX_JOBS_RETURNED
+
+    bridges_response = [
+        {
+            "id": 1000 + i,
+            "name": f"trigger_{i}",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "script_failure",
+            "downstream_pipeline": None,
+        }
+        for i in range(MAX_JOBS_RETURNED + 5)
+    ]
+    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+
+    assert len(json.loads(response)) == MAX_JOBS_RETURNED
+
+
+def test_get_failing_bridge_jobs_format_display_message():
+    """Test the format_display_message method."""
+    from duo_workflow_service.tools.gitlab_resource_input import GitLabResourceInput
+
+    tool = GetFailingBridgeJobs(description="Get failing bridge jobs description")
+    input_data = GitLabResourceInput(
+        url="https://gitlab.com/namespace/project/-/pipelines/42"
+    )
+    message = tool.format_display_message(input_data)
+
+    assert (
+        message
+        == "Get failing bridge jobs for https://gitlab.com/namespace/project/-/pipelines/42"
+    )

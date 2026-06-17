@@ -30,7 +30,7 @@ components:
         as: "workspace_agent_skills"
         optional: True
     toolset:
-      - get_downstream_pipelines
+      - get_failing_bridge_jobs
       - get_pipeline_failing_jobs:
           exclude_allow_failure: true
       - get_job_logs
