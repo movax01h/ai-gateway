@@ -627,6 +627,24 @@ class TestAgentNodeCompaction:
                 agent_name="test_agent_node",
             )
 
+    @pytest.mark.asyncio
+    async def test_run_calls_restore_message_consistency(
+        self,
+        agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """restore_message_consistency is called on history after compaction."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.restore_message_consistency",
+        ) as mock_restore:
+            mock_restore.side_effect = lambda h: h
+
+            await agent_node.run(base_flow_state)
+
+            mock_restore.assert_called_once_with([])
+
 
 class TestAgentNodeTruncation:
     """Test suite for AgentNode truncation recovery support."""
