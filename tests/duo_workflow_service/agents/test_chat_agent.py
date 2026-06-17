@@ -1369,7 +1369,7 @@ class TestChatAgentCompaction:
         summary = AIMessage(content="Compacted summary text", id="auto-summary-id")
         compaction_result = CompactionResult(
             messages=[summary, HumanMessage(content="recent")],
-            was_compacted=True,
+            was_modified=True,
             messages_summarized=5,
             compaction_input_tokens=4200,
             compaction_output_tokens=350,
@@ -1420,7 +1420,7 @@ class TestChatAgentCompaction:
         )
         compaction_result = CompactionResult(
             messages=[summary],
-            was_compacted=True,
+            was_modified=True,
             messages_summarized=1,
             summary=summary,
         )
@@ -1457,7 +1457,7 @@ class TestChatAgentCompaction:
         )
 
         history = [HumanMessage(content="hi")]
-        noop_result = CompactionResult(messages=history, was_compacted=False)
+        noop_result = CompactionResult(messages=history, was_modified=False)
         mock_maybe_compact.return_value = (history, noop_result)
 
         input_state = {
@@ -1509,7 +1509,7 @@ class TestChatAgentCompaction:
         summary = AIMessage(content="Summary", id="auto-summary-id")
         compaction_result = CompactionResult(
             messages=[summary],
-            was_compacted=True,
+            was_modified=True,
             messages_summarized=2,
             compaction_input_tokens=100,
             compaction_output_tokens=20,
@@ -1541,7 +1541,7 @@ def _successful_compaction_result() -> CompactionResult:
     summary = AIMessage(content="Summary text", id="summary-msg-id")
     return CompactionResult(
         messages=[summary, HumanMessage(content="recent")],
-        was_compacted=True,
+        was_modified=True,
         messages_summarized=3,
         compaction_input_tokens=900,
         compaction_output_tokens=150,
@@ -1697,7 +1697,7 @@ class TestChatAgentManualCompaction:
             pytest.param(
                 CompactionResult(
                     messages=[HumanMessage(content="orig")],
-                    was_compacted=False,
+                    was_modified=False,
                     error=RuntimeError("boom"),
                 ),
                 "RuntimeError",
@@ -1706,7 +1706,7 @@ class TestChatAgentManualCompaction:
             pytest.param(
                 CompactionResult(
                     messages=[HumanMessage(content="orig")],
-                    was_compacted=False,
+                    was_modified=False,
                     summary=None,
                 ),
                 None,

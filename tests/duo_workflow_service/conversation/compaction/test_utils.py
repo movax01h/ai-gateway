@@ -18,9 +18,9 @@ from duo_workflow_service.conversation.compaction import (
     resolve_recent_messages_internal,
     slice_for_summarization,
 )
-from duo_workflow_service.conversation.compaction.utils import (
+from duo_workflow_service.conversation.compaction.utils import strip_tool_metadata
+from duo_workflow_service.conversation.history_optimizer.optimizers._compaction_utils import (
     _format_tool_calls_as_text,
-    strip_tool_metadata,
 )
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 
@@ -278,6 +278,12 @@ class TestIsTurnComplete:
             AIMessage(content="Response", invalid_tool_calls=[]),
         ]
         assert is_turn_complete(messages) is True
+
+    def test_other_message_type_is_incomplete(self):
+        """Non-Human/AI/Tool message types should be treated as incomplete."""
+        # SystemMessage is not one of the recognized terminal types.
+        messages = [HumanMessage(content="Hello"), SystemMessage(content="sys")]
+        assert is_turn_complete(messages) is False
 
 
 def _mock_estimate_tokens(messages: list[BaseMessage]) -> int:
@@ -1102,3 +1108,30 @@ class TestStripToolMetadata:
         msg = AIMessage(content="Just a normal response.")
         cleaned = strip_tool_metadata([msg])
         assert cleaned[0] is msg
+
+    def test_strip_tool_metadata_list_content_only_tool_use_becomes_empty_string(
+        self,
+    ):
+        """AIMessage whose list content is entirely tool_use blocks collapses to empty string content."""
+        messages = [
+            AIMessage(
+                content=[
+                    {
+                        "type": "tool_use",
+                        "id": "c1",
+                        "name": "read_file",
+                        "input": {"path": "/foo"},
+                    },
+                ],
+                tool_calls=[
+                    {"id": "c1", "name": "read_file", "args": {"path": "/foo"}}
+                ],
+            ),
+        ]
+        cleaned = strip_tool_metadata(messages)
+        # All tool_use blocks were filtered, leaving no text blocks; the
+        # ``elif not text_blocks`` branch sets content to "" before the tool
+        # calls are appended as text.
+        assert isinstance(cleaned[0].content, str)
+        assert "[Called tool 'read_file'" in cleaned[0].content
+        assert not cleaned[0].tool_calls

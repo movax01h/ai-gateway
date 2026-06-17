@@ -1,10 +1,10 @@
-"""Tests for ConversationCompactor class."""
+"""Tests for CompactionOptimizer class (formerly ConversationCompactor)."""
 
 # pylint: disable=too-many-lines
 # Pylint's `too-many-lines` is suppressed here because this file mirrors a
-# single source module (compactor.py) and the project enforces 1:1 test/source
-# file naming via the file-naming-for-tests lint, so splitting is not an
-# option.
+# single source module (compaction.py) and the project enforces
+# 1:1 test/source file naming via the file-naming-for-tests lint, so
+# splitting is not an option.
 from unittest.mock import patch
 
 import pytest
@@ -15,12 +15,11 @@ from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
-from duo_workflow_service.conversation.compaction.compactor import (
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     COMPACTION_CONTINUE_MESSAGE,
     COMPACTION_PROMPT_ID,
     COMPACTION_PROMPT_MANUAL_ID,
     CompactionStatus,
-    ConversationCompactor,
 )
 
 DEFAULT_MAX_RECENT_MESSAGES = 10
@@ -41,7 +40,8 @@ def _token_count_side_effect(history_tokens: int, per_turn_tokens: int = 100):
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+    "duo_workflow_service.conversation.history_optimizer.optimizers"
+    ".compaction.get_current_model_max_context_token_limit"
 )
 @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
 class TestConversationCompactorShouldCompact:
@@ -278,7 +278,7 @@ class TestConversationCompactorShouldCompact:
         mock_get_max_context.assert_called_once()
 
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     )
     def test_with_custom_config_max_recent_messages(
@@ -307,7 +307,7 @@ class TestConversationCompactorShouldCompact:
         assert compactor.should_compact(messages) is True
 
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     )
     def test_with_custom_config_trim_threshold(
@@ -340,7 +340,8 @@ class TestConversationCompactorShouldCompact:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+    "duo_workflow_service.conversation.history_optimizer.optimizers"
+    ".compaction.get_current_model_max_context_token_limit"
 )
 class TestConversationCompactorCompact:
     """Test suite for ConversationCompactor.compact method."""
@@ -443,7 +444,7 @@ class TestConversationCompactorCompact:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     )
     async def test_compact_no_messages_to_summarize(
@@ -627,7 +628,7 @@ class TestIsCompactionCallFlag:
 
     @pytest.mark.asyncio
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     )
     async def test_is_compaction_call_in_internal_event_extra(
@@ -658,9 +659,12 @@ class TestIsCompactionCallFlag:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+    "duo_workflow_service.conversation.history_optimizer.optimizers"
+    ".compaction.get_current_model_max_context_token_limit"
 )
-@patch("duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics")
+@patch(
+    "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.duo_workflow_metrics"
+)
 class TestCompactorPrometheusMetrics:
     """Test Prometheus metric recording during compaction."""
 
@@ -736,7 +740,8 @@ class TestCompactorPrometheusMetrics:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+    "duo_workflow_service.conversation.history_optimizer.optimizers"
+    ".compaction.get_current_model_max_context_token_limit"
 )
 class TestCompactorSnowplowEvents:
     """Test Snowplow event firing during compaction."""
@@ -744,7 +749,7 @@ class TestCompactorSnowplowEvents:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.duo_workflow_metrics"
     )
     async def test_fires_compaction_event_on_success(
         self,
@@ -779,7 +784,10 @@ class TestCompactorSnowplowEvents:
         mock_internal_events_client.track_event.assert_called_once()
         call_kwargs = mock_internal_events_client.track_event.call_args.kwargs
         assert call_kwargs["event_name"] == "duo_workflow_compaction_executed"
-        assert call_kwargs["category"] == ConversationCompactor.__name__
+        # Category string preserved as legacy "ConversationCompactor" name
+        # despite the class rename to CompactionOptimizer. See
+        # CompactionOptimizer._fire_compaction_event for rationale.
+        assert call_kwargs["category"] == "ConversationCompactor"
         additional_props = call_kwargs["additional_properties"]
         assert additional_props.label == "test_agent"
         assert additional_props.property == "workflow_id"
@@ -798,7 +806,7 @@ class TestCompactorSnowplowEvents:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.duo_workflow_metrics"
     )
     async def test_fires_compaction_event_on_error(
         self,
@@ -825,7 +833,7 @@ class TestCompactorSnowplowEvents:
         mock_internal_events_client.track_event.assert_called_once()
         call_kwargs = mock_internal_events_client.track_event.call_args.kwargs
         assert call_kwargs["event_name"] == "duo_workflow_compaction_executed"
-        assert call_kwargs["category"] == ConversationCompactor.__name__
+        assert call_kwargs["category"] == "ConversationCompactor"
         additional_props = call_kwargs["additional_properties"]
         assert additional_props.extra["status"] == "error"
         assert additional_props.extra["model_name"] == "unknown"
@@ -836,7 +844,7 @@ class TestCompactorSnowplowEvents:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.duo_workflow_metrics"
     )
     async def test_fire_compaction_event_noop_without_client(
         self,
@@ -874,7 +882,7 @@ class TestCompactorSnowplowEvents:
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.duo_workflow_metrics"
     )
     async def test_fire_compaction_event_noop_when_prompt_load_fails(
         self,
@@ -929,7 +937,8 @@ def _large_history():
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+    "duo_workflow_service.conversation.history_optimizer.optimizers"
+    ".compaction.get_current_model_max_context_token_limit"
 )
 class TestCompactManualMode:
     """Tests for manual-mode behaviors of ConversationCompactor.compact."""
@@ -1093,7 +1102,8 @@ class TestCompactManualMode:
 
 
 @patch(
-    "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+    "duo_workflow_service.conversation.history_optimizer.optimizers"
+    ".compaction.get_current_model_max_context_token_limit"
 )
 class TestCompactorOperationType:
     """Tests for the operation_type carried in the Snowplow event per mode."""
@@ -1109,7 +1119,7 @@ class TestCompactorOperationType:
     )
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.duo_workflow_metrics"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.duo_workflow_metrics"
     )
     async def test_compaction_event_uses_correct_operation_type(
         self,
@@ -1153,7 +1163,7 @@ class TestCompactorLazyPromptLoad:
     """Tests verifying prompts are only loaded on first compact() call per mode."""
 
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_model_metadata",
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     )
     def test_init_does_not_load_any_prompt(
@@ -1171,7 +1181,8 @@ class TestCompactorLazyPromptLoad:
 
     @pytest.mark.asyncio
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction"
+        ".get_current_model_max_context_token_limit"
     )
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_auto_compact_loads_only_auto_prompt(
@@ -1196,7 +1207,8 @@ class TestCompactorLazyPromptLoad:
 
     @pytest.mark.asyncio
     @patch(
-        "duo_workflow_service.conversation.compaction.compactor.get_current_model_max_context_token_limit"
+        "duo_workflow_service.conversation.history_optimizer.optimizers.compaction"
+        ".get_current_model_max_context_token_limit"
     )
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     async def test_manual_compact_loads_only_manual_prompt(
@@ -1218,3 +1230,81 @@ class TestCompactorLazyPromptLoad:
         ]
         assert COMPACTION_PROMPT_MANUAL_ID in prompt_ids_called
         assert COMPACTION_PROMPT_ID not in prompt_ids_called
+
+
+@patch(
+    "duo_workflow_service.conversation.history_optimizer.optimizers.compaction"
+    ".get_current_model_max_context_token_limit"
+)
+class TestCompactionOptimizerInterface:
+    """Tests for the ``HistoryOptimizer`` interface methods on ``CompactionOptimizer``.
+
+    ``optimize`` / ``optimize_manual`` are thin wrappers around ``compact`` that
+    set ``optimizer_name``. Behavior beyond that is covered by the existing
+    ``compact`` tests.
+    """
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_optimize_delegates_to_compact_and_sets_optimizer_name(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        result = await compactor.optimize(_large_history())
+
+        assert result.was_modified is True
+        assert result.was_compacted is True
+        assert result.optimizer_name == "CompactionOptimizer"
+        mock_prompt.ainvoke.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_optimize_no_op_when_threshold_not_met(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        mock_get_max_context.return_value = 400_000
+        # Under-threshold history; should_compact -> False -> no-op result.
+        mock_count_tokens.return_value = int(0.1 * 400_000)
+
+        result = await compactor.optimize([HumanMessage(content="short")])
+
+        assert result.was_modified is False
+        assert result.optimizer_name == "CompactionOptimizer"
+        mock_prompt.ainvoke.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_optimize_manual_forwards_user_instruction(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.1 * 400_000))
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        result = await compactor.optimize_manual(
+            _large_history(),
+            user_instruction="focus on auth bug",
+        )
+
+        assert result.was_modified is True
+        assert result.optimizer_name == "CompactionOptimizer"
+        inputs = mock_prompt.ainvoke.call_args[0][0]
+        assert inputs.get("user_instruction") == "focus on auth bug"
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_optimize_manual_default_user_instruction_is_none(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.1 * 400_000))
+        mock_prompt.ainvoke.return_value = _summary_message()
+
+        result = await compactor.optimize_manual(_large_history())
+
+        assert result.was_modified is True
+        inputs = mock_prompt.ainvoke.call_args[0][0]
+        assert inputs["user_instruction"] is None
