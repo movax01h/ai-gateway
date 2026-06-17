@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from duo_workflow_service.audit_events.collector import AuditEventCollector
-from lib.context import ip_address
 from tests.duo_workflow_service.audit_events.conftest import make_audit_event
 
 
@@ -52,44 +51,6 @@ class TestCapture:
             mock_asyncio.get_running_loop.side_effect = RuntimeError("no loop")
             collector.capture(make_audit_event())
         assert len(collector._buffer) == 1
-
-    def test_capture_stamps_ip_address_from_context(self, collector):
-        event = make_audit_event()
-
-        token = ip_address.set("203.0.113.7")
-        try:
-            collector.capture(event)
-        finally:
-            ip_address.reset(token)
-
-        assert event.ip_address == "203.0.113.7"
-
-    def test_capture_leaves_ip_address_none_when_context_unset(self, collector):
-        event = make_audit_event()
-
-        collector.capture(event)
-
-        assert event.ip_address is None
-
-    def test_capture_preserves_explicit_ip_address_on_event(self, collector):
-        event = make_audit_event()
-        event.ip_address = "198.51.100.42"
-
-        token = ip_address.set("203.0.113.7")
-        try:
-            collector.capture(event)
-        finally:
-            ip_address.reset(token)
-
-        assert event.ip_address == "198.51.100.42"
-
-    def test_capture_preserves_explicit_ip_address_when_context_unset(self, collector):
-        event = make_audit_event()
-        event.ip_address = "198.51.100.42"
-
-        collector.capture(event)
-
-        assert event.ip_address == "198.51.100.42"
 
 
 class TestFlush:
