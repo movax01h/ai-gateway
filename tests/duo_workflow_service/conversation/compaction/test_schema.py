@@ -44,7 +44,7 @@ class TestCompactionResult:
 
     def test_default_values(self):
         """Should have expected default values for optional fields."""
-        result = CompactionResult(messages=[], was_compacted=False)
+        result = CompactionResult(messages=[], was_modified=False)
         assert result.tokens_before == 0
         assert result.tokens_after == 0
         assert result.messages_summarized == 0
@@ -55,20 +55,20 @@ class TestCompactionResult:
     def test_with_messages(self):
         """Should store messages correctly."""
         messages = [HumanMessage(content="test")]
-        result = CompactionResult(messages=messages, was_compacted=True)
+        result = CompactionResult(messages=messages, was_modified=True)
         assert result.messages == messages
 
     def test_with_error(self):
         """Should store error correctly."""
         error = Exception("test error")
-        result = CompactionResult(messages=[], was_compacted=False, error=error)
+        result = CompactionResult(messages=[], was_modified=False, error=error)
         assert result.error is error
 
     def test_with_token_counts(self):
         """Should store token counts correctly."""
         result = CompactionResult(
             messages=[],
-            was_compacted=True,
+            was_modified=True,
             tokens_before=1000,
             tokens_after=500,
             messages_summarized=10,
