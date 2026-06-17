@@ -15,12 +15,13 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   <step number="1" parallel="true">
     Call ALL of the following tools together in a single response:
     - `get_pipeline_failing_jobs` to retrieve failing jobs for the pipeline_url
+    - `get_failing_bridge_jobs` to retrieve any failed bridge jobs (jobs that trigger a downstream pipeline) on the pipeline_url
     {% if merge_request_url %}- `list_merge_request_diffs` to retrieve changes made in this merge request{% endif %}
     - `find_files` to locate any GitLab CI/CD configuration files (e.g., .gitlab-ci.yml)
   </step>
 
   <step number="2">
-    Only if `get_pipeline_failing_jobs` returned no failing jobs: use `get_downstream_pipelines` to find child pipelines and call `get_pipeline_failing_jobs` on those.
+    Progressive downstream traversal. For each failed bridge returned by `get_failing_bridge_jobs`, queue its `downstream_pipeline_url`. For each queued downstream pipeline, call `get_pipeline_failing_jobs` and `get_failing_bridge_jobs` together in a single tool_use response. Repeat until no failed bridges remain. Enforce a maximum depth of 3 levels — do not recurse further.
   </step>
 
   <step number="3" parallel="true">
