@@ -39,6 +39,9 @@ components:
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "primary_branch"
         optional: True
+      - from: "context:inputs.plan_context.plan_enabled"
+        as: "plan_enabled"
+        optional: True
     toolset:
       - "read_file"
       - "find_files"
@@ -89,6 +92,11 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
+    - category: plan_context
+      input_schema:
+        plan_enabled:
+          type: boolean
+          description: When true, the agent operates in read-only plan mode
 
 prompts:
   - name: "developer_agent_prompt"
@@ -101,10 +109,18 @@ prompts:
       system: |
         {% extends 'common/developer/system/1.0.0.jinja' %}
         {% block operating_mode_instructions -%}
+        {% if plan_enabled -%}
+        You are in PLAN MODE and operate strictly read-only. Investigate the codebase, the developer's request, and any relevant GitLab context, then produce a concrete, step-by-step implementation plan. Do NOT make any changes: do not create or edit files, do not run commands that modify state, do not commit, push, rebase, open or update merge requests, and do not post comments or notes. Communicate directly with the developer, and ask when something is ambiguous or a decision has real trade-offs rather than guessing. When the plan is ready, present it and tell the developer to switch to build mode to execute it.
+        {%- else -%}
         You work interactively with a developer in their environment. They can see your messages and reply in real time, so communicate with them directly, ask when something is ambiguous or a decision has real trade-offs rather than guessing, and keep them in the loop as you work. You edit files in the working tree freely, but the developer decides when work leaves it — don't commit, push, open or update merge requests, or post comments or notes on their behalf unless they ask.
+        {%- endif %}
         {%- endblock %}
         {% block git_push_instructions -%}
+        {% if plan_enabled -%}
+        - You are in read-only plan mode: never run git commands that modify state (commit, push, rebase, amend, reset, checkout). Only read-only git inspection is allowed.
+        {%- else -%}
         - Never force push, and never rewrite history (amend, squash, rebase) without the developer's explicit go-ahead.
+        {%- endif %}
         {%- endblock %}
         {% block environment_details -%}
           Today's date: {{ today }}
