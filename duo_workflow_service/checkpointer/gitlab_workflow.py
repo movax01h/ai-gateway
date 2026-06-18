@@ -128,8 +128,8 @@ def _attribute_dirty(
     return False, None
 
 
-class ListDelta(NamedTuple):
-    values: Any
+class Delta(NamedTuple):
+    values: dict | list
     is_append: bool
 
 
@@ -143,50 +143,45 @@ def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
     )
 
 
-def _list_delta(prev: List[Any], current: List[Any]) -> Optional[ListDelta]:
+def _list_delta(prev: List[Any], current: List[Any]) -> Optional[Delta]:
     """Compute a delta for a list channel.
 
-    Returns a ListDelta(values, is_append) or None if unchanged. is_append=True means values is only the newly appended
+    Returns a Delta(values, is_append) or None if unchanged. is_append=True means values is only the newly appended
     tail; is_append=False means values is the full current list (shrink, reorder, or content change).
     """
     if len(current) > len(prev) and current[: len(prev)] == prev:
-        return ListDelta(current[len(prev) :], True)
+        return Delta(current[len(prev) :], True)
     if current != prev:
-        return ListDelta(current, False)
+        return Delta(current, False)
     return None
 
 
 def _dict_of_list_delta(
     prev: Dict[str, Any], current: Dict[str, Any]
-) -> Optional[ListDelta]:
+) -> Optional[Delta]:
     """Compute a delta for a dict-of-lists channel (e.g. conversation_history).
 
-    Returns a ListDelta(values, is_append) or None if unchanged. is_append=True means values is a per-key dict of only
-    newly appended items (or changed non-list values); is_append=False means values is the full current dict (a list
-    shrunk or its prefix changed for at least one key — i.e. compaction).
+    Returns a Delta(values, is_append) or None if unchanged. is_append=True means values is a per-key dict of only newly
+    appended items (or changed non-list values); is_append=False means values is the full current dict (a list shrunk or
+    its prefix changed for at least one key — i.e. compaction).
     """
-    for key, val in current.items():
-        prev_val = prev.get(key)
-        if (
-            isinstance(val, list)
-            and isinstance(prev_val, list)
-            and not (len(val) >= len(prev_val) and val[: len(prev_val)] == prev_val)
-        ):
-            return ListDelta(current, False)
-
     delta: Dict[str, Any] = {}
     for key, val in current.items():
         prev_val = prev.get(key)
         if isinstance(val, list) and isinstance(prev_val, list):
             list_delta = _list_delta(prev_val, val)
-            if list_delta is not None:
+            if list_delta is None:
+                continue
+            if list_delta.is_append:
                 delta[key] = list_delta.values
+            else:
+                return Delta(current, False)
         elif val != prev_val:
             delta[key] = val
 
     if not delta:
         return None
-    return ListDelta(delta, True)
+    return Delta(delta, True)
 
 
 def _serialize_channel_blobs(
