@@ -472,7 +472,6 @@ class TestCodeCompletions:
             patch.object(use_case.model, "generate", mock_generate),
             patch.object(use_case.prompt_builder, "wrap", mock_wrap),
         ):
-
             actual = await use_case.execute(
                 prefix, suffix, file_name, editor_lang=editor_lang, raw_prompt=prompt
             )
@@ -553,7 +552,6 @@ class TestCodeCompletions:
         mock_watch.return_value.__exit__ = mock_exit
 
         with patch.object(use_case.model, "generate", mock_generate):
-
             with pytest.raises(model_exception_type):
                 _ = await use_case.execute(prefix, suffix, file_name, editor_lang)
 

@@ -528,9 +528,9 @@ def assert_tools_in_tools_registry(tools_registry, tools):
         if tools_registry.get(tool_name) is None:
             missing_tools.append(tool_name)
 
-    assert (
-        not missing_tools
-    ), f"The following tools are missing from the tools registry: {missing_tools}"
+    assert not missing_tools, (
+        f"The following tools are missing from the tools registry: {missing_tools}"
+    )
 
     assert tools, "No tools were captured"
 

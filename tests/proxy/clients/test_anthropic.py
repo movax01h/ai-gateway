@@ -235,9 +235,9 @@ async def test_anthropic_beta_header_handling(
     upstream_request = mock_proxy_async_client.send.call_args[0][0]
 
     for header, value in expected_upstream_headers.items():
-        assert (
-            header in upstream_request.headers
-        ), f"Expected {header} in upstream headers"
+        assert header in upstream_request.headers, (
+            f"Expected {header} in upstream headers"
+        )
         assert upstream_request.headers[header] == value
 
     # Verify disallowed headers are NOT in upstream request

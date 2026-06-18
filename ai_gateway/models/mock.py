@@ -145,8 +145,8 @@ class FakeModel(SimpleChatModel):
         return "mock"
 
     @override
-    def bind_tools(
-        self, *args: Any, **kwargs: Any  # pylint: disable=unused-argument
+    def bind_tools(  # pylint: disable=unused-argument
+        self, *args: Any, **kwargs: Any
     ) -> Any:
         return self
 

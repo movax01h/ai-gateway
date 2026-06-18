@@ -327,11 +327,11 @@ class TestChatAgentPromptTemplate:
         assert expected_timezone in dynamic_system_message.content
         assert "<project_id>123</project_id>" in dynamic_system_message.content
         assert (
-            f"<project_name>{project["name"]}</project_name>"
+            f"<project_name>{project['name']}</project_name>"
             in dynamic_system_message.content
         )
         assert (
-            f"<project_url>{project["web_url"]}</project_url>"
+            f"<project_url>{project['web_url']}</project_url>"
             in dynamic_system_message.content
         )
         assert "<namespace_id>456</namespace_id>" in dynamic_system_message.content
@@ -719,7 +719,6 @@ class TestChatAgentPromptTemplate:
                 return_value=model_metadata,
             ),
         ):
-
             result = template.invoke(
                 sample_chat_workflow_state,
                 agent_name="test_agent",

@@ -563,9 +563,9 @@ async def test_failed_authorization_logging(
         # Check that all expected keys are present in the log
         expected_keys = set(expected_log_keys + log_keys)
         actual_keys = set(access_logs[0].keys())
-        assert expected_keys.issubset(
-            actual_keys
-        ), f"Missing keys: {expected_keys - actual_keys}"
+        assert expected_keys.issubset(actual_keys), (
+            f"Missing keys: {expected_keys - actual_keys}"
+        )
 
 
 def test_bypass_auth(fast_api_router, stub_auth_provider):

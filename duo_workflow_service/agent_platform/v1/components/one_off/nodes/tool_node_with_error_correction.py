@@ -503,11 +503,11 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             if i < len(tool_calls):
                 tool_call = tool_calls[i]
                 error_details.append(
-                    f"Tool call {i+1}: {tool_call['name']}({tool_call.get('args', {})}) "
+                    f"Tool call {i + 1}: {tool_call['name']}({tool_call.get('args', {})}) "
                     f"failed with error: {error}"
                 )
             else:
-                error_details.append(f"Error {i+1}: {error}")
+                error_details.append(f"Error {i + 1}: {error}")
 
         remaining_attempts = self.max_correction_attempts - attempt_count
 

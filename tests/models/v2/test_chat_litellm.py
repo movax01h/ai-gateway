@@ -379,18 +379,18 @@ async def test_fireworks_exponential_backoff_timing():
         # Expected delays: ~1s, ~2s, ~4s, ~8s (with some tolerance)
         # Note: First 4 retries should follow exponential pattern
         if len(delays) >= 4:
-            assert (
-                0.8 <= delays[0] <= 1.5
-            ), f"First delay should be ~1s, got {delays[0]}"
-            assert (
-                1.8 <= delays[1] <= 2.5
-            ), f"Second delay should be ~2s, got {delays[1]}"
-            assert (
-                3.5 <= delays[2] <= 4.5
-            ), f"Third delay should be ~4s, got {delays[2]}"
-            assert (
-                7.0 <= delays[3] <= 9.0
-            ), f"Fourth delay should be ~8s, got {delays[3]}"
+            assert 0.8 <= delays[0] <= 1.5, (
+                f"First delay should be ~1s, got {delays[0]}"
+            )
+            assert 1.8 <= delays[1] <= 2.5, (
+                f"Second delay should be ~2s, got {delays[1]}"
+            )
+            assert 3.5 <= delays[2] <= 4.5, (
+                f"Third delay should be ~4s, got {delays[2]}"
+            )
+            assert 7.0 <= delays[3] <= 9.0, (
+                f"Fourth delay should be ~8s, got {delays[3]}"
+            )
 
 
 def test_fireworks_max_retries_set_via_params():

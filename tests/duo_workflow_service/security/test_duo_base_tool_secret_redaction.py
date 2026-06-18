@@ -223,9 +223,9 @@ async def test_arun_redact_receives_original_response():
     with patch.object(duo_base_tool_module, "redact_secrets", side_effect=mock_redact):
         await tool._arun()
 
-    assert (
-        len(redact_inputs) == 1
-    ), f"Expected redact_secrets to be called exactly once, got {len(redact_inputs)}"
+    assert len(redact_inputs) == 1, (
+        f"Expected redact_secrets to be called exactly once, got {len(redact_inputs)}"
+    )
     assert redact_inputs[0] == large_response, (
         "The redact_secrets call must receive the original (pre-truncation) response "
         "so that full secrets are caught before truncation can split them."

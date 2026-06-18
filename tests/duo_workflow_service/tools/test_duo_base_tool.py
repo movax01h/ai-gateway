@@ -227,7 +227,6 @@ def test_format_tool_display_message_for_tool_with_args_schema_when_error():
         "format_display_message",
         return_value="Using MagicMock: test=value",
     ) as mock_parent_method:
-
         result = format_tool_display_message(mock_tool, args)
         assert result == "Using MagicMock: test=value"
 

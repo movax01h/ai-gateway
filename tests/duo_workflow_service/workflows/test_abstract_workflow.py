@@ -46,14 +46,17 @@ class MockGraphWithUiChatLog:
     async def astream(  # pylint: disable=unused-argument  # astream() signature
         self, input, config, stream_mode
     ):
-        yield "values", {
-            "status": WorkflowStatusEnum.COMPLETED,
-            "ui_chat_log": [
-                {"content": "First message"},
-                {"content": "Second message"},
-                {"content": "Final response"},
-            ],
-        }
+        yield (
+            "values",
+            {
+                "status": WorkflowStatusEnum.COMPLETED,
+                "ui_chat_log": [
+                    {"content": "First message"},
+                    {"content": "Second message"},
+                    {"content": "Final response"},
+                ],
+            },
+        )
 
 
 class MockWorkflow(AbstractWorkflow):

@@ -1461,7 +1461,6 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
 
 
 class TestGetRequiredVariables:
-
     _PROMPT_BASE_DIR = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
     )

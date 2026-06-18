@@ -17,7 +17,6 @@ from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER
 
 
 class TestEnabledInstanceVerboseAiLogsHeaderPlugin:
-
     @pytest.fixture(name="plugin", scope="class")
     def plugin_fixture(self):
         return EnabledInstanceVerboseAiLogsHeaderPlugin()

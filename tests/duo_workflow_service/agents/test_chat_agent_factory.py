@@ -219,9 +219,9 @@ class TestCreateAgent:
 
         # Verify bind_tools_params matches expected
         call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
-        assert (
-            call_kwargs["bind_tools_params"] == expected_params
-        ), f"Failed for scenario: {test_description}"
+        assert call_kwargs["bind_tools_params"] == expected_params, (
+            f"Failed for scenario: {test_description}"
+        )
 
         # Verify the feature flag was checked once for DAP_WEB_SEARCH
         assert mock_is_feature_enabled.call_count == 1

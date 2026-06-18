@@ -175,7 +175,7 @@ class ChatAgent:
                         correlation_id=None,
                         tool_info=tool_info,
                         additional_context=None,
-                        message_id=f'request-{call["id"]}',
+                        message_id=f"request-{call['id']}",
                     )
                 )
 

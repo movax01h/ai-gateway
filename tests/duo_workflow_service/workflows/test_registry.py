@@ -674,9 +674,7 @@ class TestResolveFlowTrackingFields:
             "flow_version": "2.1.0",
         }
 
-    def test_inline_flow_tracks_only_schema_version(
-        self, simple_flow_config
-    ):  # pylint: disable=redefined-outer-name
+    def test_inline_flow_tracks_only_schema_version(self, simple_flow_config):  # pylint: disable=redefined-outer-name
         mocks = simple_flow_config
 
         with (

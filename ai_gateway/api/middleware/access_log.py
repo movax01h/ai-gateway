@@ -99,7 +99,11 @@ class AccessLogMiddleware:
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
-                nonlocal status_code, response_start_duration_s, first_chunk_duration_s, content_type
+                nonlocal \
+                    status_code, \
+                    response_start_duration_s, \
+                    first_chunk_duration_s, \
+                    content_type
                 status_code = message["status"]
 
                 headers = MutableHeaders(scope=message)

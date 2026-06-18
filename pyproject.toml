@@ -126,8 +126,7 @@ optional = true
 
 [tool.poetry.group.lint.dependencies]
 flake8 = "^7.0.0"
-isort = "^8.0.0"
-black = "^26.0.0"
+ruff = "^0.15.14"
 pylint = "^4.0.5"
 astroid = "^4.0.4"
 mypy = "^2.0.0"
@@ -188,8 +187,19 @@ omit = [
   "*.jinja",
 ]
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["*_pb2.py", "*_pb2.pyi", "*_pb2_grpc.py"]
+
+[tool.ruff.lint]
+select = ["I"]
+
+[tool.ruff.lint.isort]
+# `_pickle` is the C accelerator for `pickle`. ruff treats it as standard
+# library, but pylint classifies it as third-party; pin it here so both tools
+# agree on import ordering (avoids pylint wrong-import-order).
+known-third-party = ["_pickle"]
 
 [tool.pylint.main]
 extension-pkg-allow-list = ["dependency_injector", "lxml"]

@@ -349,7 +349,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         try:
             if not model_metadata:
                 model_metadata = self._default_model_metadata(
-                    prompt_id, prompt_version, is_graph_node  # type: ignore[arg-type]
+                    prompt_id,
+                    prompt_version,  # type: ignore[arg-type]
+                    is_graph_node,
                 )
 
             family = model_metadata.llm_definition.family if model_metadata else []

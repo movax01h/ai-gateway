@@ -926,8 +926,9 @@ class TestStripToolMetadata:
                     lambda r: "[Called tool 'read_file'" in r[0].content,
                     lambda r: not r[0].tool_calls,
                     lambda r: isinstance(r[1], HumanMessage),
-                    lambda r: "read_file" in r[1].content
-                    and "file data" in r[1].content,
+                    lambda r: (
+                        "read_file" in r[1].content and "file data" in r[1].content
+                    ),
                     lambda r: r[2].content == "Thanks!",
                 ],
                 id="text_plus_tool_calls",
@@ -984,10 +985,12 @@ class TestStripToolMetadata:
                 [
                     lambda r: "[Called tool 'read_file'" in r[0].content,
                     lambda r: "[Called tool 'write_file'" in r[0].content,
-                    lambda r: isinstance(r[1], HumanMessage)
-                    and "read_file" in r[1].content,
-                    lambda r: isinstance(r[2], HumanMessage)
-                    and "write_file" in r[2].content,
+                    lambda r: (
+                        isinstance(r[1], HumanMessage) and "read_file" in r[1].content
+                    ),
+                    lambda r: (
+                        isinstance(r[2], HumanMessage) and "write_file" in r[2].content
+                    ),
                 ],
                 id="multiple_tool_calls_one_message",
             ),

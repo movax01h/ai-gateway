@@ -245,8 +245,10 @@ async def fix_end_block_errors(
         )
         before_errors = list(
             filter(
-                lambda e: find_cursor_position(code_sample_before_suggestion, e.start)
-                < len(code_sample_before_suggestion),
+                lambda e: (
+                    find_cursor_position(code_sample_before_suggestion, e.start)
+                    < len(code_sample_before_suggestion)
+                ),
                 parser_before_suggestion.errors(),
             )
         )
@@ -265,10 +267,10 @@ async def fix_end_block_errors(
             )
             after_errors = list(
                 filter(
-                    lambda e: find_cursor_position(
-                        code_sample_after_suggestion, e.start
-                    )
-                    < len(prefix),
+                    lambda e: (
+                        find_cursor_position(code_sample_after_suggestion, e.start)
+                        < len(prefix)
+                    ),
                     parser_after_suggestion.errors(),
                 )
             )

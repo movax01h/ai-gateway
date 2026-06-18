@@ -368,7 +368,8 @@ class WriteFileInput(BaseModel):
 class WriteFile(DuoBaseTool):
     name: str = "create_file_with_contents"
     description: str = (
-        "Create and write the given contents to a file. Please specify the `file_path` and the `contents` to write."
+        "Create and write the given contents to a file. "
+        "Please specify the `file_path` and the `contents` to write."
     )
     args_schema: Type[BaseModel] = WriteFileInput
     handle_tool_error: bool = True

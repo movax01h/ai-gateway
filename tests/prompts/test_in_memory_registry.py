@@ -19,7 +19,6 @@ from lib.internal_events.client import InternalEventsClient
 
 
 class TestInMemoryPromptRegistry:
-
     @pytest.fixture
     def mock_shared_registry(
         self,
@@ -312,7 +311,6 @@ class TestInMemoryPromptRegistry:
 
 
 class TestGetRequiredVariables:
-
     @pytest.fixture
     def mock_shared_registry(self, internal_event_client, model_limits):
         registry = Mock(spec=LocalPromptRegistry)

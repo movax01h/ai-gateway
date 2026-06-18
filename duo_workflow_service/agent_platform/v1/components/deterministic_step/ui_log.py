@@ -129,7 +129,9 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
                 return tool.format_display_message(parsed, tool_response)
         except Exception:
             return DuoBaseTool.format_display_message(
-                tool, tool_call_args, tool_response  # type: ignore[arg-type]
+                tool,  # type: ignore[arg-type]
+                tool_call_args,
+                tool_response,
             )  # type: ignore[return-value]
 
         return tool.format_display_message(tool_call_args, tool_response)

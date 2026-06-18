@@ -429,9 +429,9 @@ class TestFinalResponseNode:
 
         # Verify all prior messages preserved and completion marker appended
         result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert (
-            len(result_messages) == 3
-        ), "Expected 2 AI messages plus completion marker"
+        assert len(result_messages) == 3, (
+            "Expected 2 AI messages plus completion marker"
+        )
         assert result_messages[0] == first_message
         assert result_messages[1] == last_message
         assert isinstance(result_messages[2], ToolMessage)

@@ -1998,9 +1998,9 @@ async def test_self_hosted_execute_workflow(
     """Test that TrackSelfHostedExecuteWorkflow echoes back client events with matching requestID."""
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in request_ids:
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2035,9 +2035,9 @@ async def test_track_self_hosted_execute_workflow_unauthorized(
 
     mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         yield contract_pb2.TrackSelfHostedClientEvent(
             requestID="test-req",
             workflowID="#1337",
@@ -2077,9 +2077,9 @@ async def test_track_self_hosted_execute_workflow_billing_event(
 ):
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         yield contract_pb2.TrackSelfHostedClientEvent(
             requestID="test-req-id",
             workflowID="#1337",
@@ -2152,9 +2152,9 @@ async def test_track_self_hosted_execute_workflow_bills_once_per_workflow_featur
     acknowledged so the call proceeds."""
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in ("req-1", "req-2", "req-3"):
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2190,9 +2190,9 @@ async def test_track_self_hosted_execute_workflow_bills_per_call_for_other_featu
     """Features not in BILL_ONCE_PER_WORKFLOW_FEATURES still bill per LLM call (regression guard)."""
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in ("req-1", "req-2", "req-3"):
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2239,9 +2239,9 @@ async def test_track_self_hosted_execute_workflow_mixes_bill_once_and_per_call_f
         ("req-6", "sast_fp_detection/v1"),
     ]
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id, feature in events:
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2297,9 +2297,9 @@ async def test_track_self_hosted_execute_workflow_dedups_across_feature_versions
     """
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id, feature in [
             ("req-1", "code_review/v1"),
             ("req-2", "code_review/v2"),
@@ -2346,9 +2346,9 @@ async def test_track_self_hosted_execute_workflow_failure_does_not_consume_once_
         None,
     ]
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in ("req-1", "req-2", "req-3"):
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2395,9 +2395,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     servicer,
 ):
     # Setup mocks
-    mock_language_server_version.get.return_value.ignore_broken_flow_schema_version.return_value = (
-        ignore_schema_version
-    )
+    mock_language_server_version.get.return_value.ignore_broken_flow_schema_version.return_value = ignore_schema_version
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()

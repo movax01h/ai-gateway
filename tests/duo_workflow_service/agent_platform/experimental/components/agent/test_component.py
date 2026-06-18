@@ -363,8 +363,8 @@ class TestAgentComponentBase:
         else:
             if schema_id:
                 mock_schema = mock_schema_registry.get.return_value
-                mock_toolset.__contains__ = (
-                    lambda self, name: name != mock_schema.tool_title
+                mock_toolset.__contains__ = lambda self, name: (
+                    name != mock_schema.tool_title
                 )
 
             component = ConcreteBase(

@@ -43,7 +43,6 @@ def disable_unpickling() -> None:
 
     # Patch the accelerated C module too (some code imports _pickle directly)
     try:
-
         for name in ("load", "loads"):
             if hasattr(_c_pickle, name):
                 setattr(_c_pickle, name, _blocked_unpickle)

@@ -519,8 +519,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
             instruction_items.append(
                 f'For files matching "{include_patterns}" '
-                f'(excluding: {exclude_patterns}) - {instruction["name"]}:\n'
-                f'{instruction["instructions"].strip()}\n'
+                f"(excluding: {exclude_patterns}) - {instruction['name']}:\n"
+                f"{instruction['instructions'].strip()}\n"
             )
 
         instructions_text = "\n".join(instruction_items)

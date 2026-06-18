@@ -112,7 +112,8 @@ class EndComponent(BaseComponent):
         graph.add_edge(self.__entry_hook__(), END)
 
     async def _terminate_flow(
-        self, state: FlowState  # pylint: disable=unused-argument
+        self,
+        state: FlowState,  # pylint: disable=unused-argument
     ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}
 
@@ -128,6 +129,7 @@ class AbortComponent(BaseComponent):
         graph.add_edge(self.__entry_hook__(), END)
 
     async def _abort_flow(
-        self, state: FlowState  # pylint: disable=unused-argument
+        self,
+        state: FlowState,  # pylint: disable=unused-argument
     ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.ERROR.value}

@@ -310,9 +310,9 @@ class TestCodeGeneration:
 
             full_output = "".join(chunks)
 
-            assert (
-                "```" not in full_output
-            ), f"Streamed generation leaked markdown fences: {full_output!r}"
+            assert "```" not in full_output, (
+                f"Streamed generation leaked markdown fences: {full_output!r}"
+            )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

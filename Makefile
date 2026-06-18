@@ -154,15 +154,11 @@ codespell: install-lint-deps
 	@echo "Running codespell fix..."
 	@poetry run codespell -w
 
-.PHONY: black
-black: install-lint-deps
-	@echo "Running black format..."
-	@poetry run black ${LINT_WORKING_DIR}
-
-.PHONY: isort
-isort: install-lint-deps
-	@echo "Running isort format..."
-	@poetry run isort ${LINT_WORKING_DIR}
+.PHONY: ruff-fix
+ruff-fix: install-lint-deps
+	@echo "Running ruff check --fix and ruff format..."
+	@poetry run ruff check --fix ${LINT_WORKING_DIR}
+	@poetry run ruff format ${LINT_WORKING_DIR}
 
 .PHONY: docformatter
 docformatter: install-lint-deps
@@ -181,13 +177,13 @@ check-pricing-multipliers:
 	@poetry run verify-pricing-multipliers
 
 .PHONY: format
-format: codespell black isort docformatter
+format: codespell ruff-fix docformatter
 
 .PHONY: lint
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql
+lint-code: flake8 check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql
 
 .PHONY: lint-commit
 lint-commit:
@@ -200,15 +196,11 @@ flake8: install-lint-deps
 	@echo "Running flake8..."
 	@poetry run flake8 ${LINT_WORKING_DIR}
 
-.PHONY: check-black
-check-black: install-lint-deps
-	@echo "Running black check..."
-	@poetry run black --check ${LINT_WORKING_DIR}
-
-.PHONY: check-isort
-check-isort: install-lint-deps
-	@echo "Running isort check..."
-	@poetry run isort --check-only ${LINT_WORKING_DIR}
+.PHONY: check-ruff
+check-ruff: install-lint-deps
+	@echo "Running ruff linter and formatter check..."
+	@poetry run ruff format --check ${LINT_WORKING_DIR}
+	@poetry run ruff check ${LINT_WORKING_DIR}
 
 .PHONY: check-pylint
 check-pylint: install-lint-deps

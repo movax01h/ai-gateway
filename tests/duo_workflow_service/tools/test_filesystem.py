@@ -860,9 +860,9 @@ class TestIsTrustedAbsolutePath:
     def test_every_trusted_segment_is_dotfile_anchored(self):
         """Each entry's first segment must start with '.' so it cannot appear at a repo checkout root."""
         for entry in TRUSTED_ABSOLUTE_PATH_SEGMENTS:
-            assert entry.split("/", maxsplit=1)[0].startswith(
-                "."
-            ), f"{entry!r} is not dotfile-anchored"
+            assert entry.split("/", maxsplit=1)[0].startswith("."), (
+                f"{entry!r} is not dotfile-anchored"
+            )
 
 
 class TestValidateDuoContextExclusionsTrustedAbsolute:

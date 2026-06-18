@@ -25,7 +25,6 @@ class TestVerboseAiLogsIntegration:
             patch("ai_gateway.structured_logging.CUSTOM_MODELS_ENABLED", True),
             patch("ai_gateway.structured_logging.ENABLE_REQUEST_LOGGING", False),
         ):
-
             # Set verbose AI logs enabled in shared context
             current_verbose_ai_logs_context.set(True)
 
@@ -42,7 +41,6 @@ class TestVerboseAiLogsIntegration:
                 "ai_gateway.structured_logging.is_feature_enabled", return_value=False
             ),
         ):
-
             # Set verbose AI logs disabled in shared context
             current_verbose_ai_logs_context.set(False)
 
@@ -53,7 +51,6 @@ class TestVerboseAiLogsIntegration:
     def test_can_log_request_data_with_enable_request_logging_override(self):
         """Test can_log_request_data when ENABLE_REQUEST_LOGGING is True (should always return True)."""
         with patch("ai_gateway.structured_logging.ENABLE_REQUEST_LOGGING", True):
-
             # Even with verbose AI logs disabled, should return True due to ENABLE_REQUEST_LOGGING=True
             current_verbose_ai_logs_context.set(False)
 
@@ -68,7 +65,6 @@ class TestVerboseAiLogsIntegration:
                 "ai_gateway.structured_logging.is_feature_enabled", return_value=True
             ),
         ):
-
             # In SaaS mode, verbose AI logs context shouldn't matter
             current_verbose_ai_logs_context.set(False)
 

@@ -425,8 +425,8 @@ class TestSupervisorExecutionFlow:
         nodes = all_node_mocks
 
         # Fix mock_toolset to not report collision with schema tool
-        mock_toolset.__contains__.side_effect = (
-            lambda name: name != "custom_response_tool"
+        mock_toolset.__contains__.side_effect = lambda name: (
+            name != "custom_response_tool"
         )
 
         # Create supervisor with schema params

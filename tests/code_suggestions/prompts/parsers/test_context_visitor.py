@@ -443,8 +443,10 @@ Cypress.on("before:run", () => { // don't care
             PYTHON_SAMPLE_TWO_CLASSES[1:],
             (25, 32),
             # fmt: off
-            PYTHON_SAMPLE_TWO_CLASSES[1:438], # last line:'     def visit(self, node: Node):'
-"""
+            PYTHON_SAMPLE_TWO_CLASSES[
+                1:438
+            ],  # last line:'     def visit(self, node: Node):'
+            """
         # use self instead of the class name to access the overridden attribute
         if self._TARGET_SYMBOLS and node.type in self._TARGET_SYMBOLS:
             self._visit_node(node)
@@ -460,7 +462,7 @@ Cypress.on("before:run", () => { // don't care
             (4, 21),
             # fmt: off
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:130],
-""": str = "length"
+            """: str = "length"
 
     class Model(BaseModel):
         engine: str
@@ -481,7 +483,7 @@ Cypress.on("before:run", () => { // don't care
             (7, 15),
             # fmt: off
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:191],
-""" str
+            """ str
         name: str
         lang: str
 
@@ -499,7 +501,7 @@ Cypress.on("before:run", () => { // don't care
             (11, 0),
             # fmt: off
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:233],
-"""
+            """
     id: str
     model: Model
     object: str = "text_completion"
@@ -545,7 +547,7 @@ Cypress.on("before:run", () => { // don't care
     console.log(`${this.name} makes a sound`);
   }
 }
-"""[1:-1]
+"""[1:-1],
             # fmt: on
         ),
         (  # Test context function level
@@ -554,7 +556,7 @@ Cypress.on("before:run", () => { // don't care
             JAVASCRIPT_FUNCTION_SAMPLE[1:],
             (2, 0),
             JAVASCRIPT_FUNCTION_SAMPLE[1:51],
-            "    eval(myeval);\n}"
+            "    eval(myeval);\n}",
             # fmt: on
         ),
         (  # Test context generator function level
@@ -567,7 +569,7 @@ Cypress.on("before:run", () => { // don't care
   yield* animalSounds(name, 'Dog');
   yield `${name} the ${breed} barks`;
 }
-"""[1:-1]
+"""[1:-1],
             # fmt: on
         ),
         (  # Test context generator function within arrow function
@@ -579,7 +581,7 @@ Cypress.on("before:run", () => { // don't care
             """
   yield `${name} the ${breed} barks`;
 };
-"""[1:-1]
+"""[1:-1],
             # fmt: on
         ),
         (  # Test context function within function, cursor within inner function
@@ -598,7 +600,7 @@ Cypress.on("before:run", () => { // don't care
 
   innerFunction(); // Call the inner function
 }
-"""[1:-1]
+"""[1:-1],
             # fmt: on
         ),
         (  # Test context function within function, cursor within a generator function
@@ -621,7 +623,7 @@ Cypress.on("before:run", () => { // don't care
             (3, 0),
             # fmt: off
             TYPESCRIPT_INTERFACE_SAMPLE[1:61],
-"""
+            """
   age: number;
   sayHello: () => void;
 }
@@ -634,7 +636,7 @@ Cypress.on("before:run", () => { // don't care
             (4, 0),
             # fmt: off
             TYPESCRIPT_CALL_EXPRESSION_SAMPLE[1:115],
-"""
+            """
   return false;
 })
 """[1:-1],

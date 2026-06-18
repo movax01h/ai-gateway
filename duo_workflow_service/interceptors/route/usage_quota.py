@@ -36,9 +36,7 @@ def has_sufficient_usage_quota(
                 return _process_execute_workflow_stream(func, event)
             case contract_pb2_grpc.DuoWorkflowServicer.GenerateToken.__name__:
                 return _process_generate_token_unary(func, event)
-            case (
-                contract_pb2_grpc.DuoWorkflowServicer.TrackSelfHostedExecuteWorkflow.__name__
-            ):
+            case contract_pb2_grpc.DuoWorkflowServicer.TrackSelfHostedExecuteWorkflow.__name__:
                 return _process_track_self_hosted_execute_workflow_stream(func, event)
             case _:
                 raise TypeError(

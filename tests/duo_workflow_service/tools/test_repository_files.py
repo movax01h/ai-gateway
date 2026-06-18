@@ -211,8 +211,8 @@ async def test_get_file_success(
 @pytest.mark.usefixtures("gitlab_client_mock")
 async def test_get_file_errors(tool, input_params, mock_setup, expected_error_contains):
     if mock_setup["mock_type"] == "validate_error":
-        tool._validate_repository_file_url = (
-            lambda url, project_id, ref, file_path: mock_setup["mock_value"]
+        tool._validate_repository_file_url = lambda url, project_id, ref, file_path: (
+            mock_setup["mock_value"]
         )
 
     with pytest.raises(ToolException, match=expected_error_contains):
@@ -1121,7 +1121,9 @@ class TestGetRepositoryFileWithExclusion:
         tool = GetRepositoryFile(metadata=metadata_with_project)
 
         args = RepositoryFileResourceInput(
-            project_id="test/project", ref="main", file_path="README.md"  # Allowed file
+            project_id="test/project",
+            ref="main",
+            file_path="README.md",  # Allowed file
         )
 
         message = tool.format_display_message(args)

@@ -22,7 +22,6 @@ class ConcreteRouter(BaseRouter):
 
 
 class TestBaseRouter:
-
     @patch("duo_workflow_service.agent_platform.experimental.routers.base.IOKey")
     def test_input_filed_parsing(self, mock_iokey_class):
         """Test validation passes when input targets are in allowed targets."""
