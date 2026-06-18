@@ -123,6 +123,10 @@ Your `failure_category` must be supported by direct evidence visible in the job 
     <description>The failure involves security scanning findings requiring human review. Includes secret detection alerts, SAST (Brakeman, Bandit), DAST findings, dependency vulnerability scans, license compliance failures.</description>
   </category>
   <category>
+    <failure_category>no_failing_jobs_detected</failure_category>
+    <description>No failing jobs were found in the pipeline or any of its downstream pipelines after traversal. The pipeline metadata was retrieved successfully but reported no failed jobs to analyze. Use this rather than `insufficient_context`, which applies when failing jobs exist but their logs are missing or truncated.</description>
+  </category>
+  <category>
     <failure_category>unknown_failure</failure_category>
     <description>The failure does not fit any other category after reviewing the full job trace. Use as a last resort. Prefer `insufficient_context` when the issue is lack of log data rather than an unrecognizable pattern.</description>
   </category>
@@ -224,11 +228,11 @@ Set the decision field based on these criteria:
     <decision>no_action</decision>
     <response_reason>
       Set decision to `no_action` when the failure is transient or not actionable — code fixes WILL NOT help. Choose this when ANY of the following apply:
-      - No failing jobs were detected in the pipeline or its downstream pipelines
       - The failure_category is one of:
         - `runner_system_failure` (transient runner/Docker issues)
         - `environment_failure` (transient environment setup issues)
         - `network_failure` (transient connectivity issues)
+        - `no_failing_jobs_detected` (job has already been retried)
         - `resource_limit_failure` (transient resource exhaustion)
         {% if merge_request_url %}
         - `flaky_test` (intermittent test failures or pre-existing failures on the target branch)

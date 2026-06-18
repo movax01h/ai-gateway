@@ -21,6 +21,7 @@
                 "dependency_failure",
                 "insufficient_context",
                 "security_sensitive",
+                "no_failing_jobs_detected",
                 "unknown_failure"
             ]
         },
