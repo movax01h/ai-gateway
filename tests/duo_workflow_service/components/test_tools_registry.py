@@ -286,6 +286,27 @@ _outbox = MagicMock(spec=Outbox)
             },
         ),
         (
+            ["read_only_files"],
+            {
+                "create_plan",
+                "add_new_task",
+                "remove_task",
+                "update_task_description",
+                "get_plan",
+                "set_task_status",
+                "todo_write",
+                "read_file",
+                "read_files",
+                "list_dir",
+                "find_files",
+                "grep",
+                "extract_lines_from_text",
+                "handover_tool",
+                "request_user_clarification_tool",
+                "clarification_question",
+            },
+        ),
+        (
             ["read_write_files"],
             {
                 "create_plan",
@@ -317,6 +338,7 @@ _outbox = MagicMock(spec=Outbox)
         "read_only_gitlab_privileges",
         "read_write_gitlab_privileges",
         "use_git_privileges",
+        "read_only_files_privileges",
         "read_write_files_privileges",
     ],
 )

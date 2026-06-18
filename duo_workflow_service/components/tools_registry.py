@@ -85,6 +85,15 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.ReadFileChunked,
 ]
 
+_READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
+    tools.ReadFile,
+    tools.ReadFiles,
+    tools.ListDir,
+    tools.FindFiles,
+    tools.Grep,
+    tools.ExtractLinesFromText,
+]
+
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListIssues,
     tools.GetIssue,
@@ -149,16 +158,12 @@ _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
 ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
 
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
+    "read_only_files": _READ_ONLY_FILE_TOOLS,
     "read_write_files": [
-        tools.ReadFile,
-        tools.ReadFiles,
+        *_READ_ONLY_FILE_TOOLS,
         tools.WriteFile,
         tools.EditFile,
-        tools.ListDir,
-        tools.FindFiles,
-        tools.Grep,
         tools.Mkdir,
-        tools.ExtractLinesFromText,
         tools.RunTests,
     ],
     "use_git": [
