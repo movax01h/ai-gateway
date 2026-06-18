@@ -72,6 +72,7 @@ def agent_node_fixture(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         internal_event_client=mock_internal_event_client,
+        invoke_config={},
     )
 
 
@@ -94,6 +95,7 @@ def agent_node_with_schema_fixture(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         internal_event_client=mock_internal_event_client,
+        invoke_config={},
         response_schema=AgentFinalOutput,
     )
 
@@ -188,7 +190,8 @@ class TestAgentNode:
                 **prompt_variables,
                 "history": [],
                 **FAKE_RUNTIME_VARS,
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -230,7 +233,8 @@ class TestAgentNode:
                 **prompt_variables,
                 "history": existing_history,
                 **FAKE_RUNTIME_VARS,
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -268,7 +272,8 @@ class TestAgentNode:
                 **prompt_variables,
                 "history": [],
                 **FAKE_RUNTIME_VARS,
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -314,6 +319,7 @@ class TestAgentNode:
                     factory=lambda _: conversation_history_key,
                 ),
                 internal_event_client=mock_internal_event_client,
+                invoke_config={},
             )
             result = await agent_node.run(base_flow_state)
 
@@ -381,13 +387,17 @@ class TestAgentNode:
         ]
         mock_prompt.ainvoke.assert_has_calls(
             [
-                call(input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS}),
+                call(
+                    input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS},
+                    config={},
+                ),
                 call(
                     input={
                         **prompt_variables,
                         "history": retry_history,
                         **FAKE_RUNTIME_VARS,
-                    }
+                    },
+                    config={},
                 ),
             ]
         )
@@ -477,7 +487,8 @@ class TestAgentNode:
 
         prompt_calls = mock_prompt.ainvoke.call_args_list
         assert prompt_calls[0] == call(
-            input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS}
+            input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS},
+            config={},
         )
 
         retry_messages_history = prompt_calls[1][1]["input"]["history"]
@@ -515,6 +526,7 @@ class TestAgentNodeContextLimits:
                 factory=lambda _: conversation_history_key,
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             max_context_tokens=64000,
         )
 
@@ -564,6 +576,7 @@ class TestAgentNodeCompaction:
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             compactor=mock_compactor,
         )
 
@@ -699,14 +712,16 @@ class TestAgentNodeTruncation:
                         **prompt_variables,
                         "history": [],
                         **FAKE_RUNTIME_VARS,
-                    }
+                    },
+                    config={},
                 ),
                 call(
                     input={
                         **prompt_variables,
                         "history": expected_retry_history,
                         **FAKE_RUNTIME_VARS,
-                    }
+                    },
+                    config={},
                 ),
             ]
         )
@@ -834,6 +849,7 @@ class TestAgentNodeReasoning:
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             ui_history=ui_history_with_reasoning,
         )
 
@@ -1038,6 +1054,7 @@ class TestAgentNodeReasoning:
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             ui_history=ui_history_no_reasoning,
         )
 
@@ -1152,3 +1169,48 @@ class TestPredefinedRuntimeVariables:
             "current_time",
             "current_timezone",
         }
+
+
+class TestAgentNodeInvokeConfig:
+    """Test suite for AgentNode invoke_config (TAG_NOSTREAM) support."""
+
+    @pytest.mark.asyncio
+    async def test_invoke_config_forwarded_to_ainvoke(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+        prompt_variables,
+    ):
+        """invoke_config is passed as config= to every ainvoke call."""
+        config = {"tags": ["some tag"]}
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history",
+                factory=lambda _: conversation_history_key,
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config=config,
+        )
+
+        await node.run(base_flow_state)
+
+        mock_prompt.ainvoke.assert_called_once_with(
+            input={
+                **prompt_variables,
+                "history": [],
+                **FAKE_RUNTIME_VARS,
+            },
+            config=config,
+        )

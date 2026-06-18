@@ -57,7 +57,11 @@ export interface StartWorkflowRequest {
     | string
     | undefined;
   /** Semver flow version, e.g. "1.0.0". Required when flowConfigId is set. */
-  flowVersion?: string | undefined;
+  flowVersion?:
+    | string
+    | undefined;
+  /** Whether to enable UI response streaming for this session. */
+  streaming?: boolean | undefined;
 }
 
 export interface ActionResponse {
@@ -458,6 +462,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     preapproved_tools: [],
     flowConfigId: undefined,
     flowVersion: undefined,
+    streaming: undefined,
   };
 }
 
@@ -504,6 +509,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.flowVersion !== undefined) {
       writer.uint32(122).string(message.flowVersion);
+    }
+    if (message.streaming !== undefined) {
+      writer.uint32(128).bool(message.streaming);
     }
     return writer;
   },
@@ -627,6 +635,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.flowVersion = reader.string();
           continue;
         }
+        case 16: {
+          if (tag !== 128) {
+            break;
+          }
+
+          message.streaming = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -660,6 +676,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         : [],
       flowConfigId: isSet(object.flowConfigId) ? globalThis.String(object.flowConfigId) : undefined,
       flowVersion: isSet(object.flowVersion) ? globalThis.String(object.flowVersion) : undefined,
+      streaming: isSet(object.streaming) ? globalThis.Boolean(object.streaming) : undefined,
     };
   },
 
@@ -707,6 +724,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.flowVersion !== undefined) {
       obj.flowVersion = message.flowVersion;
     }
+    if (message.streaming !== undefined) {
+      obj.streaming = message.streaming;
+    }
     return obj;
   },
 
@@ -731,6 +751,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.preapproved_tools = object.preapproved_tools?.map((e) => e) || [];
     message.flowConfigId = object.flowConfigId ?? undefined;
     message.flowVersion = object.flowVersion ?? undefined;
+    message.streaming = object.streaming ?? undefined;
     return message;
   },
 };

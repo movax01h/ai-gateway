@@ -152,6 +152,7 @@ class Flow(AbstractWorkflow):
         workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
         config: FlowConfig,
+        streaming: bool = False,
         mcp_tools: list[contract_pb2.McpTool] = [],
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
@@ -179,6 +180,7 @@ class Flow(AbstractWorkflow):
             **kwargs,
         )
         self._config = config
+        self._stream = streaming
 
         self._flow_prompt_registry = InMemoryPromptRegistry(prompt_registry)
         if self._config.prompts:

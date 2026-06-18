@@ -1107,3 +1107,68 @@ async def test_agent_context_usage_reset_on_subsequent_event(checkpoint_notifier
     second_checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
 
     assert len(second_checkpoint.agent_context_usage) == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests for secret redaction in streamed content
+# ---------------------------------------------------------------------------
+
+
+class TestStreamingSecretRedaction:
+    """Tests that secret redaction is applied to streamed LLM chunks."""
+
+    @pytest.fixture(name="outbox")
+    def outbox_fixture(self) -> MagicMock:
+        return MagicMock(spec=Outbox())
+
+    @pytest.mark.asyncio
+    async def test_redact_secrets_for_ui_called_on_first_chunk(self, outbox):
+        """redact_secrets_for_ui is called when the first chunk of a message arrives."""
+        notifier = UserInterface(outbox=outbox, goal="goal")
+        original_content = "some content"
+        redacted_content = "redacted content"
+        message = AIMessageChunk(id="msg-1", content=original_content)
+
+        with patch(
+            "duo_workflow_service.checkpointer.notifier.redact_secrets_for_ui",
+            return_value=redacted_content,
+        ) as mock_redact:
+            await notifier.send_event("messages", (message, {}), True)
+
+        mock_redact.assert_called_once_with(original_content, tool_name="streaming")
+        assert len(notifier.ui_chat_log) == 1
+        assert notifier.ui_chat_log[0]["content"] == redacted_content
+
+    @pytest.mark.asyncio
+    async def test_redact_secrets_for_ui_called_on_accumulated_chunks(self, outbox):
+        """redact_secrets_for_ui is called with the full accumulated text on each chunk."""
+        notifier = UserInterface(outbox=outbox, goal="goal")
+        chunk1 = AIMessageChunk(id="msg-1", content="Hello ")
+        chunk2 = AIMessageChunk(id="msg-1", content="world")
+
+        with patch(
+            "duo_workflow_service.checkpointer.notifier.redact_secrets_for_ui",
+            side_effect=lambda text, **_: text,
+        ) as mock_redact:
+            await notifier.send_event("messages", (chunk1, {}), True)
+            await notifier.send_event("messages", (chunk2, {}), True)
+
+        # First call: just the first chunk text
+        assert mock_redact.call_args_list[0].args[0] == "Hello "
+        # Second call: accumulated text from both chunks
+        assert mock_redact.call_args_list[1].args[0] == "Hello world"
+        assert len(notifier.ui_chat_log) == 1
+        assert notifier.ui_chat_log[0]["content"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_safe_content_not_modified(self, outbox):
+        """When redact_secrets_for_ui returns the same content, it is stored as-is."""
+        notifier = UserInterface(outbox=outbox, goal="goal")
+        safe_content = "Here is the result of your request."
+        message = AIMessageChunk(id="msg-1", content=safe_content)
+
+        # Use the real redact_secrets_for_ui -- safe content should pass through unchanged
+        await notifier.send_event("messages", (message, {}), True)
+
+        assert len(notifier.ui_chat_log) == 1
+        assert notifier.ui_chat_log[0]["content"] == safe_content

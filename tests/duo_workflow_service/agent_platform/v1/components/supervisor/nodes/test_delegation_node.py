@@ -766,9 +766,11 @@ class TestDelegationNodeUILog:
         assert call_kwargs["tool_info"]["name"] == delegate_task_cls.tool_title
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_log_entry"]
+        # Error log should not be called on the success path
+        ui_history.log.error.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_no_ui_log_emitted_on_delegation_error(
+    async def test_emits_delegation_error_ui_log_on_delegation_error(
         self,
         supervisor_name,
         delegate_task_cls,
@@ -783,7 +785,10 @@ class TestDelegationNodeUILog:
         ai_message_with_delegate,
         ui_history,
     ):
-        """DelegationNode does not call ui_history.log when delegation fails (error ToolMessage returned)."""
+        """DelegationNode emits ON_DELEGATION_ERROR via ui_history.log.error when delegation fails."""
+        sentinel = {"ui_chat_log": ["sentinel_error_log_entry"]}
+        ui_history.pop_state_updates.return_value = sentinel
+
         # Set max_delegations to 1 to force an error when delegation_count is already 1
         node = self._make_node_with_ui_history(
             supervisor_name=supervisor_name,
@@ -803,8 +808,15 @@ class TestDelegationNodeUILog:
         state["context"][supervisor_name]["delegation_count"] = 1  # Already at max
         state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
 
-        await node.run(state)
+        result = await node.run(state)
 
-        # Error path returns early — ui_history.log should not be called
+        # Success log should not be called on the error path
         ui_history.log.success.assert_not_called()
-        ui_history.pop_state_updates.assert_not_called()
+        ui_history.log.error.assert_called_once()
+        call_kwargs = ui_history.log.error.call_args.kwargs
+        assert call_kwargs["event"] == UILogEventsSupervisor.ON_DELEGATION_ERROR
+        assert call_kwargs["message_sub_type"] == DelegationNode.MESSAGE_SUB_TYPE_ERROR
+        assert call_kwargs["tool_info"] is not None
+        assert call_kwargs["tool_info"]["name"] == delegate_task_cls.tool_title
+        ui_history.pop_state_updates.assert_called_once()
+        assert result["ui_chat_log"] == ["sentinel_error_log_entry"]

@@ -47,6 +47,7 @@ def agent_node_fixture(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         internal_event_client=mock_internal_event_client,
+        invoke_config={},
     )
 
 
@@ -69,6 +70,7 @@ def agent_node_with_schema_fixture(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         internal_event_client=mock_internal_event_client,
+        invoke_config={},
         response_schema=AgentFinalOutput,
     )
 
@@ -122,7 +124,8 @@ class TestAgentNode:
             input={
                 **prompt_variables,
                 "history": [],
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -170,7 +173,8 @@ class TestAgentNode:
                 "history": flow_state_with_history[FlowStateKeys.CONVERSATION_HISTORY][
                     component_name
                 ],
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -205,7 +209,8 @@ class TestAgentNode:
             input={
                 **prompt_variables,
                 "history": [],
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -251,6 +256,7 @@ class TestAgentNode:
                     factory=lambda _: conversation_history_key,
                 ),
                 internal_event_client=mock_internal_event_client,
+                invoke_config={},
             )
             result = await agent_node.run(base_flow_state)
 
@@ -316,8 +322,8 @@ class TestAgentNode:
         ]
         mock_prompt.ainvoke.assert_has_calls(
             [
-                call(input={**prompt_variables, "history": []}),
-                call(input={**prompt_variables, "history": retry_history}),
+                call(input={**prompt_variables, "history": []}, config={}),
+                call(input={**prompt_variables, "history": retry_history}, config={}),
             ]
         )
 
@@ -410,7 +416,9 @@ class TestAgentNode:
         assert mock_prompt.ainvoke.call_count == 2
 
         prompt_calls = mock_prompt.ainvoke.call_args_list
-        assert prompt_calls[0] == call(input={**prompt_variables, "history": []})
+        assert prompt_calls[0] == call(
+            input={**prompt_variables, "history": []}, config={}
+        )
 
         retry_messages_history = prompt_calls[1][1]["input"]["history"]
         assert len(retry_messages_history) == 2

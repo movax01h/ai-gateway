@@ -124,6 +124,8 @@ class OneOffComponent(AgentComponentBase):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
+            invoke_config=self.STREAMING_DISABLED_CONFIG,
             compactor=(
                 create_conversation_compactor(
                     config=(

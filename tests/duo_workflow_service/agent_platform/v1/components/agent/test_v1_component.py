@@ -225,6 +225,35 @@ def mock_schema_registry_fixture():
 class TestAgentComponentBase:
     """Test suite for AgentComponentBase abstract stubs."""
 
+    def test_agent_node_invoke_config_raises_not_implemented(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Base _agent_node_invoke_config must raise NotImplementedError."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        with pytest.raises(NotImplementedError):
+            component._agent_node_invoke_config()
+
     def test_agent_node_router_raises_not_implemented(
         self,
         component_name,
@@ -749,6 +778,13 @@ class TestAgentComponentAttachNodes:
         assert agent_call_kwargs["ui_history"].events == ui_log_events
         # Wiring guard: attach passes the resolved per-agent limit through.
         assert "max_context_tokens" in agent_call_kwargs
+        # In all parametrized cases here the component is not streaming-eligible
+        # (requires both ON_AGENT_FINAL_ANSWER and ON_AGENT_REASONING), so
+        # invoke_config carries STREAMING_DISABLED_CONFIG.
+        assert (
+            agent_call_kwargs["invoke_config"]
+            == AgentComponentBase.STREAMING_DISABLED_CONFIG
+        )
 
         # Verify ToolNode creation
         mock_tool_node_cls.assert_called_once()
@@ -2170,3 +2206,133 @@ class TestAgentComponentToolApprovalExecutionFlow:
 
         with pytest.raises(RoutingError, match="Unexpected approval decision"):
             compiled.invoke(state)
+
+
+# ---------------------------------------------------------------------------
+# Tests for _agent_node_invoke_config TAG_NOSTREAM logic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+class TestAgentNodeInvokeConfig:
+    """Tests that attach() passes the correct invoke_config to AgentNode based on ui_log_events."""
+
+    def _attach_and_get_invoke_config(
+        self,
+        ui_log_events,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_state_graph,
+        mock_router,
+    ):
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=["context:goal"],
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+        )
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent.component.AgentNode"
+            ) as mock_agent_node_cls,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent.component.ToolNode"
+            ),
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent.component.FinalResponseNode"
+            ),
+        ):
+            mock_agent_node_cls.return_value = Mock()
+            mock_agent_node_cls.return_value.name = f"{component_name}#agent"
+            component.attach(mock_state_graph, mock_router)
+            return mock_agent_node_cls.call_args[1]["invoke_config"]
+
+    def test_both_events_declared_passes_streaming_enabled_config(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_state_graph,
+        mock_router,
+    ):
+        """Attach() passes STREAMING_ENABLED_CONFIG when both streaming events are declared."""
+        invoke_config = self._attach_and_get_invoke_config(
+            ui_log_events=[
+                UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+                UILogEventsAgent.ON_AGENT_REASONING,
+            ],
+            component_name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            mock_toolset=mock_toolset,
+            mock_prompt_registry=mock_prompt_registry,
+            mock_internal_event_client=mock_internal_event_client,
+            mock_state_graph=mock_state_graph,
+            mock_router=mock_router,
+        )
+        assert invoke_config == AgentComponentBase.STREAMING_ENABLED_CONFIG
+
+    @pytest.mark.parametrize(
+        ("ui_log_events", "case"),
+        [
+            ([], "no events"),
+            ([UILogEventsAgent.ON_AGENT_FINAL_ANSWER], "only ON_AGENT_FINAL_ANSWER"),
+            ([UILogEventsAgent.ON_AGENT_REASONING], "only ON_AGENT_REASONING"),
+            (
+                [
+                    UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+                    UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                ],
+                "tool events only",
+            ),
+        ],
+    )
+    def test_incomplete_events_pass_streaming_disabled_config(
+        self,
+        ui_log_events,
+        case,  # pylint: disable=unused-argument
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_state_graph,
+        mock_router,
+    ):
+        """Attach() passes STREAMING_DISABLED_CONFIG when both streaming events are not declared."""
+        invoke_config = self._attach_and_get_invoke_config(
+            ui_log_events=ui_log_events,
+            component_name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            mock_toolset=mock_toolset,
+            mock_prompt_registry=mock_prompt_registry,
+            mock_internal_event_client=mock_internal_event_client,
+            mock_state_graph=mock_state_graph,
+            mock_router=mock_router,
+        )
+        assert invoke_config == AgentComponentBase.STREAMING_DISABLED_CONFIG

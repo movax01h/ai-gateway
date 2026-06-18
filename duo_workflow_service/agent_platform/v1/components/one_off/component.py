@@ -3,6 +3,7 @@ from typing import Any, ClassVar, Optional, Self, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
@@ -190,6 +191,8 @@ class OneOffComponent(BaseComponent):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
+            invoke_config={"tags": [TAG_NOSTREAM]},
             max_context_tokens=get_model_max_context_token_limit(
                 self.model_size_preference
             ),

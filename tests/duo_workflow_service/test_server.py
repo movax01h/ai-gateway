@@ -1818,6 +1818,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         approval=contract_pb2.Approval(),
         language_server_version=None,
         preapproved_tools=[],
+        streaming=False,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
@@ -1894,6 +1895,7 @@ async def test_execute_workflow_valid_workflow_metadata(
         approval=approval,
         language_server_version=None,
         preapproved_tools=preapproved_tools,
+        streaming=False,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)

@@ -138,6 +138,7 @@ class AbstractWorkflow(ABC):
         ],
         language_server_version: Optional[LanguageServerVersion] = None,
         preapproved_tools: Optional[list[str]] = [],
+        streaming: bool = False,  # pylint: disable=unused-argument
         audit_event_enabled: bool = Provide[
             ContainerApplication.audit_event.config.enabled  # type: ignore[attr-defined]
         ],

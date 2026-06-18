@@ -1,7 +1,8 @@
-from typing import Annotated, Any, ClassVar, Optional, Self, TypedDict
+from typing import Annotated, Any, ClassVar, Optional, Self, TypedDict, override
 
 from dependency_injector.wiring import inject
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
@@ -223,6 +224,20 @@ class SupervisorAgentComponent(AgentComponentBase):
 
     ui_log_events: list[UILogEventsSupervisor] = Field(default_factory=list)
     ui_role_as: str = "agent"
+
+    @override
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return TAG_NOSTREAM config unless both LLM output event types are declared.
+
+        Both ON_AGENT_FINAL_ANSWER and ON_AGENT_REASONING must be present because AgentNode tokens may become either —
+        they are indistinguishable at chunk time.
+        """
+        if (
+            UILogEventsSupervisor.ON_AGENT_FINAL_ANSWER in self.ui_log_events
+            and UILogEventsSupervisor.ON_AGENT_REASONING in self.ui_log_events
+        ):
+            return self.STREAMING_ENABLED_CONFIG
+        return self.STREAMING_DISABLED_CONFIG
 
     subagent_components: dict[str, Any] = Field(
         description="Resolved subagent component instances, injected by the flow builder at construction time.",
@@ -609,6 +624,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            invoke_config=self._agent_node_invoke_config(),
             compactor=(
                 create_conversation_compactor(
                     config=(
@@ -685,7 +701,10 @@ class SupervisorAgentComponent(AgentComponentBase):
             subsession_history_key_factory=self._subsession_history_key_factory,
             subsession_goal_key_factory=self._subsession_goal_key_factory,
             ui_history=UIHistory(
-                events=[UILogEventsSupervisor.ON_DELEGATION],
+                events=[
+                    UILogEventsSupervisor.ON_DELEGATION,
+                    UILogEventsSupervisor.ON_DELEGATION_ERROR,
+                ],
                 writer_class=default_ui_log_writer_class(
                     events_class=UILogEventsSupervisor,
                     ui_role_as=MessageTypeEnum.TOOL.value,

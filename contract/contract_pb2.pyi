@@ -20,7 +20,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ..., stopWorkflow: _Optional[_Union[StopWorkflowRequest, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -35,6 +35,7 @@ class StartWorkflowRequest(_message.Message):
     PREAPPROVED_TOOLS_FIELD_NUMBER: _ClassVar[int]
     FLOWCONFIGID_FIELD_NUMBER: _ClassVar[int]
     FLOWVERSION_FIELD_NUMBER: _ClassVar[int]
+    STREAMING_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -49,7 +50,8 @@ class StartWorkflowRequest(_message.Message):
     preapproved_tools: _containers.RepeatedScalarFieldContainer[str]
     flowConfigId: str
     flowVersion: str
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ...) -> None: ...
+    streaming: bool
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ...) -> None: ...
 
 class ActionResponse(_message.Message):
     __slots__ = ("requestID", "plainTextResponse", "httpResponse")
