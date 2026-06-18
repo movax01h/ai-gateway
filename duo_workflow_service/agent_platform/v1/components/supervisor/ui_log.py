@@ -16,3 +16,4 @@ class UILogEventsSupervisor(BaseUILogEvents):
     ON_TOOL_EXECUTION_FAILED = auto()
     ON_DELEGATION = auto()
     ON_DELEGATION_RETURNS = auto()
+    ON_DELEGATION_ERROR = auto()

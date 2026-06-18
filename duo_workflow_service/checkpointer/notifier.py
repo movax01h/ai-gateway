@@ -23,6 +23,7 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 
 log = structlog.stdlib.get_logger("notifier")
 
@@ -262,9 +263,13 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         if self.latest_ai_message and self.latest_ai_message.id == message.id:
             self.latest_ai_message += message
-            self.ui_chat_log[-1]["content"] = self.latest_ai_message.text()
+            safe_content = redact_secrets_for_ui(
+                self.latest_ai_message.text(), tool_name="streaming"
+            )
+            self.ui_chat_log[-1]["content"] = safe_content
         else:
             self.latest_ai_message = message
+            safe_content = redact_secrets_for_ui(message.text(), tool_name="streaming")
             last_ui_message = UiChatLog(
                 message_id=message.id,
                 status=None,
@@ -272,7 +277,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 message_type=MessageTypeEnum.AGENT,
                 message_sub_type=None,
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                content=message.text(),
+                content=safe_content,
                 tool_info=None,
                 additional_context=None,
             )

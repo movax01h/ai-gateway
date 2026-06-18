@@ -4,6 +4,7 @@ from typing import ClassVar, Optional, Sequence, Type, cast
 import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from pydantic import ConfigDict, Field
 from pydantic_core import ValidationError
 
@@ -109,6 +110,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         ui_history: Optional UI log history writer.  When provided, reasoning
             text from mid-loop ``AIMessage``s is emitted as
             ``ON_AGENT_REASONING`` entries (if that event is enabled).
+        invoke_config: ``RunnableConfig`` dict passed to every ``ainvoke``
+            call on the prompt.  Callers must always provide this explicitly —
+            pass ``{}`` for streaming-eligible components (no suppression) or
+            ``{"tags": [TAG_NOSTREAM]}`` to suppress LLM chunks from the
+            LangGraph ``messages`` stream.  Making this required ensures every
+            ``AgentNode`` construction site makes a deliberate streaming
+            decision rather than silently inheriting a default.
         max_context_tokens: Context-window limit of the model this agent runs on.
             When set, it is stamped into ``agent_context_limits`` (keyed by the
             agent's conversation-history slot) so checkpoints can report per-agent
@@ -131,6 +139,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _compactor: ConversationCompactor | None
     _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
     _max_context_tokens: Optional[int]
+    _invoke_config: RunnableConfig
 
     def __init__(
         self,
@@ -141,6 +150,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         inputs: Sequence[IOKey | RuntimeIOKey],
         internal_event_client: InternalEventsClient,
         conversation_history_key: RuntimeIOKey,
+        invoke_config: RunnableConfig,
         compactor: ConversationCompactor | None = None,
         response_schema: Optional[Type[BaseAgentOutput]] = None,
         ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]] = None,
@@ -158,6 +168,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._response_schema = response_schema
         self._ui_history = ui_history
         self._max_context_tokens = max_context_tokens
+        self._invoke_config = invoke_config
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
@@ -246,7 +257,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                             **variables,
                             "history": history,
                             **self._predefined_runtime_variables(),
-                        }
+                        },
+                        config=self._invoke_config,
                     ),
                 )
                 finish_reason = extract_finish_reason(completion.response_metadata)

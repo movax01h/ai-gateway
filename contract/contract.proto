@@ -39,6 +39,7 @@ message StartWorkflowRequest {
     repeated string preapproved_tools = 13 [json_name = "preapproved_tools"];
     optional string flowConfigId = 14;    // Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
     optional string flowVersion = 15;     // Semver flow version, e.g. "1.0.0". Required when flowConfigId is set.
+    optional bool streaming = 16;         // Whether to enable UI response streaming for this session.
 }
 
 message ActionResponse {

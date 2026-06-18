@@ -301,6 +301,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             preapproved_tools=list(
                 start_workflow_request.startRequest.preapproved_tools
             ),
+            streaming=start_workflow_request.startRequest.streaming,
         )
 
         workflow_task = asyncio.create_task(workflow.run(goal))

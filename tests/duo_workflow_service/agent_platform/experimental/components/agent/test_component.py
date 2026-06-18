@@ -220,6 +220,35 @@ def mock_schema_registry_fixture():
 class TestAgentComponentBase:
     """Test suite for AgentComponentBase abstract stubs."""
 
+    def test_agent_node_invoke_config_raises_not_implemented(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Base _agent_node_invoke_config must raise NotImplementedError."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        with pytest.raises(NotImplementedError):
+            component._agent_node_invoke_config()
+
     def test_agent_node_router_raises_not_implemented(
         self,
         component_name,
@@ -1410,3 +1439,72 @@ class TestAgentComponentToolApprovalRouter:
             match="No approval decision found in state",
         ):
             router_function(state_with_empty_history)
+
+
+# ---------------------------------------------------------------------------
+# Tests for _agent_node_invoke_config TAG_NOSTREAM logic
+# ---------------------------------------------------------------------------
+
+
+class TestAgentNodeInvokeConfig:
+    """Tests that _agent_node_invoke_config returns the correct config based on ui_log_events."""
+
+    @pytest.mark.parametrize(
+        ("ui_log_events", "expected_config"),
+        [
+            (
+                [
+                    UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+                    UILogEventsAgent.ON_AGENT_REASONING,
+                ],
+                AgentComponentBase.STREAMING_ENABLED_CONFIG,
+            ),
+            ([], AgentComponentBase.STREAMING_DISABLED_CONFIG),
+            (
+                [UILogEventsAgent.ON_AGENT_FINAL_ANSWER],
+                AgentComponentBase.STREAMING_DISABLED_CONFIG,
+            ),
+            (
+                [UILogEventsAgent.ON_AGENT_REASONING],
+                AgentComponentBase.STREAMING_DISABLED_CONFIG,
+            ),
+            (
+                [UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS],
+                AgentComponentBase.STREAMING_DISABLED_CONFIG,
+            ),
+        ],
+        ids=[
+            "both_events_enabled",
+            "no_events",
+            "only_final_answer",
+            "only_reasoning",
+            "tool_event_only",
+        ],
+    )
+    def test_invoke_config_based_on_ui_log_events(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        ui_log_events,
+        expected_config,
+    ):
+        """_agent_node_invoke_config returns STREAMING_ENABLED_CONFIG only when both events declared."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+        )
+        assert component._agent_node_invoke_config() == expected_config

@@ -12,6 +12,8 @@ from typing import (
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -80,6 +82,9 @@ class AgentComponentBase(BaseComponent):
 
     Do NOT use this class directly in flow configs — use AgentComponent instead.
     """
+
+    STREAMING_ENABLED_CONFIG: ClassVar[RunnableConfig] = {}
+    STREAMING_DISABLED_CONFIG: ClassVar[RunnableConfig] = {"tags": [TAG_NOSTREAM]}
 
     _final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
@@ -196,6 +201,17 @@ class AgentComponentBase(BaseComponent):
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
         return f"{self.name}#agent"
 
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return the ``RunnableConfig`` to pass to every ``AgentNode`` ``ainvoke`` call.
+
+        Subclasses must override this method to express their own streaming policy
+        in terms of their own typed ``ui_log_events`` enum.
+
+        Return ``STREAMING_ENABLED_CONFIG`` to allow LLM chunks to stream to the
+        UI, or ``STREAMING_DISABLED_CONFIG`` to suppress them.
+        """
+        raise NotImplementedError
+
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
         return self.prompt_registry.get_on_behalf(
@@ -244,6 +260,16 @@ class AgentComponent(AgentComponentBase):
     pre_approved_tools: list[str] = Field(default_factory=list)
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
+
+    @override
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return TAG_NOSTREAM config unless both LLM output event types are declared."""
+        if (
+            UILogEventsAgent.ON_AGENT_FINAL_ANSWER in self.ui_log_events
+            and UILogEventsAgent.ON_AGENT_REASONING in self.ui_log_events
+        ):
+            return self.STREAMING_ENABLED_CONFIG
+        return self.STREAMING_DISABLED_CONFIG
 
     # Private attributes for RuntimeIOKey instances with default values.
     # Overridden by bind_to_supervisor when used as a subagent.
@@ -507,6 +533,7 @@ class AgentComponent(AgentComponentBase):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            invoke_config=self._agent_node_invoke_config(),
             compactor=(
                 create_conversation_compactor(
                     config=(
