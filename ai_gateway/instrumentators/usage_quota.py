@@ -3,7 +3,7 @@ from prometheus_client import Counter, Histogram
 USAGE_QUOTA_CHECK_TOTAL = Counter(
     "usage_quota_check_total",
     "Total usage quota decisions at gateway (post-cache)",
-    ["result", "realm"],  # result: allow | deny | fail_open
+    ["result", "realm"],  # result: allow | deny
 )
 
 USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL = Counter(

@@ -311,10 +311,10 @@ class TestErrorHandling:
     """Tests for error handling."""
 
     @pytest.mark.asyncio
-    async def test_allows_request_on_generic_exception(
+    async def test_raises_generic_exception(
         self, mock_request, mock_usage_quota_service
     ):
-        """Test that decorator allows request when unexpected error occurs (fail-open)."""
+        """Test that decorator raises unexpected errors."""
 
         async def test_handler(_request, *_args, **_kwargs):
             return JSONResponse({"status": "ok"})
