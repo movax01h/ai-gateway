@@ -11,7 +11,7 @@ came before. The only genuinely new information in most steps is the handful of 
 appended since the previous checkpoint.
 
 Incremental checkpoints send only the channels that changed, and within those channels,
-only the newly appended items. This dramatically reduces per-step payload size for
+only the newly appended items. This significantly reduces per-step payload size for
 append-heavy channels such as `conversation_history`, while Rails can still reconstruct
 full state by replaying the deltas.
 
