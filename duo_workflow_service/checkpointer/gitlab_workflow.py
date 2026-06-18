@@ -15,6 +15,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Mapping,
     NamedTuple,
     NoReturn,
     Optional,
@@ -803,6 +804,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         decoded_metadata = json.loads(
             checkpoint["metadata"], object_hook=checkpoint_decoder
         )
+        self._hydrate_incremental_state(checkpoint, decoded_checkpoint)
         return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
             {
                 "thread_ts": checkpoint["threadTs"],
@@ -811,6 +813,37 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 "metadata": decoded_metadata,
             }
         )
+
+    def _hydrate_incremental_state(
+        self,
+        gl_checkpoint: Mapping[str, Any],
+        decoded_checkpoint: Mapping[str, Any],
+    ) -> None:
+        """Restore in-memory incremental-checkpoint state from a fetched checkpoint.
+
+        On gateway restart, ``_current_thread`` / ``_prev_channel_values`` / ``_prev_checkpoint_id`` reset to their
+        __init__ defaults. Without this, the next aput would either trigger a stale-cache rewrite or emit a
+        current_thread that no longer matches the server's view. Accepts both REST (snake_case) and GraphQL
+        (camelCase) field names. Absent values are tolerated: older Rails versions don't expose current_thread, in
+        which case the in-memory default is kept.
+        """
+        if not is_client_capable("incremental_checkpoints"):
+            return
+
+        current_thread = gl_checkpoint.get("current_thread")
+        if current_thread is None:
+            current_thread = gl_checkpoint.get("currentThread")
+        if current_thread is not None:
+            try:
+                self._current_thread = int(current_thread)
+            except (TypeError, ValueError):
+                self._logger.warning(
+                    "Unexpected current_thread value from server; keeping default",
+                    current_thread=current_thread,
+                )
+
+        self._prev_checkpoint_id = decoded_checkpoint.get("id")
+        self._prev_channel_values = dict(decoded_checkpoint.get("channel_values", {}))
 
     @override
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -855,6 +888,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                         checkpoint["compressed_checkpoint"]
                     )
                 # else: checkpoint["checkpoint"] already exists from old instance, use as-is
+                self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
         else:
             # If the latest checkpoint is fetch, we don't need to refetch it on initialization
             if self._workflow_config.get("latest_checkpoint"):
@@ -899,6 +933,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                         checkpoint["compressed_checkpoint"]
                     )
                 # else: checkpoint["checkpoint"] already exists from old instance, use as-is
+                self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
 
         if checkpoint:
             return self._convert_gitlab_checkpoint_to_checkpoint_tuple(checkpoint)
