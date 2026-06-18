@@ -62,11 +62,7 @@ class TestOptionalFieldDefault(CheckerTestCase):
             self.checker.visit_annassign(node)
 
     def test_non_optional_field_not_checked(self):
-        code = (
-            "from pydantic import Field\n"
-            "class MyModel:\n"
-            "    foo: int = Field(...)"
-        )
+        code = "from pydantic import Field\nclass MyModel:\n    foo: int = Field(...)"
         node = astroid.extract_node(code)
         with self.assertNoMessages():
             self.checker.visit_annassign(node)

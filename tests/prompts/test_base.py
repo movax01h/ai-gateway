@@ -2115,9 +2115,9 @@ class TestContextManagementTokenReduction:
         tokens_without_cm = response_without_cm.usage_metadata.get("input_tokens", 0)
 
         assert tokens_without_cm > 0, "Baseline should have recorded input tokens"
-        assert (
-            tokens_with_cm > 0
-        ), "Context management run should have recorded input tokens"
+        assert tokens_with_cm > 0, (
+            "Context management run should have recorded input tokens"
+        )
         assert tokens_with_cm < tokens_without_cm, (
             f"Context management should reduce input tokens: "
             f"with_cm={tokens_with_cm}, without_cm={tokens_without_cm}"

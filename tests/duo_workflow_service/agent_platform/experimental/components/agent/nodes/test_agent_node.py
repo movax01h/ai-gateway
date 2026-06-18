@@ -152,12 +152,12 @@ class TestAgentNode:
 
         # Verify component appends to existing conversation history
         result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert (
-            len(result_history) == len(existing_history) + 1
-        ), "Expected existing messages plus new completion"
-        assert (
-            result_history[:-1] == existing_history
-        ), "Existing history must be preserved"
+        assert len(result_history) == len(existing_history) + 1, (
+            "Expected existing messages plus new completion"
+        )
+        assert result_history[:-1] == existing_history, (
+            "Existing history must be preserved"
+        )
         assert result_history[-1] == mock_ai_message, "New completion must be appended"
 
         mock_get_vars_from_state.assert_called_once_with(

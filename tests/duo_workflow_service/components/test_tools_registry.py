@@ -1314,7 +1314,8 @@ class TestToolCallApprovals:
         )
 
         result = await registry.approval_required(
-            "read_file", {"path": object()}  # not JSON-serializable
+            "read_file",
+            {"path": object()},  # not JSON-serializable
         )
         assert result
         mock_client.graphql.assert_not_called()

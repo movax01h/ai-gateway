@@ -71,9 +71,9 @@ async def mock_request_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
     )
 
 
-async def mock_track_self_hosted_request_generator() -> (
-    AsyncIterator[contract_pb2.TrackSelfHostedClientEvent]
-):
+async def mock_track_self_hosted_request_generator() -> AsyncIterator[
+    contract_pb2.TrackSelfHostedClientEvent
+]:
     """Helper to generate mock TrackSelfHostedClientEvent stream."""
     yield contract_pb2.TrackSelfHostedClientEvent(
         requestID="test-request-id",

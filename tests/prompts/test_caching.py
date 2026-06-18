@@ -306,9 +306,9 @@ class TestCacheControlInjectionPointsConverter:
             "ttl": "5m",
         }
 
-        assert (
-            original_value.to_messages() == prompt_value.to_messages()
-        ), "Original list has been modified"
+        assert original_value.to_messages() == prompt_value.to_messages(), (
+            "Original list has been modified"
+        )
 
     @pytest.mark.parametrize(
         "model_class_provider",

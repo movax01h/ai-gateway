@@ -17,7 +17,6 @@ def node_fixture():
 
 
 class TestFileNamingForTests(pylint.testutils.CheckerTestCase):
-
     CHECKER_CLASS = file_naming_for_tests.FileNamingForTests
 
     @patch("lints.file_naming_for_tests.Path")

@@ -221,15 +221,15 @@ async def chat(
 
     gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
 
-    stream_result: Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]] = (
-        await create_event_stream(
-            current_user=current_user,
-            agent_request=agent_request,
-            agent=agent,
-            gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
-            gl_version=gl_version,
-            agent_scratchpad=scratchpad,
-        )
+    stream_result: Tuple[
+        ReActAgentInputs, AsyncIterator[TypeAgentEvent]
+    ] = await create_event_stream(
+        current_user=current_user,
+        agent_request=agent_request,
+        agent=agent,
+        gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
+        gl_version=gl_version,
+        agent_scratchpad=scratchpad,
     )
 
     inputs, stream_events = stream_result

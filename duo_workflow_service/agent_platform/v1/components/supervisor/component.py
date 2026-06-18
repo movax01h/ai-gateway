@@ -100,8 +100,7 @@ def extract_subagent_names(subagents: list[SubagentConfig]) -> list[str]:
     for entry in subagents:
         if not isinstance(entry, dict) or "name" not in entry:
             raise ValueError(
-                f"Each subagents entry must be a dict with a 'name' key, "
-                f"got: {entry!r}"
+                f"Each subagents entry must be a dict with a 'name' key, got: {entry!r}"
             )
         name = entry["name"]
         if name in names:

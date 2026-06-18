@@ -272,9 +272,7 @@ def _serialize_channel_blobs(
     return blobs, is_compaction
 
 
-class GitLabWorkflow(
-    BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]
-):  # pylint: disable=too-many-instance-attributes
+class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]):  # pylint: disable=too-many-instance-attributes
     _client: GitlabHttpClient
     _logger: structlog.stdlib.BoundLogger
     _workflow_config: WorkflowConfig
@@ -447,9 +445,10 @@ class GitLabWorkflow(
             self._flow_start_time = time.time()
 
             config: RunnableConfig = {"configurable": {}}
-            self.initial_status_event, event_property = (
-                await self._get_initial_status_event(config)
-            )
+            (
+                self.initial_status_event,
+                event_property,
+            ) = await self._get_initial_status_event(config)
             await self._update_workflow_status(self.initial_status_event)
 
             if self.initial_status_event == WorkflowStatusEventEnum.START:
@@ -522,7 +521,8 @@ class GitLabWorkflow(
             raise
 
     async def _get_initial_status_event(
-        self, config: RunnableConfig  # pylint: disable=unused-argument
+        self,
+        config: RunnableConfig,  # pylint: disable=unused-argument
     ) -> tuple[WorkflowStatusEventEnum, EventPropertyEnum]:
         """Determine the workflow status event and event property.
 

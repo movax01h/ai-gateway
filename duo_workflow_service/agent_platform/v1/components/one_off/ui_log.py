@@ -100,7 +100,8 @@ class UILogWriterOneOffTools(BaseUILogWriter):
     ) -> UiChatLog:
         if not message:
             message = f"An error occurred when executing the tool: {
-                self._format_message(tool, tool_call_args, kwargs.get('tool_response'))}"
+                self._format_message(tool, tool_call_args, kwargs.get('tool_response'))
+            }"
 
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
@@ -177,7 +178,9 @@ class UILogWriterOneOffTools(BaseUILogWriter):
                 return tool.format_display_message(parsed, tool_response)
         except Exception:
             return DuoBaseTool.format_display_message(
-                tool, tool_call_args, tool_response  # type: ignore[arg-type]
+                tool,  # type: ignore[arg-type]
+                tool_call_args,
+                tool_response,
             )  # type: ignore[return-value]
 
         return tool.format_display_message(tool_call_args, tool_response)

@@ -122,12 +122,12 @@ class TestToolNode:
 
         # Verify component appends tool response to existing conversation history
         result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert (
-            len(result_messages) == len(existing_history) + 1
-        ), "Expected existing messages plus tool response"
-        assert (
-            result_messages[:-1] == existing_history
-        ), "Existing history must be preserved"
+        assert len(result_messages) == len(existing_history) + 1, (
+            "Expected existing messages plus tool response"
+        )
+        assert result_messages[:-1] == existing_history, (
+            "Existing history must be preserved"
+        )
 
         # Verify tool response properties
         tool_message = result_messages[-1]
@@ -192,9 +192,9 @@ class TestToolNode:
 
         # Verify all tool responses are appended to conversation history
         result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert (
-            len(result_messages) == 3
-        ), "Expected AI message with 2 tool calls plus 2 tool responses"
+        assert len(result_messages) == 3, (
+            "Expected AI message with 2 tool calls plus 2 tool responses"
+        )
         assert result_messages[0] == mock_ai_message_with_multiple_tool_calls
         assert isinstance(result_messages[1], ToolMessage)
         assert isinstance(result_messages[2], ToolMessage)
@@ -434,9 +434,9 @@ class TestToolNode:
         assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
 
         result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
-        assert (
-            len(result_messages) == 1
-        ), "Expected original AI message with no tool responses"
+        assert len(result_messages) == 1, (
+            "Expected original AI message with no tool responses"
+        )
         assert result_messages[0] == mock_ai_message_no_tool_calls
 
     @pytest.mark.asyncio

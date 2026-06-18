@@ -783,9 +783,9 @@ def test_fireworks_models_have_max_retries_10(selection_config):
     assert len(fireworks_models) > 0, "No Fireworks models found in models.yml"
 
     for identifier, definition in fireworks_models:
-        assert (
-            definition.params.max_retries == 10
-        ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
+        assert definition.params.max_retries == 10, (
+            f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
+        )
 
 
 @pytest.mark.usefixtures("mock_fs")

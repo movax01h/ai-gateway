@@ -72,9 +72,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.tool_call_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.tool_call_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_tool_call(tool_name="test_tool", flow_type="test_flow"):
             pass
@@ -95,9 +95,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.compute_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.compute_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_compute(operation_type="test_operation"):
             pass
@@ -112,9 +112,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.gitlab_response_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.gitlab_response_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_gitlab_response(endpoint="test_endpoint", method="GET"):
             pass
@@ -129,9 +129,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.network_latency.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.network_latency.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_network_latency(source="service", destination="gitlab"):
             pass
@@ -146,9 +146,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.workflow_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.workflow_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_workflow(workflow_type="test_workflow"):
             pass
@@ -455,9 +455,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.compaction_llm_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.compaction_llm_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_compaction_llm(
             flow_type="developer", agent_name="planner"

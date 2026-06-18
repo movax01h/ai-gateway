@@ -210,7 +210,7 @@ class ListWorkItems(WorkItemBaseTool):
 
     {PARENT_IDENTIFICATION_DESCRIPTION}
 
-    This tool only supports the following types: ({', '.join(sorted(ALL_TYPES))})
+    This tool only supports the following types: ({", ".join(sorted(ALL_TYPES))})
 
     For example:
     - Given group_id 'namespace/group', the tool call would be:

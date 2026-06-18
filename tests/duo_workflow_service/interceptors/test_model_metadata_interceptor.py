@@ -198,7 +198,6 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
             "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_with_size_context"
         ) as mock_size_context,
     ):
-
         fake_by_size = MagicMock()
         fake_by_size.default = fake_default
         mock_by_size_cls.return_value = fake_by_size

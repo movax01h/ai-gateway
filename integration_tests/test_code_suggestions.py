@@ -46,9 +46,9 @@ def test_code_suggestion_for_gitlab_com():
     token = get_user_jwt("saas")
     response = send_and_check_completion_request(token, "gitlab.com", "saas")
 
-    assert (
-        response.status_code == 200
-    ), f"/v2/code/completions request failed with status: {response.status_code}, body: {response.text}"
+    assert response.status_code == 200, (
+        f"/v2/code/completions request failed with status: {response.status_code}, body: {response.text}"
+    )
 
 
 def test_code_suggestion_for_self_managed():
@@ -57,6 +57,6 @@ def test_code_suggestion_for_self_managed():
         token, "gitlab.company.name", "self-managed"
     )
 
-    assert (
-        response.status_code == 200
-    ), f"/v2/code/completions request failed with status: {response.status_code}, body: {response.text}"
+    assert response.status_code == 200, (
+        f"/v2/code/completions request failed with status: {response.status_code}, body: {response.text}"
+    )

@@ -31,9 +31,7 @@ def _extract_model_name(serialized: dict[str, Any], kwargs: dict[str, Any]) -> s
     return "unknown"
 
 
-class AuditEventCallbackHandler(
-    AsyncCallbackHandler
-):  # pylint: disable=too-many-ancestors
+class AuditEventCallbackHandler(AsyncCallbackHandler):  # pylint: disable=too-many-ancestors
     def __init__(self, collector: AuditEventCollector, workflow_id: str):
         self._collector = collector
         self._workflow_id = workflow_id

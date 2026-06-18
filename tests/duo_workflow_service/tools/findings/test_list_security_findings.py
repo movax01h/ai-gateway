@@ -189,11 +189,7 @@ class TestListSecurityFindings:
             "securityReportFindings"
         ]["nodes"] = page1_data["data"]["project"]["pipelines"]["nodes"][0][
             "securityReportFindings"
-        ][
-            "nodes"
-        ][
-            :1
-        ]
+        ]["nodes"][:1]
         page1_data["data"]["project"]["pipelines"]["nodes"][0][
             "securityReportFindings"
         ]["pageInfo"] = {
@@ -206,11 +202,7 @@ class TestListSecurityFindings:
             "securityReportFindings"
         ]["nodes"] = page2_data["data"]["project"]["pipelines"]["nodes"][0][
             "securityReportFindings"
-        ][
-            "nodes"
-        ][
-            1:
-        ]
+        ]["nodes"][1:]
         page2_data["data"]["project"]["pipelines"]["nodes"][0][
             "securityReportFindings"
         ]["pageInfo"] = {

@@ -896,9 +896,9 @@ def test_apply_token_based_trim_single_human_message_no_unnecessary_fallback(
     ]
     fallback_triggered = len(warning_calls) > 0
 
-    assert (
-        not fallback_triggered
-    ), "Fallback should not trigger for valid single human message"
+    assert not fallback_triggered, (
+        "Fallback should not trigger for valid single human message"
+    )
 
     # Second call: add another human message
     messages_2 = [

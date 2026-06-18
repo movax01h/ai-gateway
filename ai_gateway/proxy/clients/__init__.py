@@ -21,9 +21,7 @@ def _is_registered_pass_through_route(
     return True
 
 
-pass_through_endpoints.InitPassThroughEndpointHelpers.is_registered_pass_through_route = (
-    _is_registered_pass_through_route
-)
+pass_through_endpoints.InitPassThroughEndpointHelpers.is_registered_pass_through_route = _is_registered_pass_through_route
 
 
 def _get_registered_pass_through_route(
@@ -33,9 +31,7 @@ def _get_registered_pass_through_route(
     return {}
 
 
-pass_through_endpoints.InitPassThroughEndpointHelpers.get_registered_pass_through_route = (
-    _get_registered_pass_through_route
-)
+pass_through_endpoints.InitPassThroughEndpointHelpers.get_registered_pass_through_route = _get_registered_pass_through_route
 
 
 def _chunk_parser(self, chunk: dict) -> ModelResponseStream:

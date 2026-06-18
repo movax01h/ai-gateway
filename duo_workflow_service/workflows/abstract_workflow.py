@@ -362,11 +362,13 @@ class AbstractWorkflow(ABC):
         self.checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
 
         try:
-            self._project, self._namespace, self._workflow_config = (
-                await fetch_workflow_and_container_data(
-                    client=self._http_client,
-                    workflow_id=self._workflow_id,
-                )
+            (
+                self._project,
+                self._namespace,
+                self._workflow_config,
+            ) = await fetch_workflow_and_container_data(
+                client=self._http_client,
+                workflow_id=self._workflow_id,
             )
 
             self._merge_jwt_governance_claims()

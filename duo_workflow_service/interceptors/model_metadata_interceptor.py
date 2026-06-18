@@ -35,7 +35,6 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
                 and data.get("provider") == "gitlab"
                 and (data.get("identifier") or data.get("feature_setting"))
             ):
-
                 config = get_config()
                 model_keys = (
                     config.model_keys.model_dump()

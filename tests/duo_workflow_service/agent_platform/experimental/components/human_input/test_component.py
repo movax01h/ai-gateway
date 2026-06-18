@@ -76,7 +76,6 @@ class TestHumanInputComponent:
                 "duo_workflow_service.agent_platform.experimental.components.human_input.component.FetchNode"
             ) as mock_fetch_node,
         ):
-
             # Mock node instances
             request_instance = Mock()
             request_instance.name = "test_human_input#request"

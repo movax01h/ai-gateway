@@ -116,9 +116,9 @@ class TestGLAgentRemoteExecutor:
         with request_cycle_context({}):
             actual_actions = [action async for action in executor.stream(inputs=inputs)]
 
-            assert (
-                context.get("duo_chat.agent_available_tools") is not None
-            ), "Expected 'duo_chat.agent_available_tools' to be set in context and not None"
+            assert context.get("duo_chat.agent_available_tools") is not None, (
+                "Expected 'duo_chat.agent_available_tools' to be set in context and not None"
+            )
 
             if user.is_debug:
                 assert set(context.get("duo_chat.agent_available_tools", [])) == {

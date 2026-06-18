@@ -167,7 +167,6 @@ class ModelSelectionConfig:
 
     def get_llm_definitions(self) -> dict[str, LLMDefinition]:
         if not self._llm_definitions:
-
             with open(MODELS_CONFIG_PATH, "r") as f:
                 config_data = yaml.safe_load(f)
 
@@ -207,9 +206,9 @@ class ModelSelectionConfig:
 
             for feature_setting, models in self._default_models_override.items():
                 if feature_setting in self._unit_primitive_configs:
-                    self._unit_primitive_configs[feature_setting].default_models = (
-                        models
-                    )
+                    self._unit_primitive_configs[
+                        feature_setting
+                    ].default_models = models
 
         return self._unit_primitive_configs
 

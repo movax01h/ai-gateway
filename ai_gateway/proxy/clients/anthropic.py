@@ -83,9 +83,7 @@ def _resolve_api_key(model_name: str) -> str:
             break
 
     try:
-        return os.environ[
-            "ANTHROPIC_API_KEY"
-        ]  # pylint: disable=direct-environment-variable-reference
+        return os.environ["ANTHROPIC_API_KEY"]  # pylint: disable=direct-environment-variable-reference
     except KeyError:
         raise fastapi.HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="API key not found"

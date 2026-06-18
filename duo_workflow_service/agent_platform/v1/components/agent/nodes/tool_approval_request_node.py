@@ -193,7 +193,7 @@ class ToolApprovalRequestNode:
                 message_type=MessageTypeEnum.REQUEST,
                 message_sub_type=None,
                 content=msg,
-                message_id=f'request-{call["id"]}',
+                message_id=f"request-{call['id']}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
                 tool_info=ToolInfo(name=call["name"], args=call["args"]),

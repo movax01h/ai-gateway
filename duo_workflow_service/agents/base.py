@@ -20,9 +20,8 @@ class BaseAgent(RunnableBinding[Any, BaseMessage]):
     workflow_id: str
 
     def __init__(self, prompt: Prompt, **kwargs) -> None:
-        super().__init__(
-            prompt=prompt, bound=prompt, **kwargs
-        )  # type: ignore[call-arg] # seems that mypy checks only against the immediate parent's init arguments
+        # mypy checks only against the immediate parent's init arguments
+        super().__init__(prompt=prompt, bound=prompt, **kwargs)  # type: ignore[call-arg]
 
     def _create_ui_chat_log(
         self,

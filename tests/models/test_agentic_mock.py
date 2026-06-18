@@ -274,11 +274,15 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
 
     @pytest.mark.asyncio
     async def test_astream_with_streaming_tool_calls_in_chunks(self, model):
-        messages = [HumanMessage(content="""
+        messages = [
+            HumanMessage(
+                content="""
                 <response stream="true">
                 Analyzing <tool_calls>[{"name": "search", "args": {"query": "test"}}]</tool_calls>
                 </response>'
-                """)]
+                """
+            )
+        ]
 
         chunks = []
         async for chunk in model._astream(messages):
@@ -299,11 +303,15 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
         assert len(tool_chunks) >= 1  # Should have at least one chunk for the tool call
 
     def test_stream_with_streaming_tool_calls_in_chunks(self, model):
-        messages = [HumanMessage(content="""
+        messages = [
+            HumanMessage(
+                content="""
                 <response stream="true">
                 Analyzing <tool_calls>[{"name": "search", "args": {"query": "test"}}]</tool_calls>
                 </response>'
-                """)]
+                """
+            )
+        ]
 
         chunks = []
         for chunk in model._stream(messages):
@@ -383,11 +391,15 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
 
     @pytest.mark.parametrize("use_last_human_message", [True, False])
     def test_response_handler_multiple_latencies(self, use_last_human_message):
-        messages = [HumanMessage(content="""
+        messages = [
+            HumanMessage(
+                content="""
                 <response latency_ms='100'>Fast response</response>
                 <response latency_ms='1000'>Slow response</response>
                 <response>No latency response</response>
-            """)]
+            """
+            )
+        ]
 
         handler = ResponseHandler(
             messages, use_last_human_message=use_last_human_message
@@ -492,7 +504,8 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         [
             (
                 [
-                    HumanMessage(content="""
+                    HumanMessage(
+                        content="""
             <responses>
                 <response>
                     Create an issue for an awesome feature.
@@ -500,13 +513,15 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
                 </response>
                 <response>Issue created</response>
             </responses>
-                                """),
+                                """
+                    ),
                 ],
                 "Create an issue for an awesome feature.",
             ),
             (
                 [
-                    HumanMessage(content="""
+                    HumanMessage(
+                        content="""
 <responses>
     <response>
         Create an issue for an awesome feature.
@@ -514,7 +529,8 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
     </response>
     <response>Issue created</response>
 </responses>
-                                """),
+                                """
+                    ),
                     AIMessage(
                         content="Create an issue for an awesome feature.",
                         tool_calls=[
@@ -562,11 +578,15 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         assert not response.tool_calls
 
     def test_response_handler_streaming_attributes(self):
-        messages = [HumanMessage(content="""
+        messages = [
+            HumanMessage(
+                content="""
                 <response stream='true' chunk_delay_ms='100'>Streaming response</response>
                 <response stream="false">Non-streaming response</response>
                 <response>Default response</response>
-            """)]
+            """
+            )
+        ]
 
         handler = ResponseHandler(messages, use_last_human_message=False)
 
@@ -651,18 +671,23 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
     def test_response_handler_template_variables(self, tmp_path):
         content_file = tmp_path / "template_vars.txt"
         content_file.write_text(
-            "Project ID is {{ projectId }} in {{ namespace }}\n" + """
+            "Project ID is {{ projectId }} in {{ namespace }}\n"
+            + """
             <tool_calls>
             [{"name": "list_repository_tree", "args": {"project_id": {{ projectId }}, "recursive": true}}]
             </tool_calls>
             """
         )
 
-        messages = [HumanMessage(content=f"""
+        messages = [
+            HumanMessage(
+                content=f"""
                 {{% set projectId = 1000001 %}}
                 {{% set namespace = "test-namespace" %}}
                 <response file="{content_file}" />
-                """)]
+                """
+            )
+        ]
 
         handler = ResponseHandler(messages, use_last_human_message=False)
 
@@ -692,11 +717,14 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
     def test_response_handler_file_with_xml_special_characters(self, tmp_path):
         # Create a file with content that would break XML parsing
         response_file = tmp_path / "code_with_xml_chars.txt"
-        response_file.write_text("Creating a Python function.\n" + """
+        response_file.write_text(
+            "Creating a Python function.\n"
+            + """
             '<tool_calls>
             [{"name": "create_file", "args": {"code": "if x < 10 and y > 5:\\n    print(\\"x & y are valid\\")"}}]
             </tool_calls>'
-            """)
+            """
+        )
 
         messages = [HumanMessage(content=f'<response file="{response_file}" />')]
 
@@ -711,10 +739,14 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         assert "x & y" in response.tool_calls[0]["args"]["code"]
 
     def test_extract_template_variables_with_invalid_jinja(self):
-        messages = [HumanMessage(content="""
+        messages = [
+            HumanMessage(
+                content="""
                 {% set invalid syntax here %}
                 <response>Test</response>
-                """)]
+                """
+            )
+        ]
         handler = ResponseHandler(messages, use_last_human_message=False)
         # Should still create handler with empty template_vars
         assert handler.template_vars == {}
@@ -725,10 +757,14 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         response_file = tmp_path / "jinja_error.txt"
         response_file.write_text("Project {% if invalid syntax %}")
 
-        messages = [HumanMessage(content=f"""
+        messages = [
+            HumanMessage(
+                content=f"""
                 {{% set projectId = 123 %}}
                 <response file="{response_file}" />
-                """)]
+                """
+            )
+        ]
         handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()
         # Should return content as-is when rendering fails
@@ -752,13 +788,17 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
         # Create a tool call with large args to trigger multiple chunks (chunk_size is 100)
         large_data = "x" * 150
 
-        messages = [HumanMessage(content=f"""
+        messages = [
+            HumanMessage(
+                content=f"""
                 <response stream="true">
                     Processing <tool_calls>
                         [{{"name": "process_data", "args": {{"data": "{large_data}"}}}}]
                     </tool_calls>
                 </response>
-                """)]
+                """
+            )
+        ]
 
         chunks = []
         for chunk in model._stream(messages):
@@ -781,13 +821,17 @@ class TestResponseHandler:  # pylint: disable=too-many-public-methods
             assert tool_chunks[1].message.tool_call_chunks[0]["name"] is None
 
     def test_extract_text_from_nested_elements(self):
-        messages = [HumanMessage(content="""
+        messages = [
+            HumanMessage(
+                content="""
                 <response>
                     Text before
                     <custom_tag>Nested content</custom_tag>
                     Text after
                 </response>
-                """)]
+                """
+            )
+        ]
 
         handler = ResponseHandler(messages, use_last_human_message=False)
         response = handler.get_next_response()

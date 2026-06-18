@@ -91,9 +91,9 @@ class TestHiddenLayerScannerLogging:
             assert result.detection_type == DetectionType.PROMPT_INJECTION
 
             # Verify warning was logged - should have at least one warning call
-            assert (
-                mock_log.warning.called
-            ), "Warning should be logged when detection found"
+            assert mock_log.warning.called, (
+                "Warning should be logged when detection found"
+            )
 
     @pytest.mark.asyncio
     async def test_does_not_log_response_when_detection_but_realm_not_allowed(
@@ -135,9 +135,9 @@ class TestHiddenLayerScannerLogging:
                 for call in mock_log.warning.call_args_list
                 if "Hidden Layer scan detects threats" in str(call)
             ]
-            assert (
-                len(detection_warning_calls) == 0
-            ), "Should not log response when realm not allowed"
+            assert len(detection_warning_calls) == 0, (
+                "Should not log response when realm not allowed"
+            )
 
             # But the general threat warning should still be logged
             threat_warning_calls = [
@@ -245,9 +245,9 @@ class TestHiddenLayerScannerLogging:
             }, "API metadata must contain only expected fields"
 
             # Verify warning was logged
-            assert (
-                mock_log.warning.called
-            ), "Warning should be logged when detection found"
+            assert mock_log.warning.called, (
+                "Warning should be logged when detection found"
+            )
 
     def test_does_not_log_response_sync_when_detection_but_realm_not_allowed(
         self, mock_hidden_layer_response_with_detection
@@ -288,9 +288,9 @@ class TestHiddenLayerScannerLogging:
                 for call in mock_log.warning.call_args_list
                 if "Hidden Layer scan detects threats" in str(call)
             ]
-            assert (
-                len(detection_warning_calls) == 0
-            ), "Should not log response when realm not allowed"
+            assert len(detection_warning_calls) == 0, (
+                "Should not log response when realm not allowed"
+            )
 
 
 class TestHiddenLayerConfigRealms:
@@ -415,9 +415,9 @@ class TestHiddenLayerScannerRealmLogging:
 
             # Verify realm was logged
             warning_calls = mock_log.warning.call_args_list
-            assert any(
-                "gitlab_realm" in str(call) for call in warning_calls
-            ), "gitlab_realm should be logged"
+            assert any("gitlab_realm" in str(call) for call in warning_calls), (
+                "gitlab_realm should be logged"
+            )
 
     @pytest.mark.asyncio
     async def test_logs_allowed_realms_in_warning_message(
@@ -452,6 +452,6 @@ class TestHiddenLayerScannerRealmLogging:
 
             # Verify allowed realms were logged
             warning_calls = mock_log.warning.call_args_list
-            assert any(
-                "log_allowed_realms" in str(call) for call in warning_calls
-            ), "log_allowed_realms should be logged"
+            assert any("log_allowed_realms" in str(call) for call in warning_calls), (
+                "log_allowed_realms should be logged"
+            )
