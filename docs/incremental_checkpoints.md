@@ -17,7 +17,7 @@ full state by replaying the deltas.
 
 ## Capability gating
 
-The feature is gated behind the `incremental_checkpoints` client capability
+The `incremental_checkpoints` client capability gates this feature
 (`is_client_capable("incremental_checkpoints")`, see
 [`client_capabilities.py`](../duo_workflow_service/client_capabilities.py)). Clients that
 don't declare it receive the legacy payload unchanged. The current rollout is a **shadow
