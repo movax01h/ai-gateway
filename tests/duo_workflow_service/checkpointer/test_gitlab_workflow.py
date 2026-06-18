@@ -2603,3 +2603,233 @@ async def test_aput_omits_channel_blobs_when_not_capable(
     post_call_body = json.loads(http_client.apost.call_args[1]["body"])
     assert "compressed_checkpoint" in post_call_body
     assert "channel_blobs" not in post_call_body
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+    return_value=True,
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_current_thread_from_response(
+    _mock_duo_workflow_metrics,
+    _mock_is_client_capable,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """On resume, current_thread must be restored from the server so subsequent aput emits the same thread."""
+    compressed_checkpoint_data[0]["current_thread"] = 3
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert gitlab_workflow._current_thread == 3
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+    assert "conversation_history" in gitlab_workflow._prev_channel_values
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+    return_value=True,
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_current_thread_on_latest_fetch_path(
+    _mock_duo_workflow_metrics,
+    _mock_is_client_capable,
+    http_client,
+    workflow_id,
+    workflow_type,
+    compressed_checkpoint_data,
+):
+    """Hydration must also fire on the latest-fetch path (no checkpoint_id; first_checkpoint set)."""
+    workflow_config = {
+        "first_checkpoint": {},
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    compressed_checkpoint_data[0]["current_thread"] = 7
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": workflow_id}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert "per_page=1" in http_client.aget.call_args[1]["path"]
+    assert gitlab_workflow._current_thread == 7
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+    assert "conversation_history" in gitlab_workflow._prev_channel_values
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+    return_value=True,
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydration_tolerates_missing_current_thread(
+    _mock_duo_workflow_metrics,
+    _mock_is_client_capable,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """Older Rails versions don't return current_thread; hydration must still seed prev_* without raising."""
+    assert "current_thread" not in compressed_checkpoint_data[0]
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    await gitlab_workflow.aget_tuple(config)
+
+    assert gitlab_workflow._current_thread == 0
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+    return_value=True,
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
+    _mock_duo_workflow_metrics,
+    _mock_is_client_capable,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """Malformed current_thread values must not raise; default is kept and hydration of other fields continues."""
+    compressed_checkpoint_data[0]["current_thread"] = "not-a-number"
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    await gitlab_workflow.aget_tuple(config)
+
+    assert gitlab_workflow._current_thread == 0
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+    return_value=False,
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_skips_hydration_when_capability_disabled(
+    _mock_duo_workflow_metrics,
+    _mock_is_client_capable,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    compressed_checkpoint_data[0]["current_thread"] = 5
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    await gitlab_workflow.aget_tuple(config)
+
+    assert gitlab_workflow._current_thread == 0
+    assert gitlab_workflow._prev_checkpoint_id is None
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+    return_value=True,
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
+    _mock_duo_workflow_metrics,
+    _mock_is_client_capable,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+    checkpoint_metadata,
+):
+    """End-to-end: simulate a restart by hydrating then writing — must reuse server thread, no current_thread bump."""
+    import base64
+
+    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
+
+    serde = CheckpointSerializer()
+    compressed_checkpoint_data[0]["current_thread"] = 2
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    fetched = await gitlab_workflow.aget_tuple(config)
+    assert fetched is not None
+
+    next_checkpoint = {
+        "id": "ckpt-next",
+        "channel_values": dict(fetched.checkpoint["channel_values"]),
+    }
+    next_checkpoint["channel_values"]["messages"] = ["new"]
+
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "5678"}},
+        next_checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 2
+    assert len(body["channel_blobs"]) == 1
+    blob = body["channel_blobs"][0]
+    assert blob["channel"] == "messages"
+    assert blob["step_action"] == "compaction"
+    val = serde.loads_typed(
+        (blob["write_type"], zlib.decompress(base64.b64decode(blob["data"])))
+    )
+    assert val == ["new"]
+
+
+def test_decode_graphql_latest_checkpoint_hydrates(gitlab_workflow):
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
+        return_value=True,
+    ):
+        gitlab_workflow._decode_graphql_latest_checkpoint(
+            {
+                "threadTs": "gql-ckpt",
+                "parentTs": None,
+                "checkpoint": json.dumps(
+                    {"id": "gql-ckpt", "channel_values": {"x": [1]}}
+                ),
+                "metadata": "{}",
+                "currentThread": 4,
+            }
+        )
+
+    assert gitlab_workflow._current_thread == 4
+    assert gitlab_workflow._prev_checkpoint_id == "gql-ckpt"
+    assert gitlab_workflow._prev_channel_values == {"x": [1]}
