@@ -372,3 +372,7 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
