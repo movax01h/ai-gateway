@@ -29,6 +29,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import McpTool, McpToolConfig
+from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
@@ -198,6 +199,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         PostSecretFpAnalysisToGitlab,
         PostDuoCodeReview,
         UpdateFormPermissions,
+        SetFormPermissions,
         *_READ_ONLY_GITLAB_TOOLS,
     ],
     "read_only_gitlab": _READ_ONLY_GITLAB_TOOLS,

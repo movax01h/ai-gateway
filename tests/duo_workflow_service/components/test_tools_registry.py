@@ -35,6 +35,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
+from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
@@ -267,6 +268,7 @@ _outbox = MagicMock(spec=Outbox)
                 "gitlab_api_get",
                 "gitlab_graphql",
                 "update_form_permissions",
+                "set_form_permissions",
             },
         ),
         (
@@ -511,6 +513,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
         "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
         "update_form_permissions": UpdateFormPermissions(metadata=tool_metadata),
+        "set_form_permissions": SetFormPermissions(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
