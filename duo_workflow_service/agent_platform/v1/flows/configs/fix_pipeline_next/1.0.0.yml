@@ -117,9 +117,25 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "create_repository_branch"
+  - name: "git_fetch_for_branch"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "fetch"
+        as: "command"
+        literal: True
+      - from: "origin"
+        as: "args"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fix_pipeline_next_create_branch"
     type: AgentComponent
-    prompt_id: "create_repository_branch"
+    prompt_id: "fix_pipeline_next_create_branch"
     prompt_version: "^1.0.0"
     response_schema_id: "create_repository_branch"
     response_schema_version: "^1.0.0"
@@ -273,7 +289,7 @@ components:
         as: "source_branch"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "default_branch"
-      - from: "context:create_repository_branch.final_answer.branch_name"
+      - from: "context:fix_pipeline_next_create_branch.final_answer.branch_name"
         as: "source_branch_name"
       - from: "context:fix_pipeline_next_execution.final_answer"
         as: "execution_results"
@@ -320,14 +336,16 @@ routers:
       input: "context:fix_pipeline_next_decide_fix.final_answer.decision"
       routes:
         "create_fix_on_existing_mr": "fix_pipeline_next_code_suggestions"
-        "create_fix_on_new_mr": "create_repository_branch"
+        "create_fix_on_new_mr": "git_fetch_for_branch"
         "no_action_needed": "end"
-        "default_route": "create_repository_branch"
+        "default_route": "git_fetch_for_branch"
   - from: "fix_pipeline_next_code_suggestions"
     to: "end"
-  - from: "create_repository_branch"
+  - from: "git_fetch_for_branch"
+    to: "fix_pipeline_next_create_branch"
+  - from: "fix_pipeline_next_create_branch"
     condition:
-      input: "context:create_repository_branch.final_answer.status"
+      input: "context:fix_pipeline_next_create_branch.final_answer.status"
       routes:
         "success": "fix_pipeline_git_commit"
         "default_route": "end"
