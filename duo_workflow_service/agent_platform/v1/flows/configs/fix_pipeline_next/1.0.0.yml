@@ -8,6 +8,40 @@ version: "v1"
 environment: ambient
 
 components:
+  - name: "fetch_failing_jobs"
+    type: DeterministicStepComponent
+    tool_name: "get_pipeline_failing_jobs"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "true"
+        as: "exclude_allow_failure"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fetch_failing_bridge_jobs"
+    type: DeterministicStepComponent
+    tool_name: "get_failing_bridge_jobs"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "list_merge_request_diffs"
+    inputs:
+      - from: "context:inputs.merge_request.url"
+        as: "url"
+        optional: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "fix_pipeline_next_context"
     type: AgentComponent
     prompt_id: "fix_pipeline_next_context"
@@ -23,6 +57,14 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
+      - from: "context:fetch_failing_jobs.tool_responses"
+        as: "failing_jobs"
+      - from: "context:fetch_failing_bridge_jobs.tool_responses"
+        as: "failing_bridge_jobs"
+        optional: True
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+        optional: True
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -30,11 +72,9 @@ components:
         as: "workspace_agent_skills"
         optional: True
     toolset:
-      - get_failing_bridge_jobs
       - get_pipeline_failing_jobs:
           exclude_allow_failure: true
       - get_job_logs
-      - list_merge_request_diffs
       - read_file
       - find_files
       - list_dir
@@ -314,6 +354,12 @@ components:
       - "on_tool_execution_failed"
 
 routers:
+  - from: "fetch_failing_jobs"
+    to: "fetch_failing_bridge_jobs"
+  - from: "fetch_failing_bridge_jobs"
+    to: "fetch_mr_diffs"
+  - from: "fetch_mr_diffs"
+    to: "fix_pipeline_next_context"
   - from: "fix_pipeline_next_context"
     condition:
       input: "context:fix_pipeline_next_context.final_answer.decision"
@@ -363,7 +409,7 @@ routers:
     to: "end"
 
 flow:
-  entry_point: "fix_pipeline_next_context"
+  entry_point: "fetch_failing_jobs"
   inputs:
     - category: merge_request
       input_schema:
