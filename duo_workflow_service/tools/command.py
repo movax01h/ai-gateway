@@ -1,6 +1,6 @@
 import shlex
 import textwrap
-from typing import Any, ClassVar, List, Optional, Type
+from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
@@ -10,8 +10,6 @@ from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.executor.action import _execute_action
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
-_DISALLOWED_COMMANDS: List[str] = []
-_DISALLOWED_OPERATORS = ["&&", "||", "|"]
 _DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
 
 
@@ -34,8 +32,6 @@ class RunCommand(DuoBaseTool):
     description: str = (
         "Run a bash command in the current working directory. "
         "This tool should be reserved for cases where specialized tools cannot accomplish the task. "
-        f"Following bash commands are not supported: {', '.join(_DISALLOWED_COMMANDS)} "
-        "and will result in error. "
         "Pay extra attention to correctly escape special characters like '`'"
     )
     args_schema: Type[BaseModel] = RunCommandInput
@@ -48,15 +44,9 @@ class RunCommand(DuoBaseTool):
     ) -> str:
         args = args or ""
 
-        for disallowed_operator in _DISALLOWED_OPERATORS:
-            if disallowed_operator in program or disallowed_operator in args:
-                # pylint: disable=line-too-long
-                return f"""'{disallowed_operator}' operators are not supported with {self.name} tool.
-Instead of '{disallowed_operator}' please use {self.name} multiple times consecutively to emulate '{disallowed_operator}' behaviour
-"""
-        for disallowed_command in _DISALLOWED_COMMANDS:
-            if program.startswith(disallowed_command):
-                return f"{disallowed_command} commands are not supported with {self.name} tool."
+        # Command validation is handled by Rails via GraphQL approval query.
+        # RunCommand sends structured program + arguments (not a shell string),
+        # so shell operators are not interpreted.
 
         try:
             arguments = shlex.split(args)
