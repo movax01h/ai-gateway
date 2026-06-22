@@ -255,6 +255,10 @@ environment variable to use `MemorySaver`.
 
 When using `MemorySaver`, human in the loop features and workflow status updates are disabled.
 
+The GitLab checkpointer supports incremental checkpoints, which send only the channels
+that changed each step rather than the full state. See
+[Incremental checkpoints](../docs/incremental_checkpoints.md) for details.
+
 ### Logging
 
 Production logs are
