@@ -35,6 +35,12 @@ from duo_workflow_service.tools.findings.list_security_findings import (
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
+from duo_workflow_service.tools.mr_discussions import (
+    ListMrDiscussions,
+    ReplyToDiscussion,
+    SetDiscussionResolved,
+)
+from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
@@ -119,6 +125,7 @@ _outbox = MagicMock(spec=Outbox)
                 "get_merge_request",
                 "list_merge_request_diffs",
                 "list_all_merge_request_notes",
+                "list_mr_discussions",
                 "get_pipeline_failing_jobs",
                 "get_downstream_pipelines",
                 "get_failing_bridge_jobs",
@@ -268,6 +275,10 @@ _outbox = MagicMock(spec=Outbox)
                 "gitlab_api_get",
                 "gitlab_graphql",
                 "update_form_permissions",
+                "submit_mr_review",
+                "list_mr_discussions",
+                "reply_to_discussion",
+                "set_discussion_resolved",
                 "set_form_permissions",
             },
         ),
@@ -513,6 +524,10 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
         "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
         "update_form_permissions": UpdateFormPermissions(metadata=tool_metadata),
+        "submit_mr_review": SubmitMrReview(metadata=tool_metadata),
+        "list_mr_discussions": ListMrDiscussions(metadata=tool_metadata),
+        "reply_to_discussion": ReplyToDiscussion(metadata=tool_metadata),
+        "set_discussion_resolved": SetDiscussionResolved(metadata=tool_metadata),
         "set_form_permissions": SetFormPermissions(metadata=tool_metadata),
     }
 

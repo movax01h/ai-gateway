@@ -1736,6 +1736,10 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "secret_vulnerability_lines_agent_prompt",
         "secret_vulnerability_report_agent_prompt",
         "secret_vulnerability_source_file_agent_prompt",
+        "security_review",
+        "security_review_build_context",
+        "security_review_prescan",
+        "security_review_validate",
         "validate_sast_fix_has_changes",
         "validate_sast_vulnerability_agent_prompt",
     }

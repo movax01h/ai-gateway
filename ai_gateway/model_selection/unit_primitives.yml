@@ -396,3 +396,11 @@ configurable_unit_primitives:
       - "claude_haiku_4_5_20251001"
     selectable_models:
       - "claude_haiku_4_5_20251001"
+  - feature_setting: "security_review"
+    unit_primitives: []
+    default_models:
+      - "claude_sonnet_4_6_vertex"
+    selectable_models:
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_4_6_bedrock"
