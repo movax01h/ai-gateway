@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     list_configs,
     load_component_class,
 )
+from duo_workflow_service.tools.mr_review import SubmitMrReviewInput
 
 
 class TestFlowConfig:
@@ -934,3 +935,45 @@ class TestFromYamlConfigVersionResolution:
             result = FlowConfig.from_yaml_config("myflow")
         assert result.environment == "ambient"
         assert result.resolved_version == "1.0.0"
+
+
+class TestSecurityReviewToolOptions:
+    """Guard the security_review flow's pinned submit_mr_review tool options.
+
+    These arguments are pinned at the flow level (rather than set by the LLM) so a hallucination or a prompt injection
+    cannot flip them — flipping the fold/internal flags on a public project would expose inline security findings. See
+    the validate_and_publish component in security_review/1.0.0.yml.
+    """
+
+    EXPECTED_OPTIONS = {
+        "fold_inline_into_summary_when_public": True,
+        "inline_findings_title": (
+            "**Security Findings** (internal only — this project is public)"
+        ),
+        "summary_internal": True,
+    }
+
+    @staticmethod
+    def _submit_mr_review_options(config: FlowConfig) -> dict:
+        component = next(
+            c for c in config.components if c.get("name") == "validate_and_publish"
+        )
+        for entry in component["toolset"]:
+            if isinstance(entry, dict) and "submit_mr_review" in entry:
+                return entry["submit_mr_review"]
+        raise AssertionError(
+            "submit_mr_review is not declared with pinned tool options in "
+            "validate_and_publish"
+        )
+
+    def test_submit_mr_review_args_are_pinned(self):
+        config = FlowConfig.from_yaml_config("security_review", "1.0.0")
+        assert self._submit_mr_review_options(config) == self.EXPECTED_OPTIONS
+
+    def test_pinned_option_keys_are_valid_tool_parameters(self):
+        # Mirrors Toolset._validate_tool_options: every pinned key must be a real
+        # parameter on the tool's input schema, so a typo/rename fails fast here.
+        config = FlowConfig.from_yaml_config("security_review", "1.0.0")
+        options = self._submit_mr_review_options(config)
+        valid_fields = set(SubmitMrReviewInput.model_fields.keys())
+        assert set(options).issubset(valid_fields)

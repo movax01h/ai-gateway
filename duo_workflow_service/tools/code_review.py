@@ -110,6 +110,13 @@ class BuildReviewMergeRequestContextInput(ProjectResourceInput):
             "(no diff content). Useful for context analysis."
         ),
     )
+    include_diff_links: bool = Field(
+        default=False,
+        description=(
+            "If True, include clickable diff link URLs for each changed file. "
+            "Useful for producing review summaries with file references."
+        ),
+    )
 
 
 class BuildReviewMergeRequestContext(DuoBaseTool):
@@ -149,11 +156,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         only_diffs = kwargs.get("only_diffs", False)
         lightweight = kwargs.get("lightweight", False)
+        include_diff_links = kwargs.get("include_diff_links", False)
         context = await self._build_context(validation_result, only_diffs, lightweight)
 
         if lightweight:
             return self._format_lightweight_output(context)
-        return self._format_output(context)
+        return self._format_output(context, include_diff_links=include_diff_links)
 
     async def _build_context(
         self, validation_result, only_diffs: bool = False, lightweight: bool = False
@@ -466,7 +474,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         return output
 
-    def _format_output(self, context: dict) -> str:
+    def _format_output(self, context: dict, include_diff_links: bool = False) -> str:
         """Format output with escaped user content."""
 
         # Escape user-controlled fields to prevent HTML/XML injection
@@ -485,6 +493,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         files_section = self._format_original_files(context.get("files_content", {}))
 
+        diff_links_section = (
+            self._format_diff_links(context["mr_data"], context["diffs_and_paths"])
+            if include_diff_links
+            else ""
+        )
+
         return f"""Here are the merge request details for you to review:
 
 <input>
@@ -495,6 +509,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 <mr_description>
 {description}
 </mr_description>
+
+{diff_links_section}
 
 {custom_instructions_section}
 
@@ -654,6 +670,39 @@ This formatting is only required for custom instruction comments. Regular review
 
         lines.append("</original_files>")
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_diff_links(
+        mr_data: Dict[str, Any], diffs_and_paths: Dict[str, str]
+    ) -> str:
+        """Build a diff_links block mapping each changed file to a blob permalink.
+
+        Links are pinned to the immutable commit that was reviewed
+        (``diff_refs.head_sha``), so they keep pointing at the reviewed version
+        even after new commits are pushed to the merge request:
+
+            {project_web_url}/-/blob/{head_sha}/{file_path}
+
+        Downstream prompts append ``#L{line}`` to anchor a specific line. Using a
+        blob permalink built from data already returned by the API avoids
+        replicating the monolith's internal diff-anchor hashing, which would
+        couple this tool to monolith implementation details.
+        """
+        mr_web_url = mr_data.get("web_url", "")
+        diff_refs = mr_data.get("diff_refs") or {}
+        head_sha = diff_refs.get("head_sha") or mr_data.get("sha")
+        if not mr_web_url or not head_sha or not diffs_and_paths:
+            return ""
+
+        project_web_url = mr_web_url.split("/-/merge_requests/")[0]
+
+        entries = []
+        for file_path in diffs_and_paths:
+            encoded_path = quote(file_path, safe="/")
+            url = f"{project_web_url}/-/blob/{head_sha}/{encoded_path}"
+            entries.append(f'  <file path="{file_path}" url="{url}" />')
+
+        return "<diff_links>\n" + "\n".join(entries) + "\n</diff_links>"
 
     def format_display_message(
         self, args: BuildReviewMergeRequestContextInput, tool_response: Any = None

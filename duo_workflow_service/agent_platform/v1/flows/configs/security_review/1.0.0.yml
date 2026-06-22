@@ -1,0 +1,228 @@
+version: "v1"
+environment: ambient
+components:
+  # Step 1: Check if already reviewed (label dedup)
+  - name: "check_existing_review"
+    type: DeterministicStepComponent
+    tool_name: "get_merge_request"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: Apply triggered label for audit trail
+  - name: "apply_triggered_label"
+    type: DeterministicStepComponent
+    tool_name: "update_merge_request"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "security-review::triggered"
+        as: "add_labels"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: Fetch and format MR data
+  - name: "fetch_mr_data"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "true"
+        as: "include_diff_links"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 4: Enrich context — fetch linked issues, epics, discussions, codebase patterns
+  - name: "build_review_context"
+    type: AgentComponent
+    prompt_id: "security_review_build_context"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      # Exact username of this flow's per-group service account, supplied by Rails via the
+      # generic agent_platform_standard_context envelope (see flow.inputs below). Lets the
+      # prompts identify the agent's own prior comments without hardcoding a naming convention.
+      - from: "context:inputs.agent_platform_standard_context.service_account_name"
+        as: "service_account_name"
+        optional: True
+    toolset:
+      - "build_review_merge_request_context"
+      - "list_repository_tree"
+      - "get_repository_file"
+      - "read_file"
+      - "find_files"
+      - "blob_search"
+      - "list_all_merge_request_notes"
+      - "get_issue"
+      - "list_issues"
+      - "get_epic"
+      - "list_epics"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 5: Pre-scan codebase for security-relevant context
+  - name: "prescan_codebase"
+    type: AgentComponent
+    prompt_id: "security_review_prescan"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    toolset:
+      - "build_review_merge_request_context"
+      - "list_repository_tree"
+      - "get_repository_file"
+      - "read_file"
+      - "find_files"
+      - "blob_search"
+      - "list_all_merge_request_notes"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 6: Perform security review (AgentComponent — multi-turn with tool use)
+  - name: "perform_security_review"
+    type: AgentComponent
+    prompt_id: "security_review"
+    prompt_version: "^1.0.0"
+    response_schema_id: "security_review"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      - from: "context:build_review_context.final_answer"
+        as: "codebase_context"
+      - from: "context:prescan_codebase.final_answer"
+        as: "prescan_context"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    toolset:
+      - "get_issue"
+      - "get_repository_file"
+      - "read_file"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 7: Validate findings — senior AppSec engineer filters false positives
+  - name: "validate_and_publish"
+    type: AgentComponent
+    prompt_id: "security_review_validate"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      - from: "context:perform_security_review.final_answer.findings"
+        as: "review_findings"
+      - from: "context:build_review_context.final_answer"
+        as: "codebase_context"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_standard_context.service_account_name"
+        as: "service_account_name"
+        optional: True
+    toolset:
+      - "list_mr_discussions"
+      - "reply_to_discussion"
+      - "set_discussion_resolved"
+      # Pin the always-constant arguments so they cannot be overridden by an LLM
+      # hallucination or a prompt injection. Flipping the fold/internal flags on a
+      # public project would expose inline security findings, so these are enforced
+      # at the flow level rather than relying on the prompt.
+      - "submit_mr_review":
+          fold_inline_into_summary_when_public: true
+          inline_findings_title: "**Security Findings** (internal only — this project is public)"
+          summary_internal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 8: Apply completed label and remove triggered label
+  - name: "apply_completed_label"
+    type: DeterministicStepComponent
+    tool_name: "update_merge_request"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "security-review::completed"
+        as: "add_labels"
+        literal: true
+      - from: "security-review::triggered"
+        as: "remove_labels"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "check_existing_review"
+    to: "apply_triggered_label"
+  - from: "apply_triggered_label"
+    to: "fetch_mr_data"
+  - from: "fetch_mr_data"
+    to: "build_review_context"
+  - from: "build_review_context"
+    to: "prescan_codebase"
+  - from: "prescan_codebase"
+    to: "perform_security_review"
+  - from: "perform_security_review"
+    to: "validate_and_publish"
+  - from: "validate_and_publish"
+    to: "apply_completed_label"
+  - from: "apply_completed_label"
+    to: "end"
+
+flow:
+  entry_point: "check_existing_review"
+  inputs:
+    # Rails always sends the agent_platform_standard_context envelope. additionalProperties is
+    # false, so every field it carries must be declared here. This flow only consumes
+    # service_account_name; the rest are declared (all optional) solely so the envelope validates.
+    - category: agent_platform_standard_context
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+          optional: true
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+          optional: true
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+          optional: true
+        service_account_name:
+          type: string
+          description: Username of this flow's per-group review service account
+          optional: true

@@ -1,0 +1,58 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "security_review_response",
+    "description": "Structured output for the security review agent. Use this tool to submit your final review findings.",
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "description": "List of security findings. Empty array if no issues found.",
+            "items": {
+                "type": "object",
+                "title": "SecurityFinding",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "description": "Full file path as shown in the diff"
+                    },
+                    "new_line": {
+                        "type": "integer",
+                        "description": "Line number in the new version of the file"
+                    },
+                    "old_line": {
+                        "type": "integer",
+                        "description": "Line number in the old version (only for comments on deleted lines)"
+                    },
+                    "tier": {
+                        "type": "integer",
+                        "enum": [1, 2, 3],
+                        "description": "Finding tier: 1 = Exploitable, 2 = Logic Flaw, 3 = Design Issue"
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "high", "medium", "low"],
+                        "description": "Severity of the finding"
+                    },
+                    "cwe": {
+                        "type": "string",
+                        "description": "Primary CWE identifier, e.g. \"CWE-639\""
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Specific feedback in markdown. Do NOT restate tier/severity/CWE — those are separate fields and are rendered into the comment header automatically."
+                    },
+                    "suggestion": {
+                        "type": "string",
+                        "description": "Corrected code to replace the commented line(s). Only include when the fix is self-contained and uses existing functions."
+                    }
+                },
+                "required": ["file", "new_line", "tier", "severity", "cwe", "body"]
+            }
+        },
+        "summary": {
+            "type": "string",
+            "description": "When no findings exist, provide 3-5 bullet points summarizing security observations. When findings exist, a brief overview of the review."
+        }
+    },
+    "required": ["findings", "summary"]
+}
