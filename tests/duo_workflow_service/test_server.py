@@ -1617,6 +1617,7 @@ class TestServeTLS:
         return mock_config
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
     @patch("duo_workflow_service.server.setup_signal_handlers")
     @patch(
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
@@ -1657,6 +1658,7 @@ class TestServeTLS:
         mock_cloud_connector_ready.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
     @patch("duo_workflow_service.server.setup_signal_handlers")
     @patch(
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
@@ -1715,6 +1717,7 @@ class TestServeTLS:
         mock_cloud_connector_ready.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
     @patch("duo_workflow_service.server.setup_signal_handlers")
     @patch(
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
