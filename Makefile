@@ -8,6 +8,8 @@ SCRIPTS_DIR := ${ROOT_DIR}/scripts
 TESTS_DIR := ${ROOT_DIR}/tests
 INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 
+PYTEST_SLOWEST_TESTS_COUNT ?= 10
+
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${DUO_WORKFLOW_SERVICE_DIR} \
 	${LIB_DIR} \
@@ -245,7 +247,7 @@ install-test-deps:
 .PHONY: test
 test: install-test-deps
 	@echo "Running tests..."
-	@poetry run pytest -n auto
+	@poetry run pytest -n auto --durations=${PYTEST_SLOWEST_TESTS_COUNT}
 
 .PHONY: test-watch
 test-watch: install-test-deps
@@ -255,12 +257,12 @@ test-watch: install-test-deps
 .PHONY: test-coverage
 test-coverage: install-test-deps
 	@echo "Running tests with coverage..."
-	@poetry run pytest --cov --cov-report term --cov-report html -n auto
+	@poetry run pytest --cov --cov-report term --cov-report html -n auto --durations=${PYTEST_SLOWEST_TESTS_COUNT}
 
 .PHONY: test-coverage-ci
 test-coverage-ci: install-test-deps
 	@echo "Running tests with coverage on CI..."
-	@poetry run pytest --cov --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto
+	@poetry run pytest --cov --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto --durations=${PYTEST_SLOWEST_TESTS_COUNT}
 
 UNDERCOVERAGE_COMPARE_BRANCH ?= origin/main
 UNDERCOVERAGE_DIFF_RANGE_NOTATION ?= ...
