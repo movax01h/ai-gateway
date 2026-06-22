@@ -240,12 +240,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             f"/api/v4/projects/{validation_result.project_id}/"
             f"merge_requests/{validation_result.merge_request_iid}/diffs"
         )
-        response = await self.gitlab_client.aget(path, parse_json=False)
-
-        body = self._process_http_response(
-            "fetch merge request diffs", response, logger
-        )
-        return json.loads(body)
+        return await self._paginate_get(path)
 
     async def _fetch_original_files(
         self, project_id: int, branch: str, file_paths: List[str]

@@ -299,6 +299,55 @@ line 1
 
 
 @pytest.mark.asyncio
+async def test_build_review_context_fetches_all_diff_pages(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+):
+    """Diffs spanning multiple API pages are all included in the review context."""
+    diffs_page_1 = [
+        {
+            "old_path": "file_a.rb",
+            "new_path": "file_a.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1 +1 @@\n-old\n+new",
+        }
+    ]
+    diffs_page_2 = [
+        {
+            "old_path": "file_b.rb",
+            "new_path": "file_b.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1 +1 @@\n-old\n+new",
+        }
+    ]
+    file_content = {"content": base64.b64encode(b"content").decode("utf-8")}
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200,
+                body=json.dumps(diffs_page_1),
+                headers={"X-Next-Page": "2"},
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_page_2)),
+            GitLabHttpResponse(status_code=200, body=json.dumps({"instructions": []})),
+            GitLabHttpResponse(status_code=200, body=json.dumps(file_content)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert '<file_diff filename="file_a.rb">' in response
+    assert '<file_diff filename="file_b.rb">' in response
+
+
+@pytest.mark.asyncio
 async def test_build_review_context_basic_success(
     gitlab_client_mock,
     metadata,
