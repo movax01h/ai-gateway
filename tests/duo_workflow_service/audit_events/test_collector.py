@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -51,6 +51,57 @@ class TestCapture:
             mock_asyncio.get_running_loop.side_effect = RuntimeError("no loop")
             collector.capture(make_audit_event())
         assert len(collector._buffer) == 1
+
+
+class TestCaptureMetrics:
+    def test_capture_increments_captured_counter(self, collector):
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.collector.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            event = make_audit_event()
+            collector.capture(event)
+
+        mock_metrics.count_audit_events_captured.assert_called_once_with(
+            event_type=event.event_type.value
+        )
+
+    def test_capture_no_loop_increments_auto_flush_skipped_counter(self, mock_client):
+        collector = AuditEventCollector(
+            client=mock_client, buffer_size=1, flush_interval_seconds=1.0
+        )
+        mock_metrics = MagicMock()
+        with (
+            patch(
+                "duo_workflow_service.audit_events.collector.duo_workflow_metrics",
+                mock_metrics,
+            ),
+            patch(
+                "duo_workflow_service.audit_events.collector.asyncio"
+            ) as mock_asyncio,
+        ):
+            mock_asyncio.get_running_loop.side_effect = RuntimeError("no loop")
+            collector.capture(make_audit_event())
+
+        mock_metrics.count_audit_events_auto_flush_skipped.assert_called_once_with()
+        mock_metrics.count_audit_events_dropped.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_capture_no_loop_not_incremented_when_below_buffer_size(
+        self, mock_client
+    ):
+        collector = AuditEventCollector(
+            client=mock_client, buffer_size=5, flush_interval_seconds=1.0
+        )
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.collector.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            collector.capture(make_audit_event())
+
+        mock_metrics.count_audit_events_dropped.assert_not_called()
 
 
 class TestFlush:

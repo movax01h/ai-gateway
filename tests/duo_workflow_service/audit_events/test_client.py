@@ -1,6 +1,6 @@
 import json
 import uuid as uuid_mod
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -269,3 +269,194 @@ class TestFinalBatch:
         result = await client.send_batch(events, is_final=True, total_events_sent=2)
         assert result is True
         http_client.apost.assert_not_called()
+
+
+@patch.object(
+    AuditEventClient, "_is_supported", new_callable=PropertyMock, return_value=True
+)
+class TestSendBatchMetrics:
+    @pytest.mark.asyncio
+    async def test_success_increments_sent_counter_per_event(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.return_value = GitLabHttpResponse(status_code=200, body="")
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client)
+            await client.send_batch(events)
+
+        mock_metrics.count_audit_events_sent.assert_called_once_with(
+            result="success", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_http_error_increments_sent_and_dropped_per_event(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.return_value = GitLabHttpResponse(
+            status_code=400, body="Bad Request"
+        )
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client)
+            await client.send_batch(events)
+
+        mock_metrics.count_audit_events_sent.assert_called_once_with(
+            result="http_error", amount=len(events)
+        )
+        mock_metrics.count_audit_events_dropped.assert_called_once_with(
+            reason="http_error", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_http_retries_exhausted_drops_with_retries_exhausted_reason(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.return_value = GitLabHttpResponse(
+            status_code=500, body="Server Error"
+        )
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client, max_retries=2)
+            await client.send_batch(events)
+
+        mock_metrics.count_audit_events_sent.assert_called_once_with(
+            result="http_error", amount=len(events)
+        )
+        mock_metrics.count_audit_events_dropped.assert_called_once_with(
+            reason="retries_exhausted", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_exception_exhausted_increments_sent_counter_per_event(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.side_effect = ConnectionError("boom")
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client, max_retries=1)
+            await client.send_batch(events)
+
+        mock_metrics.count_audit_events_sent.assert_called_once_with(
+            result="exception", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_retries_exhausted_increments_dropped_counter_per_event(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.side_effect = ConnectionError("boom")
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client, max_retries=2)
+            await client.send_batch(events)
+
+        mock_metrics.count_audit_events_dropped.assert_called_once_with(
+            reason="retries_exhausted", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_observes_batch_size(self, _mock_supported, http_client, events):
+        http_client.apost.return_value = GitLabHttpResponse(status_code=200, body="")
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client)
+            await client.send_batch(events)
+
+        mock_metrics.observe_audit_events_batch_size.assert_called_once_with(
+            len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_observes_payload_bytes_utf8(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.return_value = GitLabHttpResponse(status_code=200, body="")
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client)
+            await client.send_batch(events)
+
+        call_args = mock_metrics.observe_audit_events_payload_bytes.call_args
+        assert call_args is not None
+        observed_bytes = call_args.args[0]
+        assert observed_bytes > 0
+
+    @pytest.mark.asyncio
+    async def test_empty_final_batch_skips_size_and_bytes_observation(
+        self, _mock_supported, http_client
+    ):
+        http_client.apost.return_value = GitLabHttpResponse(status_code=200, body="")
+        mock_metrics = MagicMock()
+        with patch(
+            "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+            mock_metrics,
+        ):
+            client = _make_client(http_client)
+            await client.send_batch([], is_final=True, total_events_sent=0)
+
+        mock_metrics.observe_audit_events_batch_size.assert_not_called()
+        mock_metrics.observe_audit_events_payload_bytes.assert_not_called()
+
+
+class TestSendBatchMetricsUnsupported:
+    @pytest.mark.asyncio
+    async def test_version_unsupported_increments_dropped_counter_per_event(
+        self, http_client, events
+    ):
+        mock_metrics = MagicMock()
+        with (
+            patch(
+                "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+                mock_metrics,
+            ),
+            patch(
+                "duo_workflow_service.audit_events.client.gitlab_version"
+            ) as mock_version,
+        ):
+            mock_version.get.return_value = "17.0.0"
+            client = _make_client(http_client)
+            await client.send_batch(events)
+
+        mock_metrics.count_audit_events_dropped.assert_called_once_with(
+            reason="version_unsupported", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_version_unsupported_no_drop_for_empty_events(self, http_client):
+        mock_metrics = MagicMock()
+        with (
+            patch(
+                "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+                mock_metrics,
+            ),
+            patch(
+                "duo_workflow_service.audit_events.client.gitlab_version"
+            ) as mock_version,
+        ):
+            mock_version.get.return_value = "17.0.0"
+            client = _make_client(http_client)
+            await client.send_batch([])
+
+        mock_metrics.count_audit_events_dropped.assert_not_called()
