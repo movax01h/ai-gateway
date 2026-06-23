@@ -21,6 +21,7 @@ class MonitoringContext(BaseModel):
     prompt_injection_protection_level: PromptInjectionProtectionLevel = (
         PromptInjectionProtectionLevel.LOG_ONLY
     )
+    workflow_no_start_reason: Optional[str] = None
 
     def set_flow_identity(
         self,

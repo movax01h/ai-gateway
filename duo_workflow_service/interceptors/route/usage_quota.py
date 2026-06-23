@@ -14,6 +14,7 @@ from duo_workflow_service.flow_request import workflow_definition_key_from_proto
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
 )
+from duo_workflow_service.tracking import current_monitoring_context
 from lib.context import gitlab_version
 from lib.events import FeatureQualifiedNameStatic, GLReportingEventContext
 from lib.internal_events.context import current_event_context
@@ -84,8 +85,15 @@ def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
         try:
             message = await anext(aiter(request))
         except StopAsyncIteration:
-            grpc_context.set_code(StatusCode.OK)
-            grpc_context.set_details("workflow execution never started")
+            current_monitoring_context.get().workflow_no_start_reason = (
+                "NO_START_REQUEST"
+            )
+            return
+
+        if not message.startRequest.workflowID:
+            current_monitoring_context.get().workflow_no_start_reason = (
+                "EMPTY_START_REQUEST"
+            )
             return
 
         try:
