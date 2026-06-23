@@ -363,6 +363,7 @@ class TestWatchContainer:
     @mock.patch("prometheus_client.Counter.labels")
     @mock.patch("prometheus_client.Histogram.labels")
     @mock.patch("time.perf_counter")
+    @pytest.mark.parametrize("unit_primitive", [GitLabUnitPrimitive.DUO_CHAT])
     @pytest.mark.parametrize(
         "response_metadata_list,expected_stop_reason",
         [
@@ -385,6 +386,7 @@ class TestWatchContainer:
         mock_histograms,
         mock_counters,
         mock_gauges,
+        unit_primitive,
         response_metadata_list,
         expected_stop_reason,
         container,
@@ -405,6 +407,9 @@ class TestWatchContainer:
         assert len(cap_logs) == 1
         assert cap_logs[0]["event"] == "Request to LLM complete"
         assert cap_logs[0]["duration"] == 1
+        assert cap_logs[0]["model_engine"] == "test_engine"
+        assert cap_logs[0]["model_name"] == "test_model"
+        assert cap_logs[0]["unit_primitive"] == unit_primitive
 
         assert mock_gauges.mock_calls == [
             mock.call(model_engine="test_engine", model_name="test_model"),
@@ -412,7 +417,11 @@ class TestWatchContainer:
         ]
 
         expected_call = mock.call(
-            **{**DEFAULT_ARGS, "finish_reason": expected_stop_reason}
+            **{
+                **DEFAULT_ARGS,
+                "unit_primitive": unit_primitive,
+                "finish_reason": expected_stop_reason,
+            }
         )
 
         assert mock_counters.mock_calls == [expected_call, mock.call().inc()]

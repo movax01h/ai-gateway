@@ -296,9 +296,14 @@ class ModelRequestInstrumentator:
                 return
 
             duration = time.perf_counter() - self.start_time
-            logger.info("Request to LLM complete", source=__name__, duration=duration)
-
             detail_labels = self._detail_labels()
+
+            logger.info(
+                "Request to LLM complete",
+                source=__name__,
+                duration=duration,
+                **detail_labels,
+            )
 
             INFERENCE_COUNTER.labels(**detail_labels).inc()
             INFERENCE_DURATION_S.labels(**detail_labels).observe(duration)
