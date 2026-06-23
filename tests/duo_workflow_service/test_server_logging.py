@@ -129,12 +129,18 @@ async def test_execute_workflow_enhanced_logging_with_context(
 
     assert extra_fields["workflow_id"] == "#123"
     assert extra_fields["workflow_definition"] == "software_development"
+    # Canonical field names
+    assert extra_fields["gitlab_instance_id"] == "test-instance-123"
+    assert extra_fields["gitlab_host_name"] == "gitlab.example.com"
+    assert extra_fields["gitlab_realm"] == "saas"
+    assert extra_fields["is_gitlab_team_member"] == "True"
+    assert extra_fields["gitlab_global_user_id"] == "user-456"
+    assert extra_fields["correlation_id"] == "corr-789"
+    # Deprecated aliases kept for dashboard migration
     assert extra_fields["instance_id"] == "test-instance-123"
     assert extra_fields["host_name"] == "gitlab.example.com"
     assert extra_fields["realm"] == "saas"
-    assert extra_fields["is_gitlab_team_member"] == "True"
     assert extra_fields["global_user_id"] == "user-456"
-    assert extra_fields["correlation_id"] == "corr-789"
 
 
 @pytest.mark.asyncio
@@ -224,10 +230,14 @@ async def test_execute_workflow_enhanced_logging_without_context(
     assert extra_fields["workflow_id"] == "#123"
     assert extra_fields["workflow_definition"] == "software_development"
 
-    # Verify event context fields are not present
+    # Verify event context fields are not present (neither canonical nor deprecated aliases)
+    assert "gitlab_instance_id" not in extra_fields
+    assert "gitlab_host_name" not in extra_fields
+    assert "gitlab_realm" not in extra_fields
+    assert "is_gitlab_team_member" not in extra_fields
+    assert "gitlab_global_user_id" not in extra_fields
+    assert "correlation_id" not in extra_fields
     assert "instance_id" not in extra_fields
     assert "host_name" not in extra_fields
     assert "realm" not in extra_fields
-    assert "is_gitlab_team_member" not in extra_fields
     assert "global_user_id" not in extra_fields
-    assert "correlation_id" not in extra_fields

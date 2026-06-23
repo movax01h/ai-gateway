@@ -96,6 +96,25 @@ async def test_gitlab_realm_header(interceptor_setup):
 
 
 @pytest.mark.asyncio
+async def test_gitlab_instance_id_header(interceptor_setup):
+    """Test that GitLab instance ID header is properly set."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-instance-id", "test-instance-123"),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.gitlab_instance_id"
+    ) as mock_gitlab_instance_id:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_gitlab_instance_id.set.assert_called_once_with("test-instance-123")
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "header_name,header_value,expected",
     [

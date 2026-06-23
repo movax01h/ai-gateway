@@ -9,12 +9,14 @@ from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_
 
 from ai_gateway import Config
 from duo_workflow_service.interceptors import (
+    X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_IS_A_GITLAB_MEMBER,
     X_GITLAB_IS_GITLAB_MEMBER,
 )
 from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
 from lib.context import (
     client_type,
+    gitlab_instance_id,
     gitlab_realm,
     gitlab_version,
     is_gitlab_team_member,
@@ -83,6 +85,10 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         # GitLab realm
         if value := metadata.get(X_GITLAB_REALM_HEADER.lower()):
             gitlab_realm.set(value)
+
+        # GitLab instance ID
+        if value := metadata.get(X_GITLAB_INSTANCE_ID_HEADER.lower()):
+            gitlab_instance_id.set(value)
 
         # GitLab version
         if value := metadata.get(X_GITLAB_VERSION_HEADER.lower()):
