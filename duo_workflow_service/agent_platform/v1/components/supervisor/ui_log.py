@@ -17,3 +17,4 @@ class UILogEventsSupervisor(BaseUILogEvents):
     ON_DELEGATION = auto()
     ON_DELEGATION_RETURNS = auto()
     ON_DELEGATION_ERROR = auto()
+    ON_TOOL_APPROVAL_REQUEST = auto()
