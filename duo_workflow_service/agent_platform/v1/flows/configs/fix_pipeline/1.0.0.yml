@@ -329,12 +329,14 @@ flow:
   entry_point: "fix_pipeline_context"
   inputs:
     - category: merge_request
+      version_constraint: "^1.0.0"
       input_schema:
         url:
           type: string
           format: uri
           description: The URL for the GitLab Merge Request
     - category: pipeline
+      version_constraint: "^1.0.0"
       input_schema:
         source_branch:
           type: string
@@ -343,6 +345,7 @@ flow:
           description: The pipeline source (e.g. merge_request_event, push)
           optional: true
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string

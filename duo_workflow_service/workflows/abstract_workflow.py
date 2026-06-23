@@ -515,12 +515,17 @@ class AbstractWorkflow(ABC):
                 )
             ]
 
-        assert self.checkpoint_notifier is not None
-        await self.checkpoint_notifier.send_event(
-            type="values",
-            state={"status": status, "ui_chat_log": ui_chat_log},
-            stream=self._stream,
-        )
+        if self.checkpoint_notifier:
+            await self.checkpoint_notifier.send_event(
+                type="values",
+                state={"status": status, "ui_chat_log": ui_chat_log},
+                stream=self._stream,
+            )
+        else:
+            self.log.warning(
+                "checkpoint_notifier is None; error status event not sent to client",
+                workflow_id=self._workflow_id,
+            )
 
         raise TraceableException(e)
 

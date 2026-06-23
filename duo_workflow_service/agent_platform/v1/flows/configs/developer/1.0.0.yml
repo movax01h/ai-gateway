@@ -98,6 +98,7 @@ flow:
   entry_point: "git_setup"
   inputs:
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string

@@ -32,7 +32,10 @@ from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.components import tools_registry
-from duo_workflow_service.errors.typing import InvalidWorkflowIdException
+from duo_workflow_service.errors.typing import (
+    EnvelopeVersionMismatchException,
+    InvalidWorkflowIdException,
+)
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import normalize_flow_request
 from duo_workflow_service.gitlab.connection_pool import connection_pool
@@ -404,6 +407,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ):
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(f"Invalid workflow ID: {workflow.last_error}")
+            elif workflow.last_error and isinstance(
+                getattr(workflow.last_error, "__cause__", None),
+                EnvelopeVersionMismatchException,
+            ):
+                context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                context.set_details(str(workflow.last_error.__cause__))
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(

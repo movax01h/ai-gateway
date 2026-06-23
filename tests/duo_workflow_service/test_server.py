@@ -30,8 +30,14 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service import server as server_module
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from duo_workflow_service.errors.typing import InvalidWorkflowIdException
+from duo_workflow_service.errors.typing import (
+    EnvelopeVersionMismatchException,
+    InvalidWorkflowIdException,
+)
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
@@ -862,6 +868,22 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
         mock_context.set_code.assert_called_once_with(grpc.StatusCode.CANCELLED)
 
 
+def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentException:
+    """Build a NotifiableAgentException chained from EnvelopeVersionMismatchException.
+
+    This mirrors the actual raise path in base.py: the server checks
+    ``workflow.last_error.__cause__`` for EnvelopeVersionMismatchException, not
+    ``workflow.last_error`` itself.
+    """
+    cause = EnvelopeVersionMismatchException(detail)
+    exc = NotifiableAgentException(
+        "Your GitLab instance sent additional context in an incompatible version.",
+        internal_detail=detail,
+    )
+    exc.__cause__ = cause
+    return exc
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "workflow_error,successful_execution,stop_reason,expected_status,expected_detail_prefix",
@@ -937,6 +959,16 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
             None,
             grpc.StatusCode.INVALID_ARGUMENT,
             "Invalid workflow ID:",
+        ),
+        (
+            _make_notifiable_with_envelope_cause(
+                "Envelope 'agent_platform_standard_context' version '2.0.0' "
+                "does not satisfy the required constraint '^1.0.0'."
+            ),
+            False,
+            None,
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "Envelope 'agent_platform_standard_context' version '2.0.0'",
         ),
     ],
 )

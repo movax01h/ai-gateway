@@ -69,6 +69,7 @@ class FlowConfigInputSchema(BaseModel):
 class FlowConfigInput(BaseModel):
     category: str
     input_schema: dict[str, FlowConfigInputSchema]
+    version_constraint: Optional[str] = None
 
 
 class FlowConfigMetadata(BaseModel):
@@ -121,6 +122,17 @@ class BaseFlowConfig(BaseModel):
             json_schemas_by_category[item.category] = jsonschema
 
         return json_schemas_by_category
+
+    def version_constraints_by_category(self) -> dict[str, Optional[str]]:
+        """Return a mapping of input category to its declared version constraint.
+
+        Returns:
+            A dict mapping each input category to its ``version_constraint`` string
+            (e.g. ``"^1.0.0"``), or ``None`` when no constraint was declared.
+        """
+        if not self.flow.inputs:
+            return {}
+        return {item.category: item.version_constraint for item in self.flow.inputs}
 
     @classmethod
     def from_yaml_config(cls, flow_id: str, flow_version: Optional[str] = None) -> Self:

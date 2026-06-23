@@ -8,6 +8,7 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -17,7 +18,12 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     EndComponent,
 )
-from duo_workflow_service.agent_platform.v1.flows.base import Flow, UserDecision
+from duo_workflow_service.agent_platform.v1.flows.base import (
+    _ENVELOPE_DEFAULT_CONSTRAINT,
+    _ENVELOPE_DEFAULT_VERSION,
+    Flow,
+    UserDecision,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     FlowConfigInput,
@@ -31,6 +37,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import EnvelopeVersionMismatchException
 from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
@@ -40,6 +47,7 @@ from lib.internal_events.context import (
     merge_request_url_context,
     pipeline_source_context,
 )
+from lib.version import resolve_version
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
@@ -1260,6 +1268,488 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             wrapped.ui_message
             == "The workflow reached its maximum step limit and could not complete. "
             "Please try again with a more focused goal, or break the task into smaller steps."
+        )
+
+    # ---------------------------------------------------------------------------
+    # Envelope version validation tests
+    # ---------------------------------------------------------------------------
+
+    @pytest.fixture(name="versioned_flow_config")
+    def versioned_flow_config_fixture(self):
+        """Flow config with a version_constraint on agent_platform_standard_context."""
+        return FlowConfig(
+            flow=FlowConfigMetadata(
+                entry_point="agent",
+                inputs=[
+                    FlowConfigInput(
+                        category="agent_platform_standard_context",
+                        version_constraint="^1.0.0",
+                        input_schema={
+                            "primary_branch": {"type": "string"},
+                        },
+                    ),
+                ],
+            ),
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "toolset": ["read_file"],
+                },
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+    @pytest.fixture(name="versioned_flow_instance")
+    def versioned_flow_instance_fixture(
+        self,
+        mock_flow_metadata,
+        user,
+        versioned_flow_config,
+        mock_checkpointer,  # pylint: disable=unused-argument
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_state_graph,  # pylint: disable=unused-argument
+        flow_type: GLReportingEventContext,
+    ):
+        """Flow instance using the versioned config."""
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-versioned-workflow",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=versioned_flow_config,
+            )
+            yield flow
+
+    @pytest.fixture(name="higher_constraint_flow_config")
+    def higher_constraint_flow_config_fixture(self):
+        """Flow config with a ^1.1.0 constraint — implicit 1.0.0 envelopes must fail."""
+        return FlowConfig(
+            flow=FlowConfigMetadata(
+                entry_point="agent",
+                inputs=[
+                    FlowConfigInput(
+                        category="agent_platform_standard_context",
+                        version_constraint="^1.1.0",
+                        input_schema={
+                            "primary_branch": {"type": "string"},
+                        },
+                    ),
+                ],
+            ),
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "toolset": ["read_file"],
+                },
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+    @pytest.fixture(name="higher_constraint_flow_instance")
+    def higher_constraint_flow_instance_fixture(
+        self,
+        mock_flow_metadata,
+        user,
+        higher_constraint_flow_config,
+        mock_checkpointer,  # pylint: disable=unused-argument
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_state_graph,  # pylint: disable=unused-argument
+        flow_type: GLReportingEventContext,
+    ):
+        """Flow instance with ^1.1.0 version constraint."""
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-higher-constraint-workflow",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=higher_constraint_flow_config,
+            )
+            yield flow
+
+    def test_process_additional_context_version_satisfied(
+        self, versioned_flow_instance
+    ):
+        """Envelope with a version that satisfies the constraint is accepted."""
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "1.1.0"},
+            )
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_process_additional_context_version_not_satisfied_single_envelope(
+        self, versioned_flow_instance
+    ):
+        """A single envelope whose version does NOT satisfy the constraint raises NotifiableAgentException.
+
+        The user-facing ``NotifiableAgentException`` carries a safe ``ui_message`` and
+        chains an ``EnvelopeVersionMismatchException`` as its ``__cause__`` so the server
+        can still map it to a ``FAILED_PRECONDITION`` gRPC status.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "2.0.0"},
+            )
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            versioned_flow_instance._process_additional_context(additional_context)
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+        assert "2.0.0" in str(exc_info.value.__cause__)
+
+    def test_process_additional_context_no_version_field_treated_as_1_0_0(
+        self, versioned_flow_instance
+    ):
+        """Envelope without a version field is treated as 1.0.0 (backwards compat).
+
+        CONTRACT — DO NOT BREAK. Older GitLab instances and Custom Flows send envelopes
+        with no ``version`` field. We must keep treating those as ``1.0.0`` so existing
+        senders continue to work. Changing this behaviour is a backward-incompatible
+        break for any client that predates envelope versioning.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+            )
+        ]
+        # ^1.0.0 constraint should accept implicit 1.0.0
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_process_additional_context_no_constraint_uses_implicit_constraint(
+        self, flow_instance
+    ):
+        """When no version_constraint is declared, implicit ^1.0.0 constraint is used.
+
+        CONTRACT — DO NOT BREAK. Existing Custom Flows were authored before
+        ``version_constraint`` existed and declare none. We must keep applying the
+        implicit ``^1.0.0`` constraint for those flows so they continue to accept
+        ``1.x.x`` envelopes. Changing this default is a backward-incompatible break for
+        every flow that predates envelope versioning.
+        """
+        # flow_instance uses sample_flow_config which has no version_constraint
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+            )
+        ]
+        # No version field → implicit 1.0.0, satisfies ^1.0.0, should not raise.
+        result = flow_instance._process_additional_context(additional_context)
+        assert result["file"]["contents"] == "data"
+
+    def test_process_additional_context_incompatible_envelope_skipped_when_compatible_present(
+        self, versioned_flow_instance
+    ):
+        """When multiple envelopes are present, the highest compatible version wins.
+
+        With constraint ``^1.0.0``, version ``2.0.0`` is incompatible and ``1.1.0``
+        is compatible.  ``resolve_version`` selects ``1.1.0`` as the best match, so
+        the result comes from the ``1.1.0`` envelope (``primary_branch == "main"``).
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "feature"}',
+                metadata={"version": "2.0.0"},
+            ),
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "1.1.0"},
+            ),
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_process_additional_context_all_envelopes_incompatible_raises(
+        self, versioned_flow_instance
+    ):
+        """When all envelopes are incompatible with the constraint, NotifiableAgentException is raised."""
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "2.0.0"},
+            ),
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "3.0.0"},
+            ),
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            versioned_flow_instance._process_additional_context(additional_context)
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+
+    def test_process_additional_context_highest_compatible_version_selected(
+        self, versioned_flow_instance
+    ):
+        """When multiple envelopes all satisfy the constraint, the highest version wins.
+
+        Both ``1.0.0`` and ``1.1.0`` satisfy ``^1.0.0``.  ``resolve_version`` returns
+        ``1.1.0`` as the best match, so the result comes from the ``1.1.0`` envelope.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "old"}',
+                metadata={"version": "1.0.0"},
+            ),
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "new"}',
+                metadata={"version": "1.1.0"},
+            ),
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "new"
+
+    def test_process_additional_context_implicit_version_fails_higher_constraint(
+        self, higher_constraint_flow_instance
+    ):
+        """An envelope without a version field is treated as 1.0.0, which fails ^1.1.0.
+
+        The implicit baseline "1.0.0" must appear in the ``__cause__`` detail so
+        operators can diagnose the mismatch without inspecting the envelope payload.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+            )
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            higher_constraint_flow_instance._process_additional_context(
+                additional_context
+            )
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+        assert "1.0.0" in str(exc_info.value.__cause__)
+
+    @pytest.mark.parametrize(
+        "bad_version",
+        ["not_a_version", "abc.def.ghi", "!!invalid!!"],
+    )
+    def test_process_additional_context_malformed_envelope_version_raises(
+        self, versioned_flow_instance, bad_version
+    ):
+        """A malformed string version field is passed to resolve_version which skips it.
+
+        With no parseable candidates, ``resolve_version`` raises ``ValueError`` and
+        the method surfaces a ``NotifiableAgentException`` chained from
+        ``EnvelopeVersionMismatchException``.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": bad_version},
+            )
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            versioned_flow_instance._process_additional_context(additional_context)
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+
+    def test_process_additional_context_non_string_version_treated_as_implicit(
+        self, versioned_flow_instance
+    ):
+        """A non-string JSON version field (e.g. a number) falls back to implicit 1.0.0.
+
+        ``str(1.0)`` produces ``"1.0"`` which semver cannot parse; the fix treats
+        non-string values as absent so they default to ``"1.0.0"`` instead of
+        triggering a spurious version-mismatch error.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                # Integer in metadata — not a string version; should be treated as 1.0.0
+                metadata={"version": 1},
+            )
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_resolve_envelope_content_raises_when_no_constraint_and_empty_content(
+        self, flow_instance
+    ):
+        """Envelope with None content raises ValueError in the unconstrained branch."""
+        additional_context = [AdditionalContext(category="file", content=None)]
+        with pytest.raises(
+            ValueError, match="content must be specified for input 'file'"
+        ):
+            flow_instance._process_additional_context(additional_context)
+
+    def test_resolve_envelope_content_raises_when_constraint_and_empty_content(
+        self, versioned_flow_instance
+    ):
+        """Envelope with None content raises ValueError in the versioned branch."""
+        additional_context = [
+            AdditionalContext(category="agent_platform_standard_context", content=None)
+        ]
+        with pytest.raises(
+            ValueError,
+            match="content must be specified for input 'agent_platform_standard_context'",
+        ):
+            versioned_flow_instance._process_additional_context(additional_context)
+
+    # ---------------------------------------------------------------------------
+    # Default-fallback consistency contract
+    # ---------------------------------------------------------------------------
+
+    def test_default_version_satisfies_default_constraint(self):
+        """The default version must satisfy the default constraint.
+
+        CONTRACT — DO NOT BREAK. Unversioned envelopes fall back to
+        ``_ENVELOPE_DEFAULT_VERSION`` and flows without a declared constraint fall back
+        to ``_ENVELOPE_DEFAULT_CONSTRAINT``. Both defaults are applied independently, so
+        if someone bumps the default version (e.g. to ``2.0.0``) without also updating
+        the default constraint, every older Custom Flow relying on the implicit
+        constraint would suddenly reject the implicit envelope version. This test guards
+        that invariant: the default version must always be resolvable against the default
+        constraint.
+        """
+        resolved = resolve_version(
+            [_ENVELOPE_DEFAULT_VERSION], _ENVELOPE_DEFAULT_CONSTRAINT
+        )
+        assert resolved == _ENVELOPE_DEFAULT_VERSION
+
+    # ---------------------------------------------------------------------------
+    # Warning-log tests for default fallbacks
+    # ---------------------------------------------------------------------------
+
+    def test_warning_emitted_when_default_constraint_used(self, flow_instance):
+        """A warning is logged when no version_constraint is declared for an input category.
+
+        ``flow_instance`` uses ``sample_flow_config`` which has no ``version_constraint``
+        on its inputs, so ``_ENVELOPE_DEFAULT_CONSTRAINT`` is substituted and a warning
+        must be emitted.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+                metadata={"version": "1.0.0"},
+            )
+        ]
+        with capture_logs() as cap_logs:
+            flow_instance._process_additional_context(additional_context)
+
+        warning_events = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "version_constraint" in log.get("event", "")
+        ]
+        assert warning_events, (
+            f"Expected a warning about missing version_constraint, got: {cap_logs}"
+        )
+        assert warning_events[0]["category"] == "file"
+        assert "default_constraint" in warning_events[0]
+
+    def test_no_warning_when_explicit_constraint_provided(
+        self, versioned_flow_instance
+    ):
+        """No default-constraint warning is emitted when version_constraint is explicitly set.
+
+        ``versioned_flow_instance`` uses a config with ``version_constraint="^1.0.0"``,
+        so the fallback path must NOT be taken.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "1.0.0"},
+            )
+        ]
+        with capture_logs() as cap_logs:
+            versioned_flow_instance._process_additional_context(additional_context)
+
+        constraint_warnings = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "version_constraint" in log.get("event", "")
+        ]
+        assert constraint_warnings == [], (
+            f"Unexpected default-constraint warning(s): {constraint_warnings}"
+        )
+
+    def test_warning_emitted_when_default_version_used(self, flow_instance):
+        """A warning is logged when an envelope payload does not declare a version field.
+
+        The envelope has no ``metadata`` (and therefore no ``version``), so
+        ``_ENVELOPE_DEFAULT_VERSION`` is substituted and a warning must be emitted.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+                # No metadata / version field → default version substituted
+            )
+        ]
+        with capture_logs() as cap_logs:
+            flow_instance._process_additional_context(additional_context)
+
+        version_warnings = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "default version" in log.get("event", "")
+        ]
+        assert version_warnings, (
+            f"Expected a warning about missing envelope version, got: {cap_logs}"
+        )
+        assert version_warnings[0]["category"] == "file"
+        assert "default_version" in version_warnings[0]
+
+    def test_no_warning_when_explicit_version_provided(self, flow_instance):
+        """No default-version warning is emitted when the envelope declares an explicit version.
+
+        The envelope carries ``metadata={"version": "1.0.0"}``, so the fallback
+        path must NOT be taken.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+                metadata={"version": "1.0.0"},
+            )
+        ]
+        with capture_logs() as cap_logs:
+            flow_instance._process_additional_context(additional_context)
+
+        version_warnings = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "default version" in log.get("event", "")
+        ]
+        assert version_warnings == [], (
+            f"Unexpected default-version warning(s): {version_warnings}"
         )
 
 
