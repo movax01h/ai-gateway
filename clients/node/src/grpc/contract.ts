@@ -24,69 +24,116 @@ import { Struct } from "./google/protobuf/struct";
 
 export const protobufPackage = "";
 
+/** ClientEvent is a message sent from the client to the server during a workflow session. */
 export interface ClientEvent {
-  startRequest?: StartWorkflowRequest | undefined;
-  actionResponse?: ActionResponse | undefined;
-  heartbeat?: HeartbeatRequest | undefined;
+  /** startRequest initiates a new workflow execution. */
+  startRequest?:
+    | StartWorkflowRequest
+    | undefined;
+  /** actionResponse returns the result of an action previously requested by the server. */
+  actionResponse?:
+    | ActionResponse
+    | undefined;
+  /** heartbeat signals that the client connection is still alive. */
+  heartbeat?:
+    | HeartbeatRequest
+    | undefined;
+  /** stopWorkflow requests graceful termination of the running workflow. */
   stopWorkflow?: StopWorkflowRequest | undefined;
 }
 
+/** StartWorkflowRequest carries the parameters needed to start a new workflow execution. */
 export interface StartWorkflowRequest {
+  /** clientVersion identifies the version of the client initiating the workflow. */
   clientVersion: string;
+  /** workflowID is the unique identifier for this workflow run. */
   workflowID: string;
   /**
-   * Use flowConfigId + flowConfigSchemaVersion + flowVersion instead
+   * workflowDefinition was the original single-string identifier for the workflow type (e.g. "chat",
+   * "software_development"). It has been superseded by the three-field tuple flowConfigId +
+   * flowConfigSchemaVersion + flowVersion, which provides explicit versioning and schema validation.
+   * Deprecated: populate flowConfigId, flowConfigSchemaVersion, and flowVersion instead.
    *
    * @deprecated
    */
   workflowDefinition: string;
+  /** goal is the natural-language objective that the workflow should achieve. */
   goal: string;
+  /** workflowMetadata carries arbitrary metadata about the workflow, encoded as a JSON string. */
   workflowMetadata: string;
+  /** clientCapabilities lists the executor capabilities supported by this client. */
   clientCapabilities: string[];
+  /** mcpTools lists the MCP tools available to the workflow from this client. */
   mcpTools: McpTool[];
+  /** additional_context provides supplementary context items (e.g. open files, snippets) for the workflow. */
   additional_context: AdditionalContext[];
-  approval?: Approval | undefined;
+  /** approval carries the user's approval or rejection decision for a pending action. */
+  approval?:
+    | Approval
+    | undefined;
+  /** flowConfig is an optional free-form configuration struct passed to the flow at startup. */
   flowConfig?:
     | { [key: string]: any }
     | undefined;
-  /** Platform version: "v1" or "experimental". Required with flowConfigId. */
-  flowConfigSchemaVersion?: string | undefined;
+  /** flowConfigSchemaVersion identifies the schema version for flowConfig (e.g. "v1" or "experimental"). Required with flowConfigId. */
+  flowConfigSchemaVersion?:
+    | string
+    | undefined;
+  /** preapproved_tools lists tool names that the user has pre-approved for automatic execution. */
   preapproved_tools: string[];
-  /** Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion. */
+  /** flowConfigId is the name of the flow to run, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion. */
   flowConfigId?:
     | string
     | undefined;
-  /** Semver flow version, e.g. "1.0.0". Required when flowConfigId is set. */
+  /** flowVersion is the semver version of the flow, e.g. "1.0.0". Required when flowConfigId is set. */
   flowVersion?:
     | string
     | undefined;
-  /** Whether to enable UI response streaming for this session. */
+  /** streaming enables UI response streaming for this session when set to true. */
   streaming?: boolean | undefined;
 }
 
+/** ActionResponse carries the executor's result for a previously requested action. */
 export interface ActionResponse {
+  /** requestID matches the Action.requestID this response corresponds to. */
   requestID: string;
-  plainTextResponse?: PlainTextResponse | undefined;
+  /** plainTextResponse carries a plain-text execution result. */
+  plainTextResponse?:
+    | PlainTextResponse
+    | undefined;
+  /** httpResponse carries the result of an HTTP request action. */
   httpResponse?: HttpResponse | undefined;
 }
 
+/** HeartbeatRequest is sent periodically by the client to keep the session alive. */
 export interface HeartbeatRequest {
+  /** timestamp is the Unix epoch milliseconds at which the heartbeat was sent. */
   timestamp: number;
 }
 
+/** StopWorkflowRequest asks the server to terminate the current workflow run. */
 export interface StopWorkflowRequest {
+  /** reason is a human-readable explanation of why the workflow is being stopped. */
   reason: string;
 }
 
+/** PlainTextResponse holds a plain-text result and an optional error from an executor action. */
 export interface PlainTextResponse {
+  /** response is the plain-text output produced by the executed action. */
   response: string;
+  /** error describes any error that occurred during execution; empty on success. */
   error: string;
 }
 
+/** HttpResponse holds the result of an HTTP request action performed by the executor. */
 export interface HttpResponse {
+  /** headers contains the HTTP response headers returned by the server. */
   headers: { [key: string]: string };
+  /** statusCode is the HTTP status code of the response. */
   statusCode: number;
+  /** body is the raw response body. */
   body: string;
+  /** error describes any transport or execution error; empty on success. */
   error: string;
 }
 
@@ -95,119 +142,232 @@ export interface HttpResponse_HeadersEntry {
   value: string;
 }
 
+/** Action is a server-initiated request for the executor to perform a specific operation. */
 export interface Action {
+  /** requestID is a unique identifier used to correlate this action with its ActionResponse. */
   requestID: string;
-  runCommand?: RunCommandAction | undefined;
-  runHTTPRequest?: RunHTTPRequest | undefined;
-  runReadFile?: ReadFile | undefined;
-  runWriteFile?: WriteFile | undefined;
-  runGitCommand?: RunGitCommand | undefined;
-  runEditFile?: EditFile | undefined;
-  newCheckpoint?: NewCheckpoint | undefined;
-  listDirectory?: ListDirectory | undefined;
-  grep?: Grep | undefined;
-  findFiles?: FindFiles | undefined;
-  runMCPTool?: RunMCPTool | undefined;
-  mkdir?: Mkdir | undefined;
-  runReadFiles?: ReadFiles | undefined;
-  runShellCommand?: RunShellCommand | undefined;
+  /** runCommand requests execution of a program with arguments. */
+  runCommand?:
+    | RunCommandAction
+    | undefined;
+  /** runHTTPRequest requests an outbound HTTP call. */
+  runHTTPRequest?:
+    | RunHTTPRequest
+    | undefined;
+  /** runReadFile requests reading the contents of a file. */
+  runReadFile?:
+    | ReadFile
+    | undefined;
+  /** runWriteFile requests writing content to a file. */
+  runWriteFile?:
+    | WriteFile
+    | undefined;
+  /** runGitCommand requests execution of a Git command. */
+  runGitCommand?:
+    | RunGitCommand
+    | undefined;
+  /** runEditFile requests an in-place string replacement within a file. */
+  runEditFile?:
+    | EditFile
+    | undefined;
+  /** newCheckpoint requests the client to save the current workflow state. */
+  newCheckpoint?:
+    | NewCheckpoint
+    | undefined;
+  /** listDirectory requests a listing of directory contents. */
+  listDirectory?:
+    | ListDirectory
+    | undefined;
+  /** grep requests a pattern search across a directory tree. */
+  grep?:
+    | Grep
+    | undefined;
+  /** findFiles requests a search for files matching a name pattern. */
+  findFiles?:
+    | FindFiles
+    | undefined;
+  /** runMCPTool requests invocation of an MCP tool by name. */
+  runMCPTool?:
+    | RunMCPTool
+    | undefined;
+  /** mkdir requests creation of a directory at the specified path. */
+  mkdir?:
+    | Mkdir
+    | undefined;
+  /** runReadFiles requests reading the contents of multiple files. */
+  runReadFiles?:
+    | ReadFiles
+    | undefined;
+  /** runShellCommand requests execution of a raw shell command string. */
+  runShellCommand?:
+    | RunShellCommand
+    | undefined;
+  /** trackLlmCallForSelfHosted asks the client to record an LLM call for self-hosted billing. */
   trackLlmCallForSelfHosted?: TrackLlmCallForSelfHosted | undefined;
 }
 
+/**
+ * TrackLlmCallForSelfHosted is sent by the self-hosted DWS to Workhorse before each LLM call,
+ * as part of the self-hosted billing bridge. Workhorse forwards the event to Cloud DWS, which
+ * records a billing entry and returns an allow/deny acknowledgment. The LLM call must not
+ * proceed until a successful ActionResponse is received. See TrackSelfHostedExecuteWorkflow.
+ */
 export interface TrackLlmCallForSelfHosted {
+  /** workflowID identifies the workflow that initiated the LLM call. */
   workflowID: string;
+  /** featureQualifiedName is the fully-qualified name of the AI feature that made the LLM call. */
   featureQualifiedName: string;
+  /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
 }
 
+/** RunShellCommand requests execution of a raw shell command string. */
 export interface RunShellCommand {
+  /** command is the shell command string to execute. */
   command: string;
+  /** timeout is the maximum execution time in milliseconds; absent means no limit. */
   timeout?: number | undefined;
 }
 
+/** RunCommandAction requests execution of a program with explicit arguments and flags. */
 export interface RunCommandAction {
+  /** program is the executable to run. */
   program: string;
+  /** arguments is the list of positional arguments passed to the program. */
   arguments: string[];
+  /** flags is the list of option flags passed to the program. */
   flags: string[];
+  /** timeout is the maximum execution time in milliseconds; absent means no limit. */
   timeout?: number | undefined;
 }
 
+/** ReadFile requests reading the contents of a single file from the executor's filesystem. */
 export interface ReadFile {
+  /** filepath is the absolute or relative path of the file to read. */
   filepath: string;
-  limit?: number | undefined;
+  /** limit is the maximum number of lines to return; absent means read the entire file. */
+  limit?:
+    | number
+    | undefined;
+  /** offset is the line number (1-indexed) at which reading should begin; absent means start from the beginning. */
   offset?: number | undefined;
 }
 
+/** ReadFiles requests reading the contents of multiple files in a single operation. */
 export interface ReadFiles {
+  /** filepaths is the list of file paths to read. */
   filepaths: string[];
 }
 
+/** WriteFile requests writing content to a file, creating or overwriting it. */
 export interface WriteFile {
+  /** filepath is the path of the file to write. */
   filepath: string;
+  /** contents is the data to write to the file. */
   contents: string;
 }
 
+/** EditFile requests an in-place string replacement within a file. */
 export interface EditFile {
+  /** filepath is the path of the file to edit. */
   filepath: string;
+  /** oldString is the exact string to search for and replace. */
   oldString: string;
+  /** newString is the replacement text. */
   newString: string;
 }
 
+/** RunHTTPRequest requests the executor to make an outbound HTTP call. */
 export interface RunHTTPRequest {
+  /** method is the HTTP method to use (e.g. "GET", "POST"). */
   method: string;
+  /** path is the URL path (and optional query string) for the request. */
   path: string;
+  /** body is the optional request body; absent for methods that carry no payload. */
   body?: string | undefined;
 }
 
+/** RunGitCommand requests execution of a Git command against a specific repository. */
 export interface RunGitCommand {
+  /** command is the Git sub-command to run (e.g. "status", "log"). */
   command: string;
-  arguments?: string | undefined;
+  /** arguments is an optional string of additional arguments for the Git command. */
+  arguments?:
+    | string
+    | undefined;
+  /** repository_url is the URL of the repository on which to run the command. */
   repository_url: string;
 }
 
+/** GenerateTokenRequest initiates a token generation request for a workflow session. */
 export interface GenerateTokenRequest {
+  /** workflowDefinition optionally specifies the workflow definition for which the token is issued. */
   workflowDefinition?: string | undefined;
 }
 
+/** GenerateTokenResponse returns the generated token and its expiry information. */
 export interface GenerateTokenResponse {
+  /** token is the generated authentication token. */
   token: string;
+  /** expiresAt is the Unix timestamp (seconds) at which the token expires. */
   expiresAt: number;
+  /** server_capabilities lists the capabilities advertised by the server for this session. */
   server_capabilities: string[];
 }
 
-/** Intentionally empty */
+/** ListToolsRequest is an empty request to retrieve the available tool definitions. */
 export interface ListToolsRequest {
 }
 
+/** ListToolsResponse returns the available tools and an optional evaluation dataset. */
 export interface ListToolsResponse {
+  /** tools is the list of available tool definitions as generic structs. */
   tools: { [key: string]: any }[];
+  /** eval_dataset is an optional dataset used for evaluating tool usage in testing. */
   eval_dataset: { [key: string]: any }[];
 }
 
+/** ListFlowsRequest carries optional filters for querying available flow configurations. */
 export interface ListFlowsRequest {
+  /** filters optionally narrows the returned flows by identifier, environment, or version. */
   filters?: ListFlowsRequestFilter | undefined;
 }
 
+/** ListFlowsRequestFilter specifies criteria for filtering the list of flows. */
 export interface ListFlowsRequestFilter {
+  /** flow_identifier filters flows by their unique identifier strings. */
   flow_identifier: string[];
+  /** environment filters flows to those available in the specified deployment environments. */
   environment: string[];
+  /** version filters flows to those matching the specified version strings. */
   version: string[];
 }
 
+/** ListFlowsResponse returns the matching flow configurations. */
 export interface ListFlowsResponse {
+  /** configs is the list of flow configuration payloads as generic structs. */
   configs: { [key: string]: any }[];
 }
 
+/** TokenBreakdown reports token usage statistics for a single agent context window. */
 export interface TokenBreakdown {
+  /** total_tokens is the number of tokens consumed in the current context. */
   total_tokens: number;
+  /** max_tokens is the maximum number of tokens allowed in the context window. */
   max_tokens: number;
 }
 
+/** NewCheckpoint captures a snapshot of workflow state at a specific point in execution. */
 export interface NewCheckpoint {
+  /** status is the current high-level status of the workflow (e.g. "running", "completed"). */
   status: string;
+  /** checkpoint is a serialized representation of the current workflow state. */
   checkpoint: string;
+  /** goal is the natural-language objective that the workflow is working toward. */
   goal: string;
+  /** errors lists any non-fatal errors encountered since the last checkpoint. */
   errors: string[];
+  /** agent_context_usage maps each agent name to its current token usage breakdown. */
   agent_context_usage: { [key: string]: TokenBreakdown };
 }
 
@@ -216,104 +376,199 @@ export interface NewCheckpoint_AgentContextUsageEntry {
   value: TokenBreakdown | undefined;
 }
 
+/** ListDirectory requests a listing of entries in a directory. */
 export interface ListDirectory {
+  /** directory is the path of the directory whose contents should be listed. */
   directory: string;
 }
 
+/** Grep requests a pattern search across files within a directory tree. */
 export interface Grep {
+  /** search_directory is the root directory in which to search. */
   search_directory: string;
+  /** pattern is the regular expression or literal string to search for. */
   pattern: string;
+  /** case_insensitive indicates whether the pattern match should ignore letter case. */
   case_insensitive: boolean;
 }
 
+/** FindFiles requests a search for files whose names match a given pattern. */
 export interface FindFiles {
+  /** name_pattern is the glob or wildcard pattern used to match file names. */
   name_pattern: string;
 }
 
+/** Icon represents a single icon image with its URL and optional display metadata. */
 export interface Icon {
+  /** url is the location of the icon image. */
   url: string;
-  mime_type?: string | undefined;
+  /** mime_type is the MIME type of the icon image (e.g. "image/png"). */
+  mime_type?:
+    | string
+    | undefined;
+  /** sizes lists the available size descriptors for the icon (e.g. "32x32"). */
   sizes: string[];
+  /** theme optionally specifies the visual theme this icon is intended for (e.g. "dark", "light"). */
   theme?: string | undefined;
 }
 
+/** ToolAnnotations carries optional hints describing a tool's behavior and safety characteristics. */
 export interface ToolAnnotations {
-  title?: string | undefined;
-  read_only_hint?: boolean | undefined;
-  destructive_hint?: boolean | undefined;
-  idempotent_hint?: boolean | undefined;
+  /** title is a human-readable display name for the tool. */
+  title?:
+    | string
+    | undefined;
+  /** read_only_hint indicates the tool does not modify any state when true. */
+  read_only_hint?:
+    | boolean
+    | undefined;
+  /** destructive_hint indicates the tool may irreversibly modify or delete data when true. */
+  destructive_hint?:
+    | boolean
+    | undefined;
+  /** idempotent_hint indicates repeated invocations produce the same result when true. */
+  idempotent_hint?:
+    | boolean
+    | undefined;
+  /** open_world_hint indicates the tool may interact with external, unpredictable systems when true. */
   open_world_hint?: boolean | undefined;
 }
 
+/** McpTool describes an MCP tool available for use during workflow execution. */
 export interface McpTool {
+  /** name is the unique identifier of the MCP tool. */
   name: string;
+  /** description explains what the tool does, shown to the LLM for tool selection. */
   description: string;
+  /** inputSchema is the JSON Schema string that defines the tool's expected input parameters. */
   inputSchema: string;
-  icons?: Icons | undefined;
-  annotations?: ToolAnnotations | undefined;
+  /** icons optionally provides icon images representing the tool in the UI. */
+  icons?:
+    | Icons
+    | undefined;
+  /** annotations optionally provides behavioral hints about the tool. */
+  annotations?:
+    | ToolAnnotations
+    | undefined;
+  /** trusted indicates whether the tool is considered trusted and may be invoked without user confirmation. */
   trusted?: boolean | undefined;
 }
 
+/** Icons is a container for a list of Icon images. */
 export interface Icons {
+  /** items is the list of icon images. */
   items: Icon[];
 }
 
+/** RunMCPTool requests invocation of a named MCP tool with the given arguments. */
 export interface RunMCPTool {
+  /** name identifies the MCP tool to invoke. */
   name: string;
+  /** args is a JSON-encoded string of the arguments to pass to the tool. */
   args: string;
 }
 
+/** AdditionalContext provides a single supplementary context item for a workflow. */
 export interface AdditionalContext {
+  /** category classifies the type of context (e.g. "file", "snippet", "issue"). */
   category: string;
-  id?: string | undefined;
-  content?: string | undefined;
+  /** id is an optional unique identifier for this context item. */
+  id?:
+    | string
+    | undefined;
+  /** content is the optional text or data payload of this context item. */
+  content?:
+    | string
+    | undefined;
+  /** metadata is optional JSON-encoded metadata about this context item. */
   metadata?: string | undefined;
 }
 
+/** Approval represents a user's decision on whether to allow a pending action. */
 export interface Approval {
-  approval?: Approval_Approved | undefined;
+  /** approval carries the details of an approved action. */
+  approval?:
+    | Approval_Approved
+    | undefined;
+  /** rejection carries the details of a rejected action. */
   rejection?: Approval_Rejected | undefined;
 }
 
+/** Approved signals that the user has approved the pending action. */
 export interface Approval_Approved {
-  remember_approval?: boolean | undefined;
-  tool_name?: string | undefined;
+  /** remember_approval indicates whether this approval should be remembered for future identical actions. */
+  remember_approval?:
+    | boolean
+    | undefined;
+  /** tool_name is the name of the tool that was approved. */
+  tool_name?:
+    | string
+    | undefined;
+  /** tool_args_json is the JSON-encoded arguments of the tool invocation that was approved. */
   tool_args_json?: string | undefined;
 }
 
+/** Rejected signals that the user has rejected the pending action. */
 export interface Approval_Rejected {
+  /** message is an optional explanation of why the action was rejected. */
   message?: string | undefined;
 }
 
+/** Mkdir requests creation of a directory at the specified path. */
 export interface Mkdir {
+  /** directory_path is the path of the directory to create, including any intermediate directories. */
   directory_path: string;
 }
 
+/** OsInformationContext provides details about the operating system running the executor. */
 export interface OsInformationContext {
+  /** platform identifies the OS type (e.g. "linux", "darwin", "windows"). */
   platform: string;
+  /** architecture identifies the CPU architecture (e.g. "amd64", "arm64"). */
   architecture: string;
 }
 
+/** ShellInformationContext provides details about the shell environment available to the executor. */
 export interface ShellInformationContext {
+  /** shell_name is the display name of the shell (e.g. "bash", "zsh"). */
   shell_name: string;
+  /** shell_type is the type identifier of the shell (e.g. "posix", "powershell"). */
   shell_type: string;
-  shell_variant?: string | undefined;
-  shell_environment?: string | undefined;
-  ssh_session?: boolean | undefined;
+  /** shell_variant is an optional version or variant string for the shell. */
+  shell_variant?:
+    | string
+    | undefined;
+  /** shell_environment is an optional JSON-encoded map of environment variables available to the shell. */
+  shell_environment?:
+    | string
+    | undefined;
+  /** ssh_session indicates whether the shell is running inside an SSH session. */
+  ssh_session?:
+    | boolean
+    | undefined;
+  /** cwd is the current working directory of the shell session. */
   cwd?: string | undefined;
 }
 
+/** TrackSelfHostedClientEvent is a message sent from the client during a self-hosted tracking session. */
 export interface TrackSelfHostedClientEvent {
+  /** requestID is the unique identifier for this tracking event request. */
   requestID: string;
+  /** workflowID identifies the workflow associated with this event. */
   workflowID: string;
+  /** featureQualifiedName is the fully-qualified name of the AI feature that triggered the event. */
   featureQualifiedName: string;
+  /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
 }
 
+/** TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event. */
 export interface TrackSelfHostedAction {
+  /** requestID matches the TrackSelfHostedClientEvent.requestID this response corresponds to. */
   requestID: string;
 }
 
+/** ValidateFlowConfigRequest carries a flow configuration payload to be validated. */
 export interface ValidateFlowConfigRequest {
   /**
    * The flow configuration payload as a JSON/YAML-equivalent struct.
@@ -323,6 +578,7 @@ export interface ValidateFlowConfigRequest {
   flow_config: { [key: string]: any } | undefined;
 }
 
+/** ValidateFlowConfigResponse returns the validation outcome for the submitted flow configuration. */
 export interface ValidateFlowConfigResponse {
   /** Whether the flow configuration is valid. */
   valid: boolean;
@@ -4814,8 +5070,15 @@ export const ValidateFlowConfigResponse: MessageFns<ValidateFlowConfigResponse> 
   },
 };
 
+/**
+ * DuoWorkflow is the gRPC service that orchestrates AI-powered workflow execution
+ * for GitLab Duo. It serves all GitLab deployment types (SaaS, self-managed, dedicated,
+ * self-hosted) and provides RPCs for running workflows, managing authentication,
+ * discovering available tools and flows, and self-hosted billing tracking.
+ */
 export type DuoWorkflowService = typeof DuoWorkflowService;
 export const DuoWorkflowService = {
+  /** ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow. */
   executeWorkflow: {
     path: "/DuoWorkflow/ExecuteWorkflow",
     requestStream: true,
@@ -4825,6 +5088,7 @@ export const DuoWorkflowService = {
     responseSerialize: (value: Action): Buffer => Buffer.from(Action.encode(value).finish()),
     responseDeserialize: (value: Buffer): Action => Action.decode(value),
   },
+  /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken: {
     path: "/DuoWorkflow/GenerateToken",
     requestStream: false,
@@ -4835,6 +5099,7 @@ export const DuoWorkflowService = {
       Buffer.from(GenerateTokenResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): GenerateTokenResponse => GenerateTokenResponse.decode(value),
   },
+  /** ListTools returns the set of tools available to the workflow executor. */
   listTools: {
     path: "/DuoWorkflow/ListTools",
     requestStream: false,
@@ -4844,6 +5109,7 @@ export const DuoWorkflowService = {
     responseSerialize: (value: ListToolsResponse): Buffer => Buffer.from(ListToolsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListToolsResponse => ListToolsResponse.decode(value),
   },
+  /** ListFlows returns the set of flow configurations available for execution. */
   listFlows: {
     path: "/DuoWorkflow/ListFlows",
     requestStream: false,
@@ -4853,6 +5119,13 @@ export const DuoWorkflowService = {
     responseSerialize: (value: ListFlowsResponse): Buffer => Buffer.from(ListFlowsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListFlowsResponse => ListFlowsResponse.decode(value),
   },
+  /**
+   * TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+   * cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+   * lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+   * LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+   * TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+   */
   trackSelfHostedExecuteWorkflow: {
     path: "/DuoWorkflow/TrackSelfHostedExecuteWorkflow",
     requestStream: true,
@@ -4864,6 +5137,7 @@ export const DuoWorkflowService = {
       Buffer.from(TrackSelfHostedAction.encode(value).finish()),
     responseDeserialize: (value: Buffer): TrackSelfHostedAction => TrackSelfHostedAction.decode(value),
   },
+  /** ValidateFlowConfig validates a provided flow configuration against the registered schema. */
   validateFlowConfig: {
     path: "/DuoWorkflow/ValidateFlowConfig",
     requestStream: false,
@@ -4878,18 +5152,32 @@ export const DuoWorkflowService = {
 } as const;
 
 export interface DuoWorkflowServer extends UntypedServiceImplementation {
+  /** ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow. */
   executeWorkflow: handleBidiStreamingCall<ClientEvent, Action>;
+  /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken: handleUnaryCall<GenerateTokenRequest, GenerateTokenResponse>;
+  /** ListTools returns the set of tools available to the workflow executor. */
   listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
+  /** ListFlows returns the set of flow configurations available for execution. */
   listFlows: handleUnaryCall<ListFlowsRequest, ListFlowsResponse>;
+  /**
+   * TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+   * cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+   * lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+   * LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+   * TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+   */
   trackSelfHostedExecuteWorkflow: handleBidiStreamingCall<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  /** ValidateFlowConfig validates a provided flow configuration against the registered schema. */
   validateFlowConfig: handleUnaryCall<ValidateFlowConfigRequest, ValidateFlowConfigResponse>;
 }
 
 export interface DuoWorkflowClient extends Client {
+  /** ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow. */
   executeWorkflow(): ClientDuplexStream<ClientEvent, Action>;
   executeWorkflow(options: Partial<CallOptions>): ClientDuplexStream<ClientEvent, Action>;
   executeWorkflow(metadata: Metadata, options?: Partial<CallOptions>): ClientDuplexStream<ClientEvent, Action>;
+  /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken(
     request: GenerateTokenRequest,
     callback: (error: ServiceError | null, response: GenerateTokenResponse) => void,
@@ -4905,6 +5193,7 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GenerateTokenResponse) => void,
   ): ClientUnaryCall;
+  /** ListTools returns the set of tools available to the workflow executor. */
   listTools(
     request: ListToolsRequest,
     callback: (error: ServiceError | null, response: ListToolsResponse) => void,
@@ -4920,6 +5209,7 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListToolsResponse) => void,
   ): ClientUnaryCall;
+  /** ListFlows returns the set of flow configurations available for execution. */
   listFlows(
     request: ListFlowsRequest,
     callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
@@ -4935,6 +5225,13 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
   ): ClientUnaryCall;
+  /**
+   * TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+   * cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+   * lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+   * LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+   * TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+   */
   trackSelfHostedExecuteWorkflow(): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
   trackSelfHostedExecuteWorkflow(
     options: Partial<CallOptions>,
@@ -4943,6 +5240,7 @@ export interface DuoWorkflowClient extends Client {
     metadata: Metadata,
     options?: Partial<CallOptions>,
   ): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  /** ValidateFlowConfig validates a provided flow configuration against the registered schema. */
   validateFlowConfig(
     request: ValidateFlowConfigRequest,
     callback: (error: ServiceError | null, response: ValidateFlowConfigResponse) => void,

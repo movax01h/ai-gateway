@@ -35,6 +35,9 @@ pre-commit:
         export STAGED_FILES="$(echo '{staged_files}')"
         make check-codespell CODESPELL_LINT_WORKING_DIR="$STAGED_FILES"
         make check-editorconfig EDITORCONFIG_LINT_WORKING_DIR="$STAGED_FILES"
+    lint-proto:
+      glob: "contract/*.proto"
+      run: make lint-proto
     lint-doc:
       glob: "*.md"
       run: make lint-doc
