@@ -5,7 +5,7 @@ require_relative "lib/gitlab/duo_workflow_service/version"
 Gem::Specification.new do |spec|
   spec.name = "gitlab-duo-workflow-service-client"
   spec.version = Gitlab::DuoWorkflowService::VERSION
-  spec.authors = ["group::ai framework"]
+  spec.authors = ["GitLab Engineering"]
   spec.email = ["engineering@gitlab.com"]
 
   spec.summary = "Client library to interact with the Duo Workflow Service"

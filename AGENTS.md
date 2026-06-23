@@ -323,7 +323,7 @@ The default template (`.gitlab/merge_request_templates/Default.md`) includes:
 - Documentation added/updated
 - Executor implementation verified (if applicable)
 
-**Labels**: Auto-applies `~"group::ai framework"`
+**Labels**: Auto-applies `~"group::ai core infra"`
 
 ### Review Process
 
