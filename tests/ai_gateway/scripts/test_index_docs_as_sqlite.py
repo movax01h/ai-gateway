@@ -1,6 +1,7 @@
 """Tests for the ``index_docs_as_sqlite`` build-time helper."""
 
 import io
+import tarfile
 import zipfile
 from unittest.mock import MagicMock
 
@@ -11,6 +12,7 @@ from tenacity import wait_none
 from ai_gateway.scripts import index_docs_as_sqlite
 from ai_gateway.scripts.index_docs_as_sqlite import (
     _download_docs_archive,
+    _extract_archive,
     candidate_version_tags,
     fetch_documents,
 )
@@ -55,7 +57,27 @@ class TestDownloadDocsArchive:
             "get",
             lambda url, timeout: _mock_response(200, b"zip-bytes"),
         )
-        assert _download_docs_archive("v19.0.0-ee") == b"zip-bytes"
+        assert _download_docs_archive("v19.0.0-ee", "zip") == b"zip-bytes"
+
+    def test_requests_the_given_archive_format(self, monkeypatch):
+        captured = {}
+
+        def fake_get(url, **_kwargs):
+            captured["url"] = url
+            return _mock_response(200, b"tar-bytes")
+
+        monkeypatch.setattr(index_docs_as_sqlite.requests, "get", fake_get)
+
+        assert _download_docs_archive("v19.1.0-ee", "tar.gz") == b"tar-bytes"
+        assert "gitlab-v19.1.0-ee.tar.gz?path=doc" in captured["url"]
+
+    def test_returns_none_on_empty_200(self, monkeypatch):
+        monkeypatch.setattr(
+            index_docs_as_sqlite.requests,
+            "get",
+            lambda url, timeout: _mock_response(200, b""),
+        )
+        assert _download_docs_archive("v19.1.0-ee", "zip") is None
 
     def test_retries_on_429(self, monkeypatch):
         call_count = 0
@@ -70,7 +92,7 @@ class TestDownloadDocsArchive:
         monkeypatch.setattr(index_docs_as_sqlite.requests, "get", fake_get)
         monkeypatch.setattr(_download_docs_archive.retry, "wait", wait_none())
 
-        assert _download_docs_archive("master") == b"zip-bytes"
+        assert _download_docs_archive("master", "zip") == b"zip-bytes"
         assert call_count == 3
 
     def test_raises_after_exhausting_retries_on_429(self, monkeypatch):
@@ -85,7 +107,7 @@ class TestDownloadDocsArchive:
         monkeypatch.setattr(_download_docs_archive.retry, "wait", wait_none())
 
         with pytest.raises(HTTPError):
-            _download_docs_archive("master")
+            _download_docs_archive("master", "zip")
         assert call_count == 5
 
     def test_returns_none_on_non_200(self, monkeypatch):
@@ -94,7 +116,7 @@ class TestDownloadDocsArchive:
             "get",
             lambda url, timeout: _mock_response(404),
         )
-        assert _download_docs_archive("v19.0.1-ee") is None
+        assert _download_docs_archive("v19.0.1-ee", "zip") is None
 
 
 def _docs_zip_bytes(extracted_dir: str = "gitlab-v19.0.0-ee-doc") -> bytes:
@@ -102,6 +124,51 @@ def _docs_zip_bytes(extracted_dir: str = "gitlab-v19.0.0-ee-doc") -> bytes:
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr(f"{extracted_dir}/doc/index.md", "# Index\n")
     return buf.getvalue()
+
+
+def _docs_targz_bytes(extracted_dir: str = "gitlab-v19.0.0-ee-doc") -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        data = b"# Index\n"
+        info = tarfile.TarInfo(name=f"{extracted_dir}/doc/index.md")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+class TestExtractArchive:
+    def test_extracts_zip_to_doc_directory(self):
+        path = _extract_archive(_docs_zip_bytes(), "zip")
+
+        assert path is not None
+        assert (path / "doc" / "index.md").exists()
+
+    def test_extracts_targz_to_doc_directory(self):
+        path = _extract_archive(_docs_targz_bytes(), "tar.gz")
+
+        assert path is not None
+        assert (path / "doc" / "index.md").exists()
+
+    def test_returns_none_for_corrupt_archive(self):
+        assert _extract_archive(b"not-an-archive", "zip") is None
+        assert _extract_archive(b"not-an-archive", "tar.gz") is None
+
+    def test_returns_none_when_zip_has_no_directory(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("loose-file.md", "# Loose\n")
+
+        assert _extract_archive(buf.getvalue(), "zip") is None
+
+    def test_returns_none_when_targz_has_no_directory(self):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            data = b"# Loose\n"
+            info = tarfile.TarInfo(name="loose-file.md")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+        assert _extract_archive(buf.getvalue(), "tar.gz") is None
 
 
 class TestFetchDocuments:
@@ -161,7 +228,57 @@ class TestFetchDocuments:
             for record in caplog.records
         )
 
-    def test_exits_when_all_candidates_fail(self, monkeypatch):
+    def test_falls_back_to_targz_when_zip_is_empty(self, monkeypatch, caplog):
+        def fake_get(url, **_kwargs):
+            if ".zip" in url:
+                return _mock_response(200, b"")
+            if ".tar.gz" in url:
+                return _mock_response(200, _docs_targz_bytes("gitlab-v19.1.0-ee-doc"))
+            raise AssertionError(f"unexpected URL {url}")
+
+        monkeypatch.setattr(index_docs_as_sqlite.requests, "get", fake_get)
+
+        with caplog.at_level("WARNING"):
+            path = fetch_documents("v19.1.0-ee")
+
+        assert path.is_dir()
+        assert (path / "doc" / "index.md").exists()
+        assert any(
+            "empty zip archive" in record.message.lower() for record in caplog.records
+        )
+
+    def test_falls_back_to_targz_when_zip_is_corrupt(self, monkeypatch):
+        def fake_get(url, **_kwargs):
+            if ".zip" in url:
+                return _mock_response(200, b"not-a-real-zip")
+            if ".tar.gz" in url:
+                return _mock_response(200, _docs_targz_bytes("gitlab-v19.1.0-ee-doc"))
+            raise AssertionError(f"unexpected URL {url}")
+
+        monkeypatch.setattr(index_docs_as_sqlite.requests, "get", fake_get)
+
+        path = fetch_documents("v19.1.0-ee")
+
+        assert path.is_dir()
+        assert (path / "doc" / "index.md").exists()
+
+    def test_exhausts_all_tags_in_zip_before_trying_targz(self, monkeypatch):
+        requested_formats = []
+
+        def fake_get(url, **_kwargs):
+            fmt = "tar.gz" if ".tar.gz" in url else "zip"
+            requested_formats.append(fmt)
+            if fmt == "tar.gz" and "v19.0.0-ee" in url:
+                return _mock_response(200, _docs_targz_bytes())
+            return _mock_response(200, b"") if fmt == "zip" else _mock_response(404)
+
+        monkeypatch.setattr(index_docs_as_sqlite.requests, "get", fake_get)
+
+        fetch_documents("v19.0.1-ee")
+
+        assert requested_formats == ["zip", "zip", "tar.gz", "tar.gz"]
+
+    def test_exits_when_all_candidates_and_formats_fail(self, monkeypatch):
         monkeypatch.setattr(
             index_docs_as_sqlite.requests,
             "get",
