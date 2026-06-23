@@ -8,6 +8,7 @@ from packaging.version import InvalidVersion, Version
 
 from duo_workflow_service.audit_events.event_types import AuditEvent
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.context import gitlab_version
 
 logger = structlog.stdlib.get_logger("audit_event_client")
@@ -45,6 +46,10 @@ class AuditEventClient:
         total_events_sent: Optional[int] = None,
     ) -> bool:
         if not self._is_supported:
+            if events:
+                duo_workflow_metrics.count_audit_events_dropped(
+                    reason="version_unsupported", amount=len(events)
+                )
             return True
         if not events and not is_final:
             return True
@@ -59,6 +64,11 @@ class AuditEventClient:
             payload_dict["total_events_sent"] = total_events_sent
 
         payload = json.dumps(payload_dict)
+        if events:
+            duo_workflow_metrics.observe_audit_events_batch_size(len(events))
+            duo_workflow_metrics.observe_audit_events_payload_bytes(
+                len(payload.encode("utf-8"))
+            )
         path = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/audit_events"
 
         for attempt in range(self._max_retries):
@@ -74,12 +84,13 @@ class AuditEventClient:
                         workflow_id=self._workflow_id,
                         count=len(events),
                     )
+                    duo_workflow_metrics.count_audit_events_sent(
+                        result="success", amount=len(events)
+                    )
                     return True
 
-                if (
-                    response.status_code in (429, 500, 503, 529)
-                    and attempt < self._max_retries - 1
-                ):
+                is_retryable = response.status_code in (429, 500, 503, 529)
+                if is_retryable and attempt < self._max_retries - 1:
                     delay = self._base_delay * (2**attempt)
                     logger.warning(
                         "Audit event send failed, retrying",
@@ -95,6 +106,13 @@ class AuditEventClient:
                     status_code=response.status_code,
                     response_body=response.body,
                 )
+                duo_workflow_metrics.count_audit_events_sent(
+                    result="http_error", amount=len(events)
+                )
+                duo_workflow_metrics.count_audit_events_dropped(
+                    reason="retries_exhausted" if is_retryable else "http_error",
+                    amount=len(events),
+                )
                 return False
             except Exception as e:
                 if attempt < self._max_retries - 1:
@@ -107,6 +125,9 @@ class AuditEventClient:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Audit event send failed after retries", error=str(e))
+                duo_workflow_metrics.count_audit_events_sent(
+                    result="exception", amount=len(events)
+                )
                 break
 
         logger.error(
@@ -114,5 +135,8 @@ class AuditEventClient:
             workflow_id=self._workflow_id,
             count=len(events),
             event_types=[event.event_type.value for event in events],
+        )
+        duo_workflow_metrics.count_audit_events_dropped(
+            reason="retries_exhausted", amount=len(events)
         )
         return False
