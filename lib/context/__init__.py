@@ -35,6 +35,7 @@ from lib.context.request_metadata import (
     client_capabilities,
     client_type,
     extract_finish_reason,
+    gitlab_instance_id,
     gitlab_realm,
     gitlab_version,
     is_gitlab_team_member,
@@ -55,6 +56,7 @@ __all__ = [
     # request_metadata
     "client_capabilities",
     "client_type",
+    "gitlab_instance_id",
     "gitlab_realm",
     "gitlab_version",
     "is_gitlab_team_member",

@@ -15,6 +15,9 @@ log = structlog.stdlib.get_logger("request_metadata")
 
 # Context variables for request metadata
 client_type: ContextVar[Optional[str]] = ContextVar("client_type", default=None)
+gitlab_instance_id: ContextVar[Optional[str]] = ContextVar(
+    "gitlab_instance_id", default=None
+)
 gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
 gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
 language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
