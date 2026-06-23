@@ -1,6 +1,6 @@
 # pylint: disable=too-many-lines
 import asyncio
-from json import dumps
+from json import dumps, loads
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -9,10 +9,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
+from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog, NodePhase
 from duo_workflow_service.checkpointer.notifier import (
     UserInterface,
     _agent_token_totals,
-    _component_name_from_node,
 )
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox
@@ -458,21 +458,6 @@ async def test_send_event_messages_stream_continuation_keeps_component(
     assert len(checkpoint_notifier.ui_chat_log) == 1
     assert checkpoint_notifier.ui_chat_log[-1]["component_name"] == "researcher"
     assert checkpoint_notifier.ui_chat_log[-1]["content"] == "hello world"
-
-
-@pytest.mark.parametrize(
-    ("node_name", "expected"),
-    [
-        ("researcher#agent", "researcher"),
-        ("researcher#tools", "researcher"),
-        ("planner#final_response", "planner"),
-        ("build_context", "build_context"),  # legacy node without a role suffix
-        (None, None),
-        ("", None),
-    ],
-)
-def test_component_name_from_node(node_name, expected):
-    assert _component_name_from_node(node_name) == expected
 
 
 @pytest.mark.asyncio
@@ -1107,6 +1092,101 @@ async def test_agent_context_usage_reset_on_subsequent_event(checkpoint_notifier
     second_checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
 
     assert len(second_checkpoint.agent_context_usage) == 0
+
+
+def _node_events_from(checkpoint) -> list[dict]:
+    return loads(checkpoint.checkpoint)["channel_values"].get("node_events")
+
+
+def test_checkpoint_includes_node_events_when_present(
+    outbox,
+    gl_version_18_7,  # pylint: disable=unused-argument  # sets capabilities version
+):
+    client_capabilities.set({"incremental_streaming"})
+    log = NodeEventLog()
+    log.record("run-1", "researcher", NodePhase.STARTED)
+    log.record("run-1", "researcher", NodePhase.ENDED)
+    notifier = UserInterface(outbox=outbox, goal="test_goal", node_event_log=log)
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "researcher", "phase": "started"},
+        {"run_id": "run-1", "component": "researcher", "phase": "ended"},
+    ]
+
+
+def test_checkpoint_omits_node_events_when_log_empty(outbox):
+    notifier = UserInterface(
+        outbox=outbox, goal="test_goal", node_event_log=NodeEventLog()
+    )
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    channel_values = loads(notifier.most_recent_new_checkpoint().checkpoint)[
+        "channel_values"
+    ]
+
+    assert "node_events" not in channel_values
+
+
+def test_checkpoint_omits_node_events_when_no_log(outbox):
+    notifier = UserInterface(outbox=outbox, goal="test_goal")
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    channel_values = loads(notifier.most_recent_new_checkpoint().checkpoint)[
+        "channel_values"
+    ]
+
+    assert "node_events" not in channel_values
+
+
+def test_node_events_sent_incrementally_advancing_only_on_send(
+    outbox,
+    gl_version_18_7,  # pylint: disable=unused-argument  # sets capabilities version
+):
+    # The cursor advances only when a checkpoint is composed for sending, so each
+    # checkpoint carries only the events appended since the previous one.
+    client_capabilities.set({"incremental_streaming"})
+    log = NodeEventLog()
+    notifier = UserInterface(outbox=outbox, goal="test_goal", node_event_log=log)
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    log.record("run-1", "build_context", NodePhase.STARTED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "build_context", "phase": "started"},
+    ]
+
+    log.record("run-1", "build_context", NodePhase.ENDED)
+    log.record("run-2", "researcher", NodePhase.STARTED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "build_context", "phase": "ended"},
+        {"run_id": "run-2", "component": "researcher", "phase": "started"},
+    ]
+
+    # Nothing new appended -> key omitted entirely.
+    channel_values = loads(notifier.most_recent_new_checkpoint().checkpoint)[
+        "channel_values"
+    ]
+    assert "node_events" not in channel_values
+
+
+def test_node_events_sent_in_full_without_incremental_streaming(outbox):
+    # Without the incremental capability the full log is resent each checkpoint;
+    # the client deduplicates by (run_id, phase).
+    client_capabilities.set(set())
+    log = NodeEventLog()
+    notifier = UserInterface(outbox=outbox, goal="test_goal", node_event_log=log)
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    log.record("run-1", "researcher", NodePhase.STARTED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "researcher", "phase": "started"},
+    ]
+
+    log.record("run-1", "researcher", NodePhase.ENDED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "researcher", "phase": "started"},
+        {"run_id": "run-1", "component": "researcher", "phase": "ended"},
+    ]
 
 
 # ---------------------------------------------------------------------------

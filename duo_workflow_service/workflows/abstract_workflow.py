@@ -37,6 +37,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.checkpointer.node_lifecycle import (
+    NodeEventLog,
+    NodeLifecycleCallbackHandler,
+)
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
@@ -344,6 +348,10 @@ class AbstractWorkflow(ABC):
     async def _compile_and_run_graph(self, goal: str) -> str | None:
         audit_collector = await self._init_audit_events(goal)
 
+        # Append-only log of node-lifecycle events for live flow visualization.
+        # Fed by the callback handler below and drained by the checkpoint
+        # notifier when composing checkpoints.
+        node_event_log = NodeEventLog()
         callbacks: list[BaseCallbackHandler] = (
             [
                 AuditEventCallbackHandler(
@@ -353,6 +361,7 @@ class AbstractWorkflow(ABC):
             if audit_collector
             else []
         )
+        callbacks.append(NodeLifecycleCallbackHandler(node_event_log))
         graph_config: RunnableConfig = {
             "recursion_limit": self._recursion_limit(),
             "configurable": {"thread_id": self._workflow_id},
@@ -360,7 +369,9 @@ class AbstractWorkflow(ABC):
         }
         last_state = None
         compiled_graph = None
-        self.checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
+        self.checkpoint_notifier = UserInterface(
+            outbox=self._outbox, goal=goal, node_event_log=node_event_log
+        )
 
         try:
             (

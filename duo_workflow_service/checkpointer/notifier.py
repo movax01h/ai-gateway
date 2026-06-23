@@ -2,18 +2,19 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import structlog
 from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
 
 from contract import contract_pb2
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
+from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
@@ -43,18 +44,6 @@ def _agent_token_totals(
     }
 
 
-def _component_name_from_node(node_name: Optional[str]) -> Optional[str]:
-    """Recover the design-time component name from a runtime LangGraph node name.
-
-    v1 components compile to nodes named ``{component}{NODE_ROLE_SEPARATOR}{role}`` (e.g. ``"researcher#agent"``); the
-    segment before the separator is the component name. Names without it (e.g. legacy workflow nodes) are returned
-    unchanged.
-    """
-    if not node_name:
-        return None
-    return node_name.partition(NODE_ROLE_SEPARATOR)[0]
-
-
 class _ThrottleState:
     """Holds throttle state for checkpoint enqueuing."""
 
@@ -69,6 +58,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         outbox: Outbox,
         goal: str,
         workflow_id: str = "",
+        node_event_log: Optional[NodeEventLog] = None,
     ):
         self.outbox = outbox
         self.goal = goal
@@ -83,6 +73,10 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self._throttle = _ThrottleState()
         self._agent_token_totals: dict[str, int] = {}
         self._agent_context_limits: dict[str, int] = {}
+        self._node_event_log = node_event_log
+        # Count of node-lifecycle events already sent; advances only when a
+        # checkpoint is actually composed for sending (see _pop_recent_node_events).
+        self._last_sent_event_count = 0
 
     async def send_event(
         self,
@@ -129,7 +123,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             )
 
             self._append_chunk_to_ui_chat_log(
-                message, component_name=_component_name_from_node(node_name)
+                message, component_name=component_name_from_node(node_name)
             )
 
             return await self._execute_action(throttle=True)
@@ -200,18 +194,22 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
     def most_recent_new_checkpoint(self):
         recent_ui_chat_log_changes = self._pop_recent_ui_chat_log_changes()
 
+        channel_values: dict[str, Any] = {
+            "ui_chat_log": recent_ui_chat_log_changes,
+            "plan": {"steps": self.steps},
+        }
+        # Append-only node-lifecycle events for live flow visualization. Additive
+        # and ignored by clients that don't consume it; omitted when there is
+        # nothing new to send so checkpoints without lifecycle activity are
+        # unchanged. Clients fold the accumulated log into canvas state.
+        node_events = self._pop_recent_node_events()
+        if node_events:
+            channel_values["node_events"] = node_events
+
         checkpoint = contract_pb2.NewCheckpoint(
             goal=self.goal,
             status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self.status],
-            checkpoint=dumps(
-                {
-                    "channel_values": {
-                        "ui_chat_log": recent_ui_chat_log_changes,
-                        "plan": {"steps": self.steps},
-                    }
-                },
-                cls=CustomEncoder,
-            ),
+            checkpoint=dumps({"channel_values": channel_values}, cls=CustomEncoder),
         )
 
         if self._agent_token_totals:
@@ -264,6 +262,31 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self.last_sent_ui_message_id = self.ui_chat_log[-1].get("message_id", None)
 
         return self.ui_chat_log[ui_chat_log_diff_idx:]
+
+    def _pop_recent_node_events(self) -> list[dict[str, str]]:
+        """Node-lifecycle events to include in this checkpoint.
+
+        Mirrors :meth:`_pop_recent_ui_chat_log_changes`: incremental clients get
+        only the events appended since the last *sent* checkpoint, and the cursor
+        advances only here — i.e. only when a checkpoint is actually composed for
+        sending — so the "skip stale, send latest" optimization dropping
+        intermediate checkpoints never opens a gap. Non-incremental clients get
+        the full log each time and deduplicate client-side (events are immutable
+        and identified by ``run_id``/``phase``).
+        """
+        if self._node_event_log is None:
+            return []
+
+        events = self._node_event_log.events
+        if not events:
+            return []
+
+        if not is_client_capable("incremental_streaming"):
+            return [event.to_dict() for event in events]
+
+        recent = events[self._last_sent_event_count :]
+        self._last_sent_event_count = len(events)
+        return [event.to_dict() for event in recent]
 
     def _append_chunk_to_ui_chat_log(
         self, message: BaseMessage, component_name: Optional[str] = None
