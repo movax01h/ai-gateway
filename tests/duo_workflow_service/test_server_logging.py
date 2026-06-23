@@ -9,7 +9,6 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser
 
 from contract import contract_pb2
-from duo_workflow_service import server as server_module
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import DuoWorkflowService
@@ -34,7 +33,6 @@ def mock_usage_quota_service(mock_duo_workflow_service_container):
     service_instance.execute = AsyncMock()
     service_instance.aclose = AsyncMock()
 
-    mock_duo_workflow_service_container.wire(modules=[server_module])
     mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
 
     yield service_instance
