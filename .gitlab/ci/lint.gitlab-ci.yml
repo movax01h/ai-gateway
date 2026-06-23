@@ -4,6 +4,7 @@ lint:
   needs:
     - install
   script:
+    - BUF_VERSION=$(grep '^buf ' .tool-versions | awk '{print $2}') && curl -sSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m)" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf && sha256sum /usr/local/bin/buf
     - make lint-code
     - poetry lock --no-cache
     - git diff --exit-code

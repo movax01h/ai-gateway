@@ -123,6 +123,11 @@ bin/protoc: tmp/protoc-${PROTOC_VERSION}/bin/protoc
 	cp tmp/protoc-${PROTOC_VERSION}/bin/protoc bin/protoc
 
 
+.PHONY: lint-proto
+lint-proto:
+	@echo "Running buf lint check..."
+	@buf lint contract/
+
 .PHONY: clean-proto
 clean-proto:
 	@echo "Cleaning protoc installation and generated files..."
@@ -185,7 +190,7 @@ format: codespell ruff-fix docformatter
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql
+lint-code: flake8 check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql lint-proto
 
 .PHONY: lint-commit
 lint-commit:

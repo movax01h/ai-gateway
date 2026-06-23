@@ -21,11 +21,14 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ClientEvent is a message sent from the client to the server during a workflow session.
 type ClientEvent struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// response carries one of the possible client-initiated payloads.
+	//
 	// Types that are assignable to Response:
 	//
 	//	*ClientEvent_StartRequest
@@ -105,18 +108,22 @@ type isClientEvent_Response interface {
 }
 
 type ClientEvent_StartRequest struct {
+	// startRequest initiates a new workflow execution.
 	StartRequest *StartWorkflowRequest `protobuf:"bytes,1,opt,name=startRequest,proto3,oneof"`
 }
 
 type ClientEvent_ActionResponse struct {
+	// actionResponse returns the result of an action previously requested by the server.
 	ActionResponse *ActionResponse `protobuf:"bytes,2,opt,name=actionResponse,proto3,oneof"`
 }
 
 type ClientEvent_Heartbeat struct {
+	// heartbeat signals that the client connection is still alive.
 	Heartbeat *HeartbeatRequest `protobuf:"bytes,3,opt,name=heartbeat,proto3,oneof"`
 }
 
 type ClientEvent_StopWorkflow struct {
+	// stopWorkflow requests graceful termination of the running workflow.
 	StopWorkflow *StopWorkflowRequest `protobuf:"bytes,4,opt,name=stopWorkflow,proto3,oneof"`
 }
 
@@ -128,27 +135,47 @@ func (*ClientEvent_Heartbeat) isClientEvent_Response() {}
 
 func (*ClientEvent_StopWorkflow) isClientEvent_Response() {}
 
+// StartWorkflowRequest carries the parameters needed to start a new workflow execution.
 type StartWorkflowRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// clientVersion identifies the version of the client initiating the workflow.
 	ClientVersion string `protobuf:"bytes,1,opt,name=clientVersion,proto3" json:"clientVersion,omitempty"`
-	WorkflowID    string `protobuf:"bytes,2,opt,name=workflowID,proto3" json:"workflowID,omitempty"`
+	// workflowID is the unique identifier for this workflow run.
+	WorkflowID string `protobuf:"bytes,2,opt,name=workflowID,proto3" json:"workflowID,omitempty"`
+	// workflowDefinition was the original single-string identifier for the workflow type (e.g. "chat",
+	// "software_development"). It has been superseded by the three-field tuple flowConfigId +
+	// flowConfigSchemaVersion + flowVersion, which provides explicit versioning and schema validation.
+	// Deprecated: populate flowConfigId, flowConfigSchemaVersion, and flowVersion instead.
+	//
 	// Deprecated: Marked as deprecated in contract/contract.proto.
-	WorkflowDefinition      string               `protobuf:"bytes,3,opt,name=workflowDefinition,proto3" json:"workflowDefinition,omitempty"` // Use flowConfigId + flowConfigSchemaVersion + flowVersion instead
-	Goal                    string               `protobuf:"bytes,4,opt,name=goal,proto3" json:"goal,omitempty"`
-	WorkflowMetadata        string               `protobuf:"bytes,5,opt,name=workflowMetadata,proto3" json:"workflowMetadata,omitempty"`
-	ClientCapabilities      []string             `protobuf:"bytes,6,rep,name=clientCapabilities,proto3" json:"clientCapabilities,omitempty"`
-	McpTools                []*McpTool           `protobuf:"bytes,8,rep,name=mcpTools,proto3" json:"mcpTools,omitempty"`
-	AdditionalContext       []*AdditionalContext `protobuf:"bytes,9,rep,name=additional_context,proto3" json:"additional_context,omitempty"`
-	Approval                *Approval            `protobuf:"bytes,10,opt,name=approval,proto3,oneof" json:"approval,omitempty"`
-	FlowConfig              *structpb.Struct     `protobuf:"bytes,11,opt,name=flowConfig,proto3,oneof" json:"flowConfig,omitempty"`
-	FlowConfigSchemaVersion *string              `protobuf:"bytes,12,opt,name=flowConfigSchemaVersion,proto3,oneof" json:"flowConfigSchemaVersion,omitempty"` // Platform version: "v1" or "experimental". Required with flowConfigId.
-	PreapprovedTools        []string             `protobuf:"bytes,13,rep,name=preapproved_tools,proto3" json:"preapproved_tools,omitempty"`
-	FlowConfigId            *string              `protobuf:"bytes,14,opt,name=flowConfigId,proto3,oneof" json:"flowConfigId,omitempty"` // Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
-	FlowVersion             *string              `protobuf:"bytes,15,opt,name=flowVersion,proto3,oneof" json:"flowVersion,omitempty"`   // Semver flow version, e.g. "1.0.0". Required when flowConfigId is set.
-	Streaming               *bool                `protobuf:"varint,16,opt,name=streaming,proto3,oneof" json:"streaming,omitempty"`      // Whether to enable UI response streaming for this session.
+	WorkflowDefinition string `protobuf:"bytes,3,opt,name=workflowDefinition,proto3" json:"workflowDefinition,omitempty"`
+	// goal is the natural-language objective that the workflow should achieve.
+	Goal string `protobuf:"bytes,4,opt,name=goal,proto3" json:"goal,omitempty"`
+	// workflowMetadata carries arbitrary metadata about the workflow, encoded as a JSON string.
+	WorkflowMetadata string `protobuf:"bytes,5,opt,name=workflowMetadata,proto3" json:"workflowMetadata,omitempty"`
+	// clientCapabilities lists the executor capabilities supported by this client.
+	ClientCapabilities []string `protobuf:"bytes,6,rep,name=clientCapabilities,proto3" json:"clientCapabilities,omitempty"`
+	// mcpTools lists the MCP tools available to the workflow from this client.
+	McpTools []*McpTool `protobuf:"bytes,8,rep,name=mcpTools,proto3" json:"mcpTools,omitempty"`
+	// additional_context provides supplementary context items (e.g. open files, snippets) for the workflow.
+	AdditionalContext []*AdditionalContext `protobuf:"bytes,9,rep,name=additional_context,proto3" json:"additional_context,omitempty"`
+	// approval carries the user's approval or rejection decision for a pending action.
+	Approval *Approval `protobuf:"bytes,10,opt,name=approval,proto3,oneof" json:"approval,omitempty"`
+	// flowConfig is an optional free-form configuration struct passed to the flow at startup.
+	FlowConfig *structpb.Struct `protobuf:"bytes,11,opt,name=flowConfig,proto3,oneof" json:"flowConfig,omitempty"`
+	// flowConfigSchemaVersion identifies the schema version for flowConfig (e.g. "v1" or "experimental"). Required with flowConfigId.
+	FlowConfigSchemaVersion *string `protobuf:"bytes,12,opt,name=flowConfigSchemaVersion,proto3,oneof" json:"flowConfigSchemaVersion,omitempty"` // Platform version: "v1" or "experimental". Required with flowConfigId.
+	// preapproved_tools lists tool names that the user has pre-approved for automatic execution.
+	PreapprovedTools []string `protobuf:"bytes,13,rep,name=preapproved_tools,proto3" json:"preapproved_tools,omitempty"`
+	// flowConfigId is the name of the flow to run, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
+	FlowConfigId *string `protobuf:"bytes,14,opt,name=flowConfigId,proto3,oneof" json:"flowConfigId,omitempty"` // Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
+	// flowVersion is the semver version of the flow, e.g. "1.0.0". Required when flowConfigId is set.
+	FlowVersion *string `protobuf:"bytes,15,opt,name=flowVersion,proto3,oneof" json:"flowVersion,omitempty"` // Semver flow version, e.g. "1.0.0". Required when flowConfigId is set.
+	// streaming enables UI response streaming for this session when set to true.
+	Streaming *bool `protobuf:"varint,16,opt,name=streaming,proto3,oneof" json:"streaming,omitempty"`
 }
 
 func (x *StartWorkflowRequest) Reset() {
@@ -287,12 +314,16 @@ func (x *StartWorkflowRequest) GetStreaming() bool {
 	return false
 }
 
+// ActionResponse carries the executor's result for a previously requested action.
 type ActionResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// requestID matches the Action.requestID this response corresponds to.
 	RequestID string `protobuf:"bytes,1,opt,name=requestID,proto3" json:"requestID,omitempty"`
+	// response_type holds the structured response payload returned by the executor.
+	//
 	// Types that are assignable to ResponseType:
 	//
 	//	*ActionResponse_PlainTextResponse
@@ -363,10 +394,12 @@ type isActionResponse_ResponseType interface {
 }
 
 type ActionResponse_PlainTextResponse struct {
+	// plainTextResponse carries a plain-text execution result.
 	PlainTextResponse *PlainTextResponse `protobuf:"bytes,3,opt,name=plainTextResponse,proto3,oneof"`
 }
 
 type ActionResponse_HttpResponse struct {
+	// httpResponse carries the result of an HTTP request action.
 	HttpResponse *HttpResponse `protobuf:"bytes,4,opt,name=httpResponse,proto3,oneof"`
 }
 
@@ -374,11 +407,13 @@ func (*ActionResponse_PlainTextResponse) isActionResponse_ResponseType() {}
 
 func (*ActionResponse_HttpResponse) isActionResponse_ResponseType() {}
 
+// HeartbeatRequest is sent periodically by the client to keep the session alive.
 type HeartbeatRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// timestamp is the Unix epoch milliseconds at which the heartbeat was sent.
 	Timestamp int64 `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 }
 
@@ -419,11 +454,13 @@ func (x *HeartbeatRequest) GetTimestamp() int64 {
 	return 0
 }
 
+// StopWorkflowRequest asks the server to terminate the current workflow run.
 type StopWorkflowRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// reason is a human-readable explanation of why the workflow is being stopped.
 	Reason string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
 }
 
@@ -464,13 +501,16 @@ func (x *StopWorkflowRequest) GetReason() string {
 	return ""
 }
 
+// PlainTextResponse holds a plain-text result and an optional error from an executor action.
 type PlainTextResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// response is the plain-text output produced by the executed action.
 	Response string `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
-	Error    string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	// error describes any error that occurred during execution; empty on success.
+	Error string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
 }
 
 func (x *PlainTextResponse) Reset() {
@@ -517,15 +557,20 @@ func (x *PlainTextResponse) GetError() string {
 	return ""
 }
 
+// HttpResponse holds the result of an HTTP request action performed by the executor.
 type HttpResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Headers    map[string]string `protobuf:"bytes,1,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	StatusCode int32             `protobuf:"varint,2,opt,name=statusCode,proto3" json:"statusCode,omitempty"`
-	Body       string            `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
-	Error      string            `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	// headers contains the HTTP response headers returned by the server.
+	Headers map[string]string `protobuf:"bytes,1,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	// statusCode is the HTTP status code of the response.
+	StatusCode int32 `protobuf:"varint,2,opt,name=statusCode,proto3" json:"statusCode,omitempty"`
+	// body is the raw response body.
+	Body string `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	// error describes any transport or execution error; empty on success.
+	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
 }
 
 func (x *HttpResponse) Reset() {
@@ -586,12 +631,16 @@ func (x *HttpResponse) GetError() string {
 	return ""
 }
 
+// Action is a server-initiated request for the executor to perform a specific operation.
 type Action struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// requestID is a unique identifier used to correlate this action with its ActionResponse.
 	RequestID string `protobuf:"bytes,1,opt,name=requestID,proto3" json:"requestID,omitempty"`
+	// action holds one of the specific operation payloads the executor must carry out.
+	//
 	// Types that are assignable to Action:
 	//
 	//	*Action_RunCommand
@@ -766,62 +815,77 @@ type isAction_Action interface {
 }
 
 type Action_RunCommand struct {
+	// runCommand requests execution of a program with arguments.
 	RunCommand *RunCommandAction `protobuf:"bytes,2,opt,name=runCommand,proto3,oneof"`
 }
 
 type Action_RunHTTPRequest struct {
+	// runHTTPRequest requests an outbound HTTP call.
 	RunHTTPRequest *RunHTTPRequest `protobuf:"bytes,3,opt,name=runHTTPRequest,proto3,oneof"`
 }
 
 type Action_RunReadFile struct {
+	// runReadFile requests reading the contents of a file.
 	RunReadFile *ReadFile `protobuf:"bytes,4,opt,name=runReadFile,proto3,oneof"`
 }
 
 type Action_RunWriteFile struct {
+	// runWriteFile requests writing content to a file.
 	RunWriteFile *WriteFile `protobuf:"bytes,5,opt,name=runWriteFile,proto3,oneof"`
 }
 
 type Action_RunGitCommand struct {
+	// runGitCommand requests execution of a Git command.
 	RunGitCommand *RunGitCommand `protobuf:"bytes,6,opt,name=runGitCommand,proto3,oneof"`
 }
 
 type Action_RunEditFile struct {
+	// runEditFile requests an in-place string replacement within a file.
 	RunEditFile *EditFile `protobuf:"bytes,7,opt,name=runEditFile,proto3,oneof"`
 }
 
 type Action_NewCheckpoint struct {
+	// newCheckpoint requests the client to save the current workflow state.
 	NewCheckpoint *NewCheckpoint `protobuf:"bytes,8,opt,name=newCheckpoint,proto3,oneof"`
 }
 
 type Action_ListDirectory struct {
+	// listDirectory requests a listing of directory contents.
 	ListDirectory *ListDirectory `protobuf:"bytes,9,opt,name=listDirectory,proto3,oneof"`
 }
 
 type Action_Grep struct {
+	// grep requests a pattern search across a directory tree.
 	Grep *Grep `protobuf:"bytes,10,opt,name=grep,proto3,oneof"`
 }
 
 type Action_FindFiles struct {
+	// findFiles requests a search for files matching a name pattern.
 	FindFiles *FindFiles `protobuf:"bytes,11,opt,name=findFiles,proto3,oneof"`
 }
 
 type Action_RunMCPTool struct {
+	// runMCPTool requests invocation of an MCP tool by name.
 	RunMCPTool *RunMCPTool `protobuf:"bytes,12,opt,name=runMCPTool,proto3,oneof"`
 }
 
 type Action_Mkdir struct {
+	// mkdir requests creation of a directory at the specified path.
 	Mkdir *Mkdir `protobuf:"bytes,13,opt,name=mkdir,proto3,oneof"`
 }
 
 type Action_RunReadFiles struct {
+	// runReadFiles requests reading the contents of multiple files.
 	RunReadFiles *ReadFiles `protobuf:"bytes,14,opt,name=runReadFiles,proto3,oneof"`
 }
 
 type Action_RunShellCommand struct {
+	// runShellCommand requests execution of a raw shell command string.
 	RunShellCommand *RunShellCommand `protobuf:"bytes,15,opt,name=runShellCommand,proto3,oneof"`
 }
 
 type Action_TrackLlmCallForSelfHosted struct {
+	// trackLlmCallForSelfHosted asks the client to record an LLM call for self-hosted billing.
 	TrackLlmCallForSelfHosted *TrackLlmCallForSelfHosted `protobuf:"bytes,16,opt,name=trackLlmCallForSelfHosted,proto3,oneof"`
 }
 
@@ -855,14 +919,21 @@ func (*Action_RunShellCommand) isAction_Action() {}
 
 func (*Action_TrackLlmCallForSelfHosted) isAction_Action() {}
 
+// TrackLlmCallForSelfHosted is sent by the self-hosted DWS to Workhorse before each LLM call,
+// as part of the self-hosted billing bridge. Workhorse forwards the event to Cloud DWS, which
+// records a billing entry and returns an allow/deny acknowledgment. The LLM call must not
+// proceed until a successful ActionResponse is received. See TrackSelfHostedExecuteWorkflow.
 type TrackLlmCallForSelfHosted struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	WorkflowID           string `protobuf:"bytes,1,opt,name=workflowID,proto3" json:"workflowID,omitempty"`
+	// workflowID identifies the workflow that initiated the LLM call.
+	WorkflowID string `protobuf:"bytes,1,opt,name=workflowID,proto3" json:"workflowID,omitempty"`
+	// featureQualifiedName is the fully-qualified name of the AI feature that made the LLM call.
 	FeatureQualifiedName string `protobuf:"bytes,2,opt,name=featureQualifiedName,proto3" json:"featureQualifiedName,omitempty"`
-	FeatureAiCatalogItem bool   `protobuf:"varint,3,opt,name=featureAiCatalogItem,proto3" json:"featureAiCatalogItem,omitempty"`
+	// featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
+	FeatureAiCatalogItem bool `protobuf:"varint,3,opt,name=featureAiCatalogItem,proto3" json:"featureAiCatalogItem,omitempty"`
 }
 
 func (x *TrackLlmCallForSelfHosted) Reset() {
@@ -916,12 +987,15 @@ func (x *TrackLlmCallForSelfHosted) GetFeatureAiCatalogItem() bool {
 	return false
 }
 
+// RunShellCommand requests execution of a raw shell command string.
 type RunShellCommand struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// command is the shell command string to execute.
 	Command string `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	// timeout is the maximum execution time in milliseconds; absent means no limit.
 	Timeout *int64 `protobuf:"varint,2,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
 }
 
@@ -969,15 +1043,20 @@ func (x *RunShellCommand) GetTimeout() int64 {
 	return 0
 }
 
+// RunCommandAction requests execution of a program with explicit arguments and flags.
 type RunCommandAction struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Program   string   `protobuf:"bytes,3,opt,name=program,proto3" json:"program,omitempty"`
+	// program is the executable to run.
+	Program string `protobuf:"bytes,3,opt,name=program,proto3" json:"program,omitempty"`
+	// arguments is the list of positional arguments passed to the program.
 	Arguments []string `protobuf:"bytes,4,rep,name=arguments,proto3" json:"arguments,omitempty"`
-	Flags     []string `protobuf:"bytes,5,rep,name=flags,proto3" json:"flags,omitempty"`
-	Timeout   *int64   `protobuf:"varint,6,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
+	// flags is the list of option flags passed to the program.
+	Flags []string `protobuf:"bytes,5,rep,name=flags,proto3" json:"flags,omitempty"`
+	// timeout is the maximum execution time in milliseconds; absent means no limit.
+	Timeout *int64 `protobuf:"varint,6,opt,name=timeout,proto3,oneof" json:"timeout,omitempty"`
 }
 
 func (x *RunCommandAction) Reset() {
@@ -1038,14 +1117,18 @@ func (x *RunCommandAction) GetTimeout() int64 {
 	return 0
 }
 
+// ReadFile requests reading the contents of a single file from the executor's filesystem.
 type ReadFile struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// filepath is the absolute or relative path of the file to read.
 	Filepath string `protobuf:"bytes,1,opt,name=filepath,proto3" json:"filepath,omitempty"`
-	Limit    *int64 `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
-	Offset   *int64 `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
+	// limit is the maximum number of lines to return; absent means read the entire file.
+	Limit *int64 `protobuf:"varint,2,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
+	// offset is the line number (1-indexed) at which reading should begin; absent means start from the beginning.
+	Offset *int64 `protobuf:"varint,3,opt,name=offset,proto3,oneof" json:"offset,omitempty"`
 }
 
 func (x *ReadFile) Reset() {
@@ -1099,11 +1182,13 @@ func (x *ReadFile) GetOffset() int64 {
 	return 0
 }
 
+// ReadFiles requests reading the contents of multiple files in a single operation.
 type ReadFiles struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// filepaths is the list of file paths to read.
 	Filepaths []string `protobuf:"bytes,1,rep,name=filepaths,proto3" json:"filepaths,omitempty"`
 }
 
@@ -1144,12 +1229,15 @@ func (x *ReadFiles) GetFilepaths() []string {
 	return nil
 }
 
+// WriteFile requests writing content to a file, creating or overwriting it.
 type WriteFile struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// filepath is the path of the file to write.
 	Filepath string `protobuf:"bytes,1,opt,name=filepath,proto3" json:"filepath,omitempty"`
+	// contents is the data to write to the file.
 	Contents string `protobuf:"bytes,2,opt,name=contents,proto3" json:"contents,omitempty"`
 }
 
@@ -1197,13 +1285,17 @@ func (x *WriteFile) GetContents() string {
 	return ""
 }
 
+// EditFile requests an in-place string replacement within a file.
 type EditFile struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Filepath  string `protobuf:"bytes,1,opt,name=filepath,proto3" json:"filepath,omitempty"`
+	// filepath is the path of the file to edit.
+	Filepath string `protobuf:"bytes,1,opt,name=filepath,proto3" json:"filepath,omitempty"`
+	// oldString is the exact string to search for and replace.
 	OldString string `protobuf:"bytes,2,opt,name=oldString,proto3" json:"oldString,omitempty"`
+	// newString is the replacement text.
 	NewString string `protobuf:"bytes,3,opt,name=newString,proto3" json:"newString,omitempty"`
 }
 
@@ -1258,14 +1350,18 @@ func (x *EditFile) GetNewString() string {
 	return ""
 }
 
+// RunHTTPRequest requests the executor to make an outbound HTTP call.
 type RunHTTPRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Method string  `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
-	Path   string  `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	Body   *string `protobuf:"bytes,3,opt,name=body,proto3,oneof" json:"body,omitempty"`
+	// method is the HTTP method to use (e.g. "GET", "POST").
+	Method string `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
+	// path is the URL path (and optional query string) for the request.
+	Path string `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	// body is the optional request body; absent for methods that carry no payload.
+	Body *string `protobuf:"bytes,3,opt,name=body,proto3,oneof" json:"body,omitempty"`
 }
 
 func (x *RunHTTPRequest) Reset() {
@@ -1319,14 +1415,18 @@ func (x *RunHTTPRequest) GetBody() string {
 	return ""
 }
 
+// RunGitCommand requests execution of a Git command against a specific repository.
 type RunGitCommand struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Command       string  `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
-	Arguments     *string `protobuf:"bytes,2,opt,name=arguments,proto3,oneof" json:"arguments,omitempty"`
-	RepositoryUrl string  `protobuf:"bytes,3,opt,name=repository_url,proto3" json:"repository_url,omitempty"`
+	// command is the Git sub-command to run (e.g. "status", "log").
+	Command string `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	// arguments is an optional string of additional arguments for the Git command.
+	Arguments *string `protobuf:"bytes,2,opt,name=arguments,proto3,oneof" json:"arguments,omitempty"`
+	// repository_url is the URL of the repository on which to run the command.
+	RepositoryUrl string `protobuf:"bytes,3,opt,name=repository_url,proto3" json:"repository_url,omitempty"`
 }
 
 func (x *RunGitCommand) Reset() {
@@ -1380,11 +1480,13 @@ func (x *RunGitCommand) GetRepositoryUrl() string {
 	return ""
 }
 
+// GenerateTokenRequest initiates a token generation request for a workflow session.
 type GenerateTokenRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// workflowDefinition optionally specifies the workflow definition for which the token is issued.
 	WorkflowDefinition *string `protobuf:"bytes,1,opt,name=workflowDefinition,proto3,oneof" json:"workflowDefinition,omitempty"`
 }
 
@@ -1425,13 +1527,17 @@ func (x *GenerateTokenRequest) GetWorkflowDefinition() string {
 	return ""
 }
 
+// GenerateTokenResponse returns the generated token and its expiry information.
 type GenerateTokenResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Token              string   `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
-	ExpiresAt          int64    `protobuf:"varint,2,opt,name=expiresAt,proto3" json:"expiresAt,omitempty"`
+	// token is the generated authentication token.
+	Token string `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	// expiresAt is the Unix timestamp (seconds) at which the token expires.
+	ExpiresAt int64 `protobuf:"varint,2,opt,name=expiresAt,proto3" json:"expiresAt,omitempty"`
+	// server_capabilities lists the capabilities advertised by the server for this session.
 	ServerCapabilities []string `protobuf:"bytes,3,rep,name=server_capabilities,json=serverCapabilities,proto3" json:"server_capabilities,omitempty"`
 }
 
@@ -1486,6 +1592,7 @@ func (x *GenerateTokenResponse) GetServerCapabilities() []string {
 	return nil
 }
 
+// ListToolsRequest is an empty request to retrieve the available tool definitions.
 type ListToolsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1522,12 +1629,15 @@ func (*ListToolsRequest) Descriptor() ([]byte, []int) {
 	return file_contract_contract_proto_rawDescGZIP(), []int{19}
 }
 
+// ListToolsResponse returns the available tools and an optional evaluation dataset.
 type ListToolsResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Tools       []*structpb.Struct `protobuf:"bytes,1,rep,name=tools,proto3" json:"tools,omitempty"`
+	// tools is the list of available tool definitions as generic structs.
+	Tools []*structpb.Struct `protobuf:"bytes,1,rep,name=tools,proto3" json:"tools,omitempty"`
+	// eval_dataset is an optional dataset used for evaluating tool usage in testing.
 	EvalDataset []*structpb.Struct `protobuf:"bytes,2,rep,name=eval_dataset,proto3" json:"eval_dataset,omitempty"`
 }
 
@@ -1575,11 +1685,13 @@ func (x *ListToolsResponse) GetEvalDataset() []*structpb.Struct {
 	return nil
 }
 
+// ListFlowsRequest carries optional filters for querying available flow configurations.
 type ListFlowsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// filters optionally narrows the returned flows by identifier, environment, or version.
 	Filters *ListFlowsRequestFilter `protobuf:"bytes,1,opt,name=filters,proto3,oneof" json:"filters,omitempty"`
 }
 
@@ -1620,14 +1732,18 @@ func (x *ListFlowsRequest) GetFilters() *ListFlowsRequestFilter {
 	return nil
 }
 
+// ListFlowsRequestFilter specifies criteria for filtering the list of flows.
 type ListFlowsRequestFilter struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// flow_identifier filters flows by their unique identifier strings.
 	FlowIdentifier []string `protobuf:"bytes,4,rep,name=flow_identifier,proto3" json:"flow_identifier,omitempty"`
-	Environment    []string `protobuf:"bytes,2,rep,name=environment,proto3" json:"environment,omitempty"`
-	Version        []string `protobuf:"bytes,3,rep,name=version,proto3" json:"version,omitempty"`
+	// environment filters flows to those available in the specified deployment environments.
+	Environment []string `protobuf:"bytes,2,rep,name=environment,proto3" json:"environment,omitempty"`
+	// version filters flows to those matching the specified version strings.
+	Version []string `protobuf:"bytes,3,rep,name=version,proto3" json:"version,omitempty"`
 }
 
 func (x *ListFlowsRequestFilter) Reset() {
@@ -1681,11 +1797,13 @@ func (x *ListFlowsRequestFilter) GetVersion() []string {
 	return nil
 }
 
+// ListFlowsResponse returns the matching flow configurations.
 type ListFlowsResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// configs is the list of flow configuration payloads as generic structs.
 	Configs []*structpb.Struct `protobuf:"bytes,1,rep,name=configs,proto3" json:"configs,omitempty"`
 }
 
@@ -1726,13 +1844,16 @@ func (x *ListFlowsResponse) GetConfigs() []*structpb.Struct {
 	return nil
 }
 
+// TokenBreakdown reports token usage statistics for a single agent context window.
 type TokenBreakdown struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// total_tokens is the number of tokens consumed in the current context.
 	TotalTokens int32 `protobuf:"varint,1,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
-	MaxTokens   int32 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// max_tokens is the maximum number of tokens allowed in the context window.
+	MaxTokens int32 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 }
 
 func (x *TokenBreakdown) Reset() {
@@ -1779,15 +1900,21 @@ func (x *TokenBreakdown) GetMaxTokens() int32 {
 	return 0
 }
 
+// NewCheckpoint captures a snapshot of workflow state at a specific point in execution.
 type NewCheckpoint struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Status            string                     `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Checkpoint        string                     `protobuf:"bytes,2,opt,name=checkpoint,proto3" json:"checkpoint,omitempty"`
-	Goal              string                     `protobuf:"bytes,3,opt,name=goal,proto3" json:"goal,omitempty"`
-	Errors            []string                   `protobuf:"bytes,4,rep,name=errors,proto3" json:"errors,omitempty"`
+	// status is the current high-level status of the workflow (e.g. "running", "completed").
+	Status string `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// checkpoint is a serialized representation of the current workflow state.
+	Checkpoint string `protobuf:"bytes,2,opt,name=checkpoint,proto3" json:"checkpoint,omitempty"`
+	// goal is the natural-language objective that the workflow is working toward.
+	Goal string `protobuf:"bytes,3,opt,name=goal,proto3" json:"goal,omitempty"`
+	// errors lists any non-fatal errors encountered since the last checkpoint.
+	Errors []string `protobuf:"bytes,4,rep,name=errors,proto3" json:"errors,omitempty"`
+	// agent_context_usage maps each agent name to its current token usage breakdown.
 	AgentContextUsage map[string]*TokenBreakdown `protobuf:"bytes,5,rep,name=agent_context_usage,json=agentContextUsage,proto3" json:"agent_context_usage,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 }
 
@@ -1856,11 +1983,13 @@ func (x *NewCheckpoint) GetAgentContextUsage() map[string]*TokenBreakdown {
 	return nil
 }
 
+// ListDirectory requests a listing of entries in a directory.
 type ListDirectory struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// directory is the path of the directory whose contents should be listed.
 	Directory string `protobuf:"bytes,1,opt,name=directory,proto3" json:"directory,omitempty"`
 }
 
@@ -1901,14 +2030,18 @@ func (x *ListDirectory) GetDirectory() string {
 	return ""
 }
 
+// Grep requests a pattern search across files within a directory tree.
 type Grep struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// search_directory is the root directory in which to search.
 	SearchDirectory string `protobuf:"bytes,1,opt,name=search_directory,proto3" json:"search_directory,omitempty"`
-	Pattern         string `protobuf:"bytes,2,opt,name=pattern,proto3" json:"pattern,omitempty"`
-	CaseInsensitive bool   `protobuf:"varint,3,opt,name=case_insensitive,proto3" json:"case_insensitive,omitempty"`
+	// pattern is the regular expression or literal string to search for.
+	Pattern string `protobuf:"bytes,2,opt,name=pattern,proto3" json:"pattern,omitempty"`
+	// case_insensitive indicates whether the pattern match should ignore letter case.
+	CaseInsensitive bool `protobuf:"varint,3,opt,name=case_insensitive,proto3" json:"case_insensitive,omitempty"`
 }
 
 func (x *Grep) Reset() {
@@ -1962,11 +2095,13 @@ func (x *Grep) GetCaseInsensitive() bool {
 	return false
 }
 
+// FindFiles requests a search for files whose names match a given pattern.
 type FindFiles struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// name_pattern is the glob or wildcard pattern used to match file names.
 	NamePattern string `protobuf:"bytes,1,opt,name=name_pattern,proto3" json:"name_pattern,omitempty"`
 }
 
@@ -2007,15 +2142,20 @@ func (x *FindFiles) GetNamePattern() string {
 	return ""
 }
 
+// Icon represents a single icon image with its URL and optional display metadata.
 type Icon struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Url      string   `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	MimeType *string  `protobuf:"bytes,2,opt,name=mime_type,json=mimeType,proto3,oneof" json:"mime_type,omitempty"`
-	Sizes    []string `protobuf:"bytes,3,rep,name=sizes,proto3" json:"sizes,omitempty"`
-	Theme    *string  `protobuf:"bytes,4,opt,name=theme,proto3,oneof" json:"theme,omitempty"`
+	// url is the location of the icon image.
+	Url string `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	// mime_type is the MIME type of the icon image (e.g. "image/png").
+	MimeType *string `protobuf:"bytes,2,opt,name=mime_type,json=mimeType,proto3,oneof" json:"mime_type,omitempty"`
+	// sizes lists the available size descriptors for the icon (e.g. "32x32").
+	Sizes []string `protobuf:"bytes,3,rep,name=sizes,proto3" json:"sizes,omitempty"`
+	// theme optionally specifies the visual theme this icon is intended for (e.g. "dark", "light").
+	Theme *string `protobuf:"bytes,4,opt,name=theme,proto3,oneof" json:"theme,omitempty"`
 }
 
 func (x *Icon) Reset() {
@@ -2076,16 +2216,22 @@ func (x *Icon) GetTheme() string {
 	return ""
 }
 
+// ToolAnnotations carries optional hints describing a tool's behavior and safety characteristics.
 type ToolAnnotations struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Title           *string `protobuf:"bytes,1,opt,name=title,proto3,oneof" json:"title,omitempty"`
-	ReadOnlyHint    *bool   `protobuf:"varint,2,opt,name=read_only_hint,json=readOnlyHint,proto3,oneof" json:"read_only_hint,omitempty"`
-	DestructiveHint *bool   `protobuf:"varint,3,opt,name=destructive_hint,json=destructiveHint,proto3,oneof" json:"destructive_hint,omitempty"`
-	IdempotentHint  *bool   `protobuf:"varint,4,opt,name=idempotent_hint,json=idempotentHint,proto3,oneof" json:"idempotent_hint,omitempty"`
-	OpenWorldHint   *bool   `protobuf:"varint,5,opt,name=open_world_hint,json=openWorldHint,proto3,oneof" json:"open_world_hint,omitempty"`
+	// title is a human-readable display name for the tool.
+	Title *string `protobuf:"bytes,1,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	// read_only_hint indicates the tool does not modify any state when true.
+	ReadOnlyHint *bool `protobuf:"varint,2,opt,name=read_only_hint,json=readOnlyHint,proto3,oneof" json:"read_only_hint,omitempty"`
+	// destructive_hint indicates the tool may irreversibly modify or delete data when true.
+	DestructiveHint *bool `protobuf:"varint,3,opt,name=destructive_hint,json=destructiveHint,proto3,oneof" json:"destructive_hint,omitempty"`
+	// idempotent_hint indicates repeated invocations produce the same result when true.
+	IdempotentHint *bool `protobuf:"varint,4,opt,name=idempotent_hint,json=idempotentHint,proto3,oneof" json:"idempotent_hint,omitempty"`
+	// open_world_hint indicates the tool may interact with external, unpredictable systems when true.
+	OpenWorldHint *bool `protobuf:"varint,5,opt,name=open_world_hint,json=openWorldHint,proto3,oneof" json:"open_world_hint,omitempty"`
 }
 
 func (x *ToolAnnotations) Reset() {
@@ -2153,17 +2299,24 @@ func (x *ToolAnnotations) GetOpenWorldHint() bool {
 	return false
 }
 
+// McpTool describes an MCP tool available for use during workflow execution.
 type McpTool struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Name        string           `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Description string           `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
-	InputSchema string           `protobuf:"bytes,3,opt,name=inputSchema,proto3" json:"inputSchema,omitempty"`
-	Icons       *Icons           `protobuf:"bytes,4,opt,name=icons,proto3,oneof" json:"icons,omitempty"`
+	// name is the unique identifier of the MCP tool.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// description explains what the tool does, shown to the LLM for tool selection.
+	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	// inputSchema is the JSON Schema string that defines the tool's expected input parameters.
+	InputSchema string `protobuf:"bytes,3,opt,name=inputSchema,proto3" json:"inputSchema,omitempty"`
+	// icons optionally provides icon images representing the tool in the UI.
+	Icons *Icons `protobuf:"bytes,4,opt,name=icons,proto3,oneof" json:"icons,omitempty"`
+	// annotations optionally provides behavioral hints about the tool.
 	Annotations *ToolAnnotations `protobuf:"bytes,5,opt,name=annotations,proto3,oneof" json:"annotations,omitempty"`
-	Trusted     *bool            `protobuf:"varint,6,opt,name=trusted,proto3,oneof" json:"trusted,omitempty"`
+	// trusted indicates whether the tool is considered trusted and may be invoked without user confirmation.
+	Trusted *bool `protobuf:"varint,6,opt,name=trusted,proto3,oneof" json:"trusted,omitempty"`
 }
 
 func (x *McpTool) Reset() {
@@ -2238,11 +2391,13 @@ func (x *McpTool) GetTrusted() bool {
 	return false
 }
 
+// Icons is a container for a list of Icon images.
 type Icons struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// items is the list of icon images.
 	Items []*Icon `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 }
 
@@ -2283,12 +2438,15 @@ func (x *Icons) GetItems() []*Icon {
 	return nil
 }
 
+// RunMCPTool requests invocation of a named MCP tool with the given arguments.
 type RunMCPTool struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// name identifies the MCP tool to invoke.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// args is a JSON-encoded string of the arguments to pass to the tool.
 	Args string `protobuf:"bytes,2,opt,name=args,proto3" json:"args,omitempty"`
 }
 
@@ -2336,14 +2494,19 @@ func (x *RunMCPTool) GetArgs() string {
 	return ""
 }
 
+// AdditionalContext provides a single supplementary context item for a workflow.
 type AdditionalContext struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Category string  `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`
-	Id       *string `protobuf:"bytes,2,opt,name=id,proto3,oneof" json:"id,omitempty"`
-	Content  *string `protobuf:"bytes,3,opt,name=content,proto3,oneof" json:"content,omitempty"`
+	// category classifies the type of context (e.g. "file", "snippet", "issue").
+	Category string `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`
+	// id is an optional unique identifier for this context item.
+	Id *string `protobuf:"bytes,2,opt,name=id,proto3,oneof" json:"id,omitempty"`
+	// content is the optional text or data payload of this context item.
+	Content *string `protobuf:"bytes,3,opt,name=content,proto3,oneof" json:"content,omitempty"`
+	// metadata is optional JSON-encoded metadata about this context item.
 	Metadata *string `protobuf:"bytes,4,opt,name=metadata,proto3,oneof" json:"metadata,omitempty"`
 }
 
@@ -2405,11 +2568,14 @@ func (x *AdditionalContext) GetMetadata() string {
 	return ""
 }
 
+// Approval represents a user's decision on whether to allow a pending action.
 type Approval struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// user_decision holds the user's approval or rejection outcome.
+	//
 	// Types that are assignable to UserDecision:
 	//
 	//	*Approval_Approval
@@ -2473,10 +2639,12 @@ type isApproval_UserDecision interface {
 }
 
 type Approval_Approval struct {
+	// approval carries the details of an approved action.
 	Approval *Approval_Approved `protobuf:"bytes,1,opt,name=approval,proto3,oneof"`
 }
 
 type Approval_Rejection struct {
+	// rejection carries the details of a rejected action.
 	Rejection *Approval_Rejected `protobuf:"bytes,2,opt,name=rejection,proto3,oneof"`
 }
 
@@ -2484,11 +2652,13 @@ func (*Approval_Approval) isApproval_UserDecision() {}
 
 func (*Approval_Rejection) isApproval_UserDecision() {}
 
+// Mkdir requests creation of a directory at the specified path.
 type Mkdir struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// directory_path is the path of the directory to create, including any intermediate directories.
 	DirectoryPath string `protobuf:"bytes,1,opt,name=directory_path,proto3" json:"directory_path,omitempty"`
 }
 
@@ -2529,12 +2699,15 @@ func (x *Mkdir) GetDirectoryPath() string {
 	return ""
 }
 
+// OsInformationContext provides details about the operating system running the executor.
 type OsInformationContext struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Platform     string `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	// platform identifies the OS type (e.g. "linux", "darwin", "windows").
+	Platform string `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	// architecture identifies the CPU architecture (e.g. "amd64", "arm64").
 	Architecture string `protobuf:"bytes,2,opt,name=architecture,proto3" json:"architecture,omitempty"`
 }
 
@@ -2582,17 +2755,24 @@ func (x *OsInformationContext) GetArchitecture() string {
 	return ""
 }
 
+// ShellInformationContext provides details about the shell environment available to the executor.
 type ShellInformationContext struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	ShellName        string  `protobuf:"bytes,1,opt,name=shell_name,proto3" json:"shell_name,omitempty"`
-	ShellType        string  `protobuf:"bytes,2,opt,name=shell_type,proto3" json:"shell_type,omitempty"`
-	ShellVariant     *string `protobuf:"bytes,3,opt,name=shell_variant,proto3,oneof" json:"shell_variant,omitempty"`
+	// shell_name is the display name of the shell (e.g. "bash", "zsh").
+	ShellName string `protobuf:"bytes,1,opt,name=shell_name,proto3" json:"shell_name,omitempty"`
+	// shell_type is the type identifier of the shell (e.g. "posix", "powershell").
+	ShellType string `protobuf:"bytes,2,opt,name=shell_type,proto3" json:"shell_type,omitempty"`
+	// shell_variant is an optional version or variant string for the shell.
+	ShellVariant *string `protobuf:"bytes,3,opt,name=shell_variant,proto3,oneof" json:"shell_variant,omitempty"`
+	// shell_environment is an optional JSON-encoded map of environment variables available to the shell.
 	ShellEnvironment *string `protobuf:"bytes,4,opt,name=shell_environment,proto3,oneof" json:"shell_environment,omitempty"`
-	SshSession       *bool   `protobuf:"varint,5,opt,name=ssh_session,proto3,oneof" json:"ssh_session,omitempty"`
-	Cwd              *string `protobuf:"bytes,6,opt,name=cwd,proto3,oneof" json:"cwd,omitempty"`
+	// ssh_session indicates whether the shell is running inside an SSH session.
+	SshSession *bool `protobuf:"varint,5,opt,name=ssh_session,proto3,oneof" json:"ssh_session,omitempty"`
+	// cwd is the current working directory of the shell session.
+	Cwd *string `protobuf:"bytes,6,opt,name=cwd,proto3,oneof" json:"cwd,omitempty"`
 }
 
 func (x *ShellInformationContext) Reset() {
@@ -2667,15 +2847,20 @@ func (x *ShellInformationContext) GetCwd() string {
 	return ""
 }
 
+// TrackSelfHostedClientEvent is a message sent from the client during a self-hosted tracking session.
 type TrackSelfHostedClientEvent struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	RequestID            string `protobuf:"bytes,1,opt,name=requestID,proto3" json:"requestID,omitempty"`
-	WorkflowID           string `protobuf:"bytes,2,opt,name=workflowID,proto3" json:"workflowID,omitempty"`
+	// requestID is the unique identifier for this tracking event request.
+	RequestID string `protobuf:"bytes,1,opt,name=requestID,proto3" json:"requestID,omitempty"`
+	// workflowID identifies the workflow associated with this event.
+	WorkflowID string `protobuf:"bytes,2,opt,name=workflowID,proto3" json:"workflowID,omitempty"`
+	// featureQualifiedName is the fully-qualified name of the AI feature that triggered the event.
 	FeatureQualifiedName string `protobuf:"bytes,3,opt,name=featureQualifiedName,proto3" json:"featureQualifiedName,omitempty"`
-	FeatureAiCatalogItem bool   `protobuf:"varint,4,opt,name=featureAiCatalogItem,proto3" json:"featureAiCatalogItem,omitempty"`
+	// featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
+	FeatureAiCatalogItem bool `protobuf:"varint,4,opt,name=featureAiCatalogItem,proto3" json:"featureAiCatalogItem,omitempty"`
 }
 
 func (x *TrackSelfHostedClientEvent) Reset() {
@@ -2736,11 +2921,13 @@ func (x *TrackSelfHostedClientEvent) GetFeatureAiCatalogItem() bool {
 	return false
 }
 
+// TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event.
 type TrackSelfHostedAction struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// requestID matches the TrackSelfHostedClientEvent.requestID this response corresponds to.
 	RequestID string `protobuf:"bytes,1,opt,name=requestID,proto3" json:"requestID,omitempty"`
 }
 
@@ -2781,6 +2968,7 @@ func (x *TrackSelfHostedAction) GetRequestID() string {
 	return ""
 }
 
+// ValidateFlowConfigRequest carries a flow configuration payload to be validated.
 type ValidateFlowConfigRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -2829,6 +3017,7 @@ func (x *ValidateFlowConfigRequest) GetFlowConfig() *structpb.Struct {
 	return nil
 }
 
+// ValidateFlowConfigResponse returns the validation outcome for the submitted flow configuration.
 type ValidateFlowConfigResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -2884,14 +3073,18 @@ func (x *ValidateFlowConfigResponse) GetErrors() []string {
 	return nil
 }
 
+// Approved signals that the user has approved the pending action.
 type Approval_Approved struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	RememberApproval *bool   `protobuf:"varint,1,opt,name=remember_approval,proto3,oneof" json:"remember_approval,omitempty"`
-	ToolName         *string `protobuf:"bytes,2,opt,name=tool_name,proto3,oneof" json:"tool_name,omitempty"`
-	ToolArgsJson     *string `protobuf:"bytes,3,opt,name=tool_args_json,proto3,oneof" json:"tool_args_json,omitempty"`
+	// remember_approval indicates whether this approval should be remembered for future identical actions.
+	RememberApproval *bool `protobuf:"varint,1,opt,name=remember_approval,proto3,oneof" json:"remember_approval,omitempty"`
+	// tool_name is the name of the tool that was approved.
+	ToolName *string `protobuf:"bytes,2,opt,name=tool_name,proto3,oneof" json:"tool_name,omitempty"`
+	// tool_args_json is the JSON-encoded arguments of the tool invocation that was approved.
+	ToolArgsJson *string `protobuf:"bytes,3,opt,name=tool_args_json,proto3,oneof" json:"tool_args_json,omitempty"`
 }
 
 func (x *Approval_Approved) Reset() {
@@ -2945,11 +3138,13 @@ func (x *Approval_Approved) GetToolArgsJson() string {
 	return ""
 }
 
+// Rejected signals that the user has rejected the pending action.
 type Approval_Rejected struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// message is an optional explanation of why the action was rejected.
 	Message *string `protobuf:"bytes,1,opt,name=message,proto3,oneof" json:"message,omitempty"`
 }
 
