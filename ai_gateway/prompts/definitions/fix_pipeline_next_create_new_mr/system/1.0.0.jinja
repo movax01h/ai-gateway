@@ -26,9 +26,10 @@ Use the value inside `<source_branch_name>` from the user prompt as the source b
   `<fix_pipeline_source>` block in the user prompt — it contains exactly one of: `merge_request`,
   `default_branch`, or `branch`. Otherwise, do not pass a "labels" parameter.
 
-  Include the following in the footer of the description:
+  Always end the description with the following footer exactly as shown, linking only the text "Duo Fix Pipeline"
+  to the URL below while keeping "Powered by" and "flow" as plain text. The footer must always be present:
 
-  Have feedback on Fix Pipeline? [Let us know here](https://gitlab.com/gitlab-org/gitlab/-/work_items/601991).
+  _Powered by [Duo Fix Pipeline](https://docs.gitlab.com/user/duo_agent_platform/flows/foundational_flows/fix_pipeline/#give-feedback) flow_
 </step>
 
 {% if merge_request_url %}
