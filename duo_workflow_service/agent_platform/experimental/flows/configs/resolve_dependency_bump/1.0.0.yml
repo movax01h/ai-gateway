@@ -44,6 +44,7 @@ flow:
   entry_point: "resolve_dep_bump_pipeline_fix"
   inputs:
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string

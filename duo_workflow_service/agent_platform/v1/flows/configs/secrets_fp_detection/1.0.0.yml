@@ -117,6 +117,7 @@ flow:
   entry_point: "secret_vulnerability_details_component"
   inputs:
     - category: secret_detection_context
+      version_constraint: "^1.0.0"
       input_schema:
         secret_value:
           type: string

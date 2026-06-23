@@ -14,7 +14,7 @@ AIO_CANCEL_STOP_WORKFLOW_REQUEST = "AIO_CANCEL_STOP_WORKFLOW_REQUEST"
 OUTGOING_MESSAGE_TOO_LARGE = "OUTGOING_MESSAGE_TOO_LARGE"
 
 
-# Note: additionaL_context is an alias for injected_context
+# Note: additional_context is an alias for injected_context
 class AdditionalContext(BaseModel):
     # One of "file", "snippet", "merge_request", "issue", "dependency", "local_git", "terminal", "repository",
     # "directory". The corresponding unit primitives must be registered with `include_{category}_context` format.

@@ -49,6 +49,7 @@ flow:
   entry_point: "post_recommendation"
   inputs:
     - category: reviewer_data
+      version_constraint: "^1.0.0"
       input_schema:
         current_reviewers:
           type: array

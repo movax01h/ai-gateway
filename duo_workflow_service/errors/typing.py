@@ -39,3 +39,14 @@ class TierAccessDeniedException(ToolException):
 
 class InvalidWorkflowIdException(Exception):
     """Raised when a workflow ID is invalid or not found."""
+
+
+class EnvelopeVersionMismatchException(Exception):
+    """Raised when an additional context envelope version does not satisfy the flow's constraint.
+
+    This exception is raised during flow initialisation when the version field
+    carried by an incoming envelope does not satisfy the semver constraint declared
+    in the flow YAML configuration.  It is mapped to a ``FAILED_PRECONDITION``
+    gRPC status so that callers receive a clear, actionable error rather than a
+    generic ``INTERNAL`` failure.
+    """

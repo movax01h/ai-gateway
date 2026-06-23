@@ -81,7 +81,16 @@ class MockWorkflow(AbstractWorkflow):
 def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     mock_duo_workflow_service_container,
 ):
-    pass
+    # ``current_monitoring_context`` defaults to a single shared, mutable ``MonitoringContext``
+    # instance. Any test (or production code path exercised by a test) that mutates it via
+    # ``set_flow_identity`` would otherwise leak flow versioning fields (flow_id / flow_version /
+    # schema_version) into later tests on the same worker, breaking order-dependent assertions
+    # such as "legacy flows carry no versioning metadata". Give each test a fresh context.
+    token = current_monitoring_context.set(MonitoringContext())
+    try:
+        yield
+    finally:
+        current_monitoring_context.reset(token)
 
 
 def test_extract_trace_output_with_valid_state(user):
@@ -1087,3 +1096,36 @@ async def test_compile_and_run_graph_notifiable_agent_exception_handling(
     assert state["ui_chat_log"][0]["content"] == "Safe message for user"
     assert secret not in state["ui_chat_log"][0]["content"]
     assert state["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+
+
+@pytest.mark.asyncio
+async def test_handle_compile_and_run_exception_logs_warning_when_checkpoint_notifier_is_none(
+    user,
+):
+    """Test that a warning is logged when checkpoint_notifier is None during error handling.
+
+    checkpoint_notifier is assigned unconditionally before the try block in _compile_and_run_graph, so this branch is
+    theoretically unreachable in normal execution. The defensive guard is tested by calling
+    _handle_compile_and_run_exception directly with checkpoint_notifier explicitly set to None.
+    """
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    # Simulate the theoretically-unreachable state where checkpoint_notifier is None
+    workflow.checkpoint_notifier = None
+
+    error = RuntimeError("graph error")
+
+    with patch.object(workflow, "log") as mock_log:
+        with pytest.raises(TraceableException):
+            await workflow._handle_compile_and_run_exception(
+                error, compiled_graph=None, graph_config={}
+            )
+
+    mock_log.warning.assert_called_once_with(
+        "checkpoint_notifier is None; error status event not sent to client",
+        workflow_id=workflow._workflow_id,
+    )

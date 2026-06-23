@@ -133,11 +133,13 @@ flow:
   entry_point: "load_jenkins_file"
   inputs:
     - category: agent_user_environment
+      version_constraint: "^1.0.0"
       input_schema:
         source_branch:
           type: string
           description: Source branch of the Jenkins file
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string

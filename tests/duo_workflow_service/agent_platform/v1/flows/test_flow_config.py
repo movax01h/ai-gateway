@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import json
 from pathlib import Path
 from typing import Annotated
@@ -507,6 +508,78 @@ class TestLoadComponentClass:
         """Test loading non-existent component class raises TypeError."""
         with pytest.raises(KeyError):
             load_component_class("NonExistentComponent")
+
+
+class TestVersionConstraintsByCategory:
+    """Test BaseFlowConfig.version_constraints_by_category()."""
+
+    @staticmethod
+    def _make_config(**flow_kwargs):
+        return FlowConfig(
+            flow={"entry_point": "agent", **flow_kwargs},
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+    def test_no_inputs_returns_empty_dict(self):
+        """version_constraints_by_category returns empty dict when no inputs defined."""
+        config = self._make_config()
+        assert config.version_constraints_by_category() == {}
+
+    def test_with_constraint(self):
+        """version_constraints_by_category returns the declared constraint."""
+        config = self._make_config(
+            inputs=[
+                {
+                    "category": "agent_platform_standard_context",
+                    "version_constraint": "^1.0.0",
+                    "input_schema": {"primary_branch": {"type": "string"}},
+                }
+            ]
+        )
+        assert config.version_constraints_by_category() == {
+            "agent_platform_standard_context": "^1.0.0"
+        }
+
+    def test_without_constraint_returns_none(self):
+        """version_constraints_by_category returns None for inputs without a constraint."""
+        config = self._make_config(
+            inputs=[
+                {
+                    "category": "file",
+                    "input_schema": {
+                        "contents": {"type": "string"},
+                        "file_name": {"type": "string"},
+                    },
+                }
+            ]
+        )
+        assert config.version_constraints_by_category() == {"file": None}
+
+    def test_mixed_constrained_and_unconstrained(self):
+        """version_constraints_by_category handles a mix of constrained and unconstrained inputs."""
+        config = self._make_config(
+            inputs=[
+                {
+                    "category": "agent_platform_standard_context",
+                    "version_constraint": "^1.1.0",
+                    "input_schema": {"primary_branch": {"type": "string"}},
+                },
+                {
+                    "category": "file",
+                    "input_schema": {
+                        "contents": {"type": "string"},
+                        "file_name": {"type": "string"},
+                    },
+                },
+            ]
+        )
+        assert config.version_constraints_by_category() == {
+            "agent_platform_standard_context": "^1.1.0",
+            "file": None,
+        }
 
 
 class TestListConfigs:

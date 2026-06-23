@@ -46,7 +46,10 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.typing import GENERIC_WORKFLOW_ERROR_MESSAGE
+from duo_workflow_service.errors.typing import (
+    GENERIC_WORKFLOW_ERROR_MESSAGE,
+    EnvelopeVersionMismatchException,
+)
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
@@ -60,8 +63,12 @@ from lib.internal_events.context import (
     merge_request_url_context,
     pipeline_source_context,
 )
+from lib.version import resolve_version
 
 __all__ = ["Flow", "persist_error_to_ui_chat_log"]
+
+_ENVELOPE_DEFAULT_VERSION = "1.0.0"
+_ENVELOPE_DEFAULT_CONSTRAINT = "^1.0.0"
 
 _EXECUTOR_CONTEXT = [
     "os_information",
@@ -286,12 +293,80 @@ class Flow(AbstractWorkflow):
     def _support_namespace_level_workflow(self) -> bool:
         return True
 
+    def _resolve_envelope_content(
+        self,
+        category: str,
+        envelopes: list[AdditionalContext],
+        schema: Any,
+        constraint: Optional[str],
+    ) -> Any:
+        # Flows without an explicit constraint implicitly require ^1.0.0: they
+        # were authored against the 1.x series and must not silently receive a
+        # breaking v2.x envelope.
+        if constraint is None:
+            self.log.warning(
+                "No version_constraint declared for envelope category; falling back to default constraint",
+                category=category,
+                default_constraint=_ENVELOPE_DEFAULT_CONSTRAINT,
+            )
+        effective_constraint = (
+            constraint if constraint is not None else _ENVELOPE_DEFAULT_CONSTRAINT
+        )
+        try:
+            versioned: list[tuple[str, Any]] = []
+            for item in envelopes:
+                if not item.content:
+                    raise ValueError(
+                        f"content must be specified for input '{category}'."
+                    )
+                obj = json.loads(item.content)
+                raw = (item.metadata or {}).get("version")
+                if not isinstance(raw, str):
+                    self.log.warning(
+                        "Envelope payload does not declare a version; falling back to default version",
+                        category=category,
+                        default_version=_ENVELOPE_DEFAULT_VERSION,
+                    )
+                versioned.append(
+                    (raw if isinstance(raw, str) else _ENVELOPE_DEFAULT_VERSION, obj)
+                )
+
+            versions = [v for v, _ in versioned]
+            try:
+                best = resolve_version(versions, effective_constraint)
+            except ValueError:
+                detail = (
+                    f"No envelope for '{category}' satisfies constraint "
+                    f"'{effective_constraint}'. Available versions: {versions}."
+                )
+                raise NotifiableAgentException(
+                    "Your GitLab instance sent additional context in an incompatible "
+                    "version. Please upgrade your GitLab instance to a compatible version "
+                    "and try again.",
+                    internal_detail=detail,
+                ) from EnvelopeVersionMismatchException(detail)
+
+            # resolve_version returns a string from its input list, so this
+            # lookup is always safe. On duplicate version strings, last wins.
+            content = dict(versioned)[best]
+
+            jsonschema.validate(content, schema)
+            return content
+        except jsonschema.ValidationError as e:
+            raise ValueError(f"input '{category}' does not match specified schema: {e}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in input item, {e}")
+
     def _process_additional_context(
         self, additional_context: list[AdditionalContext]
     ) -> Dict:
         processed_additional_context = {}
 
         jsonschemas_by_category = self._config.input_json_schemas_by_category()
+        version_constraints_by_category = self._config.version_constraints_by_category()
+
+        # Group non-executor envelopes by category, handling executor context inline.
+        grouped: dict[str, list[AdditionalContext]] = {}
         for item in additional_context:
             if (
                 item.category in _EXECUTOR_CONTEXT
@@ -310,22 +385,15 @@ class Flow(AbstractWorkflow):
                     additional_context_category=item.category,
                 )
                 continue
-            try:
-                schema = jsonschemas_by_category.get(item.category)
-                if not item.content:
-                    raise ValueError(
-                        f"content must be specified for input '{item.category}'."
-                    )
 
-                content_object = json.loads(item.content)
-                jsonschema.validate(content_object, schema)
-                processed_additional_context[item.category] = content_object
-            except jsonschema.ValidationError as e:
-                raise ValueError(
-                    f"input '{item.category}' does not match specified schema: {e}"
-                )
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in input item, {e}")
+            grouped.setdefault(item.category, []).append(item)
+
+        for category, envelopes in grouped.items():
+            schema = jsonschemas_by_category.get(category)
+            constraint = version_constraints_by_category.get(category)
+            processed_additional_context[category] = self._resolve_envelope_content(
+                category, envelopes, schema, constraint
+            )
 
         return processed_additional_context
 

@@ -32,6 +32,7 @@ flow:
   entry_point: "analytics_agent"
   inputs:
     - category: orbit_context
+      version_constraint: "^1.0.0"
       input_schema:
         orbit_enabled:
           type: boolean
