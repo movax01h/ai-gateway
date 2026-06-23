@@ -436,7 +436,10 @@ class SupervisorAgentComponent(AgentComponentBase):
         ):
             return f"{self.name}#final_response"
 
-        # Regular tools
+        # Regular tools — optionally gated by tool approval
+        if self.require_tool_approval:
+            return f"{self.name}#tool_approval_request"
+
         return f"{self.name}#tools"
 
     def _subsession_history_key_factory(
@@ -737,6 +740,12 @@ class SupervisorAgentComponent(AgentComponentBase):
         graph.add_node(node_final_response.name, node_final_response.run)
         graph.add_node(node_delegation.name, node_delegation.run)
         graph.add_node(node_subagent_return.name, node_subagent_return.run)
+
+        self._attach_tool_approval_nodes(
+            graph,
+            conversation_history_key=supervisor_history_key,
+            ui_log_events=agent_events,
+        )
 
         # --- Supervisor edges ---
         # 3-way conditional routing from agent node

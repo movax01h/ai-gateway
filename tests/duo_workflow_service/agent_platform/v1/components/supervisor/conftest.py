@@ -1,11 +1,12 @@
 """Shared fixtures for v1 supervisor component tests."""
 
 from typing import ClassVar
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
+from langgraph.graph import StateGraph
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_gateway.prompts.registry import LocalPromptRegistry
@@ -13,13 +14,16 @@ from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
+from duo_workflow_service.agent_platform.v1.components.supervisor.component import (
+    SupervisorAgentComponent,
+)
 from duo_workflow_service.agent_platform.v1.components.supervisor.delegate_task import (
     DelegateTask,
     SubagentDescriptor,
     build_delegate_task_model,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
-from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
+from duo_workflow_service.agent_platform.v1.state.base import FlowState, RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
@@ -416,6 +420,202 @@ def subsession_goal_key_factory_fixture(supervisor_name):
         return IOKey(target="context", subkeys=[key, "goal"], optional=True)
 
     return factory
+
+
+class MockSubagentComponent:
+    """Minimal stub satisfying the supervisor's subagent type check.
+
+    Both ``attach`` and ``bind_to_supervisor`` are no-op Mocks, suitable for
+    tests that only need to verify those calls were made.  Use
+    ``RoutingMockSubagentComponent`` when the test needs to actually execute
+    through the subagent node inside a compiled graph.
+    """
+
+    def __init__(self, name: str, description: str = "A test subagent."):
+        self.name = name
+        self.description = description
+        self.attach = Mock()
+        self.bind_to_supervisor = Mock()
+
+
+class RoutingMockSubagentComponent:
+    """Subagent stub that wires a real graph node and routes via the injected router.
+
+    Unlike ``MockSubagentComponent``, this stub's ``attach`` adds an actual node
+    to the graph.  The node's ``run`` immediately delegates to the router passed
+    at attach-time, which is ``_SubagentRouter`` → ``supervisor#subagent_return``.
+    This allows tests to execute the full delegation loop without needing a real
+    ``SubagentComponent`` with all its dependencies.
+    """
+
+    def __init__(self, name: str, description: str = "A test subagent."):
+        self.name = name
+        self.description = description
+        self._router = None
+
+    def bind_to_supervisor(self, **_kwargs):
+        """No-op: the routing stub does not need key factories."""
+
+    def attach(self, graph: StateGraph, router) -> None:
+        """Add a single pass-through node whose run routes straight to the router."""
+        self._router = router
+
+        def _run(state):
+            return state
+
+        graph.add_node(f"{self.name}#agent", _run)
+        graph.add_conditional_edges(f"{self.name}#agent", router.route)
+
+    def __entry_hook__(self) -> str:
+        """Return the entry node name expected by _delegation_router."""
+        return f"{self.name}#agent"
+
+
+@pytest.fixture(name="mock_sub_agents")
+def mock_sub_agents_fixture(developer_name, tester_name):
+    """Create mock subagent components."""
+    return {
+        developer_name: MockSubagentComponent(name=developer_name),
+        tester_name: MockSubagentComponent(name=tester_name),
+    }
+
+
+# Sentinel used as a default for optional factory parameters.
+# We cannot use ``None`` as the default because ``None`` is a valid caller-supplied
+# value (e.g. ``max_delegations=None`` means "no limit"), so we need a distinct
+# object to distinguish "caller did not pass this argument" from "caller explicitly
+# passed None".
+_UNSET = object()
+
+
+@pytest.fixture(name="make_supervisor")
+def make_supervisor_fixture(
+    supervisor_name,
+    flow_id,
+    flow_type,
+    user,
+    mock_toolset,
+    mock_prompt_registry,
+    mock_internal_event_client,
+    subagent_names,
+    max_delegations,
+    mock_sub_agents,
+    mock_schema_registry,
+):
+    """Fixture that returns a factory for creating a SupervisorAgentComponent."""
+    default_max_delegations = max_delegations
+    default_subagent_names = subagent_names
+
+    def factory(
+        subagent_components=None,
+        subagents=_UNSET,
+        max_delegations=_UNSET,
+        response_schema_id=None,
+        response_schema_version=None,
+        **kwargs,
+    ):
+        return SupervisorAgentComponent(
+            name=supervisor_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="supervisor_prompt",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            subagents=default_subagent_names if subagents is _UNSET else subagents,
+            max_delegations=default_max_delegations
+            if max_delegations is _UNSET
+            else max_delegations,
+            subagent_components=mock_sub_agents
+            if subagent_components is None
+            else subagent_components,
+            schema_registry=mock_schema_registry,
+            response_schema_id=response_schema_id,
+            response_schema_version=response_schema_version,
+            **kwargs,
+        )
+
+    return factory
+
+
+_AGENT_COMPONENT_MODULE = (
+    "duo_workflow_service.agent_platform.v1.components.agent.component"
+)
+
+_SUPERVISOR_MODULE = (
+    "duo_workflow_service.agent_platform.v1.components.supervisor.component"
+)
+
+
+def _compile(supervisor, mock_router):
+    """Attach supervisor to a real StateGraph, set entry point, and compile it."""
+    graph = StateGraph(FlowState)
+    supervisor.attach(graph, mock_router)
+    graph.set_entry_point(supervisor.__entry_hook__())
+    return graph.compile()
+
+
+# --- Node class mock fixtures ---
+
+
+@pytest.fixture(name="mock_agent_node_cls")
+def mock_agent_node_cls_fixture(supervisor_name):
+    """Fixture for mocked AgentNode class in supervisor component module."""
+    with patch(f"{_SUPERVISOR_MODULE}.AgentNode") as mock_cls:
+        mock_cls.return_value.name = f"{supervisor_name}#agent"
+        yield mock_cls
+
+
+@pytest.fixture(name="mock_tool_node_cls")
+def mock_tool_node_cls_fixture(supervisor_name):
+    """Fixture for mocked ToolNode class in supervisor component module."""
+    with patch(f"{_SUPERVISOR_MODULE}.ToolNode") as mock_cls:
+        mock_cls.return_value.name = f"{supervisor_name}#tools"
+        yield mock_cls
+
+
+@pytest.fixture(name="mock_final_response_node_cls")
+def mock_final_response_node_cls_fixture(supervisor_name):
+    """Fixture for mocked FinalResponseNode class in supervisor component module."""
+    with patch(f"{_SUPERVISOR_MODULE}.FinalResponseNode") as mock_cls:
+        mock_cls.return_value.name = f"{supervisor_name}#final_response"
+        yield mock_cls
+
+
+@pytest.fixture(name="mock_delegation_node_cls")
+def mock_delegation_node_cls_fixture(supervisor_name):
+    """Fixture for mocked DelegationNode class in supervisor component module."""
+    with patch(f"{_SUPERVISOR_MODULE}.DelegationNode") as mock_cls:
+        mock_cls.return_value.name = f"{supervisor_name}#delegation"
+        yield mock_cls
+
+
+@pytest.fixture(name="mock_subagent_return_node_cls")
+def mock_subagent_return_node_cls_fixture(supervisor_name):
+    """Fixture for mocked SubagentReturnNode class in supervisor component module."""
+    with patch(f"{_SUPERVISOR_MODULE}.SubagentReturnNode") as mock_cls:
+        mock_cls.return_value.name = f"{supervisor_name}#subagent_return"
+        yield mock_cls
+
+
+@pytest.fixture(name="all_node_mocks")
+def all_node_mocks_fixture(
+    mock_agent_node_cls,
+    mock_tool_node_cls,
+    mock_final_response_node_cls,
+    mock_delegation_node_cls,
+    mock_subagent_return_node_cls,
+):
+    """Activate all supervisor node mocks together."""
+    return {
+        "agent": mock_agent_node_cls.return_value,
+        "tools": mock_tool_node_cls.return_value,
+        "final_response": mock_final_response_node_cls.return_value,
+        "delegation": mock_delegation_node_cls.return_value,
+        "subagent_return": mock_subagent_return_node_cls.return_value,
+    }
 
 
 # --- Mock graph/router fixtures ---

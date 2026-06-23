@@ -78,9 +78,9 @@ class RoutingError(Exception):
 class AgentComponentBase(BaseComponent):
     """Shared base for agent-style components (AgentComponent, SupervisorAgentComponent).
 
-    Holds the common field declarations and class-level metadata shared by all
-    agent variants.  Subclasses must override ``_agent_node_router`` and
-    ``attach`` with their own graph-topology logic.
+    Holds the common field declarations, shared routing methods, and protected
+    graph-wiring helpers used by all agent variants.  Subclasses must override
+    ``_agent_node_router`` and ``attach`` with their own graph-topology logic.
 
     Do NOT use this class directly in flow configs — use AgentComponent instead.
     """
@@ -122,6 +122,8 @@ class AgentComponentBase(BaseComponent):
     response_schema_version: Optional[str] = None
     response_schema_tracking: bool = False
     response_schema_tracking_context: dict[str, str] = Field(default_factory=dict)
+    require_tool_approval: bool = False
+    pre_approved_tools: list[str] = Field(default_factory=list)
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -136,6 +138,23 @@ class AgentComponentBase(BaseComponent):
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
     _response_schema: Optional[Type[BaseAgentOutput]] = PrivateAttr()
+    _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
+
+    @model_validator(mode="after")
+    def initialize_tool_approval_decision_key(self) -> Self:
+        """Initialize the tool approval decision key with a component-scoped default.
+
+        Subclasses (e.g. AgentComponent) may override this key via bind_to_supervisor to use a subsession-scoped key,
+        preventing race conditions when the same subagent runs in multiple subsessions in parallel.
+        """
+        static_key = self._tool_approval_decision_key_template.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        )
+        self._tool_approval_decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: static_key,
+        )
+        return self
 
     @model_validator(mode="after")
     def validate_and_resolve_response_schema(self) -> Self:
@@ -281,6 +300,109 @@ class AgentComponentBase(BaseComponent):
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
         return f"{self.name}#agent"
 
+    def _tool_approval_request_router(self, state: FlowState) -> str:
+        """Route from tool approval request node.
+
+        Routes to:
+            - fetch: If approval is required (status=TOOL_CALL_APPROVAL_REQUIRED)
+            - tools: If all tools pre-approved (status=EXECUTION)
+
+        Raises:
+            RoutingError: If status is neither TOOL_CALL_APPROVAL_REQUIRED nor EXECUTION.
+        """
+        status = IOKey(target="status").value_from_state(state)
+
+        if status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED:
+            return f"{self.name}#tool_approval_fetch"
+        if status == WorkflowStatusEnum.EXECUTION:
+            return f"{self.name}#tools"
+        raise RoutingError(f"Unexpected approval status: {status}")
+
+    def _tool_approval_fetch_router(self, state: FlowState) -> str:
+        """Route from tool approval fetch node.
+
+        Routes to:
+            - tools: If approval was granted (decision=APPROVE)
+            - agent: If approval was rejected (decision=REJECT or MODIFY)
+        """
+        approval_decision_iokey = self._tool_approval_decision_key.to_iokey(state)
+
+        decision = approval_decision_iokey.value_from_state(state)
+
+        if not decision:
+            raise RoutingError(f"No approval decision found in state for {self.name}")
+
+        if decision == FlowEventType.APPROVE:
+            return f"{self.name}#tools"
+        if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
+            return f"{self.name}#agent"
+
+        raise RoutingError(f"Unexpected approval decision: {decision}")
+
+    def _attach_tool_approval_nodes(
+        self,
+        graph: StateGraph,
+        conversation_history_key: RuntimeIOKey,
+        ui_log_events: list,
+    ) -> None:
+        """Add tool approval nodes and edges to the graph when ``require_tool_approval`` is True.
+
+        Creates ``ToolApprovalRequestNode`` and ``ToolApprovalFetchNode``, registers
+        them in the graph, and wires their conditional edges using the shared router
+        methods defined on this base class.
+
+        This is a no-op when ``require_tool_approval`` is False, so callers can
+        call it unconditionally.
+
+        Args:
+            graph: The LangGraph ``StateGraph`` being assembled.
+            conversation_history_key: ``RuntimeIOKey`` resolving this component's
+                conversation-history slot at runtime.
+            ui_log_events: Event list passed to ``ToolApprovalRequestNode``'s
+                ``UIHistory``.
+        """
+        if not self.require_tool_approval:
+            return
+
+        node_tool_approval_request = ToolApprovalRequestNode(
+            name=f"{self.name}#tool_approval_request",
+            conversation_history_key=conversation_history_key,
+            toolset=self.toolset,
+            pre_approved_tools=self.pre_approved_tools,
+            status_key=RuntimeIOKey(
+                alias="status",
+                factory=lambda _: IOKey(target="status"),
+            ),
+            ui_history=UIHistory(
+                events=ui_log_events,
+                writer_class=UILogWriterAgentTools,
+            ),
+        )
+
+        node_tool_approval_fetch = ToolApprovalFetchNode(
+            name=f"{self.name}#tool_approval_fetch",
+            conversation_history_key=conversation_history_key,
+            status_key=RuntimeIOKey(
+                alias="status",
+                factory=lambda _: IOKey(target="status"),
+            ),
+            approval_decision_key=self._tool_approval_decision_key,
+        )
+
+        graph.add_node(node_tool_approval_request.name, node_tool_approval_request.run)
+        graph.add_node(node_tool_approval_fetch.name, node_tool_approval_fetch.run)
+
+        # Conditional edge from request: goes to fetch if approval needed, tools if all pre-approved
+        graph.add_conditional_edges(
+            node_tool_approval_request.name,
+            self._tool_approval_request_router,
+        )
+        # Conditional edge from fetch: goes to tools if approved, agent if rejected
+        graph.add_conditional_edges(
+            node_tool_approval_fetch.name,
+            self._tool_approval_fetch_router,
+        )
+
     def _agent_node_router(self, state: FlowState) -> str:
         raise NotImplementedError
 
@@ -309,8 +431,6 @@ class AgentComponent(AgentComponentBase):
     description: Optional[str] = None
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
-    require_tool_approval: bool = False
-    pre_approved_tools: list[str] = Field(default_factory=list)
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
@@ -356,19 +476,6 @@ class AgentComponent(AgentComponentBase):
 
         # Standalone components have no session — use NoneIOKey sentinel
         self._session_id_key = NoneIOKey(alias="session_id")
-
-        # Default tool approval decision key is component-scoped (no subsession namespace).
-        # Overridden by bind_to_supervisor to be subsession-scoped when used as a subagent,
-        # preventing race conditions when the same subagent runs in multiple subsessions.
-        static_tool_approval_decision_key = (
-            self._tool_approval_decision_key_template.to_iokey(
-                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
-            )
-        )
-        self._tool_approval_decision_key = RuntimeIOKey(
-            alias="tool_approval_decision",
-            factory=lambda _: static_tool_approval_decision_key,
-        )
 
         return self
 
@@ -473,49 +580,6 @@ class AgentComponent(AgentComponentBase):
             return f"{self.name}#tool_approval_request"
 
         return f"{self.name}#tools"
-
-    def _tool_approval_request_router(self, state: FlowState) -> str:
-        """Route from tool approval request node.
-
-        Routes to:
-            - fetch: If approval is required (status=TOOL_CALL_APPROVAL_REQUIRED)
-            - tools: If all tools pre-approved (status=EXECUTION)
-        """
-        status_iokey = RuntimeIOKey(
-            alias="status",
-            factory=lambda _: IOKey(target="status"),
-        ).to_iokey(state)
-        status = status_iokey.value_from_state(state)
-
-        needs_approval = status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
-
-        if needs_approval:
-            target = f"{self.name}#tool_approval_fetch"
-        else:
-            target = f"{self.name}#tools"
-
-        return target
-
-    def _tool_approval_fetch_router(self, state: FlowState) -> str:
-        """Route from tool approval fetch node.
-
-        Routes to:
-            - tools: If approval was granted (decision=APPROVE)
-            - agent: If approval was rejected (decision=REJECT or MODIFY)
-        """
-        approval_decision_iokey = self._tool_approval_decision_key.to_iokey(state)
-
-        decision = approval_decision_iokey.value_from_state(state)
-
-        if not decision:
-            raise RoutingError(f"No approval decision found in state for {self.name}")
-
-        if decision == FlowEventType.APPROVE:
-            return f"{self.name}#tools"
-        if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
-            return f"{self.name}#agent"
-
-        raise RoutingError(f"Unexpected approval decision: {decision}")
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
@@ -660,50 +724,11 @@ class AgentComponent(AgentComponentBase):
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)
 
-        # Conditionally add tool approval nodes
-        if self.require_tool_approval:
-            node_tool_approval_request = ToolApprovalRequestNode(
-                name=f"{self.name}#tool_approval_request",
-                conversation_history_key=self._conversation_history_key,
-                toolset=self.toolset,
-                pre_approved_tools=self.pre_approved_tools,
-                status_key=RuntimeIOKey(
-                    alias="status",
-                    factory=lambda _: IOKey(target="status"),
-                ),
-                ui_history=UIHistory(
-                    events=self.ui_log_events,
-                    writer_class=UILogWriterAgentTools,
-                ),
-            )
-
-            node_tool_approval_fetch = ToolApprovalFetchNode(
-                name=f"{self.name}#tool_approval_fetch",
-                conversation_history_key=self._conversation_history_key,
-                status_key=RuntimeIOKey(
-                    alias="status",
-                    factory=lambda _: IOKey(target="status"),
-                ),
-                approval_decision_key=self._tool_approval_decision_key,
-            )
-
-            # Add approval nodes to graph
-            graph.add_node(
-                node_tool_approval_request.name, node_tool_approval_request.run
-            )
-            graph.add_node(node_tool_approval_fetch.name, node_tool_approval_fetch.run)
-
-            # Add edges for approval flow
-            # Conditional edge from request: goes to fetch if approval needed, tools if all pre-approved
-            graph.add_conditional_edges(
-                node_tool_approval_request.name,
-                self._tool_approval_request_router,
-            )
-            # Conditional edge from fetch: goes to tools if approved, agent if rejected
-            graph.add_conditional_edges(
-                node_tool_approval_fetch.name,
-                self._tool_approval_fetch_router,
-            )
+        self._attach_tool_approval_nodes(
+            graph,
+            conversation_history_key=self._conversation_history_key,
+            ui_log_events=self.ui_log_events,
+        )
 
         graph.add_conditional_edges(
             node_agent.name,
