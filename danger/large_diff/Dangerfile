@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+WARN_THRESHOLD = 500
+ERROR_THRESHOLD = 1000
+SKIP_LABEL = "pipeline::skip-large-diff"
+
+lines_changed = git.lines_of_code
+
+if lines_changed >= ERROR_THRESHOLD && !helper.mr_labels.include?(SKIP_LABEL)
+  fail "This merge request is too big (#{lines_changed} lines changed). Please split it into multiple merge requests, or apply the `~#{SKIP_LABEL}` label to skip this check."
+elsif lines_changed >= WARN_THRESHOLD
+  warn "This merge request is quite big (#{lines_changed} lines changed), please consider splitting it into multiple merge requests."
+end
