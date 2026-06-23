@@ -9,7 +9,7 @@ from structlog.testing import capture_logs
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
-from duo_workflow_service.tracking import MonitoringContext
+from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from lib.language_server import LanguageServerVersion
 
 
@@ -109,6 +109,9 @@ async def test_interceptor_methods(
 @patch(
     "duo_workflow_service.interceptors.monitoring_interceptor.client_type",
 )
+@patch(
+    "duo_workflow_service.interceptors.monitoring_interceptor.current_feature_flag_context",
+)
 @pytest.mark.parametrize(
     (
         "service_name",
@@ -138,6 +141,7 @@ async def test_interceptor_methods(
     ],
 )
 async def test_streaming_interceptor_methods(
+    mock_feature_flag_context,
     mock_client_type,
     mock_language_server_version,
     _mock_monitoring_context,
@@ -157,6 +161,7 @@ async def test_streaming_interceptor_methods(
 
     mock_language_server_version.get.return_value = LanguageServerVersion("0.0.1")
     mock_client_type.get.return_value = "node-grpc"
+    mock_feature_flag_context.get.return_value = {"ai_context_compaction"}
 
     async def _stream_generator(_req, _ctx):
         yield "Stream"
@@ -211,6 +216,7 @@ async def test_streaming_interceptor_methods(
     assert cap_logs[0]["workflow_stop_reason"] == "stopped by client"
     assert cap_logs[0]["language_server_version"] == "0.0.1"
     assert cap_logs[0]["gitlab_client_type"] == "node-grpc"
+    assert cap_logs[0]["feature_flags"] == {"ai_context_compaction"}
 
 
 @pytest.mark.asyncio
@@ -309,3 +315,72 @@ async def test_interceptor_stream_handles_exception():
     assert cap_logs[0]["event"] == "Test Exception"
     assert cap_logs[0]["exception_class"] == "BaseException"
     assert cap_logs[1]["event"] == "Finished StreamErrorMethod RPC"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "no_start_reason",
+    ["NO_START_REQUEST", "EMPTY_START_REQUEST"],
+)
+async def test_interceptor_logs_info_and_skips_finished_log_when_workflow_never_started(
+    no_start_reason,
+):
+    """When workflow_no_start_reason is set on MonitoringContext the interceptor must:
+    - emit a single info-level 'connection closed before workflow started' log with the reason
+    - not emit 'Finished RPC'
+    - not increment the Prometheus counter
+    """
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+    continuation = AsyncMock()
+    handler_call_details = Mock()
+    handler_call_details.method = "/test.Service/ExecuteWorkflow"
+    handler_call_details.invocation_metadata = {"user-agent": "test_agent"}
+
+    async def _never_started_stream_handler(_req, _ctx):
+        # Simulate the usage_quota wrapper setting the reason and returning without
+        # yielding anything.
+        current_monitoring_context.get().workflow_no_start_reason = no_start_reason
+        return
+        yield  # make it an async generator
+
+    mock_handler = Mock()
+    mock_handler.stream_stream = MagicMock(side_effect=_never_started_stream_handler)
+    mock_handler.request_streaming = True
+    mock_handler.response_streaming = True
+
+    continuation.return_value = mock_handler
+    mock_context = Mock()
+    mock_context.code.return_value = grpc.StatusCode.OK
+
+    result = await interceptor.intercept_service(continuation, handler_call_details)
+    assert result is not None
+
+    with capture_logs() as cap_logs:
+        async for _ in result.stream_stream(None, mock_context):
+            pass
+
+    assert len(cap_logs) == 1
+    assert cap_logs[0]["log_level"] == "info"
+    assert cap_logs[0]["event"] == "connection closed before workflow started"
+    assert cap_logs[0]["no_start_reason"] == no_start_reason
+    assert cap_logs[0]["user_agent"] == "test_agent"
+
+    total_calls = registry.get_sample_value(
+        "grpc_server_handled_total",
+        {
+            "grpc_type": "BIDI_STREAM",
+            "grpc_service": "test.Service",
+            "grpc_method": "ExecuteWorkflow",
+            "grpc_code": "OK",
+            "gitlab_version": "unknown",
+            "client_type": "unknown",
+            "lsp_version": "unknown",
+            "gitlab_realm": "unknown",
+            "flow_type": "unknown",
+            "is_gitlab_team_member": "unknown",
+        },
+    )
+    assert total_calls is None, (
+        "Expected no Prometheus counter increment when workflow never started"
+    )

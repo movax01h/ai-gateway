@@ -172,12 +172,14 @@ class MonitoringInterceptor(ServerInterceptor):
         try:
             yield
 
-            self._increase_grpc_server_handled_total_counter(
-                grpc_type,
-                grpc_service_name,
-                grpc_method_name,
-                servicer_context.code(),
-            )
+            context: MonitoringContext = current_monitoring_context.get()
+            if not context.workflow_no_start_reason:
+                self._increase_grpc_server_handled_total_counter(
+                    grpc_type,
+                    grpc_service_name,
+                    grpc_method_name,
+                    servicer_context.code(),
+                )
         except BaseException as e:  # We handle all BaseException to ensure we include asyncio.CancelledError
             self._handle_error(
                 e,
@@ -191,54 +193,83 @@ class MonitoringInterceptor(ServerInterceptor):
 
             raise e
         finally:
-            elapsed_time = time.perf_counter() - start_time_total
-            cpu_time = time.process_time() - start_time_cpu
-            servicer_context_code = ""
+            context = current_monitoring_context.get()
 
-            if context_code := servicer_context.code():
-                servicer_context_code = context_code.name
+            # When the client connected but never sent a StartRequest (or sent one
+            # without a workflowID), the workflow never actually ran.  Skip the normal
+            # "Finished RPC" log (the Prometheus counter is already skipped above in
+            # the try block) so that these no-op connections don't appear as executed
+            # flows, but emit a dedicated info entry so the connection is still traceable.
+            if context.workflow_no_start_reason:
+                log.info(
+                    "connection closed before workflow started",
+                    grpc_type=grpc_type,
+                    grpc_service_name=grpc_service_name,
+                    grpc_method_name=grpc_method_name,
+                    request_arrived_at=request_arrived_at.isoformat(),
+                    no_start_reason=context.workflow_no_start_reason,
+                    gitlab_host_name=invocation_metadata.get(
+                        X_GITLAB_HOST_NAME_HEADER.lower()
+                    ),
+                    gitlab_realm=invocation_metadata.get(X_GITLAB_REALM_HEADER.lower()),
+                    gitlab_instance_id=invocation_metadata.get(
+                        X_GITLAB_INSTANCE_ID_HEADER.lower()
+                    ),
+                    gitlab_authentication_type=invocation_metadata.get(
+                        AUTH_TYPE_HEADER.lower()
+                    ),
+                    user_agent=invocation_metadata.get("user-agent"),
+                )
+            else:
+                elapsed_time = time.perf_counter() - start_time_total
+                cpu_time = time.process_time() - start_time_cpu
+                servicer_context_code = ""
 
-            fields = {
-                "duration_s": elapsed_time,
-                "request_arrived_at": request_arrived_at.isoformat(),
-                "cpu_s": cpu_time,
-                "grpc_type": grpc_type,
-                "grpc_service_name": grpc_service_name,
-                "grpc_method_name": grpc_method_name,
-                "servicer_context_code": servicer_context_code,
-                "servicer_context_details": servicer_context.details(),
-                "gitlab_host_name": invocation_metadata.get(
-                    X_GITLAB_HOST_NAME_HEADER.lower()
-                ),
-                "gitlab_realm": invocation_metadata.get(X_GITLAB_REALM_HEADER.lower()),
-                "gitlab_instance_id": invocation_metadata.get(
-                    X_GITLAB_INSTANCE_ID_HEADER.lower()
-                ),
-                "gitlab_authentication_type": invocation_metadata.get(
-                    AUTH_TYPE_HEADER.lower()
-                ),
-                "gitlab_version": invocation_metadata.get(
-                    X_GITLAB_VERSION_HEADER.lower()
-                ),
-                "user_agent": invocation_metadata.get("user-agent"),
-            }
+                if context_code := servicer_context.code():
+                    servicer_context_code = context_code.name
 
-            if lsp_version := language_server_version.get():
-                fields["language_server_version"] = str(lsp_version.version)
+                fields = {
+                    "duration_s": elapsed_time,
+                    "request_arrived_at": request_arrived_at.isoformat(),
+                    "cpu_s": cpu_time,
+                    "grpc_type": grpc_type,
+                    "grpc_service_name": grpc_service_name,
+                    "grpc_method_name": grpc_method_name,
+                    "servicer_context_code": servicer_context_code,
+                    "servicer_context_details": servicer_context.details(),
+                    "gitlab_host_name": invocation_metadata.get(
+                        X_GITLAB_HOST_NAME_HEADER.lower()
+                    ),
+                    "gitlab_realm": invocation_metadata.get(
+                        X_GITLAB_REALM_HEADER.lower()
+                    ),
+                    "gitlab_instance_id": invocation_metadata.get(
+                        X_GITLAB_INSTANCE_ID_HEADER.lower()
+                    ),
+                    "gitlab_authentication_type": invocation_metadata.get(
+                        AUTH_TYPE_HEADER.lower()
+                    ),
+                    "gitlab_version": invocation_metadata.get(
+                        X_GITLAB_VERSION_HEADER.lower()
+                    ),
+                    "user_agent": invocation_metadata.get("user-agent"),
+                }
 
-            if client_type_value := client_type.get():
-                fields["gitlab_client_type"] = client_type_value
+                if lsp_version := language_server_version.get():
+                    fields["language_server_version"] = str(lsp_version.version)
 
-            if feature_flags := current_feature_flag_context.get():
-                fields["feature_flags"] = feature_flags
+                if client_type_value := client_type.get():
+                    fields["gitlab_client_type"] = client_type_value
 
-            context: MonitoringContext = current_monitoring_context.get()
-            fields.update(context.model_dump())
+                if feature_flags := current_feature_flag_context.get():
+                    fields["feature_flags"] = feature_flags
 
-            log.info(
-                f"""Finished {grpc_method_name} RPC""",
-                **fields,
-            )
+                fields.update(context.model_dump())
+
+                log.info(
+                    f"""Finished {grpc_method_name} RPC""",
+                    **fields,
+                )
 
     def _handle_error(
         self,

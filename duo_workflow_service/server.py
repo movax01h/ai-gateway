@@ -213,12 +213,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
 
         workflow_id = start_req.workflowID
-        if not workflow_id:
-            await context.abort(
-                grpc.StatusCode.INVALID_ARGUMENT,
-                "workflowID must not be empty",
-            )
-
         set_workflow_id(workflow_id)
 
         log.info(
