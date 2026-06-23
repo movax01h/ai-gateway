@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -297,13 +298,36 @@ def mock_ai_message_fixture():
     return mock_message
 
 
-@pytest.fixture(name="mock_duo_workflow_service_container")
-def mock_duo_workflow_service_container_fixture(
-    mock_container: ContainerApplication,
-) -> ContainerApplication:
-    mock_container.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+@pytest.fixture(name="mock_duo_workflow_service_container", scope="module")
+def mock_duo_workflow_service_container_fixture() -> Generator[
+    ContainerApplication, None, None
+]:
+    """Module-scoped container fixture that wires the DI container once per test module.
 
-    return mock_container
+    wire(packages=CONTAINER_APPLICATION_PACKAGES) costs ~220ms per call because it introspects the entire
+    duo_workflow_service package. Scoping this to module means it runs once per test file instead of once per test,
+    saving ~220ms × N tests.
+
+    Tests that need to change provider behavior should use override/reset_override on specific providers (e.g.
+    usage_quota.service), which is cheap and safe on a shared wired container.
+    """
+    from ai_gateway.config import Config  # pylint: disable=import-outside-toplevel
+
+    with (
+        patch("ai_gateway.models.base.PredictionServiceAsyncClient"),
+        patch("ai_gateway.searches.container.discoveryengine.SearchServiceAsyncClient"),
+        patch(
+            "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+            return_value=None,
+        ),
+    ):
+        config = Config(
+            _env_file=None, _env_prefix="AIGW_TEST", mock_model_responses=True
+        )
+        container = ContainerApplication()
+        container.config.from_dict(config.model_dump())
+        container.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+        yield container
 
 
 @pytest.fixture(name="ui_chat_log")

@@ -30,18 +30,17 @@ def mock_user_with_skip_usage_cutoff_fixture():
 
 @pytest.fixture(autouse=True, name="mock_usage_quota_service")
 def mock_usage_quota_service_fixture(mock_duo_workflow_service_container):
-    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+    """Auto-use fixture to mock UsageQuotaService for each test.
 
-    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    This ensures the @has_sufficient_usage_quota decorator works correctly. The container is already wired by
+    mock_duo_workflow_service_container (which wires the entire duo_workflow_service package at module scope), so no
+    additional wire() call is needed here.
     """
-    from duo_workflow_service import server as server_module
-
     service_instance = MagicMock()
     service_instance.execute = AsyncMock()
     service_instance.aclose = AsyncMock()
 
     mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
-    mock_duo_workflow_service_container.wire(modules=[server_module])
 
     yield service_instance
 

@@ -85,15 +85,6 @@ def chat_agent_fixture(system_template_override: str, mock_toolset):
     )
 
 
-@pytest.fixture(autouse=True)
-def prepare_container(
-    mock_duo_workflow_service_container,
-):
-    mock_duo_workflow_service_container.wire(
-        modules=["tests.duo_workflow_service.agents.test_chat_agent"]
-    )
-
-
 @pytest.fixture(name="input")
 def input_fixture():
     return {

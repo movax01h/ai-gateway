@@ -29,7 +29,6 @@ from ai_gateway.config import (
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
-from duo_workflow_service import server as server_module
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -45,6 +44,7 @@ from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
 from duo_workflow_service.server import (
+    CONTAINER_APPLICATION_PACKAGES,
     DuoWorkflowService,
     clean_start_request,
     next_client_event,
@@ -82,6 +82,34 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 def setup_event_loop():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+
+@pytest.fixture(name="mock_duo_workflow_service_container", scope="module")
+def mock_duo_workflow_service_container_fixture():
+    """Module-scoped container fixture that wires the DI container once for all tests.
+
+    wire(packages=CONTAINER_APPLICATION_PACKAGES) costs ~220ms per call because it introspects the entire
+    duo_workflow_service package. Scoping this fixture to module means it runs once instead of once per test (~107
+    times), saving ~23s of setup time.
+
+    The mock_usage_quota_service autouse fixture handles per-test override/reset_override, which is cheap (~1ms) and
+    safe to do on a shared wired container.
+    """
+    with (
+        patch("ai_gateway.models.base.PredictionServiceAsyncClient"),
+        patch("ai_gateway.searches.container.discoveryengine.SearchServiceAsyncClient"),
+        patch(
+            "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+            return_value=None,
+        ),
+    ):
+        config = Config(
+            _env_file=None, _env_prefix="AIGW_TEST", mock_model_responses=True
+        )
+        container = ContainerApplication()
+        container.config.from_dict(config.model_dump())
+        container.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+        yield container
 
 
 @pytest.fixture(name="simple_flow_config")
@@ -170,21 +198,37 @@ def mock_context_fixture() -> grpc.ServicerContext:
 
 @pytest.fixture(autouse=True)
 def mock_usage_quota_service(mock_duo_workflow_service_container):
-    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+    """Auto-use fixture to mock UsageQuotaService for each test.
 
-    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    This ensures the @has_sufficient_usage_quota decorator works correctly. The container is already wired by
+    mock_duo_workflow_service_container (which wires the entire duo_workflow_service package), so no additional wire()
+    call is needed here.
     """
 
     service_instance = MagicMock()
     service_instance.execute = AsyncMock()
     service_instance.aclose = AsyncMock()
 
-    mock_duo_workflow_service_container.wire(modules=[server_module])
     mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
 
     yield service_instance
 
     mock_duo_workflow_service_container.usage_quota.service.reset_override()
+
+
+@pytest.fixture(name="use_real_model_path")
+def use_real_model_path_fixture(mock_duo_workflow_service_container):
+    """Override the mock model selector to use the real LiteLLM code path for this test.
+
+    The module-scoped container uses mock_model_responses=True (FakeModel) by default. This fixture temporarily
+    overrides the model selector to 'original' so that mock_acompletion_with_retry can intercept the real LiteLLM call
+    path, enabling LLM operation tracking needed for billing event assertions.
+    """
+    mock_duo_workflow_service_container.pkg_models_v2.container._mock_selector.override(
+        providers.Object("original")
+    )
+    yield
+    mock_duo_workflow_service_container.pkg_models_v2.container._mock_selector.reset_override()
 
 
 @pytest.mark.parametrize(
@@ -196,6 +240,7 @@ def mock_usage_quota_service(mock_duo_workflow_service_container):
 )
 def test_run(custom_models_enabled, vertex_project, should_validate_llm):
     with (
+        patch("duo_workflow_service.server.setup_container"),
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
             "duo_workflow_service.server.setup_error_tracking"
@@ -242,6 +287,7 @@ class TestRunMockUsageQuotaServer:
     @pytest.fixture(name="mock_run_dependencies")
     def mock_run_dependencies_fixture(self):
         with (
+            patch("duo_workflow_service.server.setup_container"),
             patch("duo_workflow_service.server.setup_profiling"),
             patch("duo_workflow_service.server.setup_error_tracking"),
             patch("duo_workflow_service.server.setup_monitoring"),
@@ -602,8 +648,8 @@ async def test_list_flows_with_filters(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config_values,acompletion_response_fixture",
-    [({"mock_model_responses": False}, "acompletion_stream_response")],
+    "acompletion_response_fixture",
+    ["acompletion_stream_response"],
 )
 @pytest.mark.parametrize("self_hosted_dap_billing_enabled", ["true", "false"])
 @pytest.mark.usefixtures(
@@ -612,6 +658,7 @@ async def test_list_flows_with_filters(
     "mock_gitlab_workflow_aput",
     "mock_get_event",
     "mock_acompletion_with_retry",
+    "use_real_model_path",
 )
 @patch(
     "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater._update_workflow_status_in_remote"
