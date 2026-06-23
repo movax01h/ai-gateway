@@ -27,11 +27,6 @@ from lib.context import gitlab_version
 from lib.events import GLReportingEventContext
 
 
-@pytest.fixture(name="config_values")
-def config_values_fixture():
-    return {"mock_model_responses": True}
-
-
 @pytest.fixture(name="plan_steps")
 def plan_steps_fixture() -> list[Task]:
     return []
