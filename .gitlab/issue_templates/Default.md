@@ -30,7 +30,7 @@ understand the problem better.
 
 ## Links / references
 
-/label ~"group::ai framework"
+/label ~"group::ai core infra"
 
 <!-- Select a type -->
 <!-- /label ~"type::bug" -->
