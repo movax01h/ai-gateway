@@ -30,7 +30,7 @@ def validate_graphql_file(file_path: Path) -> list[str]:
             content = f.read()
         return validate_graphql_syntax(content)
     except Exception as e:
-        return [f"Failed to read file: {str(e)}"]
+        return [f"Failed to read file: {e!s}"]
 
 
 def get_graphql_directories() -> list[Path]:

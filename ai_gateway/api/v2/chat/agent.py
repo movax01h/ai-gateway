@@ -34,8 +34,8 @@ from lib.context import StarletteUser, current_model_metadata_context, get_curre
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
-    "router",
     "create_event_stream",
+    "router",
 ]
 
 

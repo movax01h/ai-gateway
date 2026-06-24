@@ -21,7 +21,7 @@ pre-commit:
         fi
 
         # Run all other parts of lint-code (everything except check-mypy)
-        make flake8 check-ruff check-pylint check-codespell check-docformatter check-editorconfig \
+        make check-ruff check-pylint check-codespell check-docformatter check-editorconfig \
         LINT_WORKING_DIR="$STAGED_FILES" \
         CODESPELL_LINT_WORKING_DIR="$STAGED_FILES" \
         EDITORCONFIG_LINT_WORKING_DIR="$STAGED_FILES"

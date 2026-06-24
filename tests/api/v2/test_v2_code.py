@@ -1,4 +1,4 @@
-# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments,unused-variable
+# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments
 
 import time
 from typing import Any, Dict, List, Union
@@ -800,7 +800,7 @@ class TestCodeCompletions:
         ],
     )
     @pytest.mark.usefixtures("mock_config")
-    def test_non_stream_response(
+    def test_non_stream_response(  # noqa: PLR0913
         self,
         mock_client,
         mock_llm_text: Mock,
@@ -1298,8 +1298,7 @@ class TestCodeCompletions:
         assert (
             body["choices"][0]["text"] == expect_post_processed
             and "Post-processed completion response"
-            or "whatever"
-        )
+        ) or "whatever"
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
@@ -1626,7 +1625,7 @@ class TestGitLabModelProvider:
 
             assert response.status_code == 200
             assert mock_build.called
-            build_args, build_kwargs = mock_build.call_args
+            build_args, _build_kwargs = mock_build.call_args
             assert build_args[1].model_provider == provider
             assert build_args[1].model_name == gitlab_identifier
 
@@ -2123,7 +2122,7 @@ class TestCodeGenerations:
             ),
         ],
     )
-    def test_non_stream_response(
+    def test_non_stream_response(  # noqa: PLR0913
         self,
         mock_client,
         mock_code_bison: Mock,

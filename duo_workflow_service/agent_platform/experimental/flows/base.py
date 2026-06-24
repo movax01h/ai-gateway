@@ -144,7 +144,7 @@ class Flow(AbstractWorkflow):
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=f"Starting Flow: {goal}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -239,7 +239,7 @@ class Flow(AbstractWorkflow):
                             message_type=MessageTypeEnum.USER,
                             message_sub_type=None,
                             content=message,
-                            message_id=f"user-{str(uuid4())}",
+                            message_id=f"user-{uuid4()!s}",
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             status=ToolStatus.SUCCESS,
                             correlation_id=None,

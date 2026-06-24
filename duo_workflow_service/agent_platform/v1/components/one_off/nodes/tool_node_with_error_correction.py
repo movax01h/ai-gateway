@@ -421,7 +421,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
-                tool_response=f"{str(e)} {response}" if response else str(e),
+                tool_response=f"{e!s} {response}" if response else str(e),
             )
             if isinstance(e, ToolException):
                 err_format = self._tracker.handle_tool_exception(

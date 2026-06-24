@@ -21,8 +21,8 @@ from lib.events import FeatureQualifiedNameStatic
 from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
-    "router",
     "code_suggestions",
+    "router",
 ]
 
 router = APIRouter()

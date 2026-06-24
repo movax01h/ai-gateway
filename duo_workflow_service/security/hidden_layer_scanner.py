@@ -44,13 +44,13 @@ class HiddenLayerConfig:
     @classmethod
     def from_environment(cls) -> "HiddenLayerConfig":
         """Create configuration from environment variables."""
-        allowed_realms: set[GITLAB_REALM] = set(
+        allowed_realms: set[GITLAB_REALM] = {
             cast(GITLAB_REALM, item.strip())
             for item in os.getenv("HIDDENLAYER_LOG_ALLOWED_REALMS", "saas")
             .lower()
             .split(",")
             if item.strip() in get_args(GITLAB_REALM)
-        )
+        }
         return cls(
             client_id=os.getenv("HL_CLIENT_ID"),
             client_secret=os.getenv("HL_CLIENT_SECRET"),

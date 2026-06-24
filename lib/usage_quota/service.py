@@ -16,11 +16,11 @@ from lib.usage_quota.errors import (
 )
 
 __all__ = [
-    "UsageQuotaEvent",
     "InsufficientCredits",
     "InsufficientEntitlements",
-    "UsageQuotaCheckUnavailable",
     "ModelMetadata",
+    "UsageQuotaCheckUnavailable",
+    "UsageQuotaEvent",
     "UsageQuotaService",
 ]
 

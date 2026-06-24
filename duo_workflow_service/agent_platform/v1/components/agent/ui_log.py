@@ -90,7 +90,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             ),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -117,7 +117,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=tool.name,
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -148,7 +148,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=None,
             additional_context=kwargs.get("context_elements", []),
             message_sub_type="reasoning",
-            message_id=f"agent-{str(uuid4())}",
+            message_id=f"agent-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -158,7 +158,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
         tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
     ) -> str:
         if not hasattr(tool, "format_display_message"):
-            args_str = ", ".join(f"{k}={str(v)}" for k, v in tool_call_args.items())
+            args_str = ", ".join(f"{k}={v!s}" for k, v in tool_call_args.items())
             return f"Using {tool.name}: {args_str}"
 
         try:

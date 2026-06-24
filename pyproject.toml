@@ -125,7 +125,6 @@ diff-cover = "^10.2.0"
 optional = true
 
 [tool.poetry.group.lint.dependencies]
-flake8 = "^7.0.0"
 ruff = "^0.15.14"
 pylint = "^4.0.5"
 astroid = "^4.0.4"
@@ -190,10 +189,64 @@ omit = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-extend-exclude = ["*_pb2.py", "*_pb2.pyi", "*_pb2_grpc.py"]
+# Pin ruff: lint rules and formatter output can change between releases, so
+# contributors and CI must resolve the same ruff to get identical results.
+# Keep in sync with the `ruff` pin in [tool.poetry.group.lint.dependencies].
+required-version = ">=0.15.14"
+# Skip generated protobuf stubs and vendored code (any `vendor/` dir, matching
+# pylint's `--ignore=vendor`). `force-exclude` makes these apply even when files
+# are passed explicitly (e.g. lefthook staged paths).
+force-exclude = true
+extend-exclude = ["*_pb2.py", "*_pb2.pyi", "*_pb2_grpc.py", "**/vendor"]
 
 [tool.ruff.lint]
-select = ["I"]
+# Explicit rule set (not `extend-select`) so the active rules are fully visible
+# and do not drift when ruff changes its defaults. Rule groups enabled during
+# the ruff migration (work item #2237):
+#   I  imports        E,W,F  pycodestyle + pyflakes (replaces flake8)
+#   C4 comprehensions RUF    ruff-specific          PL  pylint subset
+select = [
+  "I",
+  "E",
+  "W",
+  "F",
+  "C4",
+  "RUF",
+  "PL",
+]
+ignore = [
+  "E501",    # line length is owned by the formatter, not enforced as a lint error
+  "E203",    # whitespace before ':', conflicts with ruff/black formatting
+  "PLR2004", # magic-value-comparison: not enforced today; deferred style debt
+  "PLC0415", # import-outside-top-level: lazy imports are intentional (DI / circular-import avoidance)
+  "PLW0603", # global-statement: intentional module-level singletons / config flags
+  "PLW2901", # redefined-loop-name: intentional normalize-the-item-in-loop idiom
+  "PLW1641", # eq-without-hash: value classes compared by value, never used as keys
+  "PLW0108", # unnecessary-lambda: test mock side_effect wrappers read more clearly as lambdas
+  "RUF012",  # mutable-class-default: noisy with Pydantic/dataclass patterns; not enforced today
+  "RUF001",  # ambiguous-unicode (string): intentional typography + CJK test fixtures
+  "RUF002",  # ambiguous-unicode (docstring): same as RUF001
+  "RUF003",  # ambiguous-unicode (comment): same as RUF001
+  "RUF005",  # collection-literal-concatenation: style only; autofix is unsafe (operand may be non-list)
+  "RUF006",  # asyncio-dangling-task: fire-and-forget tasks are intentional; task-ref handling is a separate change
+  "RUF043",  # pytest-raises-ambiguous-pattern: existing test match= patterns pass; not worth churning
+  # RUF100 (unused-noqa) is deferred: it is accurate only once every rule group
+  # (E/W/F, C4, PL) is active, otherwise it strips noqa for inactive rules.
+  "RUF100",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"] # re-export pattern: unused and `import *` re-exports are intentional
+"tests/**" = ["PLR2004"]         # magic values in tests are fine (also globally ignored above)
+
+[tool.ruff.lint.pylint]
+# Mirror the historical pylint limits so enabling the PL group does not
+# introduce hundreds of false complexity violations.
+max-args = 17
+max-positional-args = 17
+max-locals = 30
+max-statements = 65
+max-branches = 20
 
 [tool.ruff.lint.isort]
 # `_pickle` is the C accelerator for `pickle`. ruff treats it as standard

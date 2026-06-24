@@ -100,7 +100,7 @@ class DeterministicStepNode:
                 tool_call_args=tool_call_args,
                 event=UILogEventsDeterministicStep.ON_TOOL_EXECUTION_FAILED,
                 message=err_format if isinstance(e, SecurityException) else None,
-                tool_response=f"{str(e)} {response}" if response else str(e),
+                tool_response=f"{e!s} {response}" if response else str(e),
             )
 
         result = {

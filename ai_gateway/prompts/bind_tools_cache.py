@@ -16,8 +16,8 @@ from prometheus_client import Counter, Gauge, Histogram
 from pydantic import BaseModel
 
 __all__ = [
-    "BindToolsCacheProtocol",
     "BindToolsCache",
+    "BindToolsCacheProtocol",
     "NoOpBindToolsCache",
     "compute_tool_signature",
 ]

@@ -86,7 +86,7 @@ class EpicBaseTool(DuoBaseTool):
             # Use the group_id from the URL
             return GroupURLValidationResult(url_group_id, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return GroupURLValidationResult(
                 None if group_id is None else str(group_id), errors
             )
@@ -137,7 +137,7 @@ class EpicBaseTool(DuoBaseTool):
             # Use the IDs from the URL
             return EpicURLValidationResult(url_group_id, url_epic_iid, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return EpicURLValidationResult(
                 None if group_id is None else str(group_id), epic_iid, errors
             )

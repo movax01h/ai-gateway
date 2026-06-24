@@ -32,8 +32,8 @@ __all__ = [
     "AnthropicAPIConnectionError",
     "AnthropicAPIStatusError",
     "AnthropicAPITimeoutError",
-    "AnthropicModel",
     "AnthropicChatModel",
+    "AnthropicModel",
     "KindAnthropicModel",
 ]
 

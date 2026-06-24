@@ -142,12 +142,11 @@ class TestServerRoutes:
             res = client.request(method, path)
             if auth_enabled:
                 assert res.status_code == 401
+            elif method == "POST":
+                # We're checking the route availability only
+                assert res.status_code == 422
             else:
-                if method == "POST":
-                    # We're checking the route availability only
-                    assert res.status_code == 422
-                else:
-                    assert False
+                assert False
 
 
 def test_setup_router():

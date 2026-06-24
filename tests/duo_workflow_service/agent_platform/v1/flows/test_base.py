@@ -281,7 +281,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
 
         input = kwargs.get("input")
-        if expected_type == dict:
+        if expected_type is dict:
             assert isinstance(input, expected_type)
             assert input["context"]["goal"] == goal
             assert input["context"]["project_id"] == project["id"]

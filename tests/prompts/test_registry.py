@@ -1476,7 +1476,7 @@ class TestGetRequiredVariables:
                 "name: Test prompt",
                 "unit_primitive: duo_chat",
                 "prompt_template:",
-                f"  system: {repr(template)}",
+                f"  system: {template!r}",
                 "",
             ]
         )
@@ -1783,7 +1783,7 @@ class TestDuoAgentPlatformPromptRegistration:
         """Return all prompt IDs whose base definition declares unit_primitive=duo_agent_platform."""
         prompt_ids = []
         for path in sorted(self._definitions_dir.glob("**")):
-            yml_files = sorted(list(path.glob("*.yml")))
+            yml_files = sorted(path.glob("*.yml"))
             if not yml_files:
                 continue
             prompt_id_with_family = path.relative_to(self._definitions_dir)

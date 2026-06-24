@@ -8,8 +8,8 @@ from ai_gateway.chat.tools import BaseTool
 from lib.context import StarletteUser
 
 __all__ = [
-    "UnitPrimitiveToolset",
     "BaseToolsRegistry",
+    "UnitPrimitiveToolset",
 ]
 
 

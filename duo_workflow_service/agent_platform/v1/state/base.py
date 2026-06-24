@@ -26,22 +26,22 @@ from duo_workflow_service.entities.state import (
 )
 
 __all__ = [
+    "BaseIOKey",
     "FlowEvent",
     "FlowEventType",
     "FlowState",
     "FlowStateKeys",
-    "merge_nested_dict",
-    "create_nested_dict",
-    "merge_nested_dict_reducer",
-    "conversation_history_replace_reducer",
-    "agent_context_limits_reducer",
-    "BaseIOKey",
     "IOKey",
-    "IOKeyTemplate",
     "IOKeyFactory",
+    "IOKeyTemplate",
     "NoneIOKey",
     "RuntimeIOKey",
+    "agent_context_limits_reducer",
+    "conversation_history_replace_reducer",
+    "create_nested_dict",
     "get_vars_from_state",
+    "merge_nested_dict",
+    "merge_nested_dict_reducer",
 ]
 
 
@@ -235,7 +235,7 @@ class IOKey(BaseIOKey):
                     f"Invalid target: {self.target} allowed targets are {allowed_targets}"
                 )
 
-            targets_with_subkeys: set[str] = set([])
+            targets_with_subkeys: set[str] = set()
 
             for attribute, annotation in FlowState.__annotations__.items():
                 annotation_type = get_origin(annotation)

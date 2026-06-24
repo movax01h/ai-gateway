@@ -18,8 +18,8 @@ __all__ = [
     "FlowConfigInput",
     "FlowConfigMetadata",
     "PartialFlowConfig",
-    "load_component_class",
     "list_configs",
+    "load_component_class",
 ]
 
 

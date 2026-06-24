@@ -7,11 +7,11 @@ from duo_workflow_service.agent_platform.v1.ui_log.base import (
 )
 
 __all__ = [
-    "LogLevels",
     "BaseUILogEvents",
-    "UILogCallback",
     "BaseUILogWriter",
+    "LogLevels",
     "UIHistory",
+    "UILogCallback",
 ]
 
 # Note: This class is for `experimental` features that extend or override behavior in the latest stable version.

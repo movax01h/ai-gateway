@@ -162,7 +162,7 @@ def _validate_and_get_model_metadata(
     except (ValueError, JSONDecodeError, UnicodeDecodeError) as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Error creating the model_metadata: {str(e)}",
+            detail=f"Error creating the model_metadata: {e!s}",
         )
 
 

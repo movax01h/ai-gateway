@@ -126,7 +126,7 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
 
         # MCP server tools
         enabled_tools = metadata.get(X_GITLAB_ENABLED_MCP_SERVER_TOOLS, "").split(",")
-        enabled_tools = set(tool.strip() for tool in enabled_tools if tool.strip())
+        enabled_tools = {tool.strip() for tool in enabled_tools if tool.strip()}
         set_enabled_mcp_server_tools(enabled_tools)
 
         # LangSmith headers for distributed tracing

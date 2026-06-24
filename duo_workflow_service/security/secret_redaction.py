@@ -211,7 +211,7 @@ def _shallow_copy_with(obj: Any, field: str, value: Any) -> Any:
     return cloned
 
 
-def _redact_recursive(
+def _redact_recursive(  # noqa: PLR0911  # branchy recursive redaction over value types
     response: Any, detectors: List[BasePlugin], tool_name: str
 ) -> Any:
     """Recursively apply ``_redact_string`` over supported value types.

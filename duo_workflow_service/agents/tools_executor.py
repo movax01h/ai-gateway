@@ -389,7 +389,7 @@ class ToolsExecutor:
         except Exception as error:
             # Convert any unexpected exception to ToolException to avoid blocking workflow
             tool_exception = ToolException(
-                f"Unexpected error executing tool {tool_name}: {str(error)}"
+                f"Unexpected error executing tool {tool_name}: {error!s}"
             )
             tool_exception.__cause__ = error
             return self._handle_tool_error(
@@ -489,9 +489,7 @@ class ToolsExecutor:
         log_exception(error, extra={"context": "Tools executor raised error"})
 
         response = getattr(error, "response", None)
-        tool_response = (
-            f"Tool {tool_name} raised ToolException: {str(error)} {response}"
-        )
+        tool_response = f"Tool {tool_name} raised ToolException: {error!s} {response}"
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,

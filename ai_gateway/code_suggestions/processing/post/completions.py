@@ -24,8 +24,8 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.structured_logging import get_request_logger
 
 __all__ = [
-    "PostProcessorOperation",
     "PostProcessor",
+    "PostProcessorOperation",
     "create_post_processor_for_model_metadata",
 ]
 

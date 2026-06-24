@@ -144,7 +144,7 @@ def _git_output(command_output: list[str], state: WorkflowState):  # pylint: dis
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"{command_output[-1]}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

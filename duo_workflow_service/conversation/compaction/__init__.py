@@ -32,13 +32,13 @@ from duo_workflow_service.conversation.compaction.utils import (
 )
 
 __all__ = [
-    "ConversationCompactor",
-    "create_conversation_compactor",
     "CompactionConfig",
     "CompactionResult",
+    "ConversationCompactor",
     "MessageSlices",
+    "create_conversation_compactor",
     "is_turn_complete",
+    "maybe_compact_history",
     "resolve_recent_messages_internal",
     "slice_for_summarization",
-    "maybe_compact_history",
 ]

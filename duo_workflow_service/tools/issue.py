@@ -91,7 +91,7 @@ class IssueBaseTool(DuoBaseTool):
             # Use the IDs from the URL
             return url_project_id, url_issue_iid, errors
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return project_id, issue_iid, errors
 
 

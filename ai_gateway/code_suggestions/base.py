@@ -21,13 +21,13 @@ from ai_gateway.models import (
 from ai_gateway.models.base import TokensConsumptionMetadata
 
 __all__ = [
-    "KindUseCase",
-    "CodeSuggestionsOutput",
-    "CodeSuggestionsChunk",
-    "ModelProvider",
     "PROVIDERS_MODELS_MAP",
-    "USE_CASES_MODELS_MAP",
     "SAAS_PROMPT_MODEL_MAP",
+    "USE_CASES_MODELS_MAP",
+    "CodeSuggestionsChunk",
+    "CodeSuggestionsOutput",
+    "KindUseCase",
+    "ModelProvider",
 ]
 
 

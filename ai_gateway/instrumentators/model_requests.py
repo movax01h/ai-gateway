@@ -446,7 +446,7 @@ class ModelRequestInstrumentator:
 
 # Re-export for backward compatibility during transition
 # These will be removed once all imports are updated to use lib.context directly
-__all__ = [
+__all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "ModelRequestInstrumentator",
     # Re-exports from lib.context
     "METADATA_LABELS",

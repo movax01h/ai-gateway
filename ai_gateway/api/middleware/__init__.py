@@ -25,14 +25,6 @@ from .model_config import ModelConfigMiddleware
 from .request_metadata import RequestMetadataMiddleware
 
 __all__ = [
-    "AccessLogMiddleware",
-    "DistributedTraceMiddleware",
-    "FeatureFlagMiddleware",
-    "HostHeaderValidationMiddleware",
-    "InternalEventMiddleware",
-    "MiddlewareAuthentication",
-    "ModelConfigMiddleware",
-    "RequestMetadataMiddleware",
     "X_GITLAB_CLIENT_NAME",
     "X_GITLAB_CLIENT_TYPE",
     "X_GITLAB_CLIENT_VERSION",
@@ -48,4 +40,12 @@ __all__ = [
     "X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER",
     "X_GITLAB_TEAM_MEMBER_HEADER",
     "X_GITLAB_VERSION_HEADER",
+    "AccessLogMiddleware",
+    "DistributedTraceMiddleware",
+    "FeatureFlagMiddleware",
+    "HostHeaderValidationMiddleware",
+    "InternalEventMiddleware",
+    "MiddlewareAuthentication",
+    "ModelConfigMiddleware",
+    "RequestMetadataMiddleware",
 ]

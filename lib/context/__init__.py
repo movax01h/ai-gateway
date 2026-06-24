@@ -52,7 +52,7 @@ from lib.context.workflow import (
     set_workflow_id,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     # request_metadata
     "client_capabilities",
     "client_type",

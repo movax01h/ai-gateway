@@ -108,7 +108,7 @@ class ToolEventTracker:
                 "error_type": type(error).__name__,
             },
         )
-        return f"Tool {tool_name} raised validation error {str(error)}"
+        return f"Tool {tool_name} raised validation error {error!s}"
 
     def handle_execution_error(
         self,
@@ -125,7 +125,7 @@ class ToolEventTracker:
             },
         )
 
-        return f"Tool runtime exception due to {str(error)} {getattr(error, 'response', None)}"
+        return f"Tool runtime exception due to {error!s} {getattr(error, 'response', None)}"
 
     def handle_tool_exception(self, tool_name: str, error: ToolException) -> str:
         """Handle a ToolException response and track the failure event."""
@@ -137,4 +137,4 @@ class ToolEventTracker:
                 "error_type": type(error).__name__,
             },
         )
-        return f"Tool exception occurred due to {str(error)}"
+        return f"Tool exception occurred due to {error!s}"

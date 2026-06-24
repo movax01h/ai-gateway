@@ -355,7 +355,7 @@ class ListSecurityFindings(DuoBaseTool):
             )
 
         except Exception as e:
-            raise ToolException(f"Failed to list security findings: {str(e)}")
+            raise ToolException(f"Failed to list security findings: {e!s}")
 
     def format_display_message(
         self, args: ListSecurityFindingsInput, _tool_response: Any = None

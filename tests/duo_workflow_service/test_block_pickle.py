@@ -43,12 +43,12 @@ def test_pickletools_import_is_blocked():
         del sys.modules["pickletools"]
 
     with pytest.raises(PickleDisabledError, match="Import blocked: pickletools"):
-        import pickletools
+        import pickletools  # noqa: F401  # import is expected to raise
 
 
 def test_pickle_dump_still_works():
     """Test that pickle.dump still works (only unpickling is blocked)."""
-    import duo_workflow_service.block_pickle
+    import duo_workflow_service.block_pickle  # noqa: F401  # imported for side effect
 
     data = {"key": "value"}
     buffer = io.BytesIO()
@@ -62,7 +62,7 @@ def test_pickle_dump_still_works():
 
 def test_pickle_dumps_still_works():
     """Test that pickle.dumps still works (only unpickling is blocked)."""
-    import duo_workflow_service.block_pickle
+    import duo_workflow_service.block_pickle  # noqa: F401  # imported for side effect
 
     data = {"key": "value"}
 

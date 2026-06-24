@@ -27,8 +27,8 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 
 __all__ = [
-    "HumanInputComponent",
     "ChatHumanInputComponent",
+    "HumanInputComponent",
 ]
 
 

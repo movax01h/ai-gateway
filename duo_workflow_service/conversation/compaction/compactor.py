@@ -34,7 +34,7 @@ __all__ = [
     "COMPACTION_PROMPT_MANUAL_ID",
     "COMPACTION_PROMPT_VERSION",
     "CompactionOptimizer",
-    "ConversationCompactor",
     "CompactionStatus",
+    "ConversationCompactor",
     "create_conversation_compactor",
 ]

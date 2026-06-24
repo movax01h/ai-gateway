@@ -428,7 +428,7 @@ class GitLabGraphQL(DuoBaseTool):
             result = json.loads(body)
 
         # Check for GraphQL errors in the response
-        if "errors" in result and result["errors"]:
+        if result.get("errors"):
             raise ToolException(
                 f"GraphQL query returned errors: {json.dumps(result['errors'])}"
             )

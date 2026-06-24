@@ -162,7 +162,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)
     @inject
-    async def ExecuteWorkflow(
+    async def ExecuteWorkflow(  # noqa: PLR0912, PLR0915  # top-level gRPC handler
         self,
         request_iterator: AsyncIterable[contract_pb2.ClientEvent],
         context: grpc.ServicerContext,
@@ -276,7 +276,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             )
             await context.abort(
                 grpc.StatusCode.CANCELLED,
-                f"Flow configuration failed security validation: {str(e)}",
+                f"Flow configuration failed security validation: {e!s}",
             )
         except ValueError as e:
             log.error(

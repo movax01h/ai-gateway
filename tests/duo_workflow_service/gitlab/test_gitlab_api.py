@@ -1,4 +1,3 @@
-# pylint: disable=unused-variable
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -225,7 +224,7 @@ async def test_fetch_workflow_and_container_data_with_empty_languages():
     }
 
     workflow_id = "456"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -274,7 +273,7 @@ async def test_fetch_workflow_and_container_data_with_missing_languages():
     }
 
     workflow_id = "789"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, _namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -292,7 +291,7 @@ async def test_fetch_workflow_and_project_data_with_missing_repository(
     gitlab_client.graphql.return_value = workflow_and_project_data
 
     workflow_id = "1"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -330,7 +329,7 @@ async def test_fetch_namespace_level_workflow():
     }
 
     workflow_id = "111"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -386,7 +385,7 @@ async def test_fetch_workflow_and_container_data_with_exclusion_rules():
     }
 
     workflow_id = "123"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, _namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -430,7 +429,7 @@ async def test_fetch_workflow_and_container_data_without_exclusion_rules():
     }
 
     workflow_id = "123"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, _namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -473,7 +472,7 @@ async def test_fetch_workflow_with_prompt_injection_protection_level_from_namesp
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 
@@ -517,7 +516,7 @@ async def test_fetch_workflow_with_prompt_injection_protection_level_from_projec
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 
@@ -617,7 +616,7 @@ async def test_fetch_workflow_protection_level_defaults_to_log_only():
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 
@@ -855,7 +854,7 @@ async def test_protection_level_defaults_to_log_only_when_ai_settings_missing():
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 

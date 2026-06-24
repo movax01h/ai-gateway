@@ -160,7 +160,7 @@ def validate_duo_context_exclusions(
             )
     except gitmatch.InvalidPathError as ex:
         raise ToolException(
-            f"Access denied: Not accessing invalid path '{file_path}'. {str(ex)}"
+            f"Access denied: Not accessing invalid path '{file_path}'. {ex!s}"
         )
 
     if file_path != file_path.lower():

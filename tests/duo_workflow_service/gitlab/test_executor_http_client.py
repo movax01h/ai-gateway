@@ -179,7 +179,7 @@ async def test_executor_gitlab_http_client(
         assert actual_body in (
             None,
             "",
-        ), f"Expected body to be None or empty string, got: {repr(actual_body)}"
+        ), f"Expected body to be None or empty string, got: {actual_body!r}"
     else:
         assert actual_body == body
 

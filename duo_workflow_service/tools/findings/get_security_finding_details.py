@@ -66,7 +66,7 @@ class GetSecurityFindingDetails(DuoBaseTool):
             raise
         except Exception as e:
             raise ToolException(
-                f"An unexpected error occurred while fetching the security finding: {str(e)}"
+                f"An unexpected error occurred while fetching the security finding: {e!s}"
             )
 
     async def _fetch_finding_from_pipeline(

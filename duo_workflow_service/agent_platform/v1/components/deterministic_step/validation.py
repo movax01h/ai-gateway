@@ -85,7 +85,7 @@ def select_validated_tool(
         candidate = superseded_tool_instance
 
     # No tool in the supersession chain matched — raise the last error
-    raise ValueError(f"Tool '{tool_name}' {str(current_error)}") from current_error
+    raise ValueError(f"Tool '{tool_name}' {current_error!s}") from current_error
 
 
 def validate_against_schema(

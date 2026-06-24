@@ -236,7 +236,7 @@ class DuoBaseTool(BaseTool):
             # Use the project_id from the URL
             return ProjectURLValidationResult(url_project_id, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return ProjectURLValidationResult(str(project_id), errors)
 
     def _validate_merge_request_url(
@@ -296,7 +296,7 @@ class DuoBaseTool(BaseTool):
                 url_project_id, url_merge_request_iid, errors
             )
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return MergeRequestValidationResult(
                 None if project_id is None else str(project_id),
                 merge_request_iid,
@@ -329,7 +329,7 @@ class DuoBaseTool(BaseTool):
             # Use the IDs from the URL
             return PipelineValidationResult(url_project_id, url_pipeline_iid, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return PipelineValidationResult(
                 None,
                 None,

@@ -202,7 +202,7 @@ class Workflow(AbstractWorkflow):
                             correlation_id=None,
                             tool_info=None,
                             additional_context=None,
-                            message_id=f"error-{str(uuid4())}",
+                            message_id=f"error-{uuid4()!s}",
                         )
                     ],
                 },
@@ -327,7 +327,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting workflow with goal: {goal}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

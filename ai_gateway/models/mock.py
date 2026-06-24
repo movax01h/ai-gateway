@@ -21,12 +21,12 @@ from ai_gateway.models.base_text import (
 from ai_gateway.safety_attributes import SafetyAttributes
 
 __all__ = [
-    "AsyncStream",
     "LLM",
-    "ChatModel",
-    "FakeModel",
-    "FakeCompletionModel",
     "AgenticFakeModel",
+    "AsyncStream",
+    "ChatModel",
+    "FakeCompletionModel",
+    "FakeModel",
 ]
 
 _T = TypeVar("_T")
