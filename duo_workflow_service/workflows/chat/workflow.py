@@ -119,9 +119,7 @@ _SIMPLE_GITLAB_READ_ONLY_TOOLS = [
     "get_work_item",
     "get_work_item_notes",
     "list_work_items",
-    "list_vulnerabilities",
     "get_current_user",
-    "get_vulnerability_details",
     "get_wiki_page",
 ]
 
