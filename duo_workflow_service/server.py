@@ -64,6 +64,9 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
+from duo_workflow_service.interceptors.request_metadata_log_interceptor import (
+    RequestMetadataLogInterceptor,
+)
 from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
@@ -901,6 +904,7 @@ async def serve(config: Config, port: int) -> None:
             interceptors=[
                 MetadataContextInterceptor(config),
                 CorrelationIdInterceptor(),
+                RequestMetadataLogInterceptor(),
                 AuthenticationInterceptor(reflection_enabled=reflection_enabled),
                 FeatureFlagInterceptor(),
                 InternalEventsInterceptor(),
