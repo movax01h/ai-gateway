@@ -28,10 +28,6 @@ lint:ruff:
   variables:
     RUFF_PATHS: "ai_gateway duo_workflow_service lib lints scripts tests integration_tests"
   script:
-    # ruff lints statically, so it needs neither the project root nor the heavy
-    # runtime deps - install just the lint group for a fast job.
-    - poetry install --only lint --no-root
-    # Always emit the Code Quality report, then fail the job on any finding.
     - poetry run ruff check --output-format=gitlab --output-file=gl-code-quality-report.json ${RUFF_PATHS} || true
     - poetry run ruff check ${RUFF_PATHS}
     - poetry run ruff format --check ${RUFF_PATHS}
