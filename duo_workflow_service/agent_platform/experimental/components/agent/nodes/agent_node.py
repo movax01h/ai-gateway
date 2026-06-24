@@ -5,4 +5,4 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentNode,
 )
 
-__all__ = ["AgentNode", "AgentFinalOutput"]
+__all__ = ["AgentFinalOutput", "AgentNode"]

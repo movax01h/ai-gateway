@@ -41,7 +41,7 @@ class Routes(StrEnum):
     COMMIT_CHANGES = "commit_changes"
 
 
-def _router(state: WorkflowState) -> str:
+def _router(state: WorkflowState) -> str:  # noqa: PLR0911  # state-machine router
     if state["status"] == WorkflowStatusEnum.CANCELLED:
         return Routes.END
 
@@ -97,7 +97,7 @@ def _git_output(command_output: list[str], state: WorkflowState):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"{command_output[-1]}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -158,7 +158,7 @@ class Workflow(AbstractWorkflow):
                         message_type=MessageTypeEnum.TOOL,
                         message_sub_type=None,
                         content="File too large, skipping.",
-                        message_id=f"tool-{str(uuid4())}",
+                        message_id=f"tool-{uuid4()!s}",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.FAILURE,
                         correlation_id=None,
@@ -176,7 +176,7 @@ class Workflow(AbstractWorkflow):
                     message_type=MessageTypeEnum.TOOL,
                     message_sub_type=None,
                     content="Loaded Jenkins file",
-                    message_id=f"tool-{str(uuid4())}",
+                    message_id=f"tool-{uuid4()!s}",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
@@ -331,7 +331,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting Jenkinsfile translation workflow from file: {target_file}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

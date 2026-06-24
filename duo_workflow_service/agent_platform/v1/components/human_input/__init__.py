@@ -4,6 +4,6 @@ from .component import (
 )
 
 __all__ = [
-    "HumanInputComponent",
     "ChatHumanInputComponent",
+    "HumanInputComponent",
 ]

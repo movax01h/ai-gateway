@@ -5,7 +5,7 @@ from ai_gateway.model_selection import PromptParams
 from ai_gateway.model_selection.models import BaseModelParams
 from lib.billing_events.service import LLMOperationType
 
-__all__ = ["PromptConfig", "ModelConfig"]
+__all__ = ["ModelConfig", "PromptConfig"]
 
 
 class ModelConfig(BaseModel):

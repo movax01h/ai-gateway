@@ -16,7 +16,7 @@ from langchain_core.prompts.chat import MessageLikeRepresentation
 
 from lib.context.workflow import get_workflow_id
 
-__all__ = ["render_security_block", "prompt_template_to_messages"]
+__all__ = ["prompt_template_to_messages", "render_security_block"]
 
 _SECURITY_TEMPLATE_SOURCE = (
     resources.files("ai_gateway.prompts.definitions")

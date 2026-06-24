@@ -23,9 +23,9 @@ from ai_gateway.safety_attributes import SafetyAttributes
 from ai_gateway.tracking import SnowplowEventContext
 
 __all__ = [
+    "KindVertexTextModel",
     "PalmCodeBisonModel",
     "PalmCodeGenBaseModel",
-    "KindVertexTextModel",
     "VertexAPIConnectionError",
     "VertexAPIStatusError",
 ]

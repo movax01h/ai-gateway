@@ -26,9 +26,9 @@ from ai_gateway.structured_logging import get_request_logger
 from lib.guardrails import GUARDRAIL_INTERVENED_WARNING
 
 __all__ = [
+    "ReActAgent",
     "ReActPlainTextParser",
     "ReActPromptTemplate",
-    "ReActAgent",
 ]
 
 

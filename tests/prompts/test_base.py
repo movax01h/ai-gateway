@@ -2261,7 +2261,7 @@ class TestBuildModelExtraHeaders:
                 custom_models_extra_headers=env_headers,
             )
 
-        warning_logs = [l for l in cap_logs if l.get("log_level") == "warning"]
+        warning_logs = [log for log in cap_logs if log.get("log_level") == "warning"]
         assert len(warning_logs) == 1
         assert "overriding" in warning_logs[0]["event"].lower()
         assert warning_logs[0]["overridden_keys"] == ["x-shared"]

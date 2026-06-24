@@ -98,7 +98,7 @@ async def _invoke(
         )
 
     # We don't use `isinstance` because we don't want to match subclasses
-    if not type(prompt) is Prompt:  # pylint: disable=unidiomatic-typecheck
+    if type(prompt) is not Prompt:  # pylint: disable=unidiomatic-typecheck
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Prompt '{prompt_id}' is not supported",

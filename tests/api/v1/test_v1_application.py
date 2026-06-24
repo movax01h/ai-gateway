@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,line-too-long,use-dict-literal
+# pylint: disable=file-naming-for-tests,line-too-long
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, call, patch
 
@@ -375,12 +375,12 @@ class TestApplication:
         assert response.status_code == status.HTTP_204_NO_CONTENT
         mock_q_boto3.client.assert_called_once_with("q", **credentials)
 
-        params = dict(
-            clientId="123",
-            clientSecret="some.secret",
-            instanceUrl="https://example.com",
-            redirectUrl="https://example.com",
-        )
+        params = {
+            "clientId": "123",
+            "clientSecret": "some.secret",
+            "instanceUrl": "https://example.com",
+            "redirectUrl": "https://example.com",
+        }
 
         mock_create_o_auth_app_connection.assert_has_calls(
             [call(**params), call(**params)]

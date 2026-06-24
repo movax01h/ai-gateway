@@ -95,7 +95,7 @@ class RepositoryFileBaseTool(DuoBaseTool):
             # Use the values from the URL
             return url_project_id, url_ref, url_file_path, errors
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return project_id, ref, file_path, errors
 
 

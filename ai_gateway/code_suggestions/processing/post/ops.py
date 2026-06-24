@@ -15,12 +15,12 @@ from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
 __all__ = [
     "clean_model_reflection",
-    "trim_by_min_allowed_context",
     "fix_end_block_errors",
     "fix_end_block_errors_legacy",
-    "strip_code_block_markdown",
     "prepend_new_line",
     "strip_asterisks",
+    "strip_code_block_markdown",
+    "trim_by_min_allowed_context",
 ]
 
 log = structlog.stdlib.get_logger("codesuggestions")

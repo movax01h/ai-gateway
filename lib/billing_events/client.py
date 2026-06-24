@@ -15,7 +15,7 @@ from lib.internal_events.context import (
     current_event_context,
 )
 
-__all__ = ["BillingEventsClient", "BillingEvent"]
+__all__ = ["BillingEvent", "BillingEventsClient"]
 
 
 class BillingEvent(StrEnum):

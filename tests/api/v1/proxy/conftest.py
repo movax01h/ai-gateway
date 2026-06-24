@@ -30,7 +30,7 @@ def auth_user_fixture():
 
 @pytest.fixture(name="unit_primitive")
 def unit_primitive_fixture():
-    return list(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys())[0]
+    return next(iter(EXTENDED_FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS.keys()))
 
 
 @pytest.fixture(name="proxy_headers")

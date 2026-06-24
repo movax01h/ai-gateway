@@ -4,7 +4,7 @@ from tree_sitter import Node
 
 from ai_gateway.code_suggestions.prompts.parsers.base import BaseVisitor, Point
 
-__all__ = ["MinAllowedBlockVisitor", "ErrorBlocksVisitor"]
+__all__ = ["ErrorBlocksVisitor", "MinAllowedBlockVisitor"]
 
 
 class MinAllowedBlockVisitor(BaseVisitor):

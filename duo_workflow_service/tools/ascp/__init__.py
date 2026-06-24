@@ -7,8 +7,8 @@ from duo_workflow_service.tools.ascp.list_components import ListAscpComponents
 from duo_workflow_service.tools.ascp.list_scans import ListAscpScans
 
 __all__ = [
-    "CreateAscpScan",
     "CreateAscpComponent",
+    "CreateAscpScan",
     "CreateAscpSecurityContext",
     "ListAscpComponents",
     "ListAscpScans",

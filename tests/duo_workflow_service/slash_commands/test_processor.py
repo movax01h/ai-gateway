@@ -127,5 +127,5 @@ class TestSlashCommandsGoalExpander:
         assert isinstance(result, Error)
         assert result.error == test_error
         mock_log.error.assert_called_once_with(
-            f"Error processing slash command: {str(test_error)}"
+            f"Error processing slash command: {test_error!s}"
         )

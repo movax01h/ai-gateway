@@ -6,9 +6,9 @@ from ai_gateway.searches.typing import SearchResult
 
 __all__ = [
     "SearchRequest",
-    "SearchResponseMetadata",
     "SearchResponse",
     "SearchResponseDetails",
+    "SearchResponseMetadata",
 ]
 
 DEFAULT_PAGE_SIZE = 4

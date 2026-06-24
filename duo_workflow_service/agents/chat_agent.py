@@ -694,7 +694,7 @@ class ChatAgent:
                 correlation_id=None,
                 tool_info=None,
                 additional_context=None,
-                message_id=f"error-{str(uuid4())}",
+                message_id=f"error-{uuid4()!s}",
             )
             ui_chat_logs = self._append_compaction_entry(
                 auto_compaction_entry, [ui_chat_log]

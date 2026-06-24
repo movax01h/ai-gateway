@@ -12,7 +12,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 
 def format_task_number(task_id: str) -> str:
-    task_num = task_id.split("-")[-1] if "-" in task_id else task_id
+    task_num = task_id.rsplit("-", maxsplit=1)[-1] if "-" in task_id else task_id
     try:
         return str(int(task_num) + 1)
     except (ValueError, TypeError):

@@ -145,7 +145,7 @@ test-local:
 
 .PHONY: lint-local
 lint-local:
-	$(COMPOSE) run -v "$(ROOT_DIR):/app" api bash -c 'poetry install --with lint && poetry run flake8 ai_gateway'
+	$(COMPOSE) run -v "$(ROOT_DIR):/app" api bash -c 'poetry install --with lint && poetry run ruff check ai_gateway'
 
 .PHONY: clean
 clean:
@@ -190,18 +190,13 @@ format: codespell ruff-fix docformatter
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql lint-proto
+lint-code: check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql lint-proto
 
 .PHONY: lint-commit
 lint-commit:
 	@npm install
 	@git fetch origin main 2>/dev/null || true
 	@npx commitlint --from=$$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse --verify --quiet origin/main || git rev-parse --verify --quiet main) --git-log-args='--first-parent --no-merges' --help-url
-
-.PHONY: flake8
-flake8: install-lint-deps
-	@echo "Running flake8..."
-	@poetry run flake8 ${LINT_WORKING_DIR}
 
 .PHONY: check-ruff
 check-ruff: install-lint-deps

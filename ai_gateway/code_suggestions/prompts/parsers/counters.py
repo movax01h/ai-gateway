@@ -109,25 +109,22 @@ class RubyCounterVisitor(BaseCounterVisitor, RubyParserMixin):
             if self.is_import(node):
                 # Remap call to require since call is too generic
                 self._symbol_counter.update(["require"])
-        else:
-            # In the Ruby grammar, module and class definitions get two nodes, one
-            # with children and one without. For example:
-            #
-            # module Foo
-            #   def initialize(self):
-            #   end
-            # end
-            #
-            # The parser returns:
-            #
-            # 1. A `module` node type for the entire `module` definition.
-            # 2. Another `module` node type for just the `module Foo` part, with no children.
-            if (
-                node.type == "comment"
-                or node.type in {"module", "class"}
-                and len(node.children) > 0
-            ):
-                self._symbol_counter.update([node.type])
+        # In the Ruby grammar, module and class definitions get two nodes, one
+        # with children and one without. For example:
+        #
+        # module Foo
+        #   def initialize(self):
+        #   end
+        # end
+        #
+        # The parser returns:
+        #
+        # 1. A `module` node type for the entire `module` definition.
+        # 2. Another `module` node type for just the `module Foo` part, with no children.
+        elif node.type == "comment" or (
+            node.type in {"module", "class"} and len(node.children) > 0
+        ):
+            self._symbol_counter.update([node.type])
 
 
 class RustCounterVisitor(BaseCounterVisitor):

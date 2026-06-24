@@ -139,7 +139,7 @@ class RunToolNode(Generic[WorkflowStateT]):
                                     name=self._tool.name, args=tool_params
                                 ),
                                 additional_context=None,
-                                message_id=f"tool-{str(uuid4())}",
+                                message_id=f"tool-{uuid4()!s}",
                             )
                         )
                         continue
@@ -166,7 +166,7 @@ class RunToolNode(Generic[WorkflowStateT]):
                     correlation_id=None,
                     tool_info=ToolInfo(name=self._tool.name, args=tool_params),
                     additional_context=None,
-                    message_id=f"tool-{str(uuid4())}",
+                    message_id=f"tool-{uuid4()!s}",
                 )
             )
 

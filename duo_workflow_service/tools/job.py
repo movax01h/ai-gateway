@@ -125,7 +125,7 @@ class GetLogsFromJob(DuoBaseTool):
             # Use the IDs from the URL
             return JobURLValidationResult(url_project_id, url_job_id, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return JobURLValidationResult(
                 None if project_id is None else str(project_id), job_id, errors
             )

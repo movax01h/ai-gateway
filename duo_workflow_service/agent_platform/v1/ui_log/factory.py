@@ -86,7 +86,7 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=kwargs.get("message_sub_type"),
             message_id=kwargs.get("message_id")
-            or f"{self._ui_roles_as.value}-{str(uuid4())}",
+            or f"{self._ui_roles_as.value}-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )

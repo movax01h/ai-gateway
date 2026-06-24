@@ -4,7 +4,7 @@ from typing import AsyncIterator, NamedTuple, Optional
 from ai_gateway.models.base import ModelBase, TokensConsumptionMetadata
 from ai_gateway.safety_attributes import SafetyAttributes
 
-__all__ = ["TextGenModelOutput", "TextGenModelChunk", "TextGenModelBase"]
+__all__ = ["TextGenModelBase", "TextGenModelChunk", "TextGenModelOutput"]
 
 
 class TextGenModelOutput(NamedTuple):

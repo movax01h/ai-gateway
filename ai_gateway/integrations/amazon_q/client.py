@@ -18,8 +18,8 @@ from lib.context import StarletteUser, cloud_connector_token_context_var
 request_log = get_request_logger("amazon_q")
 
 __all__ = [
-    "AmazonQClientFactory",
     "AmazonQClient",
+    "AmazonQClientFactory",
 ]
 
 
@@ -106,12 +106,12 @@ class AmazonQClient:
 
     @raise_aws_errors
     def create_or_update_auth_application(self, application_request):
-        params = dict(
-            clientId=application_request.client_id,
-            clientSecret=application_request.client_secret,
-            instanceUrl=application_request.instance_url,
-            redirectUrl=application_request.redirect_url,
-        )
+        params = {
+            "clientId": application_request.client_id,
+            "clientSecret": application_request.client_secret,
+            "instanceUrl": application_request.instance_url,
+            "redirectUrl": application_request.redirect_url,
+        }
 
         try:
             request_log.info("Creating OAuth Application Connection.")

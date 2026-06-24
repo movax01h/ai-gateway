@@ -62,5 +62,5 @@ class SlashCommandsProcessor:
             log_command_error(command_name=None, error=e)
             return Error(e)
         except Exception as e:
-            log.error(f"Error processing slash command: {str(e)}")
+            log.error(f"Error processing slash command: {e!s}")
             return Error(e)

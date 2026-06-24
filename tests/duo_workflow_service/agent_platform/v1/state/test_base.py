@@ -1708,7 +1708,7 @@ class TestRuntimeIOKey:
     def test_io_key_factory_type_alias(self):
         """IOKeyFactory is a callable type alias for (FlowState) -> IOKey."""
         # Verify it can be used as a type annotation
-        factory: IOKeyFactory = lambda state: IOKey(target="status")
+        factory: IOKeyFactory = lambda state: IOKey(target="status")  # noqa: E731
         key = RuntimeIOKey(alias="status", factory=factory)
         assert key.alias == "status"
 

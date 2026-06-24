@@ -23,10 +23,10 @@ from duo_workflow_service.workflows.registry import flow_factory, get_flow_class
 
 # Re-export so existing callers can still import from here.
 __all__ = [
+    "ExtraInputVariablesError",
     "FlowValidationError",
     "FlowValidator",
     "MissingInputVariablesError",
-    "ExtraInputVariablesError",
 ]
 
 

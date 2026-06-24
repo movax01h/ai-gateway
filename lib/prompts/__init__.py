@@ -11,7 +11,7 @@ from lib.prompts.utilities import (
     render_security_block,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "X_GITLAB_MODEL_PROMPT_CACHE_ENABLED",
     "current_prompt_cache_context",
     "prompt_caching_enabled_in_current_request",

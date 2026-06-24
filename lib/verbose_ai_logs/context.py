@@ -1,9 +1,9 @@
 from contextvars import ContextVar
 
 __all__ = [
-    "enabled_instance_verbose_ai_logs",
-    "current_verbose_ai_logs_context",
     "VERBOSE_AI_LOGS_HEADER",
+    "current_verbose_ai_logs_context",
+    "enabled_instance_verbose_ai_logs",
 ]
 
 # Header key used for verbose AI logs in both HTTP and gRPC contexts

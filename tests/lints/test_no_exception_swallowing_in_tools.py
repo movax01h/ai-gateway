@@ -78,7 +78,7 @@ class TestNoExceptionSwallowingInTools(pylint.testutils.CheckerTestCase):
         self.checker.linter.current_file = "duo_workflow_service/tools/my_tool.py"
 
         # Extract nodes
-        try_node = list(node.nodes_of_class(nodes.Try))[0]
+        try_node = next(iter(node.nodes_of_class(nodes.Try)))
         handler_node = try_node.handlers[0]
         return_nodes = list(handler_node.nodes_of_class(nodes.Return))
         error_return_node = return_nodes[0]
@@ -109,7 +109,7 @@ class TestNoExceptionSwallowingInTools(pylint.testutils.CheckerTestCase):
         self.checker.linter.current_file = "duo_workflow_service/tools/my_tool.py"
 
         # Extract nodes
-        try_node = list(node.nodes_of_class(nodes.Try))[0]
+        try_node = next(iter(node.nodes_of_class(nodes.Try)))
         handler_node = try_node.handlers[0]
         return_nodes = list(handler_node.nodes_of_class(nodes.Return))
         error_return_node = return_nodes[0]
@@ -230,7 +230,7 @@ class TestNoExceptionSwallowingInTools(pylint.testutils.CheckerTestCase):
         self.checker.linter.current_file = "duo_workflow_service/tools/my_tool.py"
 
         # Extract the exception handler node
-        try_node = list(node.nodes_of_class(nodes.Try))[0]
+        try_node = next(iter(node.nodes_of_class(nodes.Try)))
         handler_node = try_node.handlers[0]
 
         with self.assertAddsMessages(
@@ -255,7 +255,7 @@ class TestNoExceptionSwallowingInTools(pylint.testutils.CheckerTestCase):
         self.checker.linter.current_file = "duo_workflow_service/tools/my_tool.py"
 
         # Extract nodes
-        try_node = list(node.nodes_of_class(nodes.Try))[0]
+        try_node = next(iter(node.nodes_of_class(nodes.Try)))
         handler_node = try_node.handlers[0]
         return_nodes = list(handler_node.nodes_of_class(nodes.Return))
         error_return_node = return_nodes[0]
@@ -332,7 +332,7 @@ class TestNoExceptionSwallowingInTools(pylint.testutils.CheckerTestCase):
         self.checker.linter.current_file = "duo_workflow_service/tools/my_tool.py"
 
         # Extract nodes
-        try_node = list(node.nodes_of_class(nodes.Try))[0]
+        try_node = next(iter(node.nodes_of_class(nodes.Try)))
         handler_node = try_node.handlers[0]
         return_nodes = list(handler_node.nodes_of_class(nodes.Return))
         error_return_node = return_nodes[0]

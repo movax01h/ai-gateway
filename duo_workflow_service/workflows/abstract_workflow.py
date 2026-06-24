@@ -511,7 +511,7 @@ class AbstractWorkflow(ABC):
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=f"error-{str(uuid4())}",
+                    message_id=f"error-{uuid4()!s}",
                 )
             ]
 
@@ -602,4 +602,4 @@ class TraceableException(Exception):
         super().__init__(str(original_exception))
 
     def __repr__(self):
-        return f"<TraceableException wrapping {repr(self.original_exception)}>"
+        return f"<TraceableException wrapping {self.original_exception!r}>"

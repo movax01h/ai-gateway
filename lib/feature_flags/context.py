@@ -2,7 +2,7 @@ from contextvars import ContextVar
 from enum import StrEnum
 from typing import Set
 
-__all__ = ["is_feature_enabled", "current_feature_flag_context", "FeatureFlag"]
+__all__ = ["FeatureFlag", "current_feature_flag_context", "is_feature_enabled"]
 
 
 class FeatureFlag(StrEnum):

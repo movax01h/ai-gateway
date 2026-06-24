@@ -1,4 +1,4 @@
-# pylint: disable=unused-variable,direct-environment-variable-reference,too-many-lines
+# pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
 import os
 from typing import Any
@@ -625,7 +625,7 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     await workflow.run("Test goal")
 
     call_args = mock_compile_and_run_graph.call_args
-    args, kwargs = call_args
+    _args, kwargs = call_args
 
     metadata = kwargs["langsmith_extra"]["metadata"]
     assert metadata["git_url"] == "https://example.com"

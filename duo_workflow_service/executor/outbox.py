@@ -151,9 +151,8 @@ class Outbox:
             if action_type == "runHTTPRequest":
                 if not request_id_expecting_http_response:
                     request_id_expecting_http_response = request_id
-            else:
-                if not request_id_expecting_plain_response:
-                    request_id_expecting_plain_response = request_id
+            elif not request_id_expecting_plain_response:
+                request_id_expecting_plain_response = request_id
 
         if response_type == "httpResponse" and request_id_expecting_http_response:
             self._set_action_response_for_request_id(

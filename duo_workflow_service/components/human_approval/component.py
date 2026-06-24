@@ -141,7 +141,7 @@ class HumanApprovalComponent(ABC):
                 message_type=MessageTypeEnum.REQUEST,
                 message_sub_type=None,
                 content=approval_request.value,
-                message_id=f"request-{str(uuid4())}",
+                message_id=f"request-{uuid4()!s}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 status=ToolStatus.SUCCESS,
                 tool_info=None,

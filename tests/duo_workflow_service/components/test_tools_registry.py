@@ -870,13 +870,13 @@ async def test_registry_configuration_error(
             ["read_write_files", "use_git", "nonexistent_privilege"],
             ["read_files", "create_file_with_contents"],
             ["read_files", "create_file_with_contents", "extra_tool"],
-            set(["read_files", "create_file_with_contents"]),
+            {"read_files", "create_file_with_contents"},
         ),
         (
             ["read_write_files", "use_git", "run_mcp_tools"],
             ["read_files", "create_file_with_contents"],
             ["read_files", "create_file_with_contents", "extra_tool"],
-            set(["read_files", "create_file_with_contents"]),
+            {"read_files", "create_file_with_contents"},
         ),
         (
             ["read_write_files", "use_git"],

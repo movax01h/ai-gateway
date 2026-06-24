@@ -57,9 +57,7 @@ class AgentPromptTemplate(Runnable[dict, PromptValue]):
     ) -> PromptValue:
         if "handover" in input:
             # Transform handover into an agent-readable representation
-            input["handover"] = "\n".join(
-                map(lambda x: x.pretty_repr(), input["handover"])
-            )
+            input["handover"] = "\n".join((x.pretty_repr() for x in input["handover"]))
 
         messages: list[BaseMessage] = list(
             cast(list[BaseMessage], self.preamble_messages)

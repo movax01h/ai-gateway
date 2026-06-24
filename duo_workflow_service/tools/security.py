@@ -59,13 +59,13 @@ class FpDetectionStatus(StrEnum):
 
 
 __all__ = [
-    "ListVulnerabilities",
+    "ConfirmVulnerability",
+    "CreateVulnerabilityIssue",
     "DismissVulnerability",
     "LinkVulnerabilityToIssue",
     "LinkVulnerabilityToMergeRequest",
-    "ConfirmVulnerability",
+    "ListVulnerabilities",
     "RevertToDetectedVulnerability",
-    "CreateVulnerabilityIssue",
 ]
 
 

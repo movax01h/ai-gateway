@@ -75,7 +75,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
     ) -> UiChatLog:
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             content=self._format_message(tool, tool_call_args, tool_response),
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
@@ -103,7 +103,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=message,
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.FAILURE,
             correlation_id=kwargs.get("correlation_id"),
@@ -119,7 +119,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
         tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
     ) -> str:
         if not hasattr(tool, "format_display_message"):
-            args_str = ", ".join(f"{k}={str(v)}" for k, v in tool_call_args.items())
+            args_str = ", ".join(f"{k}={v!s}" for k, v in tool_call_args.items())
             return f"Using {tool.name}: {args_str}"
 
         try:

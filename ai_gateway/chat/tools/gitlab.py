@@ -6,13 +6,13 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from ai_gateway.chat.tools.base import BaseRemoteTool
 
 __all__ = [
-    "CommitReader",
-    "MergeRequestReader",
-    "IssueReader",
-    "GitlabDocumentation",
-    "SelfHostedGitlabDocumentation",
-    "EpicReader",
     "BuildReader",
+    "CommitReader",
+    "EpicReader",
+    "GitlabDocumentation",
+    "IssueReader",
+    "MergeRequestReader",
+    "SelfHostedGitlabDocumentation",
     "WorkItemReader",
 ]
 

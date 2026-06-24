@@ -15,8 +15,8 @@ from duo_workflow_service.agent_platform.v1.components import (
 from lib.version import resolve_version
 
 __all__ = [
-    "BaseFlowConfig",
     "DEFAULT_FLOW_VERSION",
+    "BaseFlowConfig",
     "FlowConfig",
     "FlowConfigInput",
     "FlowConfigMetadata",

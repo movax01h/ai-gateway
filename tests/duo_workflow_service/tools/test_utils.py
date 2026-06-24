@@ -78,6 +78,7 @@ def test_get_all_ops_tools(test_classes):
     TestBase = test_classes[0]
     result = get_all_ops_tools(tool_class=TestBase)
     assert len(result) == 2
-    assert set(tool.model_fields["name"].default for tool in result) == set(
-        ["edit_tool", "search_tool_b"]
-    )
+    assert {tool.model_fields["name"].default for tool in result} == {
+        "edit_tool",
+        "search_tool_b",
+    }

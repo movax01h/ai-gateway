@@ -130,13 +130,12 @@ def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
             # ... unless it's marked for deletion, in which case skip it
             if not delete:
                 current["steps"].append(step)
+        # If step exists and is marked for deletion, remove it
+        elif delete:
+            current["steps"].remove(existing_step)
         else:
-            # If step exists and is marked for deletion, remove it
-            if delete:
-                current["steps"].remove(existing_step)
-            else:
-                # Update existing step with new values
-                existing_step.update(step)
+            # Update existing step with new values
+            existing_step.update(step)
 
     return current
 

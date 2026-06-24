@@ -9,17 +9,17 @@ from tree_sitter import Node
 from ai_gateway.code_suggestions.processing.typing import LanguageId
 
 __all__ = [
-    "prepend_lang_id",
-    "remove_incomplete_lines",
-    "remove_incomplete_block",
-    "trim_by_max_len",
-    "trim_by_sep",
-    "find_non_whitespace_point",
-    "find_cursor_position",
-    "find_newline_position",
     "compare_exact",
     "find_common_lines",
+    "find_cursor_position",
+    "find_newline_position",
+    "find_non_whitespace_point",
+    "prepend_lang_id",
+    "remove_incomplete_block",
+    "remove_incomplete_lines",
     "strip_whitespaces",
+    "trim_by_max_len",
+    "trim_by_sep",
 ]
 
 

@@ -8,11 +8,11 @@ from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.entities import UiChatLog
 
 __all__ = [
-    "LogLevels",
     "BaseUILogEvents",
-    "UILogCallback",
     "BaseUILogWriter",
+    "LogLevels",
     "UIHistory",
+    "UILogCallback",
 ]
 
 

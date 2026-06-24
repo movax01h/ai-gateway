@@ -15,7 +15,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.events import GLReportingEventContext
 
-__all__ = ["RouterProtocol", "BaseComponent", "EndComponent"]
+__all__ = ["BaseComponent", "EndComponent", "RouterProtocol"]
 
 
 class RouterProtocol(Protocol):
