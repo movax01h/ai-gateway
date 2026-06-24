@@ -3,6 +3,8 @@ from contextvars import ContextVar
 
 import grpc
 
+from duo_workflow_service.interceptors import X_GITLAB_GLOBAL_USER_ID_HEADER
+
 # Context variable to store correlation ID
 correlation_id: ContextVar[str] = ContextVar("correlation_id", default="undefined")
 gitlab_global_user_id: ContextVar[str] = ContextVar(
@@ -15,7 +17,6 @@ class CorrelationIdInterceptor(grpc.aio.ServerInterceptor):
 
     CORRELATION_ID_KEY = "x-request-id"
     GITLAB_LABKIT_CORRELATION_ID_KEY = "x-gitlab-correlation-id"
-    X_GITLAB_GLOBAL_USER_ID_HEADER = "x-gitlab-global-user-id"
 
     def __init__(self):
         pass
@@ -38,7 +39,7 @@ class CorrelationIdInterceptor(grpc.aio.ServerInterceptor):
         # Set correlation ID in context
         correlation_id.set(request_id)
         gitlab_global_user_id.set(
-            metadata.get(self.X_GITLAB_GLOBAL_USER_ID_HEADER, "undefined")
+            metadata.get(X_GITLAB_GLOBAL_USER_ID_HEADER, "undefined")
         )
 
         return await continuation(handler_call_details)

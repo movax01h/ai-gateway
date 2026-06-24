@@ -87,6 +87,7 @@ def setup_logging():
     shared_processors: list[Processor] = [
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
+        structlog.contextvars.merge_contextvars,
         add_correlation_id,
         add_gitlab_global_user_id,
         add_workflow_id,
