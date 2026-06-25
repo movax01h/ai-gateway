@@ -16,7 +16,7 @@ Complete the following steps to build a rich security review context:
    - Call list_all_merge_request_notes(project_id={{project_id}}, merge_request_iid={{merge_request_iid}})
    - Identify existing security review comments (look for CWE references, severity ratings, or security-related feedback)
    - Record which issues have already been flagged and on which lines
-   - Include the author username in each existing_review_comments entry. Comments authored by `{{ service_account_name }}` are from prior runs of this security review agent
+   - Include the author username in each existing_review_comments entry. Comments authored by `{{ service_account_name }}` are from prior runs of this security review flow
 
 4. Scan project structure
    - Call list_repository_tree(recursive=false, max_depth=2) to identify key directories
