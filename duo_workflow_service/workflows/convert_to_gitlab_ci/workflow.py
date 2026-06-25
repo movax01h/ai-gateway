@@ -9,6 +9,7 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agents import HandoverAgent, RunToolNode, ToolsExecutor
 from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsRegistry
@@ -23,10 +24,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.tracking import log_exception
-from duo_workflow_service.workflows.abstract_workflow import (
-    RECURSION_LIMIT,
-    AbstractWorkflow,
-)
+from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000

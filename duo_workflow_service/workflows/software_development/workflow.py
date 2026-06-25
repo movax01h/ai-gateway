@@ -19,6 +19,7 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
     StateGraph,
 )
 
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agents import (
     HandoverAgent,
     PlanSupervisorAgent,
@@ -59,7 +60,6 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 # Constants
 QUEUE_MAX_SIZE = 1
 MAX_TOKENS_TO_SAMPLE = 16384
-RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 MAX_MESSAGE_LENGTH = 200
@@ -184,6 +184,9 @@ def _should_continue(
 
 @support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
+    def _recursion_limit(self) -> int:
+        return RECURSION_LIMIT
+
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph, graph_config
     ):

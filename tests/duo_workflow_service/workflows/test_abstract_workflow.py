@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langgraph.errors import GraphRecursionError
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -1128,4 +1130,32 @@ async def test_handle_compile_and_run_exception_logs_warning_when_checkpoint_not
     mock_log.warning.assert_called_once_with(
         "checkpoint_notifier is None; error status event not sent to client",
         workflow_id=workflow._workflow_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_compile_and_run_exception_logs_error_on_graph_recursion_error(
+    user,
+):
+    """GraphRecursionError is logged as an error with recursion_limit and workflow_id before normal handling."""
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    workflow.checkpoint_notifier = AsyncMock()
+    workflow.checkpoint_notifier.send_event = AsyncMock()
+
+    error = GraphRecursionError("Recursion limit reached")
+
+    with patch.object(workflow, "log") as mock_log:
+        with pytest.raises(TraceableException):
+            await workflow._handle_compile_and_run_exception(
+                error, compiled_graph=None, graph_config={}
+            )
+
+    mock_log.error.assert_called_once_with(
+        "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated",
+        recursion_limit=RECURSION_LIMIT,
     )

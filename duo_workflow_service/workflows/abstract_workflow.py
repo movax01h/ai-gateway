@@ -17,6 +17,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchain-imports
     BaseCheckpointSaver,
 )
+from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
+    GraphRecursionError,
+)
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
 from pydantic import BaseModel, ConfigDict
@@ -24,6 +27,7 @@ from pydantic import BaseModel, ConfigDict
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -88,7 +92,6 @@ from lib.language_server import LanguageServerVersion
 QUEUE_MAX_SIZE = 1
 STREAMING_QUEUE_MAX_SIZE = 10
 MAX_TOKENS_TO_SAMPLE = 8192
-RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 
@@ -481,6 +484,10 @@ class AbstractWorkflow(ABC):
         is_notifiable = isinstance(e, NotifiableException)
         is_notifiable_agent = isinstance(e, NotifiableAgentException)
         is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+
+        if isinstance(e, GraphRecursionError):
+            msg = "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated"
+            self.log.error(msg, recursion_limit=RECURSION_LIMIT)  # fmt: skip
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
 
