@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any, Optional
 
 import structlog
@@ -109,24 +108,15 @@ class ToolNode:
 
         last_message = conversation_history[-1]
         tool_calls = getattr(last_message, "tool_calls", [])
+        tools_responses = []
 
-        # Increment ContextVar counters here, in the parent task's context, before
-        # launching the gather. asyncio.gather wraps each coroutine as a Task with
-        # its own copy of the current context, so ContextVar mutations inside those
-        # tasks would not propagate back to the caller.
         for tool_call in tool_calls:
-            if tool_call["name"] in self._toolset:
-                total_tool_call_count.set(total_tool_call_count.get() + 1)
-                if is_orbit_tool(tool_call["name"]):
-                    orbit_tool_call_count.set(orbit_tool_call_count.get() + 1)
-
-        async def _execute_one(tool_call: dict) -> ToolMessage:
             tool_name = tool_call["name"]
             tool_call_args = tool_call.get("args", {})
             tool_call_id = tool_call.get("id")
 
             if tool_name not in self._toolset:
-                response: str | list | dict = f"Tool {tool_name} not found"
+                response = f"Tool {tool_name} not found"
             else:
                 response = await self._execute_tool(
                     tool=self._toolset[tool_name],
@@ -140,29 +130,16 @@ class ToolNode:
                 )
 
             tool = self._toolset.get(tool_name)
+            set_hidden_layer_log_context(tool_name, tool_call_args)
             sanitized = self._sanitize_response(
-                response=response,
-                tool_name=tool_name,
-                tool_call_args=tool_call_args,
-                tool=tool,
-                session_id=session_id,
+                response=response, tool_name=tool_name, tool=tool, session_id=session_id
             )
-            return ToolMessage(
-                content=sanitized,  # type: ignore[arg-type]
-                tool_call_id=tool_call_id,
+            tools_responses.append(
+                ToolMessage(
+                    content=sanitized,  # type: ignore[arg-type]
+                    tool_call_id=tool_call_id,
+                )
             )
-
-        # return_exceptions=True keeps all tasks running even if one raises, which
-        # matches the resilience of the previous sequential implementation. We then
-        # re-raise the first exception so callers still see a failure when any tool
-        # call fails unexpectedly.
-        results = await asyncio.gather(
-            *[_execute_one(tc) for tc in tool_calls], return_exceptions=True
-        )
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
-        tools_responses = list(results)
 
         # Append tool responses to existing history for replace-based reducer.
         # The reducer will replace this component's conversation history with
@@ -178,6 +155,10 @@ class ToolNode:
         tool: BaseTool,
         session_id: Optional[str] = None,
     ) -> str:
+        total_tool_call_count.set(total_tool_call_count.get() + 1)
+        if is_orbit_tool(tool.name):
+            orbit_tool_call_count.set(orbit_tool_call_count.get() + 1)
+
         try:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._tracker._flow_type.value
@@ -243,11 +224,9 @@ class ToolNode:
         self,
         response: str | dict | list,
         tool_name: str,
-        tool_call_args: dict,
         tool: BaseTool | None = None,
         session_id: Optional[str] = None,
     ) -> str | dict | list:
-        set_hidden_layer_log_context(tool_name, tool_call_args)
         try:
             trust_level = getattr(tool, "trust_level", None)
             return apply_security_scanning(
