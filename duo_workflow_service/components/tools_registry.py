@@ -36,6 +36,7 @@ from duo_workflow_service.tools.mr_discussions import (
 )
 from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
+from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
@@ -208,6 +209,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         SubmitMrReview,
         ReplyToDiscussion,
         SetDiscussionResolved,
+        UpdateFormFields,
         UpdateFormPermissions,
         SetFormPermissions,
         *_READ_ONLY_GITLAB_TOOLS,
