@@ -242,6 +242,7 @@ configurable_unit_primitives:
       - "duo_agent_platform"
     default_models:
       - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_4_6"
     models_for_size_preference:
       small: claude_haiku_4_5_20251001_vertex
       large: claude_sonnet_4_6_vertex
