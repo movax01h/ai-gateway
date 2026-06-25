@@ -531,6 +531,148 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 )
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_refreshes_inputs_from_additional_context(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """Inputs are re-resolved on resume so per-turn additional context refreshes state.
+
+        `context.inputs` is otherwise populated only once, at workflow START, so
+        without this the resume Command would carry no input update and a flow
+        input changed between turns (e.g. an operating mode toggle) would never
+        reach the running graph.
+        """
+        additional_context = AdditionalContext(
+            category="agent_user_environment",
+            content='{"shell_name": "fish"}',
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-resume-inputs",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                additional_context=[additional_context],
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is not None
+            assert input.update["context"]["inputs"]["agent_user_environment"] == (
+                '{"shell_name": "fish"}'
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_without_additional_context_sends_no_update(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """With no additional context the resume Command carries no state update."""
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-resume-no-inputs",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_refreshes_inputs_and_appends_rejection_log(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """Both refreshed inputs and a rejection message land in the same update.
+
+        When additional context is sent alongside a rejection approval that
+        carries a message, the resume Command must merge both keys into its
+        `update`: `context.inputs` (refreshed per-turn inputs) and `ui_chat_log`
+        (the user's feedback entry). This guards against a future refactor
+        dropping either key from the combined `state_update`.
+        """
+        additional_context = AdditionalContext(
+            category="agent_user_environment",
+            content='{"shell_name": "fish"}',
+        )
+        rejection_message = "please redo this"
+        approval = Mock(spec=contract_pb2.Approval)
+        approval.WhichOneof.return_value = UserDecision.REJECT
+        mock_rejection = Mock()
+        mock_rejection.message = rejection_message
+        approval.rejection = mock_rejection
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-resume-inputs-and-rejection",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                approval=approval,
+                additional_context=[additional_context],
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run(rejection_message)
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is not None
+            assert input.update["context"]["inputs"]["agent_user_environment"] == (
+                '{"shell_name": "fish"}'
+            )
+            ui_chat_log = input.update["ui_chat_log"]
+            assert len(ui_chat_log) == 1
+            assert ui_chat_log[0]["content"] == rejection_message
+            assert ui_chat_log[0]["message_type"] == MessageTypeEnum.USER
+            assert input.resume["event_type"] == FlowEventType.MODIFY  # type: ignore[index]
+
+    @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_checkpointer", "mock_tools_registry")
     async def test_graph_input_with_additional_context(
         self,
