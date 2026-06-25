@@ -1,7 +1,7 @@
 name: fix_pipeline_next_create_branch
 model:
   params:
-    max_tokens: 32_768
+    max_tokens: 8_192
     max_retries: 1
 unit_primitive: duo_workflow_execute_workflow
 prompt_template:
