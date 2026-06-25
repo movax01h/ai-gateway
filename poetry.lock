@@ -1606,14 +1606,14 @@ tqdm = ["tqdm"]
 
 [[package]]
 name = "gitlab-cloud-connector"
-version = "3.25.1"
+version = "3.26.0"
 description = "Cloud Connector library for Python backends"
 optional = false
 python-versions = ">=3.11,<4.0"
 groups = ["main"]
 files = [
-    {file = "gitlab_cloud_connector-3.25.1-py3-none-any.whl", hash = "sha256:ead49f92bc1f4189b345c8fc87e3ced9fbe79b6082a23c7f12211c2d6ab28a32"},
-    {file = "gitlab_cloud_connector-3.25.1.tar.gz", hash = "sha256:899c0a0a237924ec7b55dd28a50dd3e68578cc363d0feeba77119f711442b426"},
+    {file = "gitlab_cloud_connector-3.26.0-py3-none-any.whl", hash = "sha256:436b2bf74f747bce62fae1453f7aeef7ab45a60173547c14331ef9a7b7fa8cb7"},
+    {file = "gitlab_cloud_connector-3.26.0.tar.gz", hash = "sha256:42c243303e37f9a09bb2a02d996901026e9980789d0a4800aed270264a24c6ea"},
 ]
 
 [package.dependencies]
