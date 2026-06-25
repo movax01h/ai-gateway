@@ -818,6 +818,10 @@ class TestIsTrustedAbsolutePath:
             "/home/user/.gitlab/duo/skills/y/SKILL.md",
             # XDG_CONFIG_HOME variant: .config/gitlab/duo/skills
             "/home/user/.config/gitlab/duo/skills/z/SKILL.md",
+            # Per-user Duo plugins store: .gitlab/duo/plugins
+            "/home/user/.gitlab/duo/plugins/my-plugin/skill.md",
+            # XDG_CONFIG_HOME variant: .config/gitlab/duo/plugins
+            "/home/user/.config/gitlab/duo/plugins/my-plugin/skill.md",
         ],
     )
     def test_trusted_paths_return_true(self, path):
@@ -842,9 +846,13 @@ class TestIsTrustedAbsolutePath:
             # Non-dotted `gitlab/duo/skills` inside a repo checkout must NOT be trusted —
             # only the dotfile-anchored `.config/gitlab/duo/skills` XDG variant is.
             "/builds/group/project/gitlab/duo/skills/secret.env",
+            # Likewise for the plugins store: a repo checkout containing a non-dotted
+            # `gitlab/duo/plugins/` directory must NOT be trusted.
+            "/builds/group/project/gitlab/duo/plugins/secret.env",
             # Traversal alongside a trusted segment must fail closed even standalone.
             "/home/user/.agents/skills/../../../etc/passwd",
             "/home/user/.gitlab/duo/skills/..%2f..%2fetc/passwd",
+            "/home/user/.gitlab/duo/plugins/../../etc/passwd",
             # Sensitive absolute paths that must stay rejected
             "/etc/passwd",
             "/home/user/.ssh/id_rsa",
@@ -874,6 +882,8 @@ class TestValidateDuoContextExclusionsTrustedAbsolute:
             "/home/user/.agents/skills/glab/SKILL.md",
             "/root/.agents/skills/x/SKILL.md",
             "/home/user/.gitlab/duo/skills/y/SKILL.md",
+            "/home/user/.gitlab/duo/plugins/my-plugin/skill.md",
+            "/home/user/.config/gitlab/duo/plugins/my-plugin/skill.md",
         ],
     )
     def test_trusted_absolute_allowed_when_flag_is_true(self, path):
@@ -892,6 +902,8 @@ class TestValidateDuoContextExclusionsTrustedAbsolute:
             "/home/user/.agents/skills/glab/SKILL.md",
             "/root/.agents/skills/x/SKILL.md",
             "/home/user/.gitlab/duo/skills/y/SKILL.md",
+            "/home/user/.gitlab/duo/plugins/my-plugin/skill.md",
+            "/home/user/.config/gitlab/duo/plugins/my-plugin/skill.md",
         ],
     )
     def test_trusted_absolute_rejected_when_flag_is_false(self, path):
@@ -957,6 +969,8 @@ class TestToolsTrustedAbsolutePaths:
             "/home/user/.agents/skills/glab/SKILL.md",
             "/root/.agents/skills/x/SKILL.md",
             "/home/user/.gitlab/duo/skills/y/SKILL.md",
+            "/home/user/.gitlab/duo/plugins/my-plugin/skill.md",
+            "/home/user/.config/gitlab/duo/plugins/my-plugin/skill.md",
         ],
     )
     async def test_read_file_allows_trusted_absolute(self, metadata_with_project, path):
@@ -979,6 +993,8 @@ class TestToolsTrustedAbsolutePaths:
             "/home/user/.agents/skills/glab/SKILL.md",
             "/root/.agents/skills/x/SKILL.md",
             "/home/user/.gitlab/duo/skills/y/SKILL.md",
+            "/home/user/.gitlab/duo/plugins/my-plugin/skill.md",
+            "/home/user/.config/gitlab/duo/plugins/my-plugin/skill.md",
         ],
     )
     async def test_read_file_chunked_allows_trusted_absolute(
@@ -1003,6 +1019,8 @@ class TestToolsTrustedAbsolutePaths:
             ["/home/user/.agents/skills/glab/SKILL.md"],
             ["/root/.agents/skills/x/SKILL.md"],
             ["/home/user/.gitlab/duo/skills/y/SKILL.md"],
+            ["/home/user/.gitlab/duo/plugins/my-plugin/skill.md"],
+            ["/home/user/.config/gitlab/duo/plugins/my-plugin/skill.md"],
             [
                 "/home/user/.agents/skills/glab/SKILL.md",
                 "/root/.agents/skills/x/SKILL.md",

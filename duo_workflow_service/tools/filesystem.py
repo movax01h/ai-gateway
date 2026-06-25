@@ -22,12 +22,14 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
 
-# Trusted path segments for globally-installed agent skills and Duo config.
-# Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md)
-# advertised via absolute file:// URIs by the workspace_agent_skills mechanism (!3201).
+# Trusted path segments for globally-installed agent skills, Duo plugins, and Duo config.
+# Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md or
+# ~/.gitlab/duo/plugins/<plugin>/...) advertised via absolute file:// URIs by the
+# workspace_agent_skills mechanism (!3201) and the per-user Duo plugins store.
 #
-# Scope is intentionally limited to the `skills/` subdirectory of each trusted root so
-# the rest of `.gitlab/duo` — which is in the denylist below — stays protected.
+# Scope is intentionally limited: `.agents` exposes only `skills/`, while the Duo config
+# roots expose `skills/` and `plugins/`, so the rest of `.gitlab/duo` — which is in the
+# denylist below — stays protected.
 #
 # Every entry is dotfile-anchored (first segment starts with ".") to prevent a CI
 # repository checkout from matching: a repo containing a `gitlab/duo/skills/` directory
@@ -41,6 +43,8 @@ TRUSTED_ABSOLUTE_PATH_SEGMENTS = (
     ".agents/skills",
     ".gitlab/duo/skills",
     ".config/gitlab/duo/skills",
+    ".gitlab/duo/plugins",
+    ".config/gitlab/duo/plugins",
 )
 
 # Path-traversal patterns rejected for every path, regardless of tool or trust level.
