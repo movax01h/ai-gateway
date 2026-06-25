@@ -398,10 +398,23 @@ class Flow(AbstractWorkflow):
         return processed_additional_context
 
     def _resume_command(self, goal: str) -> Command:
+        # `context.inputs` is populated once, at workflow START
+        # (`get_workflow_state`). Re-process the additional context sent with
+        # this turn so per-turn inputs (e.g. `plan_context.plan_enabled` from the
+        # Duo CLI plan/build picker) refresh the flow state on resume. `context`
+        # uses a deep-merge reducer, so this updates only the inputs that changed
+        # and leaves the rest of the context intact.
+        state_update: dict[str, Any] = {}
+        refreshed_inputs = self._process_additional_context(
+            self._additional_context or []
+        )
+        if refreshed_inputs:
+            state_update["context"] = {"inputs": refreshed_inputs}
+
         event = FlowEvent(event_type=FlowEventType.RESPONSE, message=goal)
         if not self._approval or self._approval.WhichOneof("user_decision") is None:
             # Handle case where approval is None
-            return Command(resume=event)
+            return Command(resume=event, update=state_update or None)
 
         ui_chat_log_update: list[UiChatLog] = []
 
@@ -441,8 +454,8 @@ class Flow(AbstractWorkflow):
                 )
 
         if ui_chat_log_update:
-            return Command(resume=event, update={"ui_chat_log": ui_chat_log_update})
-        return Command(resume=event)
+            state_update["ui_chat_log"] = ui_chat_log_update
+        return Command(resume=event, update=state_update or None)
 
     @override
     async def get_graph_input(
