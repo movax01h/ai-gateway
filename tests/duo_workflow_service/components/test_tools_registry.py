@@ -42,6 +42,7 @@ from duo_workflow_service.tools.mr_discussions import (
 )
 from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
+from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
@@ -274,6 +275,7 @@ _outbox = MagicMock(spec=Outbox)
                 "get_wiki_page",
                 "gitlab_api_get",
                 "gitlab_graphql",
+                "update_form_fields",
                 "update_form_permissions",
                 "submit_mr_review",
                 "list_mr_discussions",
@@ -523,6 +525,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "create_branch": CreateBranch(metadata=tool_metadata),
         "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
         "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
+        "update_form_fields": UpdateFormFields(metadata=tool_metadata),
         "update_form_permissions": UpdateFormPermissions(metadata=tool_metadata),
         "submit_mr_review": SubmitMrReview(metadata=tool_metadata),
         "list_mr_discussions": ListMrDiscussions(metadata=tool_metadata),
