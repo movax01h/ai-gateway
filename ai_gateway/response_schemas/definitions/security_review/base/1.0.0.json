@@ -1,7 +1,7 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "security_review_response",
-    "description": "Structured output for the security review agent. Use this tool to submit your final review findings.",
+    "description": "Structured output for the security review flow. Use this tool to submit your final review findings.",
     "type": "object",
     "properties": {
         "findings": {

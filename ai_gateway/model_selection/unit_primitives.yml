@@ -409,6 +409,9 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
+      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
-      - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_4_6_vertex"
+      - "gpt_5_2"
+      - "gpt_5_3_codex"
