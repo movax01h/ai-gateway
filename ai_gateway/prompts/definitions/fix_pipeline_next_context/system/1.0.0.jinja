@@ -99,7 +99,17 @@ Your `failure_category` must be supported by direct evidence visible in the job 
     <failure_category>flaky_test</failure_category>
     <description>
       A test failure that is intermittent such as passes on retry, timing-dependent, race conditions, random ordering sensitivity
-      {% if merge_request_url %}, and pre-existing failures on the target branch ("master-broken specs"){% endif %}.
+      {% if merge_request_url %}
+      , and pre-existing failures on the target branch ("master-broken specs").
+      {% else %}
+
+      IMPORTANT: When the pipeline ran against the default branch, a flaky test here is usually a defect in the test itself
+      (race condition, ordering dependence, timing assumption) that a code or configuration change can fix
+      — including de-flaking or quarantining it.
+      When such a fix exists, set `suggested_fix_type` to `code_fix` and `decision` to `create_plan` rather than `no_action`;
+      retrying only masks it. Only fall back to `retry_job`/`no_action` if the intermittency has no code-level fix
+      (i.e. it is really an infrastructure or network issue, which belongs in those categories).
+      {% endif %}
     </description>
   </category>
   <category>
@@ -147,7 +157,7 @@ Your `failure_category` must be supported by direct evidence visible in the job 
   </fix_type>
   <fix_type>
     <suggested_fix_type>retry_job</suggested_fix_type>
-    <description>The failure is transient and retrying the job will likely resolve it. Includes runner crashes, network blips, environment provisioning errors, resource contention, flaky tests, and pre-existing failures on the target branch.</description>
+    <description>The failure is transient and retrying the job will likely resolve it. Includes runner crashes, network blips, environment provisioning errors, resource contention{% if merge_request_url %}, flaky tests, and pre-existing failures on the target branch.{% else %}. On the default branch, do not use this to retry away a flaky test when a code or configuration change (e.g. de-flaking or quarantining it) could fix it — use `code_fix` instead.{% endif %}</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>comment_only</suggested_fix_type>
@@ -199,6 +209,9 @@ Set the decision field based on these criteria:
       {% if merge_request_url %}
       - You can identify a concrete causal mechanism linking the MR's changes to the failure
       - The failure does not appear to be a flaky test or timing-related
+      {% else %}
+      - A `flaky_test` qualifies here when a code or configuration change can fix it (e.g. de-flaking or quarantining):
+        on the default branch, prefer `create_plan` (with `suggested_fix_type: code_fix`) over `no_action` in that case.
       {% endif %}
       Use this whenever validation by executing the fix locally is warranted — multi-file changes, test failures, build failures, anything where the diff might surprise the reviewer.
     </response_reason>
@@ -237,7 +250,8 @@ Set the decision field based on these criteria:
         {% if merge_request_url %}
         - `flaky_test` (intermittent test failures or pre-existing failures on the target branch)
         {% else %}
-        - None of the failures meets the criteria for `create_plan` (no merge request URL is available, so `add_comment` is not a viable option)
+        - None of the failures meets the criteria for `create_plan` (no merge request URL is available, so `add_comment` is not a viable option).
+          Note: a code-fixable `flaky_test` does NOT belong here — route it to `create_plan` (see above); reserve `no_action` for intermittency with no code-level fix (e.g. infrastructure/network).
         {% endif %}
     </response_reason>
   </possible_response>
