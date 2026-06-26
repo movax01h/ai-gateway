@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -135,7 +136,7 @@ class _SubagentRouter:
 
     def route(self, _state: FlowState) -> Annotated[str, "Next node"]:
         """Always route to the subagent_return node."""
-        return f"{self._supervisor_name}#subagent_return"
+        return f"{self._supervisor_name}{NODE_ROLE_SEPARATOR}subagent_return"
 
 
 @inject
@@ -387,10 +388,10 @@ class SupervisorAgentComponent(AgentComponentBase):
         )
 
         if active_subagent_name and active_subagent_name in self.managed_agent_names:
-            return f"{active_subagent_name}#agent"
+            return f"{active_subagent_name}{NODE_ROLE_SEPARATOR}agent"
 
         # Delegation failed — route back to supervisor so LLM can react
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
     def _agent_node_router(self, state: FlowState) -> str:
         """Router for the supervisor's agent node.
@@ -420,27 +421,27 @@ class SupervisorAgentComponent(AgentComponentBase):
                     f"Schema mode requires a tool call but got a text-only response "
                     f"for component {self.name}"
                 )
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         # Check for delegate_task
         delegate_title: str = self._delegate_task_cls.tool_title  # type: ignore[attr-defined]
         if any(
             tool_call["name"] == delegate_title for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#delegation"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}delegation"
 
         # Check for schema tool (final response)
         if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         # Regular tools — optionally gated by tool approval
         if self.require_tool_approval:
-            return f"{self.name}#tool_approval_request"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request"
 
-        return f"{self.name}#tools"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
     def _subsession_history_key_factory(
         self, subagent_name: str, subsession_id: int
@@ -658,7 +659,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             conversation_history_key=supervisor_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
@@ -672,7 +673,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             session_id_key=NoneIOKey(alias="session_id"),
         )
         node_final_response = FinalResponseNode(
-            name=f"{self.name}#final_response",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
             conversation_history_key=supervisor_history_key,
             output_key=RuntimeIOKey(
                 alias="final_answer", factory=lambda _: static_output_key
@@ -693,7 +694,7 @@ class SupervisorAgentComponent(AgentComponentBase):
 
         # --- Delegation node ---
         node_delegation = DelegationNode(
-            name=f"{self.name}#delegation",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}delegation",
             max_delegations=self.max_delegations,
             delegate_task_cls=self._delegate_task_cls,
             delegation_count_key=self._resolved_delegation_count_key,
@@ -718,7 +719,7 @@ class SupervisorAgentComponent(AgentComponentBase):
 
         # --- Subagent return node ---
         node_subagent_return = SubagentReturnNode(
-            name=f"{self.name}#subagent_return",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}subagent_return",
             delegate_task_cls=self._delegate_task_cls,
             active_subsession_key=self._resolved_active_subsession_key,
             active_subagent_name_key=self._resolved_active_subagent_name_key,

@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -149,7 +150,7 @@ class OneOffComponent(BaseComponent):
 
     @override
     def __entry_hook__(self) -> str:
-        return f"{self.name}#llm"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}llm"
 
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
@@ -221,7 +222,7 @@ class OneOffComponent(BaseComponent):
             internal_event_client=self.internal_event_client,
         )
         tool_node = ToolNodeWithErrorCorrection(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             component_name=self.name,
             toolset=self.toolset,
             max_correction_attempts=self.max_correction_attempts,
@@ -250,14 +251,15 @@ class OneOffComponent(BaseComponent):
         graph.add_node(self.__entry_hook__(), agent_node.run)
 
         # Node 2: Tool execution with error correction
-        graph.add_node(f"{self.name}#tools", tool_node.run)
+        graph.add_node(f"{self.name}{NODE_ROLE_SEPARATOR}tools", tool_node.run)
 
         # Connect LLM node to tools node
-        graph.add_edge(self.__entry_hook__(), f"{self.name}#tools")
+        graph.add_edge(self.__entry_hook__(), f"{self.name}{NODE_ROLE_SEPARATOR}tools")
 
         # Connect tools node with conditional routing for error correction
         graph.add_conditional_edges(
-            f"{self.name}#tools", partial(self._tools_router, router)
+            f"{self.name}{NODE_ROLE_SEPARATOR}tools",
+            partial(self._tools_router, router),
         )
 
     def _tools_router(self, outgoing_router: RouterProtocol, state: FlowState) -> str:
