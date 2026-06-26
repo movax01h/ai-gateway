@@ -6,6 +6,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -108,7 +109,7 @@ class DeterministicStepComponent(BaseComponent):
 
     @override
     def __entry_hook__(self) -> str:
-        return f"{self.name}#deterministic_step"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}deterministic_step"
 
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:

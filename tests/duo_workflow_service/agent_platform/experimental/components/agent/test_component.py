@@ -31,6 +31,7 @@ from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 
 
 @pytest.fixture(name="prompt_id")
@@ -308,6 +309,34 @@ class TestAgentComponentBase:
         )
         with pytest.raises(NotImplementedError):
             component.attach(mock_state_graph, mock_router)
+
+    def test_entry_hook_returns_correct_node_name(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Base __entry_hook__ returns the agent entry node name."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        assert component.__entry_hook__() == f"{component_name}#agent"
 
     def test_default_conversation_history_key_returns_correct_runtime_io_key(
         self,
@@ -1439,6 +1468,38 @@ class TestAgentComponentToolApprovalRouter:
             match="No approval decision found in state",
         ):
             router_function(state_with_empty_history)
+
+    def test_agent_node_router_with_pending_tool_calls_routes_to_approval_request(
+        self,
+        agent_component_with_tool_approval,
+        flow_state_with_tool_calls,
+        component_name,
+    ):
+        """With approval required, pending tool calls route to the approval request node."""
+        result = agent_component_with_tool_approval._agent_node_router(
+            flow_state_with_tool_calls
+        )
+        assert result == f"{component_name}#tool_approval_request"
+
+    @pytest.mark.parametrize(
+        ("status", "expected_role"),
+        [
+            (WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, "tool_approval_fetch"),
+            (WorkflowStatusEnum.EXECUTION, "tools"),
+        ],
+    )
+    def test_tool_approval_request_router_routes_by_status(
+        self,
+        agent_component_with_tool_approval,
+        base_flow_state,
+        component_name,
+        status,
+        expected_role,
+    ):
+        """The request router routes to fetch when approval is pending, else to tools."""
+        state = {**base_flow_state, "status": status}
+        result = agent_component_with_tool_approval._tool_approval_request_router(state)
+        assert result == f"{component_name}#{expected_role}"
 
 
 # ---------------------------------------------------------------------------

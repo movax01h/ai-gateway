@@ -21,6 +21,7 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentNode,
     FinalResponseNode,
@@ -199,7 +200,7 @@ class AgentComponentBase(BaseComponent):
         return RuntimeIOKey(alias="conversation_history", factory=lambda _: static_key)
 
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
     def _agent_node_invoke_config(self) -> RunnableConfig:
         """Return the ``RunnableConfig`` to pass to every ``AgentNode`` ``ainvoke`` call.
@@ -403,18 +404,18 @@ class AgentComponent(AgentComponentBase):
                         f"for component {self.name}"
                     ),
                 )
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self.require_tool_approval:
-            return f"{self.name}#tool_approval_request"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request"
 
-        return f"{self.name}#tools"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
     def _tool_approval_request_router(self, state: FlowState) -> str:
         """Route from tool approval request node.
@@ -434,9 +435,9 @@ class AgentComponent(AgentComponentBase):
         needs_approval = status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
 
         if needs_approval:
-            target = f"{self.name}#tool_approval_fetch"
+            target = f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_fetch"
         else:
-            target = f"{self.name}#tools"
+            target = f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
         return target
 
@@ -456,15 +457,15 @@ class AgentComponent(AgentComponentBase):
 
         # Route based on explicit decision
         if decision == FlowEventType.APPROVE:
-            return f"{self.name}#tools"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
         if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
-            return f"{self.name}#agent"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
         raise RoutingError(f"Unexpected approval decision: {decision}")
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
     @property
     def outputs(self) -> tuple[IOKey, ...]:
@@ -564,7 +565,7 @@ class AgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             conversation_history_key=self._conversation_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
@@ -577,7 +578,7 @@ class AgentComponent(AgentComponentBase):
             session_id_key=self._session_id_key,
         )
         node_final_response = FinalResponseNode(
-            name=f"{self.name}#final_response",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
             conversation_history_key=self._conversation_history_key,
             output_key=self._output_key,
             ui_history=UIHistory(
@@ -601,7 +602,7 @@ class AgentComponent(AgentComponentBase):
         # Conditionally add tool approval nodes
         if self.require_tool_approval:
             node_tool_approval_request = ToolApprovalRequestNode(
-                name=f"{self.name}#tool_approval_request",
+                name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request",
                 conversation_history_key=self._conversation_history_key,
                 toolset=self.toolset,
                 pre_approved_tools=self.pre_approved_tools,
@@ -616,7 +617,7 @@ class AgentComponent(AgentComponentBase):
             )
 
             node_tool_approval_fetch = ToolApprovalFetchNode(
-                name=f"{self.name}#tool_approval_fetch",
+                name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_fetch",
                 conversation_history_key=self._conversation_history_key,
                 status_key=RuntimeIOKey(
                     alias="status",

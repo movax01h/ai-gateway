@@ -35,6 +35,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.state.base import IOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
 
 
@@ -2206,6 +2207,38 @@ class TestAgentComponentToolApprovalExecutionFlow:
 
         with pytest.raises(RoutingError, match="Unexpected approval decision"):
             compiled.invoke(state)
+
+    def test_agent_node_router_with_pending_tool_calls_routes_to_approval_request(
+        self,
+        agent_component_with_tool_approval,
+        flow_state_with_tool_calls,
+        component_name,
+    ):
+        """With approval required, pending tool calls route to the approval request node."""
+        result = agent_component_with_tool_approval._agent_node_router(
+            flow_state_with_tool_calls
+        )
+        assert result == f"{component_name}#tool_approval_request"
+
+    @pytest.mark.parametrize(
+        ("status", "expected_role"),
+        [
+            (WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, "tool_approval_fetch"),
+            (WorkflowStatusEnum.EXECUTION, "tools"),
+        ],
+    )
+    def test_tool_approval_request_router_routes_by_status(
+        self,
+        agent_component_with_tool_approval,
+        base_flow_state,
+        component_name,
+        status,
+        expected_role,
+    ):
+        """The request router routes to fetch when approval is pending, else to tools."""
+        state = {**base_flow_state, "status": status}
+        result = agent_component_with_tool_approval._tool_approval_request_router(state)
+        assert result == f"{component_name}#{expected_role}"
 
 
 # ---------------------------------------------------------------------------
