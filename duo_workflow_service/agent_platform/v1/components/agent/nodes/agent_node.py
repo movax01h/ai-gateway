@@ -1,8 +1,10 @@
 from datetime import datetime
+from http import HTTPStatus
 from typing import ClassVar, Optional, Sequence, Type, cast
 
 import structlog
 from anthropic import APIStatusError
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import ConfigDict, Field
@@ -27,7 +29,11 @@ from duo_workflow_service.conversation.compaction import (
     maybe_compact_history,
 )
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
-from duo_workflow_service.errors.error_handler import ModelError, ModelErrorHandler
+from duo_workflow_service.errors.error_handler import (
+    ModelError,
+    ModelErrorHandler,
+    ModelErrorType,
+)
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
@@ -312,6 +318,14 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     state_update,
                     self._agent_context_limits_update(history_iokey),
                 )
+            except ContextOverflowError as e:
+                model_error = ModelError(
+                    error_type=ModelErrorType.REQUEST_TOO_LARGE,
+                    status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                    message=str(e),
+                )
+
+                await self._error_handler.handle_error(model_error)
             except APIStatusError as e:
                 error_message = str(e)
                 status_code = e.response.status_code
