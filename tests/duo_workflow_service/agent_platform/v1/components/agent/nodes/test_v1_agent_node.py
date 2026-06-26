@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from anthropic import APIStatusError
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.prompts import Prompt
@@ -339,6 +340,57 @@ class TestAgentNode:
             ]
 
             # Verify prompt was called twice (first failed, second succeeded)
+            assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_context_overflow_error_is_handled(
+        self,
+        flow_id,
+        inputs,
+        conversation_history_key,
+        component_name,
+        mock_internal_event_client,
+        base_flow_state,
+        mock_ai_message,
+        mock_prompt,
+    ):
+        """ContextOverflowError is caught and mapped to REQUEST_TOO_LARGE ModelError."""
+        overflow_error = ContextOverflowError(
+            "Your input exceeds the context window of this model."
+        )
+        mock_prompt.ainvoke = AsyncMock(side_effect=[overflow_error, mock_ai_message])
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.ModelErrorHandler",
+        ) as mock_error_handler_cls:
+            mock_error_handler = Mock()
+            mock_error_handler_cls.return_value = mock_error_handler
+            mock_error_handler.handle_error = AsyncMock()
+
+            agent_node = AgentNode(
+                flow_id=flow_id,
+                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                name="test_agent_node",
+                prompt=mock_prompt,
+                inputs=inputs,
+                conversation_history_key=RuntimeIOKey(
+                    alias="conversation_history",
+                    factory=lambda _: conversation_history_key,
+                ),
+                internal_event_client=mock_internal_event_client,
+                invoke_config={},
+            )
+            result = await agent_node.run(base_flow_state)
+
+            mock_error_handler.handle_error.assert_called_once()
+            error = mock_error_handler.handle_error.call_args[0][0]
+            assert isinstance(error, ModelError)
+            assert error.error_type == ModelErrorType.REQUEST_TOO_LARGE
+            assert error.status_code == 413
+
+            assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
+                mock_ai_message
+            ]
             assert mock_prompt.ainvoke.call_count == 2
 
     @pytest.mark.asyncio
