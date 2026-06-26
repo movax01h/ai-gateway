@@ -218,10 +218,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)
 
+        cleaned_request, request_extra = clean_start_request(start_workflow_request)
         log.info(
             "Starting workflow %s",
-            clean_start_request(start_workflow_request),
-            extra=build_logging_context(workflow_id, workflow_definition),
+            cleaned_request,
+            extra={
+                **build_logging_context(workflow_id, workflow_definition),
+                **request_extra,
+            },
         )
 
         flow_config = start_req.flowConfig

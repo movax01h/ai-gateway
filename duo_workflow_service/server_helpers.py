@@ -8,15 +8,21 @@ from lib.internal_events.context import (
 log = structlog.stdlib.get_logger("server")
 
 
-def clean_start_request(start_workflow_request: contract_pb2.ClientEvent):
+def clean_start_request(
+    start_workflow_request: contract_pb2.ClientEvent,
+) -> tuple[contract_pb2.ClientEvent, dict]:
     request = contract_pb2.ClientEvent()
     request.CopyFrom(start_workflow_request)
+    # Capture derived fields before clearing sensitive content
+    extra = {
+        "hasFlowConfig": start_workflow_request.startRequest.HasField("flowConfig"),
+    }
     # Remove fields from being logged to prevent logging sensitive user content
     request.startRequest.ClearField("goal")
     request.startRequest.ClearField("flowConfig")
     request.startRequest.ClearField("workflowMetadata")
     request.startRequest.ClearField("additional_context")
-    return request
+    return request, extra
 
 
 def build_logging_context(workflow_id: str, workflow_definition: str) -> dict:

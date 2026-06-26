@@ -1983,7 +1983,12 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)
 
 
-def test_clean_start_request():
+@pytest.mark.parametrize(
+    "has_flow_config",
+    [True, False],
+    ids=["with_flow_config", "without_flow_config"],
+)
+def test_clean_start_request(has_flow_config):
     # Create a test request with workflow metadata and additional_context
     start_request = contract_pb2.StartWorkflowRequest(
         workflowID="test-id",
@@ -1998,10 +2003,12 @@ def test_clean_start_request():
             ),
         ],
     )
+    if has_flow_config:
+        start_request.flowConfig.CopyFrom(struct_pb2.Struct())
     client_event = contract_pb2.ClientEvent(startRequest=start_request)
 
     # Call the clean_start_request function
-    cleaned_request = clean_start_request(client_event)
+    cleaned_request, extra = clean_start_request(client_event)
 
     # Verify that the cleaned request is a new object (not the same instance)
     assert cleaned_request is not client_event
@@ -2015,6 +2022,10 @@ def test_clean_start_request():
     assert cleaned_request.startRequest.workflowID == "test-id"
     assert cleaned_request.startRequest.goal == ""
     assert len(cleaned_request.startRequest.additional_context) == 0
+    assert not cleaned_request.startRequest.HasField("flowConfig")
+
+    # Verify hasFlowConfig reflects the original state
+    assert extra["hasFlowConfig"] is has_flow_config
 
 
 @pytest.mark.asyncio
