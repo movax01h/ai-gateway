@@ -1,21 +1,70 @@
 name: "Fix pipeline"
 description: |
   Fix pipeline flow can be run for a failed CI jobs.
-  It opens a new MR with changes that address root cause of CI job failures.
+  When a merge request URL is provided, it pushes the fix directly to that MR's branch.
+  Otherwise it opens a new MR with changes that address root cause of CI job failures.
 product_group: agent_foundations
 version: "v1"
 environment: ambient
 
 components:
+  - name: "fetch_failing_jobs"
+    type: DeterministicStepComponent
+    tool_name: "get_pipeline_failing_jobs"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "true"
+        as: "exclude_allow_failure"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fetch_failing_bridge_jobs"
+    type: DeterministicStepComponent
+    tool_name: "get_failing_bridge_jobs"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "list_merge_request_diffs"
+    inputs:
+      - from: "context:inputs.merge_request.url"
+        as: "url"
+        optional: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "fix_pipeline_context"
     type: AgentComponent
     prompt_id: "fix_pipeline_context"
     prompt_version: "^1.0.0"
+    response_schema_id: "fix_pipeline_context"
+    response_schema_version: "^1.0.0"
+    response_schema_tracking: true
+    response_schema_tracking_context:
+      project_id: "context:project_id"
+      merge_request_url: "context:inputs.merge_request.url"
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
+      - from: "context:fetch_failing_jobs.tool_responses"
+        as: "failing_jobs"
+      - from: "context:fetch_failing_bridge_jobs.tool_responses"
+        as: "failing_bridge_jobs"
+        optional: True
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+        optional: True
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -23,32 +72,63 @@ components:
         as: "workspace_agent_skills"
         optional: True
     toolset:
-      - get_downstream_pipelines
-      - get_pipeline_failing_jobs
+      - get_pipeline_failing_jobs:
+          exclude_allow_failure: true
       - get_job_logs
-      - list_merge_request_diffs
       - read_file
       - find_files
       - list_dir
+      - gitlab_documentation_search
     ui_log_events:
       - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_decide_approach"
+  - name: "fix_pipeline_decide_fix"
     type: AgentComponent
-    prompt_id: "fix_pipeline_decide_approach"
+    prompt_id: "fix_pipeline_decide_fix"
     prompt_version: "^1.0.0"
-    response_schema_id: "fix_pipeline_decide_approach"
+    response_schema_id: "fix_pipeline_decide_fix"
     response_schema_version: "^1.0.0"
-    response_schema_tracking: true
     inputs:
-      - from: "context:fix_pipeline_context.final_answer"
+      - from: "context:fix_pipeline_context.final_answer.summary"
         as: "fix_pipeline_context_results"
+      - from: "context:fix_pipeline_execution.final_answer"
+        as: "execution_results"
+      - from: "context:fix_pipeline_check_diff.tool_responses"
+        as: "execution_diff"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+        optional: True
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"
+
+  - name: "fix_pipeline_code_suggestions"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_code_suggestions"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:fix_pipeline_context.final_answer.summary"
+        as: "context_summary"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+    toolset:
+      - "build_review_merge_request_context"
+      - "create_merge_request_diff_note"
+      - "run_git_command"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
 
   - name: "fix_pipeline_add_comment"
     type: AgentComponent
@@ -59,7 +139,7 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-      - from: "context:fix_pipeline_context.final_answer"
+      - from: "context:fix_pipeline_context.final_answer.summary"
         as: "fix_pipeline_context_results"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
@@ -77,9 +157,25 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "create_repository_branch"
+  - name: "git_fetch_for_branch"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "fetch"
+        as: "command"
+        literal: True
+      - from: "origin"
+        as: "args"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fix_pipeline_create_branch"
     type: AgentComponent
-    prompt_id: "create_repository_branch"
+    prompt_id: "fix_pipeline_create_branch"
     prompt_version: "^1.0.0"
     response_schema_id: "create_repository_branch"
     response_schema_version: "^1.0.0"
@@ -92,7 +188,7 @@ components:
         as: "ref"
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
-      - from: "context:fix_pipeline_context.final_answer"
+      - from: "context:fix_pipeline_context.final_answer.summary"
         as: "naming_context"
       - from: "context:workflow_id"
         as: "workflow_id"
@@ -106,34 +202,46 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_create_plan"
+  - name: "fix_pipeline_checkout_existing_branch"
     type: AgentComponent
-    prompt_id: "fix_pipeline_create_plan"
+    prompt_id: "fix_pipeline_checkout_existing_branch"
     prompt_version: "^1.0.0"
     inputs:
-      - from: "context:fix_pipeline_context.final_answer"
-        as: "fix_pipeline_context_results"
       - from: "context:inputs.pipeline.source_branch"
-        as: "source_branch"
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: True
-      - from: "context:inputs.workspace_agent_skills"
-        as: "workspace_agent_skills"
-        optional: True
-    toolset: []
+        as: "ref"
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+    toolset:
+      - "run_git_command"
     ui_log_events:
-      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fix_pipeline_check_diff"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "diff"
+        as: "command"
+        literal: True
+      - from: "--no-color"
+        as: "args"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
 
   - name: "fix_pipeline_execution"
     type: AgentComponent
     prompt_id: "fix_pipeline_execution"
     prompt_version: "^1.0.0"
     inputs:
-      - from: "context:fix_pipeline_context.final_answer"
+      - from: "context:fix_pipeline_context.final_answer.summary"
         as: "fix_pipeline_context_results"
-      - from: "context:fix_pipeline_create_plan.final_answer"
-        as: "fix_pipeline_plan"
+      - from: "context:inputs.pipeline.source_branch"
+        as: "source_branch"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -149,6 +257,7 @@ components:
       - mkdir
       - read_file
       - run_command
+      - gitlab_documentation_search
     ui_log_events:
       - "on_agent_reasoning"
       - "on_agent_final_answer"
@@ -174,159 +283,141 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_git_push"
-    type: AgentComponent
-    prompt_id: "fix_pipeline_push_changes"
-    prompt_version: "^1.0.0"
+  - name: "git_fetch_unshallow"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
     inputs:
-      - from: "context:goal"
-        as: "pipeline_url"
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
-      - from: "context:inputs.merge_request.url"
-        as: "merge_request_url"
-      - from: "context:inputs.pipeline.source_branch"
-        as: "source_branch"
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: True
-      - from: "context:workflow_id"
-        as: "workflow_id"
-      - from: "context:session_url"
-        as: "session_url"
-      - from: "context:project_id"
-        as: "project_id"
-      - from: "context:create_repository_branch.final_answer.branch_name"
-        as: "target_branch_details"
-      - from: "context:inputs.agent_platform_standard_context.primary_branch"
-        as: "default_branch"
-      - from: "context:inputs.workspace_agent_skills"
-        as: "workspace_agent_skills"
-        optional: True
-    toolset:
-      - "run_git_command"
-      - "create_merge_request"
+      - from: "fetch"
+        as: "command"
+        literal: True
+      - from: "--unshallow"
+        as: "args"
+        literal: True
     ui_log_events:
-      - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_summarize"
-    type: OneOffComponent
-    prompt_id: "fix_pipeline_summarize_changes"
-    prompt_version: "^1.0.0"
+  - name: "git_push_branch"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
     inputs:
-      - from: "context:goal"
-        as: "pipeline_url"
-      - from: "context:inputs.merge_request.url"
-        as: "merge_request_url"
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: True
-      - from: "context:fix_pipeline_git_push.final_answer"
-        as: "git_push_response"
-      - from: "context:workflow_id"
-        as: "workflow_id"
-      - from: "context:session_url"
-        as: "session_url"
-      - from: "context:fix_pipeline_execution.final_answer"
-        as: "execution_results"
-      - from: "context:inputs.agent_platform_standard_context.session_owner_id"
-        as: "assignee_id"
-      - from: "context:inputs.workspace_agent_skills"
-        as: "workspace_agent_skills"
-        optional: True
-    toolset:
-      - "update_merge_request"
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "push"
+        as: "command"
+        literal: True
+      - from: "origin HEAD --no-verify"
+        as: "args"
+        literal: True
     ui_log_events:
-      - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "fix_pipeline_decide_comment"
-    type: AgentComponent
-    prompt_id: "fix_pipeline_decide_comment"
-    prompt_version: "^1.0.0"
-    response_schema_id: "fix_pipeline_decide_comment"
-    response_schema_version: "^1.0.0"
-    inputs:
-      - from: "context:inputs.merge_request.url"
-        as: "merge_request_url"
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: True
-      - from: "context:inputs.workspace_agent_skills"
-        as: "workspace_agent_skills"
-        optional: True
-    toolset: []
-    ui_log_events:
-      - "on_agent_final_answer"
-
-  - name: "fix_pipeline_comment_link"
+  - name: "fix_pipeline_create_new_mr"
     type: OneOffComponent
-    prompt_id: "fix_pipeline_comment_link"
+    prompt_id: "fix_pipeline_create_new_mr"
     prompt_version: "^1.0.0"
     max_correction_attempts: 3
     inputs:
-      - from: "context:inputs.merge_request.url"
-        as: "merge_request_url"
-      - from: "context:fix_pipeline_git_push.final_answer"
-        as: "git_push_response"
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: True
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.pipeline.source_branch"
+        as: "source_branch"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "default_branch"
+      - from: "context:fix_pipeline_create_branch.final_answer.branch_name"
+        as: "source_branch_name"
+      - from: "context:fix_pipeline_execution.final_answer"
+        as: "execution_results"
       - from: "context:workflow_id"
         as: "workflow_id"
       - from: "context:session_url"
         as: "session_url"
-      - from: "context:inputs.workspace_agent_skills"
-        as: "workspace_agent_skills"
+      - from: "context:inputs.agent_platform_standard_context.session_owner_id"
+        as: "assignee_id"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
         optional: True
-    toolset: ["create_merge_request_note"]
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+    toolset:
+      - "create_merge_request"
+      - "create_merge_request_note"
     ui_log_events:
+      - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
 routers:
-  - from: "fix_pipeline_context"
-    to: "fix_pipeline_decide_approach"
-  - from: "fix_pipeline_decide_approach"
+  - from: "fetch_failing_jobs"
+    to: "fetch_failing_bridge_jobs"
+  - from: "fetch_failing_bridge_jobs"
     condition:
-      input: "context:fix_pipeline_decide_approach.final_answer.decision"
+      input: "context:inputs.merge_request.url"
+      routes:
+        # No MR: the merge_request schema requires url to be a non-null string,
+        # so the no-MR case always arrives as "". Skip fetch_mr_diffs (which
+        # would fail tool validation on an empty url); a real url falls through
+        # to default_route and fetches the diffs.
+        "": "fix_pipeline_context"
+        "default_route": "fetch_mr_diffs"
+  - from: "fetch_mr_diffs"
+    to: "fix_pipeline_context"
+  - from: "fix_pipeline_context"
+    condition:
+      input: "context:fix_pipeline_context.final_answer.decision"
       routes:
         "add_comment": "fix_pipeline_add_comment"
-        "create_fix": "create_repository_branch"
-        "default_route": "fix_pipeline_add_comment"
+        "create_plan": "fix_pipeline_checkout_existing_branch"
+        "direct_code_suggestions": "fix_pipeline_code_suggestions"
+        "no_action": "end"
+        "default_route": "end"
+  - from: "fix_pipeline_checkout_existing_branch"
+    to: "fix_pipeline_execution"
   - from: "fix_pipeline_add_comment"
     to: "end"
-  - from: "create_repository_branch"
-    condition:
-      input: "context:create_repository_branch.final_answer.status"
-      routes:
-        "success": "fix_pipeline_create_plan"
-        "default_route": "end"
-  - from: "fix_pipeline_create_plan"
-    to: "fix_pipeline_execution"
   - from: "fix_pipeline_execution"
-    to: "fix_pipeline_git_commit"
-  - from: "fix_pipeline_git_commit"
-    to: "fix_pipeline_git_push"
-  - from: "fix_pipeline_git_push"
-    to: "fix_pipeline_summarize"
-  - from: "fix_pipeline_summarize"
-    to: "fix_pipeline_decide_comment"
-  - from: "fix_pipeline_decide_comment"
+    to: "fix_pipeline_check_diff"
+  - from: "fix_pipeline_check_diff"
+    to: "fix_pipeline_decide_fix"
+  - from: "fix_pipeline_decide_fix"
     condition:
-      input: "context:fix_pipeline_decide_comment.final_answer.decision"
+      input: "context:fix_pipeline_decide_fix.final_answer.decision"
       routes:
-        "comment_link": "fix_pipeline_comment_link"
-        "end": "end"
+        "create_fix_on_existing_mr": "fix_pipeline_code_suggestions"
+        "create_fix_on_new_mr": "git_fetch_for_branch"
+        "no_action_needed": "end"
+        "default_route": "git_fetch_for_branch"
+  - from: "fix_pipeline_code_suggestions"
+    to: "end"
+  - from: "git_fetch_for_branch"
+    to: "fix_pipeline_create_branch"
+  - from: "fix_pipeline_create_branch"
+    condition:
+      input: "context:fix_pipeline_create_branch.final_answer.status"
+      routes:
+        "success": "fix_pipeline_git_commit"
         "default_route": "end"
-  - from: "fix_pipeline_comment_link"
+  - from: "fix_pipeline_git_commit"
+    to: "git_fetch_unshallow"
+  - from: "git_fetch_unshallow"
+    to: "git_push_branch"
+  - from: "git_push_branch"
+    condition:
+      input: "context:git_push_branch.execution_result"
+      routes:
+        "failed": "end"
+        "default_route": "fix_pipeline_create_new_mr"
+  - from: "fix_pipeline_create_new_mr"
     to: "end"
 
 flow:
-  entry_point: "fix_pipeline_context"
+  entry_point: "fetch_failing_jobs"
   inputs:
     - category: merge_request
       version_constraint: "^1.0.0"

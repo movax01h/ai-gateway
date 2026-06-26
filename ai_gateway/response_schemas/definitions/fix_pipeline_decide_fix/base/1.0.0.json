@@ -1,0 +1,19 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "fix_pipeline_decide_fix_response",
+    "description": "Response schema for the fix_pipeline_decide_fix agent that decides how to deliver an already-produced code fix: as inline code suggestions on an existing merge request, as a commit to a new merge request, or — when the execution step produced no changes — by ending the flow with no further action.",
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "description": "Use 'create_fix_on_existing_mr' when a merge request URL is provided AND every file changed by the execution step already appears in the merge request diff. Use 'create_fix_on_new_mr' when the execution step produced changes but they cannot be delivered as inline suggestions — either no merge request URL was provided, or the execution step changed files that are not present in the merge request diff. Use 'no_action_needed' when the execution step produced no changes (the execution diff is empty), e.g. because the merge request head already addresses the failing pipeline; the flow then ends without posting anything.",
+            "enum": ["create_fix_on_existing_mr", "create_fix_on_new_mr", "no_action_needed"],
+            "examples": ["create_fix_on_existing_mr", "create_fix_on_new_mr", "no_action_needed"]
+        },
+        "reasoning": {
+            "type": "string",
+            "description": "1-2 sentence justification for the chosen decision, written so it can be shown directly to the user. State what was observed (e.g. empty execution diff, file paths inside/outside the MR diff) and how that maps to the chosen decision."
+        }
+    },
+    "required": ["decision", "reasoning"]
+}
