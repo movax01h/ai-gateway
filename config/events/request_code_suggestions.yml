@@ -2,7 +2,9 @@
 description: Tracks when code suggestions API is called
 internal_events: true
 action: request_code_suggestions
-product_group: ai_framework
+product_group: ai_coding
+product_categories:
+  - code_suggestions
 milestone: '17.3'
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/1113
 tiers:
