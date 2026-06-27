@@ -19,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     list_configs,
     load_component_class,
 )
+from duo_workflow_service.agent_platform.v1.routers.base import BaseRouter
 from duo_workflow_service.tools.mr_review import SubmitMrReviewInput
 
 
@@ -1050,3 +1051,38 @@ class TestSecurityReviewToolOptions:
         options = self._submit_mr_review_options(config)
         valid_fields = set(SubmitMrReviewInput.model_fields.keys())
         assert set(options).issubset(valid_fields)
+
+
+class TestShippedConfigRouterIndentation:
+    """Regression guard for the 2026-06-23 resolve_sast_vulnerability incident.
+
+    A ``default_route`` indented as a sibling of ``routes:`` (a child of
+    ``condition`` rather than an entry inside ``routes``) is silently dropped:
+    the parser in ``flows/base.py`` only iterates ``condition["routes"]``. The
+    affected router then has no default branch and raises ``KeyError`` when the
+    routing input matches none of the explicit routes. This walks every shipped
+    v1 flow config and fails if any router reintroduces that misindentation.
+    """
+
+    def test_no_router_defines_default_route_outside_routes(self):
+        config_dir = FlowConfig.DIRECTORY_PATH
+        offenders = []
+
+        for config_file in sorted(config_dir.glob("*/*.yml")):
+            config = yaml.safe_load(config_file.read_text())
+            for router in (config or {}).get("routers", []) or []:
+                condition = router.get("condition")
+                if (
+                    isinstance(condition, dict)
+                    and BaseRouter.DEFAULT_ROUTE in condition
+                ):
+                    offenders.append(
+                        f"{config_file.relative_to(config_dir)} "
+                        f"(router from '{router.get('from')}'): "
+                        f"'{BaseRouter.DEFAULT_ROUTE}' is a sibling of 'routes:' and "
+                        "will be ignored — nest it inside 'routes:'."
+                    )
+
+        assert not offenders, "Misindented default_route(s) found:\n" + "\n".join(
+            offenders
+        )
