@@ -33,6 +33,8 @@ class BaseCommentVisitor(BaseVisitor):
 
     @override
     def visit(self, node: Node):
+        if not node.is_named:
+            return
         # use self instead of the class name to access the overridden attribute
         if self._TARGET_SYMBOLS and node.type not in self._TARGET_SYMBOLS:
             self._comments_only = False

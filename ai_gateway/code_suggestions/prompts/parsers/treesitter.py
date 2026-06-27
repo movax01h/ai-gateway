@@ -1,8 +1,8 @@
 import asyncio
 from typing import Optional, override
 
-from tree_sitter import Node, Tree
-from tree_sitter_languages import get_parser
+from tree_sitter import Node, Parser, Tree
+from tree_sitter_language_pack import get_language
 
 from ai_gateway.code_suggestions.processing.ops import (
     LanguageId,
@@ -80,7 +80,7 @@ class CodeParser(BaseCodeParser):
 
         point_in_node = convert_point_to_relative_point_in_node(node, point)
         _, suffix = split_on_point(
-            node.text.decode("utf-8", errors="ignore"), point_in_node
+            (node.text or b"").decode("utf-8", errors="ignore"), point_in_node
         )
         return suffix
 
@@ -143,9 +143,9 @@ class CodeParser(BaseCodeParser):
         lang_def = ProgramLanguage.from_language_id(lang_id)
 
         try:
-            parser = get_parser(lang_def.grammar_name)
+            parser = Parser(get_language(lang_def.grammar_name))
             tree = parser.parse(bytes(content, "utf8"))
-        except (AttributeError, TypeError) as ex:
+        except (AttributeError, TypeError, LookupError) as ex:
             raise ValueError(f"Unsupported code content: {ex!s}")
 
         return cls(tree, lang_id)

@@ -1,7 +1,11 @@
+from unittest.mock import Mock
+
 import pytest
+from tree_sitter import Node
 
 from ai_gateway.code_suggestions.processing import LanguageId
 from ai_gateway.code_suggestions.prompts.parsers import CodeParser
+from ai_gateway.code_suggestions.prompts.parsers.comments import PythonCommentVisitor
 
 # editorconfig-checker-disable
 EMPTY_SOURCE_FILE = ""
@@ -237,3 +241,18 @@ async def test_comments_only(lang_id: LanguageId, source_code: str, expected: bo
     output = parser.comments_only()
 
     assert output == expected
+
+
+def test_comments_only_ignores_unnamed_nodes():
+    # Unnamed nodes (punctuation, operators, comment delimiters) must not
+    # affect comment-only detection; only named nodes are meaningful. Without
+    # the `is_named` guard, an anonymous token whose type is not a comment
+    # would wrongly mark the source as containing code.
+    visitor = PythonCommentVisitor()
+    unnamed_node = Mock(spec=Node)
+    unnamed_node.is_named = False
+    unnamed_node.type = "="
+
+    visitor.visit(unnamed_node)
+
+    assert visitor.comments_only is True
