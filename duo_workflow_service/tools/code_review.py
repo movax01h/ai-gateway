@@ -177,7 +177,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         # Get all diff file paths for instruction matching
         diff_file_paths = list(diffs_and_paths.keys())
 
-        # Get target branch
+        # Get target branch (used for fetching original file contents below)
         target_branch = mr_data.get("target_branch")
         if not target_branch:
             raise ValueError("Target branch not found in merge request data")
@@ -186,7 +186,6 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         custom_instructions = await self._get_custom_instructions(
             validation_result.project_id,
             validation_result.merge_request_iid,
-            target_branch,
             diff_file_paths,
         )
 
@@ -334,7 +333,6 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         self,
         project_id: int,
         merge_request_iid: int,
-        branch: str,
         diff_file_paths: List[str],
     ) -> List[Dict[str, Any]]:
         if supports_group_level_custom_instructions():
@@ -342,8 +340,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
                 project_id, merge_request_iid
             )
 
+        default_branch = self.project.get("default_branch")
+        if not default_branch:
+            return []
+
         return await self._fetch_project_only_custom_instructions(
-            project_id, branch, diff_file_paths
+            project_id, default_branch, diff_file_paths
         )
 
     async def _fetch_project_only_custom_instructions(
