@@ -61,6 +61,9 @@ class BaseLLMDefinition(BaseModel):
     # Claude 4.6+ rejects requests ending with an assistant turn (prefill).
     # Opt in by setting to true for models that still accept prefill.
     supports_assistant_prefill: bool = False
+    # Some reasoning models (e.g. Qwen) leak <think>...</think> reasoning into responses.
+    # When true, the ReAct parser strips that block before it reaches the user.
+    strip_reasoning: bool = False
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):

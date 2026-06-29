@@ -21,6 +21,7 @@ __all__ = [
     "CurrentFile",
     "Message",
     "ReActAgentInputs",
+    "ReActParserConfig",
     "TypeAgentEvent",
     "TypeAgentInputs",
 ]
@@ -121,6 +122,15 @@ class ReActAgentInputs(AgentBaseInputs):
     agent_scratchpad: Optional[list[AgentStep]] = None
     unavailable_resources: Optional[list[str]] = None
     current_date: Optional[str] = None
+
+
+class ReActParserConfig(BaseModel):
+    # Strip <think>...</think> reasoning (e.g. Qwen) before parsing so it never reaches the user.
+    strip_reasoning: bool = False
+
+    # Max chars before a leaked orphan </think> for it to count as a leak rather than a
+    # genuine answer that mentions the tag. Leaks lead with a short reasoning tail (~a line).
+    orphan_close_max_prefix: int = 80
 
 
 TypeAgentInputs = TypeVar("TypeAgentInputs", bound=AgentBaseInputs)

@@ -10,6 +10,7 @@ from pydantic import AnyUrl
 from starlette.testclient import TestClient
 
 from ai_gateway.api.v2 import api_router
+from ai_gateway.api.v2.chat.agent import _should_strip_reasoning
 from ai_gateway.api.v2.chat.typing import (
     AgentRequest,
     AgentRequestOptions,
@@ -118,6 +119,29 @@ def chunk_to_model(chunk: str, klass: Type[AgentBaseEvent]) -> AgentBaseEvent:
     res = json.loads(chunk)
     data = res.pop("data")
     return klass.model_validate({**res, **data})
+
+
+class TestShouldStripReasoning:
+    @staticmethod
+    def _model_metadata(strip_reasoning):
+        model_metadata = Mock()
+        model_metadata.llm_definition.strip_reasoning = strip_reasoning
+        return model_metadata
+
+    @pytest.mark.parametrize(
+        ("strip_reasoning", "expected"),
+        [
+            (True, True),
+            (False, False),
+        ],
+    )
+    def test_strip_reasoning_flag(self, strip_reasoning, expected):
+        assert (
+            _should_strip_reasoning(self._model_metadata(strip_reasoning)) is expected
+        )
+
+    def test_no_model_metadata(self):
+        assert _should_strip_reasoning(None) is False
 
 
 class TestReActAgentStream:
