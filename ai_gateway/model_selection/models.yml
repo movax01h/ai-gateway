@@ -44,7 +44,7 @@ models:
     gitlab_identifier: "devstral_2_mistral"
     description: "Mistral AI's frontier coding agent for complex software engineering tasks across codebases."
     cost_indicator: "$$"
-    max_context_tokens: 256_000  # https://docs.mistral.ai/models/model-cards/devstral-2-25-12
+    max_context_tokens: 256_000 # https://docs.mistral.ai/models/model-cards/devstral-2-25-12
     model_class_provider: litellm
     family:
       - mistral
@@ -813,6 +813,18 @@ models:
     params:
       temperature: 1
       max_tokens: 65_536
+
+  - name: "Self-Hosted Qwen"
+    gitlab_identifier: qwen
+    max_context_tokens: 262_144
+    model_class_provider: litellm
+    strip_reasoning: true
+    family:
+      - qwen
+    params:
+      model: qwen
+      temperature: 0.0
+      max_tokens: 8_192
 
   - name: "Self-Hosted General Models"
     gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general

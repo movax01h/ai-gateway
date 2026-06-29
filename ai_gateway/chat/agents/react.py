@@ -16,6 +16,7 @@ from ai_gateway.chat.agents.typing import (
     AgentToolAction,
     AgentUnknownAction,
     ReActAgentInputs,
+    ReActParserConfig,
     TypeAgentEvent,
 )
 from ai_gateway.model_selection.models import ModelClassProvider
@@ -34,6 +35,9 @@ __all__ = [
 
 _REACT_AGENT_TOOL_ACTION_CONTEXT_KEY = "duo_chat.agent_tool_action"
 
+THINK_TAG_OPEN = "<think>"
+THINK_TAG_CLOSE = "</think>"
+
 request_log = get_request_logger("react")
 
 
@@ -44,6 +48,28 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
     re_action: re.Pattern = re.compile(r"Action:\s*([\s\S]*?)[\s-]*Action", re.DOTALL)
     re_action_input: re.Pattern = re.compile(r"Action Input:\s*([\s\S]*?)\s*</message>")
     re_final_answer: re.Pattern = re.compile(r"Final Answer:\s*([\s\S]*?)\s*</message>")
+
+    config: ReActParserConfig = ReActParserConfig()
+
+    def _strip_reasoning(self, text: str) -> str:
+        if not self.config.strip_reasoning:
+            return text
+
+        stripped = text.lstrip()
+
+        # Reasoning leads the content, so only strip tags anchored to the start.
+        if stripped.startswith(THINK_TAG_OPEN):
+            # Drop the block; suppress everything if not closed yet (mid-stream).
+            _, closed, tail = stripped.partition(THINK_TAG_CLOSE)
+            return tail if closed else ""
+
+        # Orphan close: endpoint kept <think> and the body elsewhere, leaking only the
+        # boundary (e.g. "t.\n</think>"). Strip a leading one; leave later ones intact.
+        close = stripped.find(THINK_TAG_CLOSE)
+        if 0 <= close <= self.config.orphan_close_max_prefix:
+            return stripped[close + len(THINK_TAG_CLOSE) :]
+
+        return text
 
     def _parse_final_answer(
         self, message: str, finish_reason: Optional[str]
@@ -110,7 +136,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
         self, result: list[Generation], *, partial: bool = False
     ) -> Optional[AgentEventType]:
         event = None
-        text = result[0].text.strip()
+        text = self._strip_reasoning(result[0].text).strip()
         message = getattr(result[0], "message", None)
         response_metadata = getattr(message, "response_metadata", None)
         finish_reason = self.parse_finish_reason(response_metadata)
@@ -209,8 +235,13 @@ class ReActAgent(RunnableBinding[ReActAgentInputs, TypeAgentEvent]):
         "AnthropicError - Overloaded",
     ]
 
-    def __init__(self, prompt: Prompt) -> None:
-        super().__init__(bound=prompt | ReActPlainTextParser())
+    def __init__(
+        self, prompt: Prompt, parser_config: Optional[ReActParserConfig] = None
+    ) -> None:
+        super().__init__(
+            bound=prompt
+            | ReActPlainTextParser(config=parser_config or ReActParserConfig())
+        )
 
     def _append_final_message_warnings(
         self, event: AgentFinalAnswer
