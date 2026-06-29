@@ -3,6 +3,7 @@ import asyncio
 import functools
 import json
 import os
+import re
 import signal
 from itertools import chain
 from typing import AsyncIterable, AsyncIterator, Optional, cast, override
@@ -10,6 +11,7 @@ from typing import AsyncIterable, AsyncIterator, Optional, cast, override
 import aiohttp
 import grpc
 import structlog
+from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -23,6 +25,7 @@ from google.protobuf.struct_pb2 import Struct
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
@@ -151,6 +154,38 @@ CUSTOMERSDOT_URL: str | None = (
         "https://customers.gitlab.com",
     )
 )
+
+
+def _extract_error_message(error: BaseException) -> str:
+    """Extract a clean, normalized error message from a workflow error.
+
+    Parses structured error bodies from LiteLLM and Anthropic exceptions to surface only the human-readable message.
+    Also normalizes dynamic token counts (e.g. '205531 tokens') to '<N> tokens' for consistent log grouping.
+    """
+    if isinstance(error, LiteLLMBadRequestError):
+        raw = (error.message or "").removeprefix("litellm.BadRequestError: ")
+        # Find the JSON bytes repr anywhere in the string, e.g.:
+        # "Vertex_aiException BadRequestError - b'{...}'"
+        match = re.search(r"b'(\{.*\})'|b\"(\{.*\})\"", raw)
+        if match:
+            raw = match.group(1) or match.group(2)
+        try:
+            body = json.loads(raw)
+            message = body.get("error", {}).get("message") or raw
+        except (json.JSONDecodeError, AttributeError):
+            message = raw or str(error)
+    elif isinstance(error, APIStatusError):
+        body = error.body
+        error_field = body.get("error") if isinstance(body, dict) else None
+        message = (
+            error_field.get("message") if isinstance(error_field, dict) else None
+        ) or str(error)
+    else:
+        message = str(error)
+
+    message = re.sub(r"\b\d+\b(?= tokens)", "<N>", message)
+    message = re.sub(r"(max_tokens:).*", r"\1 too large", message)
+    return message
 
 
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
@@ -417,7 +452,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(
-                    f"workflow execution failure: {type(workflow.last_error).__name__}: {workflow.last_error}"
+                    "workflow execution failure: "
+                    f"{type(workflow.last_error).__name__}: "
+                    f"{_extract_error_message(workflow.last_error)}"
                 )
             else:
                 log.warning(
