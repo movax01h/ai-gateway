@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import grpc
 import litellm
 import pytest
+from anthropic import APIStatusError
 from dependency_injector import providers
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -18,6 +19,7 @@ from gitlab_cloud_connector import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
+from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from packaging.version import Version
 
 from ai_gateway.config import (
@@ -46,6 +48,7 @@ from duo_workflow_service.interceptors.metadata_context_interceptor import (
 from duo_workflow_service.server import (
     CONTAINER_APPLICATION_PACKAGES,
     DuoWorkflowService,
+    _extract_error_message,
     clean_start_request,
     next_client_event,
     run,
@@ -3169,3 +3172,80 @@ async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
     assert monitoring_context.flow_id is None
     assert monitoring_context.flow_version is None
     assert monitoring_context.schema_version is None
+
+
+def test_extract_error_message_litellm_bad_request_parses_body():
+    body = (
+        '{"type":"error","error":{"type":"invalid_request_error",'
+        '"message":"max_tokens: 99999999 > 128000, which is the maximum'
+        ' allowed number of output tokens for claude-sonnet-4-6"}}'
+    )
+    error = LiteLLMBadRequestError(
+        message=f"Vertex_aiException BadRequestError - b'{body}'",
+        model="claude-sonnet-4-6",
+        llm_provider="vertex_ai",
+    )
+    assert _extract_error_message(error) == "max_tokens: too large"
+
+
+def test_extract_error_message_litellm_bad_request_invalid_json_falls_back():
+    error = LiteLLMBadRequestError(
+        message="Vertex_aiException BadRequestError - b'{not valid json}'",
+        model="claude-sonnet-4-6",
+        llm_provider="vertex_ai",
+    )
+    result = _extract_error_message(error)
+    assert isinstance(result, str)
+    assert result  # non-empty fallback
+
+
+def test_extract_error_message_anthropic_api_status_error_parses_body():
+    mock_response = MagicMock()
+    mock_response.status_code = 529
+    error = APIStatusError(
+        "ignored",
+        response=mock_response,
+        body={
+            "type": "error",
+            "error": {"type": "overloaded_error", "message": "Overloaded"},
+        },
+    )
+    assert _extract_error_message(error) == "Overloaded"
+
+
+def test_extract_error_message_anthropic_api_status_error_non_dict_error_field():
+    mock_response = MagicMock()
+    mock_response.status_code = 529
+    error = APIStatusError(
+        "Overloaded",
+        response=mock_response,
+        body={"type": "error", "error": "overloaded_error"},
+    )
+    # Should not raise AttributeError; falls back to str(error)
+    result = _extract_error_message(error)
+    assert isinstance(result, str)
+
+
+def test_extract_error_message_normalizes_token_count():
+    mock_response = MagicMock()
+    mock_response.status_code = 400
+    error = APIStatusError(
+        "ignored",
+        response=mock_response,
+        body={
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "prompt is too long: 205531 tokens > 200000 maximum",
+            },
+        },
+    )
+    assert (
+        _extract_error_message(error)
+        == "prompt is too long: <N> tokens > 200000 maximum"
+    )
+
+
+def test_extract_error_message_generic_error_falls_back_to_str():
+    error = ValueError("something went wrong")
+    assert _extract_error_message(error) == "something went wrong"
