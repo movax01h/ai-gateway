@@ -1,7 +1,7 @@
-# pylint: disable=line-too-long
+# pylint: disable=line-too-long,too-many-lines
 import base64
 import json
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, _Call, patch
 
 import pytest
 from langchain_core.tools import ToolException
@@ -29,6 +29,7 @@ def project_mock_fixture():
         description="Test project",
         http_url_to_repo="http://example.com/repo.git",
         web_url="http://example.com/repo",
+        default_branch="main",
         languages=[],
         exclusion_rules=["**/*.log", "/secrets/**", "**/node_modules/**"],
     )
@@ -817,6 +818,117 @@ async def test_build_review_context_no_files_content(
     assert "<original_files>" not in response
     assert '<file_diff filename="new_file.rb">' in response
     assert '<line type="added"' in response
+
+
+def _aget_path(call: _Call) -> str:
+    """Return the request path of a gitlab_client.aget call (positional or kwarg)."""
+    if call.args:
+        return call.args[0]
+    return call.kwargs.get("path", "")
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_reads_instructions_from_default_branch(
+    mock_yaml_load,
+    gitlab_client_mock,
+    project_mock,
+    metadata,
+    diffs_data,
+    custom_instructions_yaml,
+):
+    """Custom instructions must be read from the project's default branch, not the attacker-controllable MR target
+    branch (security regression for #601482).
+
+    Original file contents stay on the target branch (data under review).
+    """
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "Follow Ruby naming conventions",
+            }
+        ]
+    }
+    mr_data = {
+        "id": 123,
+        "title": "Title",
+        "description": "Description",
+        "target_branch": "not-main",
+        "source_branch": "feature",
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "Ruby Code Quality" in response
+
+    instruction_calls = [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "mr-review-instructions" in _aget_path(call)
+    ]
+    assert len(instruction_calls) == 1
+    # Read from the default branch, NOT the MR target branch ("not-main").
+    assert instruction_calls[0].kwargs["params"] == {"ref": "main"}
+
+    original_file_calls = [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "repository/files" in _aget_path(call)
+        and "mr-review-instructions" not in _aget_path(call)
+    ]
+    assert original_file_calls
+    # Original files are still fetched from the target branch (data under review).
+    assert all(
+        call.kwargs["params"] == {"ref": "not-main"} for call in original_file_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_no_default_branch_skips_instructions(
+    gitlab_client_mock,
+    project_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    """When the project has no resolvable default branch, no instructions file is fetched and custom instructions
+    resolve to empty."""
+    project_mock["default_branch"] = None
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<custom_instructions>" not in response
+    # No attempt to fetch the instructions file when default branch is unknown.
+    assert not [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "mr-review-instructions" in _aget_path(call)
+    ]
 
 
 class TestFormatDiffLinks:
