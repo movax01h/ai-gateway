@@ -432,7 +432,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `duo_permissions_assistant 1.1.0 (v1)` (Flow Registry)
+## Graph: `duo_permissions_assistant 2.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
