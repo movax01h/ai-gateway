@@ -325,6 +325,20 @@ models:
       max_tokens: 128_000
       max_retries: 1
 
+  - name: "Claude Sonnet 5"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_sonnet_5"
+    description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 4.6 with gains across agentic coding and professional work."
+    cost_indicator: "$$$"
+    max_context_tokens: 1_000_000
+    proxy_provider: anthropic
+    model_class_provider: anthropic
+    family:
+      - claude
+    params:
+      model: "claude-sonnet-5"
+      max_tokens: 64_000
+
   - name: "Claude Sonnet 4.6"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_6"
