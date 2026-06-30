@@ -66,9 +66,10 @@ class ListMrDiscussions(DuoBaseTool):
         **kwargs: Any,
     ) -> str:
         path = f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/discussions"
-        response = await self.gitlab_client.aget(path, parse_json=False)
-        body = self._process_http_response("list discussions", response, logger)
-        discussions = json.loads(body)
+        # Fetch every page: GitLab paginates discussions (default 20 per page), so a
+        # single request would hide the reviewer's prior threads on large MRs and lead
+        # to duplicate findings being re-posted. See gitlab-org/gitlab#603791.
+        discussions = await self._paginate_get(path)
 
         result = []
         for d in discussions:

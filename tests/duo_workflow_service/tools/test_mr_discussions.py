@@ -120,7 +120,8 @@ class TestListMrDiscussions:
         assert len(parsed) == 3
 
         gitlab_client_mock.aget.assert_called_once_with(
-            "/api/v4/projects/123/merge_requests/45/discussions",
+            path="/api/v4/projects/123/merge_requests/45/discussions",
+            params={"page": "1", "per_page": 100},
             parse_json=False,
         )
 
@@ -237,6 +238,118 @@ class TestListMrDiscussions:
         parsed = json.loads(result)
         # developer has no resolvable discussions (disc_bbb222 is not resolvable)
         assert len(parsed) == 0
+
+    @pytest.mark.asyncio
+    async def test_paginates_across_multiple_pages(self, metadata, gitlab_client_mock):
+        """Regression: discussions beyond the first page must be returned.
+
+        Without pagination only the first page (GitLab default 20) is fetched,
+        so the agent never sees its prior threads past page 1 and re-posts
+        duplicate findings. See gitlab-org/gitlab#603791.
+        """
+        page1 = [
+            {
+                "id": f"disc_p1_{i}",
+                "notes": [
+                    {
+                        "id": 1000 + i,
+                        "author": {"username": "duo-security-reviewer"},
+                        "body": f"page 1 finding {i}",
+                        "resolvable": True,
+                        "resolved": False,
+                    }
+                ],
+            }
+            for i in range(100)
+        ]
+        page2 = [
+            {
+                "id": "disc_p2_only",
+                "notes": [
+                    {
+                        "id": 9001,
+                        "author": {"username": "duo-security-reviewer"},
+                        "body": "page 2 finding that dedup must see",
+                        "resolvable": True,
+                        "resolved": False,
+                    }
+                ],
+            }
+        ]
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(page1),
+                    headers={"X-Next-Page": "2"},
+                ),
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(page2),
+                    headers={"X-Next-Page": ""},
+                ),
+            ]
+        )
+
+        tool = ListMrDiscussions(metadata=metadata)
+        result = await tool._execute(project_id=123, merge_request_iid=45)
+
+        parsed = json.loads(result)
+        ids = {d["discussion_id"] for d in parsed}
+        assert len(parsed) == 101
+        assert "disc_p2_only" in ids
+        assert gitlab_client_mock.aget.call_count == 2
+
+        # Assert each page was requested with the right parameters, not just that
+        # two calls happened — guards against fetching page 2 with wrong params
+        # but coincidentally returning the right data.
+        path = "/api/v4/projects/123/merge_requests/45/discussions"
+        gitlab_client_mock.aget.assert_any_call(
+            path=path, params={"page": "1", "per_page": 100}, parse_json=False
+        )
+        gitlab_client_mock.aget.assert_any_call(
+            path=path, params={"page": "2", "per_page": 100}, parse_json=False
+        )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_failed_page(self, metadata, gitlab_client_mock):
+        """A non-success status on any page raises ToolException.
+
+        Pagination via _paginate_get surfaces a failed page as a hard error rather than silently returning a partial
+        result, so the agent never treats a truncated thread list as complete. See gitlab-org/gitlab#603791.
+        """
+        page1 = [
+            {
+                "id": "disc_p1_0",
+                "notes": [
+                    {
+                        "id": 1,
+                        "author": {"username": "duo-security-reviewer"},
+                        "body": "page 1 finding",
+                        "resolvable": False,
+                        "resolved": False,
+                    }
+                ],
+            }
+        ]
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(page1),
+                    headers={"X-Next-Page": "2"},
+                ),
+                GitLabHttpResponse(
+                    status_code=500,
+                    body="Internal Server Error",
+                    headers={"X-Next-Page": ""},
+                ),
+            ]
+        )
+
+        tool = ListMrDiscussions(metadata=metadata)
+        with pytest.raises(ToolException):
+            await tool._execute(project_id=123, merge_request_iid=45)
 
     @pytest.mark.asyncio
     async def test_empty_discussions(self, metadata, gitlab_client_mock):
