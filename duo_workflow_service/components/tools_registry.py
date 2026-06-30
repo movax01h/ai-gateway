@@ -16,19 +16,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
-from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
-    BuildReviewMergeRequestContext,
-)
-from duo_workflow_service.tools.code_review.post_duo_code_review import (
-    PostDuoCodeReview,
-)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from duo_workflow_service.tools.findings.get_security_finding_details import (
-    GetSecurityFindingDetails,
-)
-from duo_workflow_service.tools.findings.list_security_findings import (
-    ListSecurityFindings,
-)
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import McpTool, McpToolConfig
 from duo_workflow_service.tools.mr_discussions import (
@@ -40,16 +28,6 @@ from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
-from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
-    EvaluateVulnerabilityFalsePositiveStatus,
-    GetVulnerabilityDetails,
-)
-from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
-    PostSastFpAnalysisToGitlab,
-)
-from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitlab import (
-    PostSecretFpAnalysisToGitlab,
-)
 from lib.language_server import LanguageServerVersion
 
 log = structlog.stdlib.get_logger("tools_registry")
@@ -147,14 +125,14 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.ListGroupAuditEvents,
     tools.ListProjectAuditEvents,
     tools.GetCurrentUser,
-    GetVulnerabilityDetails,
-    EvaluateVulnerabilityFalsePositiveStatus,
+    tools.GetVulnerabilityDetails,
+    tools.EvaluateVulnerabilityFalsePositiveStatus,
     tools.ExtractLinesFromText,
     tools.GetGlqlSchema,
     tools.RunGLQLQuery,
-    BuildReviewMergeRequestContext,
-    GetSecurityFindingDetails,
-    ListSecurityFindings,
+    tools.BuildReviewMergeRequestContext,
+    tools.GetSecurityFindingDetails,
+    tools.ListSecurityFindings,
     tools.ListAscpScans,
     tools.ListAscpComponents,
     tools.GetWikiPage,
@@ -205,9 +183,9 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.UpdateWorkItem,
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
-        PostSastFpAnalysisToGitlab,
-        PostSecretFpAnalysisToGitlab,
-        PostDuoCodeReview,
+        tools.PostSastFpAnalysisToGitlab,
+        tools.PostSecretFpAnalysisToGitlab,
+        tools.PostDuoCodeReview,
         SubmitMrReview,
         ReplyToDiscussion,
         SetDiscussionResolved,
