@@ -1,4 +1,3 @@
-# flake8: noqa: W605
 """Security functions for emoji detection and removal."""
 
 import re
