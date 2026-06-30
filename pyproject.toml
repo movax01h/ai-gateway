@@ -230,9 +230,6 @@ ignore = [
   "RUF005",  # collection-literal-concatenation: style only; autofix is unsafe (operand may be non-list)
   "RUF006",  # asyncio-dangling-task: fire-and-forget tasks are intentional; task-ref handling is a separate change
   "RUF043",  # pytest-raises-ambiguous-pattern: existing test match= patterns pass; not worth churning
-  # RUF100 (unused-noqa) is deferred: it is accurate only once every rule group
-  # (E/W/F, C4, PL) is active, otherwise it strips noqa for inactive rules.
-  "RUF100",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -249,13 +246,13 @@ max-statements = 65
 max-branches = 20
 
 [tool.ruff.lint.isort]
+known-first-party = ["ai_gateway", "duo_workflow_service", "lib"]
 # `_pickle` is the C accelerator for `pickle`. ruff treats it as standard
 # library, but pylint classifies it as third-party; pin it here so both tools
 # agree on import ordering (avoids pylint wrong-import-order).
 known-third-party = ["_pickle"]
 
 [tool.pylint.main]
-extension-pkg-allow-list = ["dependency_injector", "lxml"]
 # Exclude protobuf packages because they can't be parsed properly by pylint, leading to `no-name-in-module` errors.
 # See https://github.com/protocolbuffers/protobuf/issues/10372
 ignored-modules=["contract.contract_pb2", "google.protobuf.struct_pb2", "google.rpc.error_details_pb2"]
@@ -267,41 +264,10 @@ load-plugins = [
   "lints.no_exception_swallowing_in_tools",
 ]
 
-[tool.pylint.format]
-max-args = 17
-max-attributes = 10
-max-line-length = 120
-max-locals = 30
-max-positional-arguments = 17
-max-statements = 65
-
-[tool.pylint.messages_control]
-disable = [
-  "missing-module-docstring",
-  "missing-function-docstring",
-  "missing-class-docstring",
-  "too-few-public-methods",
-  "no-member",
-  "fixme",
-  "protected-access",
-  "no-name-in-module",
-  "arguments-differ",
-  "unspecified-encoding",
-  "redefined-builtin",
-  "arguments-renamed",
-  "raise-missing-from",
-  "abstract-method",
-  "broad-exception-caught",
-  "duplicate-code",
-]
-enable = [
-  "unsafe-dependency-resolution",
-  "direct-environment-variable-reference",
-  "useless-suppression",
-]
-
-[tool.pylint.reports]
-score = "no"
+# Pylint is slimmed to the custom checkers only (work item #2237, Phase 3); the
+# rule selection lives in the `check-pylint` Makefile target (--disable=all
+# --enable=W5001,W5002,W5003,W9002,W9003). ruff owns all general lint rules now,
+# so the old format/messages_control/reports config is gone.
 
 [tool.mypy]
 python_version = "3.12"

@@ -161,11 +161,15 @@ codespell: install-lint-deps
 	@echo "Running codespell fix..."
 	@poetry run codespell -w
 
+.PHONY: ruff-format
+ruff-format: install-lint-deps
+	@echo "Running ruff format..."
+	@poetry run ruff format ${LINT_WORKING_DIR}
+
 .PHONY: ruff-fix
 ruff-fix: install-lint-deps
-	@echo "Running ruff check --fix and ruff format..."
+	@echo "Running ruff check --fix..."
 	@poetry run ruff check --fix ${LINT_WORKING_DIR}
-	@poetry run ruff format ${LINT_WORKING_DIR}
 
 .PHONY: docformatter
 docformatter: install-lint-deps
@@ -184,7 +188,7 @@ check-pricing-multipliers:
 	@poetry run verify-pricing-multipliers
 
 .PHONY: format
-format: codespell ruff-fix docformatter
+format: codespell ruff-format ruff-fix docformatter
 
 .PHONY: lint
 lint: lint-code lint-doc
@@ -206,8 +210,8 @@ check-ruff: install-lint-deps
 
 .PHONY: check-pylint
 check-pylint: install-lint-deps
-	@echo "Running pylint check..."
-	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor
+	@echo "Running custom pylint checkers (W5001-W5003, W9002, W9003)..."
+	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor --disable=all --enable=W5001,W5002,W5003,W9002,W9003
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps

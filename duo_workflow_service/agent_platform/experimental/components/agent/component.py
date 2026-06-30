@@ -58,7 +58,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 
 # Re-export RoutingError from v1 to prevent code duplication.
-from duo_workflow_service.agent_platform.v1.components.agent.component import (  # noqa: F401
+from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
