@@ -11,3 +11,4 @@ prompt_template:
     {% include 'analyze_prescan_codebase_results/user/1.0.0.jinja' %}
 params:
   timeout: 60
+  cache_control_injection_points: []
