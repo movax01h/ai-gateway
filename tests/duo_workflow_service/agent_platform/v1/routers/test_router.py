@@ -284,6 +284,36 @@ class TestRouter:
         to_component_1.__entry_hook__.assert_called_once()
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
 
+    def test_router_route_with_empty_string_input_takes_explicit_empty_route(self):
+        """Router selects the explicit "" branch when a nested input resolves to "".
+
+        This is the mechanism the fix_pipeline_next flow uses to skip the
+        fetch_mr_diffs step when a pipeline has no associated merge request: the
+        merge_request envelope is present but ``url`` is an empty string, so the
+        router routes straight to the next component instead of running the step
+        that would fail tool validation.
+        """
+        from_component = self.create_mock_component("fetch_failing_bridge_jobs")
+        skip_component = self.create_mock_component("fix_pipeline_next_context")
+        run_component = self.create_mock_component("fetch_mr_diffs")
+
+        router = Router(
+            input="context:inputs.merge_request.url",
+            from_component=from_component,
+            to_component={
+                "": skip_component,
+                BaseRouter.DEFAULT_ROUTE: run_component,
+            },
+        )
+
+        no_mr_state = {"context": {"inputs": {"merge_request": {"url": ""}}}}
+
+        result = router.route(no_mr_state)
+
+        assert result == "fix_pipeline_next_context_entry_hook"
+        skip_component.__entry_hook__.assert_called_once()
+        run_component.__entry_hook__.assert_not_called()
+
     def test_router_allowed_input_targets(self):
         """Test that Router has correct allowed input targets."""
         assert Router._allowed_input_targets == ("context", "status")
