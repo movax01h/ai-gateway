@@ -34,7 +34,7 @@ Each layer only uses entities from the layer directly below it (enforced via CI 
 - **LiteLLM** (^1.35.20): Unified interface for multiple LLM providers
 - **Anthropic** (^0.71.0): Claude model integration
 - **Google Cloud AI Platform** (^1.36.4): Vertex AI integration
-- **Tree-sitter** (^0.25.2) + tree-sitter-language-pack (^1.8.1): Code parsing for suggestions
+- **Tree-sitter** (^0.21.0) + tree-sitter-languages (^1.10.2): Code parsing for suggestions
 - **Transformers** (^4.37.2): Tokenization
 - **gRPC** (^1.68.1): Communication protocol for Duo Workflow Service
 - **Python-GitLab** (^6.0.0): GitLab API client

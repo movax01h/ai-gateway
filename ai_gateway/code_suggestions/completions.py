@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
 
 import structlog
@@ -138,13 +137,7 @@ class CodeCompletions:
         init_llm_operations()
 
         if isinstance(self.model, AgentModel):
-            lang = (
-                editor_lang
-                or resolve_lang_name(file_name)
-                or Path(file_name).suffix.lstrip(".")
-                or None
-            )
-            if lang:
+            if lang := (editor_lang or resolve_lang_name(file_name)):
                 params = {
                     "prefix": prompt.prefix,
                     "suffix": prompt.suffix,
