@@ -1,0 +1,201 @@
+# Flow: distill_agents_md
+#
+# Given a GitLab Merge Request URL, walk the chain MR → linked issues → Duo
+# Developer session IDs → session traces, distill durable repo-scoped
+# learnings, and open an MR that creates or updates the target repo's
+# AGENTS.md. If no learning meets the bar, post a no-op comment on the source
+# MR instead of opening one.
+#
+# Invocation: schema_version="v1", config_id="distill_agents_md", version="1.0.0".
+# `context:goal` must be the source MR URL — the project that owns it is the
+# project that will be checked out and that the new AGENTS.md MR is opened against.
+#
+# Shape mirrors developer/2.0.0.yml: same git_unshallow deterministic step and
+# AgentComponent inputs. Toolset uses `glab` (via `run_command`) for all GitLab
+# API operations. Only the prompt differs.
+
+version: "v1"
+environment: ambient
+
+components:
+  # The CI runner creates a depth=1 shallow clone. Unshallow so the agent has
+  # full history for commits, amends, rebases, and pushes. Without this,
+  # commits in a shallow clone can become orphan/root commits, causing MR
+  # diffs to show every file in the repo as changed.
+  # See: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2109
+  - name: "git_unshallow"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "if git rev-parse --is-shallow-repository | grep -q true; then git fetch --unshallow; fi"
+        as: "command"
+        literal: true
+      # Large repos can take several minutes to unshallow; override the default
+      # 120 s timeout to avoid premature failures on big repositories.
+      - from: "600"
+        as: "timeout"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "distill_agent"
+    type: AgentComponent
+    prompt_id: "distill_agent_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: True
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: True
+    toolset:
+      - "read_file"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "create_file_with_contents"
+      - "edit_file"
+      - "mkdir"
+      - "todo_write"
+      - "run_command"
+
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+routers:
+  - from: "git_unshallow"
+    to: "distill_agent"
+  - from: "distill_agent"
+    to: "end"
+
+flow:
+  entry_point: "git_unshallow"
+  inputs:
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
+
+prompts:
+  - name: "distill_agent_prompt"
+    prompt_id: "distill_agent_prompt"
+    params:
+      timeout: 600
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% extends 'common/developer/system/1.0.0.jinja' %}
+        {% block tool_instructions %}
+        - Use `glab` for all GitLab API operations (it's authenticated for this instance).
+        - Fetch a Duo session's trace via `glab api "ai/duo_workflows/workflows/<session-id>/trace.jsonl" > /tmp/trace-<session-id>.jsonl`. Use a session-scoped filename so that fetching multiple sessions does not overwrite earlier traces. The response is JSONL — one JSON event per line — with fields like `message_type` (`tool`/`agent`/`user`), `message_sub_type` (`reasoning`/`edit_file`/`run_command`/etc.), `tool_info.name`, `tool_info.args`, `tool_info.tool_response`, and `status`.
+        {%- endblock %}
+      user: |
+        Analyze past Developer Flow sessions related to the source MR below, distill durable, repo-scoped learnings, and persist them as an `AGENTS.md` at the repository root via a new MR. If no learning meets the bar, do **not** open an MR — post a comment on the source MR explaining why.
+
+        Source MR: {{ goal }}
+
+        You are running non-interactively. When something is ambiguous, make the most defensible decision and surface your reasoning in the MR description or no-op comment.
+
+        # Discovery Chain
+
+        Follow in order. If any step yields nothing, hard-fail per "Failure Handling".
+
+        1. **Fetch the source MR** (description and full comment thread). The MR discussion itself is signal — user corrections often live there.
+        2. **Identify linked issues** from the MR description and comments.
+        3. **Find session IDs in each linked issue.** Read each issue's activity and comments. Look for entries like `✅ Duo Developer has started. You can view progress <session link>.` and extract the session ID from the linked URL. Deduplicate.
+        4. **Fetch each session trace** with `glab`. The trace is JSONL — infer structure from the data. Look for tool calls, errors, retries, user corrections, and any signal the agent struggled or was corrected.
+
+        # What to Extract
+
+        Distill learnings that are all of:
+
+        - **Durable** — applies to future sessions in this repo, not one-off issue context.
+        - **Actionable** — phrased as something a future agent can do, run, avoid, or check. Imperative voice.
+        - **Repo-scoped** — specific to this repo's setup, conventions, tools, or pitfalls; not generic engineering advice.
+        - **Evidence-backed** — grounded in something you actually observed in traces or comment threads.
+
+        Use judgment. No hardcoded recurrence threshold — one high-signal user correction can be enough; ten weak inferences are not.
+
+        Drop a candidate if any apply:
+
+        - **Sensitive** — tokens, credentials, internal hostnames, customer data. Redact aggressively.
+        - **Issue-specific** — facts that only matter for the originating issue/MR (e.g., "the bug was in `foo.py` line 42").
+        - **Unsupported contradiction** — if existing `AGENTS.md` says X and your learning says not-X, only overwrite when the trace or comments contain explicit user confirmation X is wrong.
+
+        # AGENTS.md Rules
+
+        At repo root only. Single file. When writing or updating:
+
+        1. **Purpose:** the file exists so an AI coding agent can be productive in this repo without re-discovering setup, conventions, and pitfalls.
+        2. **Brevity:** every line earns its place. No filler, no restating what's obvious from a glance at the repo.
+        3. **Actionable:** every bullet is something an agent can do, run, avoid, or check.
+        4. **Repo-scoped:** only guidance specific to this repository.
+
+        Do not cite sources inside `AGENTS.md` — keep it purely agent-facing. Source citations belong in the MR description.
+
+        If `AGENTS.md` exists, you may rewrite fully when learnings justify it. If it does not exist, create it with only the sections the learnings populate — do not pad with empty headings.
+
+        # MR Description
+
+        Use your standard MR flow. The MR's content must satisfy:
+
+        - The diff modifies only `AGENTS.md` at repo root.
+        - The description includes: a link back to the source MR, the list of session IDs fetched, a per-bullet rationale citing the session ID(s) for each new or changed item, and a short note on what you considered but rejected.
+
+        # No-Op Outcome
+
+        If no candidate passes the bar, do **not** open an MR. Post one comment on the source MR with: the session IDs analyzed, a brief explanation of why nothing was worth persisting, and optionally a short rejected-candidate list.
+
+        # Failure Handling
+
+        If the discovery chain breaks, do not silently degrade and do not produce partial work. Hard-fail by posting a diagnostic comment on the source MR listing exactly what you tried and where it broke. Shape:
+
+        ```text
+        Could not complete AGENTS.md distillation. Trace of attempts:
+        - Fetched source MR: OK
+        - Extracted linked issues: #123, #124 (OK)
+        - Issue #123: scanned comments for session-id pattern — none found
+        - Issue #124: found session 128 — OK
+        - glab api ai/duo_workflows/workflows/128/trace.jsonl: HTTP 404
+        Stopping. No MR created.
+        ```
+
+        Then stop. Do not open an MR.
+
+        # Execution Notes
+
+        - The repo may use any language or toolchain. Infer from the repo and the traces.
+        - You are responsible for your own reasoning. The above are constraints, not a checklist.
