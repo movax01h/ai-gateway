@@ -357,7 +357,15 @@ routers:
   - from: "fetch_failing_jobs"
     to: "fetch_failing_bridge_jobs"
   - from: "fetch_failing_bridge_jobs"
-    to: "fetch_mr_diffs"
+    condition:
+      input: "context:inputs.merge_request.url"
+      routes:
+        # No MR: the merge_request schema requires url to be a non-null string,
+        # so the no-MR case always arrives as "". Skip fetch_mr_diffs (which
+        # would fail tool validation on an empty url); a real url falls through
+        # to default_route and fetches the diffs.
+        "": "fix_pipeline_next_context"
+        "default_route": "fetch_mr_diffs"
   - from: "fetch_mr_diffs"
     to: "fix_pipeline_next_context"
   - from: "fix_pipeline_next_context"
