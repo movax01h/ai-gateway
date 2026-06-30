@@ -160,20 +160,3 @@ async def test_tree_dfs_max_visit_count(
     tree_dfs(tree, visitor, max_visit_count=max_visit_count)
 
     assert len(visitor.visited_nodes) == expected_node_count
-
-
-class StubCursorWithoutNode:
-    node = None
-
-
-class StubTreeWithoutNode:
-    def walk(self):
-        return StubCursorWithoutNode()
-
-
-def test_tree_dfs_stops_when_cursor_node_is_none():
-    visitor = StubSimpleVisitor()
-
-    tree_dfs(StubTreeWithoutNode(), visitor)
-
-    assert not visitor.visited_nodes

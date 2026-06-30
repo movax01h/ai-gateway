@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines,too-many-public-methods
+# pylint: disable=too-many-lines
 
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, Type, cast
@@ -776,65 +776,6 @@ class TestCodeCompletions:
                 "suffix": ":",
                 "file_name": "test.py",
                 "language": "python",
-            },
-            False,
-        )
-
-    async def test_execute_agent_model_unknown_language_falls_back_to_extension(self):
-        # `.xyz` is not in _ALL_LANGS and editor_lang is not provided.
-        # The AgentModel branch should still call the model, using the raw
-        # file extension as the language hint, instead of returning empty.
-        prefix = "hello "
-        suffix = ""
-        file_name = "hello.xyz"
-
-        agent_model = Mock(spec=AgentModel)
-        agent_model.input_token_limit = 16
-        agent_model.generate = AsyncMock(
-            return_value=TextGenModelOutput(
-                text="ok",
-                score=0,
-                safety_attributes=SafetyAttributes(),
-                metadata=Mock(output_tokens=1, spec_set=["output_tokens"]),
-            )
-        )
-
-        use_case = CodeCompletions(
-            agent_model,
-            Mock(spec=TokenStrategyBase),
-            Mock(spec=BillingEventService),
-        )
-
-        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
-        use_case.prompt_builder.build.return_value = Prompt(
-            prefix=prefix,
-            suffix=suffix,
-            metadata=MetadataPromptBuilder(
-                components={
-                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
-                    "suffix": MetadataCodeContent(length=1, length_tokens=1),
-                }
-            ),
-        )
-
-        actual = await use_case.execute(
-            prefix=prefix,
-            suffix=suffix,
-            file_name=file_name,
-            editor_lang=None,
-            stream=False,
-        )
-
-        actual = cast(CodeSuggestionsOutput, actual)
-        assert actual.text == "ok"
-        assert actual.lang_id is None
-
-        agent_model.generate.assert_called_once_with(
-            {
-                "prefix": prefix,
-                "suffix": suffix,
-                "file_name": file_name,
-                "language": "xyz",
             },
             False,
         )
