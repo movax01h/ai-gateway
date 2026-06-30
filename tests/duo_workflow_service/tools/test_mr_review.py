@@ -14,6 +14,7 @@ from duo_workflow_service.tools.mr_review import (
     MrReviewComment,
     SubmitMrReview,
     SubmitMrReviewInput,
+    find_line_by_anchor,
     find_line_by_content,
     find_line_by_numbers,
     match_comment_to_diff_line,
@@ -275,7 +276,123 @@ class TestFindLineByContent:
 # --- Tests for match_comment_to_diff_line ---
 
 
+class TestFindLineByAnchor:
+    def test_exact_text_match_corrects_wrong_number(self):
+        """The flagged line is located by its text even when the number is wrong."""
+        diff_lines = [
+            DiffLine(
+                old_line=None, new_line=256, text="def show(id):", line_type="added"
+            ),
+            DiffLine(
+                old_line=None,
+                new_line=257,
+                text="    record = Record.find(id)",
+                line_type="added",
+            ),
+        ]
+        # Model reported new_line=247 (an original-file number, not in the diff).
+        result = find_line_by_anchor("    record = Record.find(id)", 247, diff_lines)
+        assert result is not None
+        assert result.new_line == 257
+
+    def test_whitespace_tolerant_match(self):
+        """Indentation the model copied imperfectly still matches."""
+        diff_lines = [
+            DiffLine(
+                old_line=None,
+                new_line=42,
+                text="        do_thing()",
+                line_type="added",
+            ),
+        ]
+        result = find_line_by_anchor("do_thing()", None, diff_lines)
+        assert result is not None
+        assert result.new_line == 42
+
+    def test_multiple_matches_picks_closest_to_claimed_line(self):
+        diff_lines = [
+            DiffLine(old_line=None, new_line=10, text="    log()", line_type="added"),
+            DiffLine(old_line=None, new_line=50, text="    log()", line_type="added"),
+            DiffLine(old_line=None, new_line=90, text="    log()", line_type="added"),
+        ]
+        result = find_line_by_anchor("    log()", 48, diff_lines)
+        assert result is not None
+        assert result.new_line == 50
+
+    def test_multiple_matches_no_claimed_line_returns_first(self):
+        """With no claimed line to disambiguate, the first match wins."""
+        diff_lines = [
+            DiffLine(old_line=None, new_line=10, text="    log()", line_type="added"),
+            DiffLine(old_line=None, new_line=50, text="    log()", line_type="added"),
+        ]
+        result = find_line_by_anchor("    log()", None, diff_lines)
+        assert result is not None
+        assert result.new_line == 10
+
+    def test_skips_deleted_lines(self):
+        diff_lines = [
+            DiffLine(old_line=5, new_line=None, text="gone", line_type="deleted"),
+        ]
+        assert find_line_by_anchor("gone", None, diff_lines) is None
+
+    def test_no_match_returns_none(self):
+        diff_lines = [
+            DiffLine(old_line=None, new_line=10, text="foo", line_type="added"),
+        ]
+        assert find_line_by_anchor("bar", 10, diff_lines) is None
+
+    def test_empty_target_returns_none(self):
+        diff_lines = [
+            DiffLine(old_line=None, new_line=10, text="foo", line_type="added"),
+        ]
+        assert find_line_by_anchor("", 10, diff_lines) is None
+
+
 class TestMatchCommentToDiffLine:
+    def test_target_code_corrects_wrong_line_number(self):
+        """The bug repro: model's new_line isn't in the diff, target_code rescues it."""
+        diff_lines = [
+            DiffLine(
+                old_line=None, new_line=256, text="def show(id):", line_type="added"
+            ),
+            DiffLine(
+                old_line=None,
+                new_line=257,
+                text="    record = Record.find(id)",
+                line_type="added",
+            ),
+        ]
+        comment = MrReviewComment(
+            file="app.py",
+            new_line=247,  # original-file number, not in the diff
+            body="IDOR",
+            target_code="    record = Record.find(id)",
+        )
+        result = match_comment_to_diff_line(comment, diff_lines)
+        assert result is not None
+        assert result.new_line == 257
+
+    def test_target_code_absent_keeps_number_behavior(self):
+        """Back-compat: without target_code, behavior is unchanged (number match)."""
+        diff_lines = [
+            DiffLine(old_line=5, new_line=10, text="foo", line_type="context"),
+        ]
+        comment = MrReviewComment(file="app.py", new_line=10, old_line=5, body="issue")
+        result = match_comment_to_diff_line(comment, diff_lines)
+        assert result is not None
+        assert result.new_line == 10
+
+    def test_target_code_agreeing_with_number_uses_number_line(self):
+        diff_lines = [
+            DiffLine(old_line=None, new_line=10, text="foo", line_type="added"),
+        ]
+        comment = MrReviewComment(
+            file="app.py", new_line=10, body="issue", target_code="foo"
+        )
+        result = match_comment_to_diff_line(comment, diff_lines)
+        assert result is not None
+        assert result.new_line == 10
+
     def test_line_number_match_without_suggestion(self):
         diff_lines = [
             DiffLine(old_line=5, new_line=10, text="foo", line_type="context"),
@@ -472,7 +589,15 @@ class TestSubmitMrReview:
         assert "inline comment(s) posted" not in parsed["message"]
         # bulk_publish still ran despite the failed draft note
         post_calls = gitlab_client_mock.apost.call_args_list
-        assert any("bulk_publish" in str(c) for c in post_calls)
+        bulk = [c for c in post_calls if "bulk_publish" in str(c)]
+        assert len(bulk) == 1
+        # The comment that failed to post inline is folded into the summary (forced
+        # internal) rather than silently dropped.
+        body = json.loads(bulk[0].kwargs["body"])
+        assert body["internal"] is True
+        assert "Done" in body["note"]
+        assert "Security issue here" in body["note"]
+        assert "could not be anchored" in body["note"]
 
     @pytest.mark.asyncio
     async def test_execute_public_project_folds_comments_into_summary(
@@ -657,6 +782,111 @@ class TestSubmitMrReview:
         # nothing posted since file not in diffs, and the failure is reported honestly
         assert "inline comment(s) posted" not in parsed["message"]
         assert "1 inline comment(s) could not be posted" in parsed["message"]
+
+    @pytest.mark.asyncio
+    async def test_execute_target_code_corrects_line_and_posts_inline(
+        self, metadata, gitlab_client_mock, mr_data, diffs_api_response
+    ):
+        """A finding whose new_line isn't in the diff still posts inline, on the line located by target_code (the
+        #603790 fix)."""
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+                GitLabHttpResponse(
+                    status_code=200, body=json.dumps(diffs_api_response)
+                ),
+            ]
+        )
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=GitLabHttpResponse(status_code=200, body="{}")
+        )
+
+        tool = SubmitMrReview(metadata=metadata)
+        result = await tool._execute(
+            project_id=123,
+            merge_request_iid=45,
+            comments=[
+                {
+                    "file": "app.py",
+                    "new_line": 999,  # not in the diff (original-file numbering)
+                    "target_code": "added_line_1",  # added_line_1 is at new_line=12
+                    "body": "Security issue here",
+                },
+            ],
+            verdict="requested_changes",
+            summary="Done",
+        )
+
+        parsed = json.loads(result)
+        assert parsed["status"] == "success"
+        assert "1 inline comment(s) posted" in parsed["message"]
+        assert "could not be posted" not in parsed["message"]
+
+        # The draft note was created on the corrected line (12), not the reported 999.
+        post_calls = gitlab_client_mock.apost.call_args_list
+        draft_note_calls = [
+            c
+            for c in post_calls
+            if "draft_notes" in str(c) and "bulk_publish" not in str(c)
+        ]
+        assert len(draft_note_calls) == 1
+        body = json.loads(draft_note_calls[0].kwargs["body"])
+        assert body["position"]["new_line"] == 12
+
+    @pytest.mark.asyncio
+    async def test_execute_unanchorable_finding_folded_into_summary(
+        self, metadata, gitlab_client_mock, mr_data, diffs_api_response
+    ):
+        """A finding that can't be anchored is folded into the internal summary (never silently dropped) and the count
+        stays honest."""
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+                GitLabHttpResponse(
+                    status_code=200, body=json.dumps(diffs_api_response)
+                ),
+            ]
+        )
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=GitLabHttpResponse(status_code=200, body="{}")
+        )
+
+        tool = SubmitMrReview(metadata=metadata)
+        result = await tool._execute(
+            project_id=123,
+            merge_request_iid=45,
+            comments=[
+                {
+                    "file": "app.py",
+                    "new_line": 999,  # not in the diff
+                    "target_code": "this text is nowhere in the diff",
+                    "body": "Unanchorable critical finding",
+                },
+            ],
+            verdict="requested_changes",
+            summary="Original summary",
+            summary_internal=False,  # tool must force this True when folding
+        )
+
+        parsed = json.loads(result)
+        assert parsed["status"] == "success"
+        assert "1 inline comment(s) could not be posted" in parsed["message"]
+
+        post_calls = gitlab_client_mock.apost.call_args_list
+        # No draft note was created — only bulk_publish ran.
+        assert not [
+            c
+            for c in post_calls
+            if "draft_notes" in str(c) and "bulk_publish" not in str(c)
+        ]
+        bulk = [c for c in post_calls if "bulk_publish" in str(c)]
+        assert len(bulk) == 1
+        body = json.loads(bulk[0].kwargs["body"])
+        # Folded into the summary, forced internal, finding body preserved.
+        assert body["internal"] is True
+        assert "Original summary" in body["note"]
+        assert "Unanchorable critical finding" in body["note"]
+        assert "could not be anchored" in body["note"]
 
     @pytest.mark.asyncio
     async def test_execute_malformed_comment_raises(self, metadata, gitlab_client_mock):

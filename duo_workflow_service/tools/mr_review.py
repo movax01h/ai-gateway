@@ -162,15 +162,73 @@ def find_line_by_content(
     return None
 
 
+def find_line_by_anchor(
+    target_code: str,
+    claimed_new_line: Optional[int],
+    diff_lines: list[DiffLine],
+) -> Optional[DiffLine]:
+    """Find a diff line by matching the verbatim text of the line being commented on.
+
+    This is the most reliable anchor available: the reviewer copies ``target_code``
+    straight from the ``<line>…</line>`` tag it is flagging, and that tag's text is
+    produced the same way as ``DiffLine.text`` (the diff line with its +/-/space
+    prefix stripped). So an exact text match deterministically locates the line even
+    when the model reported a line number from the original file instead of the diff.
+
+    Deleted lines are excluded — an inline comment anchors to a line that still exists
+    in the new version. Matching is exact first, then whitespace-stripped to tolerate
+    indentation the model may have copied imperfectly. When several lines share the
+    same text, the one whose ``new_line`` is closest to ``claimed_new_line`` is chosen
+    (the model's number is a useful tie-breaker even when it is off); with no claimed
+    line, the first match wins.
+    """
+    if not target_code:
+        return None
+
+    candidates = [dl for dl in diff_lines if dl.line_type != "deleted"]
+
+    exact = [dl for dl in candidates if dl.text == target_code]
+    matches = exact or [
+        dl for dl in candidates if dl.text.strip() == target_code.strip()
+    ]
+
+    if not matches:
+        return None
+
+    if len(matches) == 1 or claimed_new_line is None:
+        return matches[0]
+
+    return min(
+        matches,
+        key=lambda dl: abs((dl.new_line or 0) - claimed_new_line),
+    )
+
+
 def match_comment_to_diff_line(
     comment: "MrReviewComment",
     diff_lines: list[DiffLine],
 ) -> Optional[DiffLine]:
-    """Match a comment to the correct diff line, with content-based fallback.
+    """Match a comment to the correct diff line.
 
-    Mirrors ProcessCommentsService#match_comment_to_diff_line.
+    Resolution order, most reliable first. (1) ``target_code``: the verbatim
+    flagged line text (deterministic, see find_line_by_anchor) — this corrects a
+    line number the model copied from the original file rather than the diff.
+    (2) line numbers (old_line/new_line). (3) ``suggestion`` content: only fires
+    when the suggestion echoes existing diff lines (rare for security fixes, which
+    are new code), kept for parity with ProcessCommentsService.
     """
     line_match = find_line_by_numbers(comment.old_line, comment.new_line, diff_lines)
+
+    # Only override the number match when the anchor disagrees with it, so a correct
+    # number is never disturbed.
+    if comment.target_code:
+        if line_match and line_match.text == comment.target_code:
+            return line_match
+        anchor_match = find_line_by_anchor(
+            comment.target_code, comment.new_line, diff_lines
+        )
+        if anchor_match:
+            return anchor_match
 
     suggestion_lines = comment.suggestion.splitlines() if comment.suggestion else []
 
@@ -198,6 +256,12 @@ class MrReviewComment(BaseModel):
         description="Line number in the old version of the file",
     )
     body: str = Field(description="Comment body in markdown")
+    target_code: Optional[str] = Field(
+        default=None,
+        description="Verbatim text of the diff line this comment targets (no diff "
+        "marker, original indentation preserved). When set, it is used to anchor the "
+        "comment to the correct line even if new_line/old_line are inaccurate.",
+    )
     suggestion: Optional[str] = Field(
         default=None,
         description="Code suggestion to replace the commented line(s). "
@@ -267,8 +331,11 @@ class SubmitMrReview(DuoBaseTool):
         "by setting summary_internal=true.\n"
         "Set fold_inline_into_summary_when_public=true to fold inline comments into an internal "
         "summary on public projects when they must not be disclosed publicly.\n"
+        "Give each comment a target_code (the verbatim text of the line it refers to) so it "
+        "anchors to the correct line even if new_line is slightly off.\n"
         "Example: submit_mr_review(project_id=123, merge_request_iid=45, "
-        'comments=[{"file": "app.py", "new_line": 10, "body": "Issue here"}], '
+        'comments=[{"file": "app.py", "new_line": 10, '
+        '"target_code": "    user = User.find(params[:id])", "body": "Issue here"}], '
         'verdict="requested_changes", summary="Found 1 issue", summary_internal=true)'
     )
     args_schema: Type[BaseModel] = SubmitMrReviewInput
@@ -324,10 +391,12 @@ class SubmitMrReview(DuoBaseTool):
 
         # Step 1 & 2: Create draft notes for inline comments (private projects only).
         # The loop is resilient: a comment that can't be resolved to a diff line or
-        # whose draft note fails to post is logged, counted, and skipped — one bad
-        # inline comment must not sink an otherwise-complete review.
+        # whose draft note fails to post is logged and set aside — one bad inline
+        # comment must not sink an otherwise-complete review. Comments that fail to
+        # post inline are NOT dropped: they are folded into the internal summary below
+        # so the developer always sees the finding and the published count stays honest.
         posted_count = 0
-        failed_count = 0
+        unanchored: list[MrReviewComment] = []
         if parsed_comments:
             mr_data = await self._fetch_mr_data(project_id, merge_request_iid)
             diff_refs = mr_data.get("diff_refs")
@@ -343,9 +412,10 @@ class SubmitMrReview(DuoBaseTool):
                     comment, diffs_by_file
                 )
                 if not resolved_comment:
-                    failed_count += 1
+                    unanchored.append(comment)
                     logger.warning(
-                        "Skipping comment — could not resolve to a valid diff line",
+                        "Could not resolve comment to a valid diff line — "
+                        "folding into summary",
                         index=i,
                         file=comment.file,
                         new_line=comment.new_line,
@@ -364,18 +434,26 @@ class SubmitMrReview(DuoBaseTool):
                         project_id, merge_request_iid, diff_refs, resolved_comment
                     )
                     posted_count += 1
-                # Deliberately resilient: one comment that fails to post (e.g. a stale
-                # diff line) is counted and skipped so it can't sink an otherwise
-                # complete review. The failure is surfaced in the returned summary.
+                # Deliberately resilient: a comment that fails to post (e.g. a stale
+                # diff line) is set aside rather than sinking the review, and folded
+                # into the summary below so it's never silently lost.
                 except Exception as e:  # pylint: disable=exception-swallowing-in-tool
-                    failed_count += 1
+                    unanchored.append(resolved_comment)
                     logger.warning(
-                        "Skipping comment — failed to create draft note",
+                        "Failed to create draft note — folding into summary",
                         index=i,
                         file=resolved_comment.file,
                         new_line=resolved_comment.new_line,
                         error=str(e),
                     )
+
+        # Last-resort safety net: any finding that could not be posted inline is folded
+        # into the summary (forced internal, since it carries finding detail) so the
+        # developer sees it and the summary never overstates what was posted inline.
+        failed_count = len(unanchored)
+        if unanchored:
+            summary = self._append_unanchored_findings(summary, unanchored)
+            summary_internal = True
 
         # Step 3: Bulk publish + summary + verdict
         logger.info(
@@ -451,6 +529,36 @@ class SubmitMrReview(DuoBaseTool):
             )
         return findings_section
 
+    def _append_unanchored_findings(
+        self,
+        existing_summary: Optional[str],
+        comments: list[MrReviewComment],
+    ) -> str:
+        """Fold findings that could not be posted inline into the summary note.
+
+        A finding whose line cannot be anchored in the diff (e.g. the model reported a line that isn't in the diff and
+        no target_code matched) or whose draft note failed to post would otherwise be silently dropped while the summary
+        still claimed it. Listing it here keeps the published review honest and gives the developer the file/line/body
+        so they can still act on it.
+        """
+        heading = (
+            "**⚠️ Findings that could not be anchored to a specific diff line**\n\n"
+            "The following finding(s) could not be attached as inline comments "
+            "(the referenced line was not found in the diff). They are listed here so "
+            "they are not lost — please review them against the code directly:"
+        )
+        section = f"{heading}\n\n"
+        for i, c in enumerate(comments, 1):
+            location = c.file
+            if c.new_line:
+                location += f":{c.new_line}"
+            code = f"\n\n```\n{c.target_code}\n```" if c.target_code else ""
+            section += f"**{i}.** `{location}`{code}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
+
+        if existing_summary:
+            return self._fix_newlines(existing_summary) + "\n\n---\n\n" + section
+        return section
+
     async def _fetch_mr_data(self, project_id: int, merge_request_iid: int) -> dict:
         """Fetch MR metadata including diff_refs."""
         path = f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}"
@@ -513,6 +621,7 @@ class SubmitMrReview(DuoBaseTool):
             new_line=matched_line.new_line,
             old_line=matched_line.old_line,
             body=comment.body,
+            target_code=comment.target_code,
             suggestion=comment.suggestion,
         )
 

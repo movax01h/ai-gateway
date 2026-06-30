@@ -17,7 +17,11 @@
                     },
                     "new_line": {
                         "type": "integer",
-                        "description": "Line number in the new version of the file"
+                        "description": "Line number in the new version of the file. MUST be the `new_line` attribute of the exact `<line>` tag you are flagging — NOT a line number from the original/full file."
+                    },
+                    "target_code": {
+                        "type": "string",
+                        "description": "The verbatim text of the single diff line this finding is about. Copy it EXACTLY from the content inside the `<line>…</line>` tag you are flagging (the text only, without the `<line>` tag itself, and without the leading +/- diff marker). This is used to deterministically anchor the comment to the correct line even if the line number is off."
                     },
                     "old_line": {
                         "type": "integer",
@@ -46,7 +50,7 @@
                         "description": "Corrected code to replace the commented line(s). Only include when the fix is self-contained and uses existing functions."
                     }
                 },
-                "required": ["file", "new_line", "tier", "severity", "cwe", "body"]
+                "required": ["file", "new_line", "target_code", "tier", "severity", "cwe", "body"]
             }
         },
         "summary": {

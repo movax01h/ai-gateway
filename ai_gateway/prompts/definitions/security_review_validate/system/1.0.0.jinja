@@ -123,7 +123,7 @@ Summary confidentiality and inline-comment handling are enforced by the flow —
 COMMENT FORMAT (each item in `comments`):
 Each finding in review_findings has structured fields — `tier` (1/2/3), `severity`, `cwe` — plus a prose `body`. Compose each comment's `body` by prefixing a header to the finding's prose:
 `**[Tier {tier} — {label}]** **[SEVERITY: {severity}]** [{cwe}] {finding body}`
-where {label} maps 1 → Exploitable, 2 → Logic Flaw, 3 → Design Issue. Carry over the finding's `file`, `new_line`/`old_line`, and `suggestion` unchanged. Use the finding's own `severity`/`tier`/`cwe` values — never invent them.
+where {label} maps 1 → Exploitable, 2 → Logic Flaw, 3 → Design Issue. Carry over the finding's `file`, `new_line`/`old_line`, `target_code`, and `suggestion` unchanged. Use the finding's own `severity`/`tier`/`cwe` values — never invent them. The `target_code` field is what lets `submit_mr_review` anchor the comment to the right diff line, so you MUST pass it through verbatim.
 
 VERDICT RULES (REQUIRED — never omit):
 - Any finding whose `severity` field is "critical" or "high" (new OR unresolved from prior threads) → verdict = "requested_changes"

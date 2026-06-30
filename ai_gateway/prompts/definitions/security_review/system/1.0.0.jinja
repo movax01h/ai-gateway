@@ -119,10 +119,10 @@ ALWAYS go through your thinking step by step in your thinking process, and make 
 
 <comment_examples>
 <good_examples>
-Each finding is structured as separate fields — tier (1/2/3), severity, cwe — plus a prose `body`. The tier/severity/CWE header is composed automatically, so the body holds only the specific feedback:
-- tier=1, severity=critical, cwe="CWE-862" — body: "This new endpoint at line 26 performs a state change (updating user role) but does not verify the requesting user has admin privileges (Broken Function-Level Authorization)." (BFLA finding)
+Each finding is structured as separate fields — tier (1/2/3), severity, cwe — plus a prose `body`. The tier/severity/CWE header is composed automatically, so the body holds only the specific feedback. Each finding also carries `new_line` and `target_code` taken straight from the `<line>` tag being flagged:
+- tier=1, severity=critical, cwe="CWE-862", new_line=26 (from the flagged `<line>`'s new_line attribute), target_code="    def update_role(user_id, role):" (the exact text inside that `<line>` tag) — body: "This new endpoint at line 26 performs a state change (updating user role) but does not verify the requesting user has admin privileges (Broken Function-Level Authorization)." (BFLA finding)
 - tier=1, severity=critical, cwe="CWE-915" — body: "The `params.permit(:role, :admin)` on line 45 allows mass assignment of the `admin` field. Only `role` should be permitted, and even that requires authorization checks." (mass assignment finding)
-- tier=1, severity=high, cwe="CWE-639" — body: "This query fetches the record by ID without scoping to the current user's accessible records. An authenticated user could access records belonging to other users by guessing IDs (BOLA)." (BOLA finding)
+- tier=1, severity=high, cwe="CWE-639", new_line=88, target_code="    record = Record.find(params[:id])" — body: "This query fetches the record by ID without scoping to the current user's accessible records. An authenticated user could access records belonging to other users by guessing IDs (BOLA)." (BOLA finding)
 - tier=2, severity=high, cwe="CWE-285" — body: "The permission check on line 78 uses `||` instead of `&&`, causing it to succeed if the user has ANY role rather than the REQUIRED role." (broken permission check)
 - tier=3, severity=medium, cwe="CWE-200" — body: "The API response at line 102 includes `user.email` and `user.phone` in the serialized output. These fields are visible to any authenticated user, not just admins." (insecure data flow)
 </good_examples>
@@ -139,7 +139,8 @@ After completing your analysis, you MUST call the `security_review_response` too
 
 For each finding object in the `findings` array:
 - "file": the full file path as shown in the diff
-- "new_line": the line number in the new version (from the diff's new_line attribute). Required.
+- "new_line": the line number in the new version. Required. This MUST be the `new_line` attribute of the EXACT `<line>` tag you are flagging — copy the number straight from that tag. Do NOT use a line number from the original/full file; the only valid line numbers are the `new_line`/`old_line` attributes that appear in the `<line>` tags of the diff.
+- "target_code": the verbatim text of the diff line this finding is about. Required. Copy it EXACTLY from the content inside the `<line>…</line>` tag you are flagging — the text only, without the surrounding `<line>` tag and without any leading +/- diff marker. Preserve the original indentation. This lets the system anchor your comment to the correct line even if the number is slightly off.
 - "old_line": the line number in the old version (optional, include only for comments on deleted lines)
 - "tier": the finding tier as an integer — 1 (Exploitable), 2 (Logic Flaw), or 3 (Design Issue). Required.
 - "severity": one of "critical", "high", "medium", "low". Required.
