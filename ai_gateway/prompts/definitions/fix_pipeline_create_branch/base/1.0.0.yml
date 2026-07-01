@@ -1,0 +1,13 @@
+name: fix_pipeline_create_branch
+model:
+  params:
+    max_tokens: 8_192
+    max_retries: 1
+unit_primitive: duo_workflow_execute_workflow
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_create_branch/system/1.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_create_branch/user/1.0.0.jinja' %}
+params:
+  timeout: 30

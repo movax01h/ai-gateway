@@ -1,0 +1,15 @@
+<source_branch_name>{{ source_branch_name }}</source_branch_name>
+
+<execution_output>
+{{ execution_results }}
+</execution_output>
+
+<fix_pipeline_source>
+{%- if merge_request_url %}
+  merge_request
+{%- elif source_branch == default_branch %}
+  default_branch
+{%- else %}
+  branch
+{%- endif %}
+</fix_pipeline_source>
