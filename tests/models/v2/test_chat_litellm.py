@@ -19,6 +19,7 @@ from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
     _force_gpt_5_max_completion_tokens,
+    _remove_claude_opus_temperature_parameters,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
@@ -744,3 +745,70 @@ class TestBedrockGuardrailConfig:
 
             call_kwargs = mock_acompletion.call_args[1]
             assert call_kwargs["guardrailConfig"] == self._expected_guardrail_config()
+
+
+class TestClaudeOpusTemperatureRemoval:
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-7",
+            "anthropic.claude-opus-4-7-20250101-v1:0",
+            "claude-opus-4-8",
+            "claude-opus-4.8",
+            "anthropic.claude-opus-4-8-20250101-v1:0",
+        ],
+    )
+    def test_opus_4_7_and_4_8_removes_temperature(self, model):
+        kwargs = {"model": model, "temperature": 0.7}
+
+        _remove_claude_opus_temperature_parameters(kwargs)
+
+        assert "temperature" not in kwargs
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-7",
+        ],
+    )
+    def test_opus_4_7_with_no_temperature(self, model):
+        kwargs = {"model": model}
+
+        _remove_claude_opus_temperature_parameters(kwargs)
+
+        assert "temperature" not in kwargs
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-6",
+            "claude-opus-4.6",
+            "claude-3-5-sonnet",
+            "gpt-5",
+        ],
+    )
+    def test_other_models_keep_temperature(self, model):
+        kwargs = {"model": model, "temperature": 0.7}
+
+        _remove_claude_opus_temperature_parameters(kwargs)
+
+        assert kwargs.get("temperature") == 0.7
+
+    @pytest.mark.asyncio
+    async def test_acompletion_with_retry_applies_before_calling_super(self):
+        chat = ChatLiteLLM(model="claude-opus-4-8", custom_llm_provider="bedrock")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(return_value="ok"),
+        ) as super_call:
+            result = await chat.acompletion_with_retry(
+                model="claude-opus-4-8",
+                custom_llm_provider="bedrock",
+                temperature=0.7,
+            )
+
+        assert result == "ok"
+        super_kwargs = super_call.call_args.kwargs
+        assert "temperature" not in super_kwargs

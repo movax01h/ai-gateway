@@ -7,7 +7,7 @@ from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
-from litellm import OpenAIGPT5Config
+from litellm import AnthropicConfig, OpenAIGPT5Config
 from pydantic import BaseModel
 
 from ai_gateway.models.base import validate_custom_endpoint
@@ -40,6 +40,30 @@ def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
     extra_body = dict(kwargs.get("extra_body") or {})
     extra_body.setdefault("max_completion_tokens", kwargs.pop("max_tokens"))
     kwargs["extra_body"] = extra_body
+
+
+def _remove_claude_opus_temperature_parameters(kwargs: Dict[str, Any]) -> None:
+    """Claude Opus 4.7 and 4.8 Bedrock are the only model that deprecated the  temperature parameters. This cause a Bad
+    Request response. We need to remove the temperature in order to avoid that.
+
+    https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
+    """
+    model = kwargs.get("model")
+    if not model or not _is_deprecated_temperature_claude_opus_model(model):
+        return
+    if kwargs.get("temperature") is None:
+        return
+    del kwargs["temperature"]
+
+
+def _is_deprecated_temperature_claude_opus_model(model: str) -> bool:
+    if AnthropicConfig._is_opus_4_7_model(model):
+        return True
+    model_lower = model.lower()
+    """Check if the model is specifically Claude Opus 4.8."""
+    return any(
+        v in model_lower for v in ("opus-4-8", "opus_4_8", "opus-4.8", "opus_4.8")
+    )
 
 
 # Register built-in model metadata for models that ship in our model_selection
@@ -102,6 +126,7 @@ class ChatLiteLLM(_LChatLiteLLM):
     ) -> Any:
         # kwargs has the merged model, provider, and max_tokens by this point.
         _force_gpt_5_max_completion_tokens(kwargs)
+        _remove_claude_opus_temperature_parameters(kwargs)
         return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
 
     @property
