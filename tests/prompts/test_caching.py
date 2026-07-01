@@ -88,6 +88,37 @@ class TestFilterCacheControlInjectionPoints:
                 == expected_cache_control_injection_points
             )
 
+    @pytest.mark.parametrize(
+        "model_kwargs,prompt_cache_enabled",
+        [
+            # Explicit empty list from a prompt YAML (e.g. to disable caching).
+            ({CACHE_CONTROL_INJECTION_POINTS_KEY: []}, "true"),
+            # All points filtered out because caching is disabled in the request.
+            (
+                {
+                    CACHE_CONTROL_INJECTION_POINTS_KEY: [
+                        {
+                            "location": "message",
+                            "index": -1,
+                            REQUIRE_PROMPT_CACHING_ENABLED_IN_REQUEST: "true",
+                        },
+                    ]
+                },
+                "false",
+            ),
+        ],
+    )
+    def test_filter_removes_key_when_empty(self, model_kwargs, prompt_cache_enabled):
+        """An empty list is a poison value: LiteLLM's AnthropicCacheControlHook
+        ignores falsy ``cache_control_injection_points`` (so it never strips the
+        key), yet the empty list still passes through to the provider request,
+        where Vertex/Bedrock Anthropic reject it. The key must be dropped."""
+        set_prompt_caching_enabled_to_current_request(prompt_cache_enabled)
+
+        filter_cache_control_injection_points(model_kwargs)
+
+        assert CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
+
 
 class TestDefaultCacheControlInjectionPoints:
     def test_always_includes_history_cache_breakpoint(self):

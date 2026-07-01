@@ -94,11 +94,23 @@ def filter_cache_control_injection_points(model_kwargs: MutableMapping[str, Any]
 
         return required_value == prompt_caching_enabled_in_current_request()
 
-    model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] = [
+    filtered_points = [
         point
         for point in model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY]
         if _check_valid_point(point)
     ]
+
+    # An empty list is a poison value: LiteLLM's AnthropicCacheControlHook only
+    # activates on a truthy `cache_control_injection_points`, so it never strips
+    # a falsy one from the request. The empty list then passes through to the
+    # provider, where Vertex/Bedrock Anthropic reject it with
+    # "cache_control_injection_points: Extra inputs are not permitted". Drop the
+    # key entirely so caching is disabled cleanly without leaking the param.
+    if not filtered_points:
+        del model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY]
+        return
+
+    model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] = filtered_points
 
     log.info(
         "Injected cache control points",
