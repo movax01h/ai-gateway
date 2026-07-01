@@ -8,6 +8,7 @@ import litellm
 import pytest
 
 from ai_gateway.models.v2.litellm_model_registry import (
+    BUILTIN_MODEL_METADATA,
     ENV_VAR_NAME,
     load_external_model_metadata,
     register_builtin_models,
@@ -57,6 +58,39 @@ class TestRegisterBuiltinModels:
         ):
             # Should not raise
             register_builtin_models()
+
+
+class TestSonnet5BedrockMetadata:
+    """Tests for the manually-registered Claude Sonnet 5 Bedrock metadata."""
+
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "global.anthropic.claude-sonnet-5-v1:0",
+            "us.anthropic.claude-sonnet-5-v1:0",
+            "eu.anthropic.claude-sonnet-5-v1:0",
+            "bedrock/global.anthropic.claude-sonnet-5",
+        ],
+    )
+    def test_builtin_metadata_has_sonnet_5_bedrock_keys(self, model_name: str) -> None:
+        """Every Sonnet 5 Bedrock cross-region inference profile is registered."""
+        assert model_name in BUILTIN_MODEL_METADATA
+        assert (
+            BUILTIN_MODEL_METADATA[model_name]["litellm_provider"] == "bedrock_converse"
+        )
+        assert BUILTIN_MODEL_METADATA[model_name]["supports_tool_choice"] is True
+
+    def test_registered_with_litellm(self) -> None:
+        """register_builtin_models passes the Sonnet 5 Bedrock model string used in models.yml to LiteLLM."""
+        with patch(
+            "ai_gateway.models.v2.litellm_model_registry.register_model"
+        ) as mock_register:
+            register_builtin_models()
+
+        registered = mock_register.call_args.args[0]
+        model_name = "bedrock/global.anthropic.claude-sonnet-5"
+        assert registered[model_name]["supports_tool_choice"] is True
+        assert registered[model_name]["max_output_tokens"] == 64_000
 
 
 class TestLoadExternalModelMetadata:

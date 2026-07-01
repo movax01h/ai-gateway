@@ -339,6 +339,38 @@ models:
       model: "claude-sonnet-5"
       max_tokens: 64_000
 
+  - name: "Claude Sonnet 5"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "claude_sonnet_5_vertex"
+    description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 4.6 with gains across agentic coding and professional work."
+    cost_indicator: "$$$"
+    max_context_tokens: 1_000_000
+    family:
+      - claude
+    model_class_provider: litellm
+    params:
+      model: "claude-sonnet-5"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 64_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
+  - name: "Claude Sonnet 5"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_sonnet_5_bedrock"
+    description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 4.6 with gains across agentic coding and professional work."
+    cost_indicator: "$$$"
+    max_context_tokens: 1_000_000
+    family:
+      - claude
+    model_class_provider: litellm
+    params:
+      model: bedrock/global.anthropic.claude-sonnet-5
+      custom_llm_provider: bedrock
+      max_tokens: 64_000
+      max_retries: 1
+
   - name: "Claude Sonnet 4.6"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_6"

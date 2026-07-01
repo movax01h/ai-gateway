@@ -51,10 +51,16 @@ ENV_VAR_NAME = "AIGW_LITELLM__MODEL_METADATA_FILE"
 log = structlog.stdlib.get_logger("litellm_model_registry")
 
 # Models that ship in our model_selection registry but are absent from the
-# pinned LiteLLM bundled `model_cost` registry. Registering them here lets
+# pinned LiteLLM bundled `model_cost` registry. Anthropic/LiteLLM routinely
+# announce "Day 0" support for new Claude releases (e.g.
+# https://docs.litellm.ai/blog/claude_opus_4_8) well before that metadata
+# lands in a stable, pinned PyPI release, so any model_selection entry that
+# outpaces our LiteLLM pin needs to be registered here by hand. Doing so lets
 # the AI Gateway route requests without waiting on a LiteLLM dependency bump.
-# Capability flags and costs mirror the predecessor entry (Opus 4.6) since
-# Opus 4.8 was launched at parity. Update when LiteLLM ships a native entry.
+# Capability flags and costs mirror the predecessor entry that already ships
+# natively (Opus 4.6 for Opus 4.8, Sonnet 4.6 for Sonnet 5), since each was
+# launched at parity. Remove the manual entry once LiteLLM ships a native one
+# and the pin is bumped past it.
 _OPUS_4_8_BEDROCK_METADATA: Dict[str, Any] = {
     "litellm_provider": "bedrock_converse",
     "mode": "chat",
@@ -75,12 +81,37 @@ _OPUS_4_8_BEDROCK_METADATA: Dict[str, Any] = {
     "supports_computer_use": True,
 }
 
+_SONNET_5_BEDROCK_METADATA: Dict[str, Any] = {
+    "litellm_provider": "bedrock_converse",
+    "mode": "chat",
+    "max_input_tokens": 1_000_000,
+    "max_output_tokens": 64_000,
+    "max_tokens": 64_000,
+    "input_cost_per_token": 3e-06,
+    "output_cost_per_token": 1.5e-05,
+    "cache_creation_input_token_cost": 3.75e-06,
+    "cache_read_input_token_cost": 3e-07,
+    "supports_function_calling": True,
+    "supports_tool_choice": True,
+    "supports_response_schema": True,
+    "supports_prompt_caching": True,
+    "supports_pdf_input": True,
+    "supports_vision": True,
+    "supports_reasoning": True,
+    "supports_computer_use": True,
+}
+
 BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     # Bedrock cross-region inference profiles for Claude Opus 4.8.
     "global.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
     "us.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
     "eu.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
     "bedrock/global.anthropic.claude-opus-4-8": _OPUS_4_8_BEDROCK_METADATA,
+    # Bedrock cross-region inference profiles for Claude Sonnet 5.
+    "global.anthropic.claude-sonnet-5-v1:0": _SONNET_5_BEDROCK_METADATA,
+    "us.anthropic.claude-sonnet-5-v1:0": _SONNET_5_BEDROCK_METADATA,
+    "eu.anthropic.claude-sonnet-5-v1:0": _SONNET_5_BEDROCK_METADATA,
+    "bedrock/global.anthropic.claude-sonnet-5": _SONNET_5_BEDROCK_METADATA,
 }
 
 
