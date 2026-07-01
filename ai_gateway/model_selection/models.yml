@@ -236,6 +236,20 @@ models:
     prompt_params:
       vertex_location: global
 
+  - name: "Claude Fable 5"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_fable_5"
+    description: "Anthropic's most capable generally available model for autonomous knowledge work and coding."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    proxy_provider: anthropic
+    model_class_provider: anthropic
+    family:
+      - claude
+    params:
+      model: "claude-fable-5"
+      max_tokens: 128_000
+
   - name: "Claude Opus 4.7"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_7"
