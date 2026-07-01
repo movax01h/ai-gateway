@@ -27,18 +27,20 @@ Each layer only uses entities from the layer directly below it (enforced via CI 
 
 ### Key Dependencies
 
-- **FastAPI** (^0.116.0): Web framework for API endpoints
+- **FastAPI** (^0.124.4): Web framework for API endpoints
 - **Pydantic** (^2.7.4): Data validation and settings management
-- **LangGraph** (0.4.8): Workflow orchestration for Duo Workflow Service
-- **LangChain** ecosystem: Anthropic (^0.3.17), Community (^0.3.5), Google Vertex AI (^2.0.8), OpenAI (^0.3.30)
-- **LiteLLM** (^1.35.20): Unified interface for multiple LLM providers
-- **Anthropic** (^0.71.0): Claude model integration
+- **LangGraph** (^1.0.2): Workflow orchestration for Duo Workflow Service
+- **LangChain** ecosystem: Anthropic (^1.4.3), Community (^0.4.1), Google Vertex AI (^3.2.0), OpenAI (^1.1.6)
+- **LiteLLM** (>=1.84.0,<1.85.0): Unified interface for multiple LLM providers
+- **Anthropic** (^0.108.0): Claude model integration
 - **Google Cloud AI Platform** (^1.36.4): Vertex AI integration
 - **Tree-sitter** (^0.21.0) + tree-sitter-languages (^1.10.2): Code parsing for suggestions
 - **Transformers** (^4.37.2): Tokenization
-- **gRPC** (^1.68.1): Communication protocol for Duo Workflow Service
-- **Python-GitLab** (^6.0.0): GitLab API client
-- **Prometheus** (^0.22.0): Metrics collection
+- **gRPC** (^1.78.0): Communication protocol for Duo Workflow Service
+- **Python-GitLab** (^7.0.0): GitLab API client
+- **Prometheus** (^0.25.0 `prometheus-client`, ^7.0.0 `prometheus-fastapi-instrumentator`): Metrics collection
+
+> Versions above mirror `pyproject.toml`; check there for the source of truth as dependencies are updated frequently (e.g. via Renovate).
 
 ### Component Interactions
 
@@ -116,26 +118,26 @@ make test-watch
 ### Linting and Formatting
 
 ```shell
-# Run all linters
+# Run all linters (code + docs)
 make lint
 
-# Auto-fix formatting issues
+# Auto-fix formatting issues (codespell, ruff, docformatter)
 make format
 
 # Individual linters
-make flake8           # Style guide enforcement
-make check-black      # Code formatting check
-make check-isort      # Import sorting check
-make check-pylint     # Code analysis
-make check-mypy       # Type checking
-make check-codespell  # Spell checking
+make check-ruff          # Ruff lint + format check (replaces flake8/black/isort)
+make check-pylint        # Code analysis
+make check-mypy          # Type checking
+make check-codespell     # Spell checking
 make check-docformatter  # Docstring formatting
+make check-editorconfig  # Editorconfig conformance
+make check-graphql       # GraphQL schema validation
+make lint-proto          # buf lint for protobuf contracts
 
 # Auto-format code
-make black
-make isort
+make ruff-fix       # ruff check --fix + ruff format
 make docformatter
-make codespell  # Auto-fix spelling
+make codespell      # Auto-fix spelling
 
 # Lint documentation
 make lint-doc  # Runs vale + markdownlint
@@ -198,9 +200,9 @@ poetry run validate-model-selection-config
 
 ### Formatting Rules
 
-- **Line length**: 120 characters (enforced by Black and Pylint)
-- **Import sorting**: Use `isort` with Black-compatible profile
-- **Code formatter**: Black (no configuration needed, opinionated)
+- **Line length**: `ruff format` targets 88 characters (default); not hard-enforced as a lint error (`E501` is ignored) — Pylint and docformatter allow up to 120 characters
+- **Import sorting**: Handled by Ruff's `isort`-compatible rule group (`I`), configured in `[tool.ruff.lint.isort]`
+- **Code formatter**: `ruff format` (replaced Black; migration tracked in work item #2237)
 - **Docstrings**: Google-style, formatted with `docformatter` (max 120 chars)
 
 ### Python Conventions
@@ -245,7 +247,7 @@ async def fetch_data(self, url: str) -> dict:
 
 ### Linting Suppressions
 
-**Avoid inline pylint/mypy disables**. They negate agreed-upon code standards. If absolutely necessary, provide a comment explaining why:
+**Avoid inline pylint/mypy/ruff disables** (`# pylint: disable=...`, `# type: ignore`, `# noqa`). They negate agreed-upon code standards. If absolutely necessary, provide a comment explaining why:
 
 ```python
 # Protobuf generated code can't be parsed by pylint
@@ -293,11 +295,14 @@ docs: update AGENTS.md with architecture details
 
 ### Pre-commit Checklist
 
-Lefthook automatically runs on commit:
+Lefthook automatically runs on commit (skipped on `main`), scoped to staged files:
 
-1. **Python files**: Lints with mypy (filtered), flake8, black, isort, pylint, codespell, docformatter, editorconfig
-1. **Markdown files**: Lints with vale and markdownlint
-1. **All files**: Spell check with codespell, editorconfig validation
+1. **Python files** (`*.py`): `check-mypy` (filtered to mypy-safe files), `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
+1. **GraphQL files** (`*.graphql`): `check-graphql`
+1. **Proto files** (`contract/*.proto`): `lint-proto` (buf lint)
+1. **Markdown files** (`*.md`): vale and markdownlint
+1. **All other files**: `check-codespell`, `check-editorconfig`
+1. **Pre-push**: `lint-commit` validates commit messages with `commitlint` against `main`
 
 **Before committing**:
 
