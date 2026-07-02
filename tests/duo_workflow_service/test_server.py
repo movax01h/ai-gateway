@@ -35,6 +35,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
     EnvelopeVersionMismatchException,
     InvalidWorkflowIdException,
@@ -3260,3 +3261,64 @@ def test_extract_error_message_normalizes_token_count():
 def test_extract_error_message_generic_error_falls_back_to_str():
     error = ValueError("something went wrong")
     assert _extract_error_message(error) == "something went wrong"
+
+
+def test_extract_error_message_model_error_extracts_message():
+    error = ModelError(
+        error_type=ModelErrorType.REQUEST_TOO_LARGE,
+        status_code=413,
+        message="prompt is too long: 205531 tokens > 200000 maximum",
+    )
+    assert (
+        _extract_error_message(error)
+        == "prompt is too long: <N> tokens > 200000 maximum"
+    )
+
+
+def test_extract_error_message_model_error_parses_embedded_dict():
+    raw = (
+        "Error code: 200 - {'type': 'error', 'error': {'details': None, "
+        "'type': 'api_error', 'message': 'Internal server error'}, "
+        "'request_id': 'req_011CcLLGhf9uyDMumz3CovMG'}"
+    )
+    error = ModelError(
+        error_type=ModelErrorType.API_ERROR,
+        status_code=200,
+        message=raw,
+    )
+    assert _extract_error_message(error) == "Internal server error"
+
+
+def test_extract_error_message_model_error_message_with_single_quote():
+    raw = (
+        "Error code: 400 - {'type': 'error', 'error': {'message': \"can't process request\"}, "
+        "'request_id': 'req_abc'}"
+    )
+    error = ModelError(
+        error_type=ModelErrorType.API_ERROR,
+        status_code=400,
+        message=raw,
+    )
+    assert _extract_error_message(error) == "can't process request"
+
+
+def test_extract_error_message_model_error_invalid_dict_falls_back_to_raw():
+    raw = "Error code: 500 - {invalid python dict"
+    error = ModelError(
+        error_type=ModelErrorType.API_ERROR,
+        status_code=500,
+        message=raw,
+    )
+    assert _extract_error_message(error) == raw
+
+
+def test_extract_error_message_model_error_unparseable_braces_falls_back_to_raw():
+    # The regex matches the {...} but ast.literal_eval raises ValueError/SyntaxError,
+    # so the except branch (lines 201-202) is exercised and raw is returned.
+    raw = "Error code: 500 - {key: value with no quotes}"
+    error = ModelError(
+        error_type=ModelErrorType.API_ERROR,
+        status_code=500,
+        message=raw,
+    )
+    assert _extract_error_message(error) == raw

@@ -1,4 +1,5 @@
 # pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-lines,too-many-statements
+import ast
 import asyncio
 import functools
 import json
@@ -35,6 +36,7 @@ from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.components import tools_registry
+from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
     EnvelopeVersionMismatchException,
     InvalidWorkflowIdException,
@@ -180,6 +182,24 @@ def _extract_error_message(error: BaseException) -> str:
         message = (
             error_field.get("message") if isinstance(error_field, dict) else None
         ) or str(error)
+    elif isinstance(error, ModelError):
+        raw = error.message
+        # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
+        # "Error code: 400 - {'type': 'error', 'error': {'message': '...'}, ...}"
+        # Extract the inner error.message using ast.literal_eval for robustness.
+        dict_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        message = raw
+        if dict_match:
+            try:
+                body = ast.literal_eval(dict_match.group())
+                error_field = body.get("error") if isinstance(body, dict) else None
+                message = (
+                    error_field.get("message")
+                    if isinstance(error_field, dict)
+                    else None
+                ) or raw
+            except (ValueError, SyntaxError):
+                pass
     else:
         message = str(error)
 
