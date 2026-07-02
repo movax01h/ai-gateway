@@ -87,6 +87,7 @@ from lib.internal_events import InternalEventAdditionalProperties, InternalEvent
 from lib.internal_events.event_enum import EventEnum
 from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
+from lib.verbose_ai_logs import is_extended_logging_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
@@ -187,7 +188,7 @@ class AbstractWorkflow(ABC):
         with duo_workflow_metrics.time_workflow(
             workflow_type=self._workflow_type.value
         ):
-            extended_logging = self._workflow_metadata.get("extended_logging", False)
+            extended_logging = is_extended_logging_enabled()
             monitoring_context: MonitoringContext = current_monitoring_context.get()
 
             tracing_metadata = {

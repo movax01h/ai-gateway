@@ -39,7 +39,12 @@ from lib.prompts.caching import (
     X_GITLAB_MODEL_PROMPT_CACHE_ENABLED,
     set_prompt_caching_enabled_to_current_request,
 )
-from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER, current_verbose_ai_logs_context
+from lib.verbose_ai_logs import (
+    VERBOSE_AI_LOGS_HEADER,
+    X_GITLAB_EXTENDED_LOGGING_HEADER,
+    current_verbose_ai_logs_context,
+    extended_logging_context,
+)
 
 log = structlog.stdlib.get_logger("metadata_context_interceptor")
 
@@ -112,6 +117,11 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         # Verbose AI logs (always set, defaults to False)
         is_enabled = metadata.get(VERBOSE_AI_LOGS_HEADER) == "true"
         current_verbose_ai_logs_context.set(is_enabled)
+
+        # Per-user/namespace extended logging (injected by Rails at /ws pre-auth time)
+        extended_logging_context.set(
+            metadata.get(X_GITLAB_EXTENDED_LOGGING_HEADER) == "true"
+        )
 
         # Prompt caching (always called)
         set_prompt_caching_enabled_to_current_request(
