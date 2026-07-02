@@ -80,6 +80,9 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                 "clarification_question_tool_enabled": is_feature_enabled(
                     FeatureFlag.DUO_CHAT_CLARIFICATION_QUESTION_TOOL
                 ),
+                "foundational_flow_tool_enabled": is_feature_enabled(
+                    FeatureFlag.AGENTIC_FOUNDATIONAL_FLOW_TOOL
+                ),
             }
             system_template_override = _kwargs.get("system_template_override")
 

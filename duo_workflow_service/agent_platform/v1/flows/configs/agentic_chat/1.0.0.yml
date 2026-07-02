@@ -24,6 +24,9 @@ components:
       - from: "dummy"                 # TODO:
         as: "clarification_question_tool_enabled"
         literal: true
+      - from: "dummy"                 # TODO:
+        as: "foundational_flow_tool_enabled"
+        literal: true
       - from: "context:project"       # The project context exists if the workflow is created at project-level.
         as: "project"
         optional: true

@@ -946,8 +946,8 @@ class TestPromptAdapterFriendlyName:
         }
     ],
 )
-class TestClarificationQuestionToolFeatureFlagPropagation:
-    """Verify the clarification_question_tool_enabled flag is propagated to the static system prompt context."""
+class TestFeatureFlagPropagationToStaticTemplateContext:
+    """Verify feature flags are propagated into the static system prompt template context."""
 
     @pytest.fixture
     def mock_gitlab_instance_info(self):
@@ -974,15 +974,28 @@ class TestClarificationQuestionToolFeatureFlagPropagation:
         }
 
     @pytest.mark.parametrize(
-        ("feature_flags", "expected_enabled"),
+        ("context_key", "flag_name"),
         [
-            ([], False),
-            (["duo_chat_clarification_question_tool"], True),
-            (["some_unrelated_flag"], False),
+            (
+                "clarification_question_tool_enabled",
+                "duo_chat_clarification_question_tool",
+            ),
+            (
+                "foundational_flow_tool_enabled",
+                "agentic_foundational_flow_tool",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("active_flags_factory", "expected_enabled"),
+        [
+            (lambda _flag: [], False),
+            (lambda flag: [flag], True),
+            (lambda _flag: ["some_unrelated_flag"], False),
         ],
         ids=[
             "no_flags",
-            "clarification_flag_enabled",
+            "target_flag_enabled",
             "only_unrelated_flag",
         ],
     )
@@ -990,12 +1003,14 @@ class TestClarificationQuestionToolFeatureFlagPropagation:
         "duo_workflow_service.gitlab.gitlab_service_context.GitLabServiceContext.get_current_instance_info"
     )
     @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
-    def test_clarification_question_tool_enabled_in_static_template_context(
+    def test_feature_flag_in_static_template_context(
         self,
         mock_get_model_metadata,
         mock_instance_info,
         mock_gitlab_instance_info,
-        feature_flags,
+        context_key,
+        flag_name,
+        active_flags_factory,
         expected_enabled,
         model_provider,
         prompt_config,
@@ -1003,7 +1018,7 @@ class TestClarificationQuestionToolFeatureFlagPropagation:
     ):
         mock_get_model_metadata.return_value = None
         mock_instance_info.return_value = mock_gitlab_instance_info
-        current_feature_flag_context.set(set(feature_flags))
+        current_feature_flag_context.set(set(active_flags_factory(flag_name)))
 
         adapter = ChatAgentPromptTemplate(model_provider, prompt_config)
 
@@ -1015,7 +1030,5 @@ class TestClarificationQuestionToolFeatureFlagPropagation:
             adapter.invoke(input_data, agent_name="test_agent")
 
             _, first_kwargs = mock_formatter.call_args_list[0]
-            assert "clarification_question_tool_enabled" in first_kwargs
-            assert (
-                first_kwargs["clarification_question_tool_enabled"] is expected_enabled
-            )
+            assert context_key in first_kwargs
+            assert first_kwargs[context_key] is expected_enabled
