@@ -87,20 +87,25 @@ class StartFlow(DuoBaseTool):
     name: str = "start_flow"
     tool_version: ClassVar[Version] = Version("0.0.1")
     description: str = (
-        "Hand off a task to a specialist agent. These agents work asynchronously "
-        "over multiple steps and are purpose-built for their task — prefer "
-        "delegating to them over attempting the work yourself whenever the user's "
-        "request matches one of the agents below.\n\n"
+        "Delegate a task to a specialist GitLab agent that works "
+        "asynchronously over multiple steps. Always use this tool when the "
+        "user's request matches one of the agents below — specialist "
+        "agents are purpose-built for their domain and deliver better "
+        "outcomes than inline handling.\n"
+        "\n"
         "Available agents:\n"
         "- developer: General-purpose agent for tasks that involve writing or "
-        "changing code, working from an issue, or implementing changes described "
+        "changing code, resolving an issue, or implementing changes described "
         "in chat. The `goal` is the agent's only briefing — it does not see this "
         "conversation, so include the user's intent, any relevant GitLab URLs, "
         "and context from chat the agent would otherwise miss.\n"
-        "- fix_pipeline: Diagnoses and fixes failing CI/CD pipelines.\n"
-        "- code_review: Reviews the changes in a merge request.\n\n"
-        "Returns a session URL the user can follow to track progress. The user "
-        "is prompted to approve the handoff before the agent starts."
+        "- fix_pipeline: fixing, debugging, or investigating a failing pipeline or broken "
+        'build (e.g. "fix this pipeline", "the build is broken").\n'
+        "- code_review: read-only review and assessment of the changes in a merge request — "
+        "not for implementing feedback or making changes "
+        '(e.g. "review this MR", "can you review my merge request?").\n'
+        "Returns a session URL the user can follow to track progress. The user is prompted to "
+        "approve the handoff before the agent starts."
     )
     args_schema: Type[BaseModel] = StartFlowInput
 

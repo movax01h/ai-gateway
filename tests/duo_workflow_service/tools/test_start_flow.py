@@ -85,8 +85,8 @@ def test_description_mentions_async_progress(tool):
 
 
 def test_description_emphasizes_delegation(tool):
-    assert "prefer" in tool.description
-    assert "delegating" in tool.description
+    assert "Always use this tool" in tool.description
+    assert "Delegate a task" in tool.description
 
 
 def test_description_does_not_contain_versioned_identifiers(tool):
