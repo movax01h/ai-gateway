@@ -34,6 +34,7 @@ from duo_workflow_service.workflows.type_definitions import (
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
+from lib.verbose_ai_logs import extended_logging_context
 
 
 # Concrete implementation for testing
@@ -140,7 +141,6 @@ def test_extract_trace_output_with_none_state(user):
 def workflow_fixture(user):
     workflow_id = "test-workflow-id"
     metadata = {
-        "extended_logging": True,
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
@@ -736,15 +736,20 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     """Test that tracing is enabled/disabled based on LANGSMITH_TRACING_V2 and extended_logging."""
     workflow_id = "test-workflow-id"
     metadata = {
-        "extended_logging": extended_logging,
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
-    with patch.dict(os.environ, {"LANGSMITH_TRACING_V2": env_var_value}, clear=False):
-        await workflow.run("Test goal")
+    token = extended_logging_context.set(extended_logging)
+    try:
+        with patch.dict(
+            os.environ, {"LANGSMITH_TRACING_V2": env_var_value}, clear=False
+        ):
+            await workflow.run("Test goal")
+    finally:
+        extended_logging_context.reset(token)
 
     # Verify tracing_context was called with the expected enabled value
     mock_tracing_context.assert_called_once()
@@ -786,17 +791,20 @@ async def test_tracing_context_with_parent_trace_headers(
 
     workflow_id = "test-workflow-id"
     metadata = {
-        "extended_logging": extended_logging,
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
-    with patch.dict(
-        os.environ, {"LANGSMITH_TRACING_V2": langsmith_tracing_v2}, clear=False
-    ):
-        await workflow.run("Test goal")
+    token = extended_logging_context.set(extended_logging)
+    try:
+        with patch.dict(
+            os.environ, {"LANGSMITH_TRACING_V2": langsmith_tracing_v2}, clear=False
+        ):
+            await workflow.run("Test goal")
+    finally:
+        extended_logging_context.reset(token)
 
     mock_tracing_context.assert_called_once()
     call_kwargs = mock_tracing_context.call_args[1]
