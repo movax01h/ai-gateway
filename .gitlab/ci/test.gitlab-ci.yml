@@ -127,6 +127,30 @@ check-dws-dependencies:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
+sanity-tests:
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}alpine:3.24
+  stage: test
+  needs: []
+  allow_failure: true # TODO: to be removed once swe-bench pipelines are stable enough
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: !reference [.duo-workflow-service-dependencies, changes]
+      when: manual
+  variables:
+    CEF_SERVICE_URL: "https://cef.runway.gitlab.net"
+    # Polling controls: interval between polls and overall timeout (seconds).
+    CEF_POLL_INTERVAL: "60"
+    CEF_POLL_TIMEOUT: "5400"
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      ./scripts/submit_cef_eval.sh \
+        "master" \
+        "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-$CI_COMMIT_SHA}" \
+        "$CI_PROJECT_PATH" \
+        "AIGW sanity-tests CI: pipeline $CI_PIPELINE_ID"
+
 regression-tests:
   <<: *test-base
   when: manual
