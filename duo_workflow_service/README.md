@@ -337,9 +337,9 @@ DWS will then accept tokens validated by either key during the transition period
 
 #### Steps to rotate the key
 
-**Before performing any production-related changes, notify the AI Framework team in `#g_ai_framework`** so they can quickly react to any incident.
+**Before performing any production-related changes, notify the AI Core Infra team in `#g_ai-core-infra`** so they can quickly react to any incident.
 
-Tokens should be rotated in the following vaults for both staging and production environments. Anyone with vault access to the `service/duo-workflow-svc` paths can perform these rotations, not just AI Framework team members. For additional help, contact the `#g_ai_framework` channel.
+Tokens should be rotated in the following vaults for both staging and production environments. Anyone with vault access to the `service/duo-workflow-svc` paths can perform these rotations, not just AI Core Infra team members. For additional help, contact the `#g_ai-core-infra` channel.
 
 | Staging | Production |
 |---------|------------|
@@ -353,8 +353,8 @@ Start by updating staging first and verifying it works as expected before procee
 1. Deploy a new revision of the DWS to staging (ask a Runway team member or an SRE, or anyone with permission to run Runway jobs in the [duo-workflow-svc deployments pipeline](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc/-/pipelines)).
 1. Confirm DWS is working correctly on staging (for example, test Duo Agent Platform on <https://staging.gitlab.com> and verify via GCP logs).
 1. Repeat the same steps for production using the [production Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/duo-workflow-svc/). Ensure changes are made outside of public holidays and Fridays, and that there is sufficient team coverage.
-1. Create a Slack reminder in `#g_ai_framework` to be triggered 3 days after the signing key rotation, to rotate the validation key.
+1. Create a Slack reminder in `#g_ai-core-infra` to be triggered 3 days after the signing key rotation, to rotate the validation key.
 1. Create a new issue as a reminder to rotate the keys again with a due date 1 month before the next rotation schedule.
-1. Create a Slack reminder in `#g_ai_framework` to be triggered 1 month before the next rotation schedule.
+1. Create a Slack reminder in `#g_ai-core-infra` to be triggered 1 month before the next rotation schedule.
 1. After 3 days, generate a new validation key: `openssl genrsa -out jwt_validation.key 2048`
 1. Update `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` in the Vault with the newly generated key.
