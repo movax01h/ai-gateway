@@ -1,5 +1,6 @@
 import json
 from enum import IntEnum
+from textwrap import dedent
 from typing import Any, ClassVar, List, Optional, Type
 
 import gitmatch
@@ -363,17 +364,23 @@ class ReadFiles(DuoBaseTool):
 
 
 class WriteFileInput(BaseModel):
-    file_path: str = Field(description="the file_path to write the file to")
+    file_path: str = Field(
+        description="The path of the new file to create. The file must not already exist."
+    )
     contents: str = Field(
-        description="the contents to write in the file. *This is required*"
+        description="The full contents to write into the newly created file. Must be non-empty."
     )
 
 
 class WriteFile(DuoBaseTool):
     name: str = "create_file_with_contents"
-    description: str = (
-        "Create and write the given contents to a file. "
-        "Please specify the `file_path` and the `contents` to write."
+    description: str = dedent(
+        """\
+        Use this tool to create a brand new file with the given contents.
+
+        IMPORTANT:
+        - This tool is only for creating files that do not yet exist. It writes the full contents of a new file.
+        - Do not use this tool to modify, append to, or overwrite an existing file. If the file already exists, use other dedicated tools instead."""
     )
     args_schema: Type[BaseModel] = WriteFileInput
     handle_tool_error: bool = True
@@ -514,87 +521,61 @@ class Mkdir(DuoBaseTool):
 
 
 class EditFileInput(BaseModel):
-    file_path: str = Field(description="the path of the file to edit.")
+    file_path: str = Field(
+        description="The path of the existing file to edit. The file must already exist."
+    )
     old_str: str = Field(
         "",
-        description="The string to replace. Please provide at least one line above and below to make it unique across "
-        "the file. *This is required*",
+        description=(
+            "The exact text to replace. Must match the file content character-for-character, "
+            "including whitespace and indentation. Include enough surrounding context (typically "
+            "at least one line above and below the change) so the text appears exactly once in the "
+            "file; only the first occurrence is replaced."
+        ),
     )
     new_str: str = Field(
-        "", description="The new value of the string. *This is required*"
+        "",
+        description=(
+            "The text to insert in place of `old_str`. Provide the full replacement block, keeping "
+            "any surrounding context lines from `old_str` unchanged. Use an empty string to delete "
+            "the matched text."
+        ),
     )
 
 
 class EditFile(DuoBaseTool):
     name: str = "edit_file"
-    description: str = """Use this tool to edit an existing file.
+    description: str = dedent(
+        """\
+        Use this tool to edit an existing file by replacing `old_str` with `new_str`.
 
-IMPORTANT:
-- When making similar changes to multiple files, include batches of tool calls in a single response
-- Do not make separate responses for each file - group related files together
-- You must read the file using the read_file tool before attempting to edit it
-- Attempting to edit a file without reading it first will result in an error
+        IMPORTANT:
+        - You must read the file with read_file before editing it; editing without reading first fails.
+        - `old_str` must match the file exactly (including whitespace) and be unique; include enough surrounding context. Only the first match is replaced.
+        - To edit multiple files, batch the tool calls in a single response rather than one response per file.
+        - Secret-like values may appear as `[REDACTED]`. This is a placeholder, not the real content, so an `old_str` containing it will never match. Anchor edits on surrounding non-secret text.
 
-Examples of individual file edits:
-- Update a function parameter:
-    edit_file(
-        file_path="src/utils.py",
-        old_str="# Utility functions\n\ndef process_data(data):\n
-            # Process the input data\n    return data.upper()\n\n# More functions below",
-        new_str="# Utility functions\n\ndef process_data(data, transform=True):\n
-            # Process the input data\n    return data.upper() if transform else data\n\n# More functions below"
-    )
+        Examples:
 
-- Fix a bug in a specific file:
-    edit_file(
-        file_path="src/api/endpoints.py",
-        old_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
-            return db.find_user(id)\n\n# Other endpoints",
-        new_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
-            user = db.find_user(id)\n    return user if user else {'error': 'User not found'}\n\n# Other endpoints"
-    )
+        - Single edit (change a function signature):
+            edit_file(
+                file_path="src/utils.py",
+                old_str="def process_data(data):\\n    return data.upper()",
+                new_str="def process_data(data, transform=True):\\n    return data.upper() if transform else data"
+            )
 
-- Add a new import statement:
-    edit_file(
-        file_path="src/models.py",
-        old_str="import os\nimport sys\n\nclass User:",
-        new_str="import os\nimport sys\nimport datetime\n\nclass User:"
+        - Batch multiple files in one response (rename a function):
+            edit_file(
+                file_path="src/utils.py",
+                old_str="def get_config():",
+                new_str="def fetch_config():"
+            )
+            edit_file(
+                file_path="src/app.py",
+                old_str="config = get_config()",
+                new_str="config = fetch_config()"
+            )"""
     )
-
-Examples of batched file edits:
-- Rename a function across multiple files:
-    edit_file(
-        file_path="src/utils.py",
-        old_str="# Configuration functions\ndef get_config():\n    return load_config()\n\n# Other utility functions",
-        new_str="# Configuration functions\ndef fetch_config():\n    return load_config()\n\n# Other utility functions"
-    )
-    edit_file(
-        file_path="src/app.py",
-        old_str="from utils import get_config\n\nconfig = get_config()\n\n# Application setup",
-        new_str="from utils import fetch_config\n\nconfig = fetch_config()\n\n# Application setup"
-    )
-    edit_file(
-        file_path="tests/test_utils.py",
-        old_str="# Test configuration\ndef test_get_config():\n    config = get_config()\n    assert config is not None",
-        new_str="# Test configuration\ndef test_fetch_config():\n    config = fetch_config()\n    assert config is not None"
-    )
-
-- Update version number across the codebase:
-    edit_file(
-        file_path="src/version.py",
-        old_str="# Version information\nVERSION = '1.0.0'\n# End of version info",
-        new_str="# Version information\nVERSION = '1.1.0'\n# End of version info"
-    )
-    edit_file(
-        file_path="README.md",
-        old_str="# Project Documentation\n\n## MyApp v1.0.0\n\n### Features",
-        new_str="# Project Documentation\n\n## MyApp v1.1.0\n\n### Features"
-    )
-    edit_file(
-        file_path="docs/changelog.md",
-        old_str="# Changelog\n\n## 1.0.0",
-        new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
-    )"""
     args_schema: Type[BaseModel] = EditFileInput
     handle_tool_error: bool = True
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
