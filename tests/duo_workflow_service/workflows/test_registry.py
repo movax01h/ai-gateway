@@ -18,6 +18,7 @@ from duo_workflow_service.flow_request import (
     LegacyWorkflowRequest,
     RegistryFlowRequest,
 )
+from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
@@ -714,3 +715,34 @@ class TestResolveFlowTrackingFields:
         )
         assert resolved.factory == Workflow
         assert resolved.tracking_fields() == {}
+
+    def test_inline_flow_security_exception_is_propagated(self, simple_flow_config):  # pylint: disable=redefined-outer-name
+        """SecurityException raised inside _load_flow_from_inline_config must propagate, not be wrapped."""
+        mocks = simple_flow_config
+
+        with (
+            patch(
+                "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+                {
+                    "experimental": (
+                        mocks["flow_config_cls"],
+                        mocks["partial_flow_config_cls"],
+                        mocks["flow_cls"],
+                    )
+                },
+            ),
+            patch(
+                "duo_workflow_service.workflows.registry.MessageToDict",
+                return_value=mocks["expected_dict"],
+            ),
+            patch(
+                "duo_workflow_service.workflows.registry.flow_factory",
+                side_effect=SecurityException("dangerous content"),
+            ),
+        ):
+            with pytest.raises(SecurityException):
+                resolve_flow(
+                    InlineFlowRequest(
+                        config_struct=mocks["struct"], schema_version="experimental"
+                    )
+                )

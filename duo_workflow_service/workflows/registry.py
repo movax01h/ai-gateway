@@ -422,6 +422,8 @@ def _load_flow_from_inline_config(
             flow_config_cls=flow_config_cls,
         )
         return flow_factory(flow_cls, config)
+    except SecurityException:
+        raise
     except Exception as e:
         raise ValueError(f"Failed to create flow from FlowConfig protobuf: {e}") from e
 

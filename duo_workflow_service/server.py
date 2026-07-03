@@ -182,6 +182,8 @@ def _extract_error_message(error: BaseException) -> str:
         message = (
             error_field.get("message") if isinstance(error_field, dict) else None
         ) or str(error)
+    elif isinstance(error, SecurityException):
+        message = "Flow configuration failed security validation"
     elif isinstance(error, ModelError):
         raw = error.message
         # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
@@ -334,8 +336,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 error=str(e),
             )
             await context.abort(
-                grpc.StatusCode.CANCELLED,
-                f"Flow configuration failed security validation: {e!s}",
+                grpc.StatusCode.INVALID_ARGUMENT, _extract_error_message(e)
             )
         except ValueError as e:
             log.error(
