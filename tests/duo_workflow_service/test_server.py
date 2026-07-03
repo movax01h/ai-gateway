@@ -3186,76 +3186,86 @@ async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
     assert monitoring_context.schema_version is None
 
 
-def test_extract_error_message_litellm_bad_request_parses_body():
-    body = (
-        '{"type":"error","error":{"type":"invalid_request_error",'
-        '"message":"max_tokens: 99999999 > 128000, which is the maximum'
-        ' allowed number of output tokens for claude-sonnet-4-6"}}'
-    )
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        pytest.param(
+            (
+                "Vertex_aiException BadRequestError - b'"
+                '{"type":"error","error":{"type":"invalid_request_error",'
+                '"message":"max_tokens: 99999999 > 128000, which is the maximum'
+                ' allowed number of output tokens for claude-sonnet-4-6"}}'
+                "'"
+            ),
+            "max_tokens: too large",
+            id="parses_body_and_normalizes_max_tokens",
+        ),
+        pytest.param(
+            "Vertex_aiException BadRequestError - b'{not valid json}'",
+            None,  # non-empty fallback; checked separately below
+            id="invalid_json_falls_back_to_non_empty_string",
+        ),
+    ],
+)
+def test_extract_error_message_litellm_bad_request(message, expected):
     error = LiteLLMBadRequestError(
-        message=f"Vertex_aiException BadRequestError - b'{body}'",
-        model="claude-sonnet-4-6",
-        llm_provider="vertex_ai",
-    )
-    assert _extract_error_message(error) == "max_tokens: too large"
-
-
-def test_extract_error_message_litellm_bad_request_invalid_json_falls_back():
-    error = LiteLLMBadRequestError(
-        message="Vertex_aiException BadRequestError - b'{not valid json}'",
+        message=message,
         model="claude-sonnet-4-6",
         llm_provider="vertex_ai",
     )
     result = _extract_error_message(error)
-    assert isinstance(result, str)
-    assert result  # non-empty fallback
+    if expected is None:
+        assert isinstance(result, str) and result
+    else:
+        assert result == expected
 
 
-def test_extract_error_message_anthropic_api_status_error_parses_body():
-    mock_response = MagicMock()
-    mock_response.status_code = 529
-    error = APIStatusError(
-        "ignored",
-        response=mock_response,
-        body={
-            "type": "error",
-            "error": {"type": "overloaded_error", "message": "Overloaded"},
-        },
-    )
-    assert _extract_error_message(error) == "Overloaded"
-
-
-def test_extract_error_message_anthropic_api_status_error_non_dict_error_field():
-    mock_response = MagicMock()
-    mock_response.status_code = 529
-    error = APIStatusError(
-        "Overloaded",
-        response=mock_response,
-        body={"type": "error", "error": "overloaded_error"},
-    )
-    # Should not raise AttributeError; falls back to str(error)
-    result = _extract_error_message(error)
-    assert isinstance(result, str)
-
-
-def test_extract_error_message_normalizes_token_count():
-    mock_response = MagicMock()
-    mock_response.status_code = 400
-    error = APIStatusError(
-        "ignored",
-        response=mock_response,
-        body={
-            "type": "error",
-            "error": {
-                "type": "invalid_request_error",
-                "message": "prompt is too long: 205531 tokens > 200000 maximum",
+@pytest.mark.parametrize(
+    "message,body,status_code,expected",
+    [
+        pytest.param(
+            "ignored",
+            {
+                "type": "error",
+                "error": {"type": "overloaded_error", "message": "Overloaded"},
             },
-        },
-    )
-    assert (
-        _extract_error_message(error)
-        == "prompt is too long: <N> tokens > 200000 maximum"
-    )
+            529,
+            "Overloaded",
+            id="parses_nested_error_message",
+        ),
+        pytest.param(
+            "Overloaded",
+            {"type": "error", "error": "overloaded_error"},
+            529,
+            None,  # falls back to str(error); checked as non-empty string
+            id="non_dict_error_field_falls_back_to_str",
+        ),
+        pytest.param(
+            "ignored",
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "prompt is too long: 205531 tokens > 200000 maximum",
+                },
+            },
+            400,
+            "prompt is too long: <N> tokens > 200000 maximum",
+            id="normalizes_token_count",
+        ),
+    ],
+)
+def test_extract_error_message_anthropic_api_status_error(
+    message, body, status_code, expected
+):
+    mock_response = MagicMock()
+    mock_response.status_code = status_code
+    error = APIStatusError(message, response=mock_response, body=body)
+    result = _extract_error_message(error)
+    if expected is None:
+        assert isinstance(result, str) and result
+    else:
+        assert result == expected
 
 
 def test_extract_error_message_generic_error_falls_back_to_str():
@@ -3263,62 +3273,53 @@ def test_extract_error_message_generic_error_falls_back_to_str():
     assert _extract_error_message(error) == "something went wrong"
 
 
-def test_extract_error_message_model_error_extracts_message():
+@pytest.mark.parametrize(
+    "raw,error_type,status_code,expected",
+    [
+        pytest.param(
+            "prompt is too long: 205531 tokens > 200000 maximum",
+            ModelErrorType.REQUEST_TOO_LARGE,
+            413,
+            "prompt is too long: <N> tokens > 200000 maximum",
+            id="normalizes_token_count",
+        ),
+        pytest.param(
+            "Error code: 200 - {'type': 'error', 'error': {'details': None, "
+            "'type': 'api_error', 'message': 'Internal server error'}, "
+            "'request_id': 'req_011CcLLGhf9uyDMumz3CovMG'}",
+            ModelErrorType.API_ERROR,
+            200,
+            "Internal server error",
+            id="parses_embedded_dict",
+        ),
+        pytest.param(
+            "Error code: 400 - {'type': 'error', 'error': {'message': \"can't process request\"}, "
+            "'request_id': 'req_abc'}",
+            ModelErrorType.API_ERROR,
+            400,
+            "can't process request",
+            id="message_with_single_quote",
+        ),
+        pytest.param(
+            "Error code: 500 - {invalid python dict",
+            ModelErrorType.API_ERROR,
+            500,
+            "Error code: 500 - {invalid python dict",
+            id="invalid_dict_falls_back_to_raw",
+        ),
+        pytest.param(
+            "Error code: 500 - {key: value with no quotes}",
+            ModelErrorType.API_ERROR,
+            500,
+            "Error code: 500 - {key: value with no quotes}",
+            id="unparseable_braces_falls_back_to_raw",
+        ),
+    ],
+)
+def test_extract_error_message_model_error(raw, error_type, status_code, expected):
     error = ModelError(
-        error_type=ModelErrorType.REQUEST_TOO_LARGE,
-        status_code=413,
-        message="prompt is too long: 205531 tokens > 200000 maximum",
-    )
-    assert (
-        _extract_error_message(error)
-        == "prompt is too long: <N> tokens > 200000 maximum"
-    )
-
-
-def test_extract_error_message_model_error_parses_embedded_dict():
-    raw = (
-        "Error code: 200 - {'type': 'error', 'error': {'details': None, "
-        "'type': 'api_error', 'message': 'Internal server error'}, "
-        "'request_id': 'req_011CcLLGhf9uyDMumz3CovMG'}"
-    )
-    error = ModelError(
-        error_type=ModelErrorType.API_ERROR,
-        status_code=200,
+        error_type=error_type,
+        status_code=status_code,
         message=raw,
     )
-    assert _extract_error_message(error) == "Internal server error"
-
-
-def test_extract_error_message_model_error_message_with_single_quote():
-    raw = (
-        "Error code: 400 - {'type': 'error', 'error': {'message': \"can't process request\"}, "
-        "'request_id': 'req_abc'}"
-    )
-    error = ModelError(
-        error_type=ModelErrorType.API_ERROR,
-        status_code=400,
-        message=raw,
-    )
-    assert _extract_error_message(error) == "can't process request"
-
-
-def test_extract_error_message_model_error_invalid_dict_falls_back_to_raw():
-    raw = "Error code: 500 - {invalid python dict"
-    error = ModelError(
-        error_type=ModelErrorType.API_ERROR,
-        status_code=500,
-        message=raw,
-    )
-    assert _extract_error_message(error) == raw
-
-
-def test_extract_error_message_model_error_unparseable_braces_falls_back_to_raw():
-    # The regex matches the {...} but ast.literal_eval raises ValueError/SyntaxError,
-    # so the except branch (lines 201-202) is exercised and raw is returned.
-    raw = "Error code: 500 - {key: value with no quotes}"
-    error = ModelError(
-        error_type=ModelErrorType.API_ERROR,
-        status_code=500,
-        message=raw,
-    )
-    assert _extract_error_message(error) == raw
+    assert _extract_error_message(error) == expected
