@@ -153,7 +153,7 @@ class UILogWriterOneOffTools(BaseUILogWriter):
             message_type=MessageTypeEnum.AGENT,
             content=message,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            status=None,
+            status=ToolStatus.SUCCESS,
             correlation_id=kwargs.get("correlation_id"),
             tool_info=None,
             additional_context=kwargs.get("context_elements", []),
