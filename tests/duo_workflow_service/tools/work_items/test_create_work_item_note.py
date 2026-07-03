@@ -320,7 +320,7 @@ async def test_create_work_item_note_reply_to_note(
                 "body": "This comment won't be created",
             },
             [{}],
-            "No project found in response",
+            "Project 'namespace/project' not found or not accessible",
             None,
             1,
         ),
