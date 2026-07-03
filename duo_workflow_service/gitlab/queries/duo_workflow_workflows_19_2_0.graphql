@@ -1,0 +1,53 @@
+query($workflowId: AiDuoWorkflowsWorkflowID!) {
+    duoWorkflowWorkflows(workflowId: $workflowId) {
+        nodes {
+            statusName
+            projectId
+            project {
+                id
+                name
+                description
+                httpUrlToRepo
+                languages {
+                    name
+                    share
+                }
+                webUrl
+                statisticsDetailsPaths {
+                    repository
+                }
+                duoContextExclusionSettings {
+                    exclusionRules
+                }
+                namespace {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                }
+            }
+            namespaceId
+            namespace {
+                id
+                name
+                description
+                webUrl
+                aiSettings {
+                    promptInjectionProtectionLevel
+                }
+            }
+            agentPrivilegesNames
+            preApprovedAgentPrivilegesNames
+            mcpEnabled
+            incrementalCheckpointsEnabled
+            allowAgentToRequestUser
+            latestCheckpoint {
+                threadTs
+                parentTs
+                metadata
+                compressedCheckpoint
+            }
+            archived
+            stalled
+        }
+    }
+}

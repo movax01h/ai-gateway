@@ -142,10 +142,17 @@ def workflow_config_fixture():
         "agent_privileges_names": ["read_repository"],
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
+        "incremental_checkpoints_enabled": False,
         "allow_agent_to_request_user": True,
         "archived": False,
         "stalled": False,
     }
+
+
+@pytest.fixture(name="incremental_enabled")
+def incremental_enabled_fixture(workflow_config):
+    """Enable incremental checkpoints on the workflow_config consumed by the gitlab_workflow fixture."""
+    workflow_config["incremental_checkpoints_enabled"] = True
 
 
 @pytest.fixture(name="gitlab_workflow")
@@ -2369,14 +2376,10 @@ def test_serialize_channel_blobs_conversation_sends_delta():
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_sends_full_checkpoint_and_channel_blobs(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     checkpoint_data,
@@ -2408,14 +2411,10 @@ async def test_aput_sends_full_checkpoint_and_channel_blobs(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_accumulates_list_deltas_across_calls(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     checkpoint_data,
@@ -2468,14 +2467,10 @@ async def test_aput_accumulates_list_deltas_across_calls(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_increments_thread_id_on_compaction(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     checkpoint_data,
@@ -2520,14 +2515,10 @@ async def test_aput_increments_thread_id_on_compaction(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_resets_cache_on_stale_checkpoint_id(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     checkpoint_data,
@@ -2576,14 +2567,9 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=False,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
-async def test_aput_omits_channel_blobs_when_not_capable(
+async def test_aput_omits_channel_blobs_when_incremental_disabled(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
     gitlab_workflow,
     http_client,
     checkpoint_data,
@@ -2606,14 +2592,10 @@ async def test_aput_omits_channel_blobs_when_not_capable(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aget_tuple_hydrates_current_thread_from_response(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     compressed_checkpoint_data,
@@ -2634,14 +2616,9 @@ async def test_aget_tuple_hydrates_current_thread_from_response(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aget_tuple_hydrates_current_thread_on_latest_fetch_path(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
     http_client,
     workflow_id,
     workflow_type,
@@ -2655,6 +2632,7 @@ async def test_aget_tuple_hydrates_current_thread_on_latest_fetch_path(
         "agent_privileges_names": ["read_repository"],
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
+        "incremental_checkpoints_enabled": True,
         "allow_agent_to_request_user": True,
         "archived": False,
         "stalled": False,
@@ -2682,14 +2660,10 @@ async def test_aget_tuple_hydrates_current_thread_on_latest_fetch_path(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aget_tuple_hydration_tolerates_missing_current_thread(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     compressed_checkpoint_data,
@@ -2708,14 +2682,10 @@ async def test_aget_tuple_hydration_tolerates_missing_current_thread(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     compressed_checkpoint_data,
@@ -2734,14 +2704,9 @@ async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=False,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
-async def test_aget_tuple_skips_hydration_when_capability_disabled(
+async def test_aget_tuple_skips_hydration_when_incremental_disabled(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
     gitlab_workflow,
     http_client,
     compressed_checkpoint_data,
@@ -2759,14 +2724,10 @@ async def test_aget_tuple_skips_hydration_when_capability_disabled(
 
 
 @pytest.mark.asyncio
-@patch(
-    "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-    return_value=True,
-)
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
     _mock_duo_workflow_metrics,
-    _mock_is_client_capable,
+    incremental_enabled,
     gitlab_workflow,
     http_client,
     compressed_checkpoint_data,
@@ -2814,21 +2775,16 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
 
 
 def test_decode_graphql_latest_checkpoint_hydrates(gitlab_workflow):
-    with patch(
-        "duo_workflow_service.checkpointer.gitlab_workflow.is_client_capable",
-        return_value=True,
-    ):
-        gitlab_workflow._decode_graphql_latest_checkpoint(
-            {
-                "threadTs": "gql-ckpt",
-                "parentTs": None,
-                "checkpoint": json.dumps(
-                    {"id": "gql-ckpt", "channel_values": {"x": [1]}}
-                ),
-                "metadata": "{}",
-                "currentThread": 4,
-            }
-        )
+    gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
+    gitlab_workflow._decode_graphql_latest_checkpoint(
+        {
+            "threadTs": "gql-ckpt",
+            "parentTs": None,
+            "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {"x": [1]}}),
+            "metadata": "{}",
+            "currentThread": 4,
+        }
+    )
 
     assert gitlab_workflow._current_thread == 4
     assert gitlab_workflow._prev_checkpoint_id == "gql-ckpt"

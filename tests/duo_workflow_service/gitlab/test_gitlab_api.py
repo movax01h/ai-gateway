@@ -8,6 +8,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
     GITLAB_18_3_OR_ABOVE_QUERY,
     GITLAB_18_8_OR_ABOVE_QUERY,
     GITLAB_19_0_OR_ABOVE_QUERY,
+    GITLAB_19_2_OR_ABOVE_QUERY,
     extract_default_branch_from_project_repository,
     extract_id_from_global_id,
     fetch_workflow_and_container_data,
@@ -94,6 +95,7 @@ async def test_fetch_workflow_and_container_data_success():
                     "agentPrivilegesNames": ["read_repository", "write_repository"],
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
                     "mcpEnabled": True,
+                    "incrementalCheckpointsEnabled": True,
                     "allowAgentToRequestUser": True,
                     "latestCheckpoint": {"checkpoint": "{}"},
                 }
@@ -136,6 +138,7 @@ async def test_fetch_workflow_and_container_data_success():
     assert workflow_config["pre_approved_agent_privileges_names"] == ["read_repository"]
     assert workflow_config["workflow_status"] == "created"
     assert workflow_config["mcp_enabled"] is True
+    assert workflow_config["incremental_checkpoints_enabled"] is True
     assert workflow_config["allow_agent_to_request_user"] is True
     assert workflow_config["latest_checkpoint"] == {"checkpoint": "{}"}
 
@@ -224,7 +227,7 @@ async def test_fetch_workflow_and_container_data_with_empty_languages():
     }
 
     workflow_id = "456"
-    project, namespace, _workflow_config = await fetch_workflow_and_container_data(
+    project, namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -232,6 +235,9 @@ async def test_fetch_workflow_and_container_data_with_empty_languages():
     assert project["id"] == 456
     assert project["languages"] == []
     assert namespace is None
+    # incrementalCheckpointsEnabled is absent from the response (as with GitLab
+    # < 19.2 query variants); it must default to False.
+    assert workflow_config["incremental_checkpoints_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -664,6 +670,19 @@ class TestQueryVersionSelection:
 
             assert result == GITLAB_19_0_OR_ABOVE_QUERY
             assert "compressedCheckpoint" in result
+            assert "incrementalCheckpointsEnabled" not in result
+
+    def test_query_selection_gitlab_19_2_or_above(self):
+        """GitLab >= 19.2 returns GITLAB_19_2_OR_ABOVE_QUERY (with incrementalCheckpointsEnabled)."""
+        with patch(
+            "duo_workflow_service.gitlab.gitlab_api.gitlab_version"
+        ) as mock_version:
+            mock_version.get.return_value = "19.2.0"
+
+            result = fetch_workflow_and_container_query()
+
+            assert result == GITLAB_19_2_OR_ABOVE_QUERY
+            assert "incrementalCheckpointsEnabled" in result
 
     def test_query_selection_gitlab_below_18_3(self):
         """GitLab < 18.3 returns GITLAB_18_2_QUERY."""

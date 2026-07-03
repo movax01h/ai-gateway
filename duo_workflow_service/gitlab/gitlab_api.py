@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Optional, Tuple, TypedDict
 
 from packaging.version import InvalidVersion, Version
@@ -8,6 +9,8 @@ from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import gitlab_version
+
+_QUERIES_DIR = Path(__file__).parent / "queries"
 
 
 def workflow_global_id(workflow_id: str) -> str:
@@ -52,6 +55,7 @@ class WorkflowConfig(TypedDict):
     pre_approved_agent_privileges_names: list
     workflow_status: str
     mcp_enabled: bool
+    incremental_checkpoints_enabled: bool
     allow_agent_to_request_user: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
@@ -308,11 +312,18 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
 }
 """
 
+# This query adds incrementalCheckpointsEnabled available in GitLab 19.2+.
+# See https://gitlab.com/gitlab-org/gitlab/-/merge_requests/243345
+GITLAB_19_2_OR_ABOVE_QUERY = (
+    _QUERIES_DIR / "duo_workflow_workflows_19_2_0.graphql"
+).read_text()
+
 version_18_2 = Version("18.2.0")
 version_18_3 = Version("18.3.0")
 version_18_8 = Version("18.8.0")
 version_18_9 = Version("18.9.0")
 version_19_0 = Version("19.0.0")
+version_19_2 = Version("19.2.0")
 FALLBACK_VERSION = version_18_2
 
 
@@ -327,6 +338,9 @@ def fetch_workflow_and_container_query():
     except (InvalidVersion, TypeError) as ex:
         log_exception(ex)
         gl_version = FALLBACK_VERSION
+
+    if version_19_2 <= gl_version:
+        return GITLAB_19_2_OR_ABOVE_QUERY
 
     if version_19_0 <= gl_version:
         return GITLAB_19_0_OR_ABOVE_QUERY
@@ -434,6 +448,9 @@ async def fetch_workflow_and_container_data(
         ),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
+        incremental_checkpoints_enabled=workflow.get(
+            "incrementalCheckpointsEnabled", False
+        ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
@@ -476,6 +493,7 @@ def empty_workflow_config() -> WorkflowConfig:
         "pre_approved_agent_privileges_names": [],
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
+        "incremental_checkpoints_enabled": False,
         "first_checkpoint": None,
         "latest_checkpoint": None,
         "workflow_status": "",
