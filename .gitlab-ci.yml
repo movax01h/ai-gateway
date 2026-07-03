@@ -10,7 +10,7 @@ workflow:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
-image: python:3.12.13
+image: ${GITLAB_DEPENDENCY_PROXY}python:3.12.13
 
 default:
   interruptible: true
@@ -192,9 +192,10 @@ Internal event definitions validation:
     - poetry config --list
 
 .docker:
-  image: docker:${DOCKER_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY}docker:${DOCKER_VERSION}
   services:
-    - docker:${DOCKER_VERSION}-dind
+    - name: ${GITLAB_DEPENDENCY_PROXY}docker:${DOCKER_VERSION}-dind
+      alias: docker
   variables:
     REGISTRY_USER: "$CI_REGISTRY_USER"
     REGISTRY_PASSWORD: "$CI_REGISTRY_PASSWORD"
