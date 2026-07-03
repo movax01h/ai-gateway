@@ -1025,3 +1025,176 @@ class TestToolNodeOrbitTracking:
         assert props.property == "orbit_query_graph"
         assert props.value == flow_id
         assert "client_capabilities" in props.extra
+
+
+class TestToolNodeTodoWriteContextWrite:
+    """Tests for todo_write context capture behaviour in ToolNode."""
+
+    def _make_tool_node(
+        self,
+        component_name,
+        mock_toolset,
+        ui_history,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+    ):
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
+        static_key = IOKey(
+            target="conversation_history", subkeys=[component_name], optional=True
+        )
+        conversation_history_key = RuntimeIOKey(
+            alias="conversation_history", factory=lambda _: static_key
+        )
+        return ToolNode(
+            name=f"{component_name}#tools",
+            conversation_history_key=conversation_history_key,
+            toolset=mock_toolset,
+            ui_history=ui_history,
+            tracker=tracker,
+        )
+
+    def _make_state(self, component_name, tool_name, tool_args, tool_call_id="call-1"):
+        ai_msg = Mock(spec=AIMessage)
+        ai_msg.tool_calls = [{"name": tool_name, "args": tool_args, "id": tool_call_id}]
+        return {
+            "status": "Execution",
+            "conversation_history": {component_name: [ai_msg]},
+            "ui_chat_log": [],
+            "context": {},
+            "agent_context_limits": {},
+        }
+
+    @pytest.mark.asyncio
+    async def test_todo_write_writes_args_to_context(
+        self,
+        component_name,
+        mock_toolset,
+        ui_history,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_prompt_security,
+        mock_tool_monitoring,
+    ):
+        """When todo_write is called, its args are written to context.<component>.last_todo_write."""
+        todo_args = {"todos": [{"description": "Write tests", "status": "pending"}]}
+        state = self._make_state(component_name, "todo_write", todo_args)
+
+        todo_tool = Mock(spec=Mock)
+        todo_tool.name = "todo_write"
+        todo_tool.ainvoke = AsyncMock(
+            return_value='[{"description": "Write tests", "status": "pending"}]'
+        )
+        mock_toolset.__contains__ = Mock(return_value=True)
+        mock_toolset.__getitem__ = Mock(return_value=todo_tool)
+        mock_toolset.get = Mock(return_value=todo_tool)
+
+        node = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            ui_history,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+        )
+        result = await node.run(state)
+
+        assert "context" in result
+        assert component_name in result["context"]
+        assert result["context"][component_name]["last_todo_write"] == todo_args
+
+    @pytest.mark.asyncio
+    async def test_non_todo_write_tool_does_not_write_to_context(
+        self,
+        component_name,
+        mock_toolset,
+        ui_history,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_prompt_security,
+        mock_tool_monitoring,
+    ):
+        """When a non-todo_write tool is called, no context update is emitted."""
+        state = self._make_state(component_name, "read_file", {"path": "foo.py"})
+
+        read_tool = Mock(spec=Mock)
+        read_tool.name = "read_file"
+        read_tool.ainvoke = AsyncMock(return_value="file contents")
+        mock_toolset.__contains__ = Mock(return_value=True)
+        mock_toolset.__getitem__ = Mock(return_value=read_tool)
+        mock_toolset.get = Mock(return_value=read_tool)
+
+        node = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            ui_history,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+        )
+        result = await node.run(state)
+
+        assert "context" not in result
+
+    @pytest.mark.asyncio
+    async def test_last_todo_write_wins_when_multiple_calls(
+        self,
+        component_name,
+        mock_toolset,
+        ui_history,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        mock_prompt_security,
+        mock_tool_monitoring,
+    ):
+        """When multiple todo_write calls are batched, only the last one is written to context."""
+        from unittest.mock import Mock
+
+        from langchain_core.messages import AIMessage
+
+        first_args = {"todos": [{"description": "Task A", "status": "pending"}]}
+        second_args = {
+            "todos": [
+                {"description": "Task B", "status": "pending"},
+                {"description": "Task C", "status": "pending"},
+            ]
+        }
+
+        ai_msg = Mock(spec=AIMessage)
+        ai_msg.tool_calls = [
+            {"name": "todo_write", "args": first_args, "id": "call-1"},
+            {"name": "todo_write", "args": second_args, "id": "call-2"},
+        ]
+        state = {
+            "status": "Execution",
+            "conversation_history": {component_name: [ai_msg]},
+            "ui_chat_log": [],
+            "context": {},
+            "agent_context_limits": {},
+        }
+
+        todo_tool = Mock(spec=Mock)
+        todo_tool.name = "todo_write"
+        todo_tool.ainvoke = AsyncMock(return_value="[]")
+        mock_toolset.__contains__ = Mock(return_value=True)
+        mock_toolset.__getitem__ = Mock(return_value=todo_tool)
+        mock_toolset.get = Mock(return_value=todo_tool)
+
+        node = self._make_tool_node(
+            component_name,
+            mock_toolset,
+            ui_history,
+            flow_id,
+            flow_type,
+            mock_internal_event_client,
+        )
+        result = await node.run(state)
+
+        assert result["context"][component_name]["last_todo_write"] == second_args

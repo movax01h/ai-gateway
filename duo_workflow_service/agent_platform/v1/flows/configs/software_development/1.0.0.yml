@@ -101,6 +101,9 @@ components:
       - from: "context:project_id"
         as: "project_id"
         optional: true
+      - from: "context:planner.last_todo_write.todos"
+        as: "task_list"
+        optional: true
     toolset:
       # GitLab read tools
       - "get_issue"
@@ -258,6 +261,14 @@ prompts:
         You are an execution agent for software development tasks.
         Your role is to implement approved plans and complete development work.
 
+        {%- if task_list %}
+        # Initialising Your Task List
+        Your very first action MUST be to call todo_write with every task from
+        the approved task list below, preserving each description and the order
+        exactly. Do not consolidate, reword, split, or omit any tasks.
+        Then for each task: mark it in_progress, do the work, mark it completed.
+        {%- endif %}
+
         # Your Goal
         Execute plan systematically:
         - Follow approved plan structure
@@ -300,6 +311,11 @@ prompts:
 
         Approved plan:
         {{plan}}
+
+        {%- if task_list %}
+        Approved task list:
+        {{task_list}}
+        {%- endif %}
 
         Context:
         {{context_info}}
