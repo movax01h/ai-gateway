@@ -5,6 +5,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -141,12 +142,26 @@ class ToolNode:
                 )
             )
 
+        # If any todo_write call was made, write its args to state so downstream
+        # components can read the task list.
+        # Component name is derived from the node name (format: "<component>#<role>").
+        context_updates: dict = {}
+        component_name = self.name.split(NODE_ROLE_SEPARATOR)[0]
+        for tool_call in tool_calls:
+            if tool_call["name"] == "todo_write":
+                context_updates = {
+                    "context": {
+                        component_name: {"last_todo_write": tool_call.get("args", {})}
+                    }
+                }
+
         # Append tool responses to existing history for replace-based reducer.
         # The reducer will replace this component's conversation history with
         # the complete list returned here.
         return {
             **self._ui_history.pop_state_updates(),
             **history_iokey.to_nested_dict(conversation_history + tools_responses),
+            **context_updates,
         }
 
     async def _execute_tool(
