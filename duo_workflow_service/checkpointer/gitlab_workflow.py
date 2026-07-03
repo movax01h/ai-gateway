@@ -54,7 +54,6 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     uncompress_checkpoint,
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
@@ -827,7 +826,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         (camelCase) field names. Absent values are tolerated: older Rails versions don't expose current_thread, in
         which case the in-memory default is kept.
         """
-        if not is_client_capable("incremental_checkpoints"):
+        if not self._workflow_config.get("incremental_checkpoints_enabled", False):
             return
 
         current_thread = gl_checkpoint.get("current_thread")
@@ -1009,7 +1008,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
 
-        if is_client_capable("incremental_checkpoints"):
+        if self._workflow_config.get("incremental_checkpoints_enabled", False):
             parent_checkpoint_id = configurable.get("checkpoint_id")
             stale_cache = (
                 self._prev_checkpoint_id is not None
