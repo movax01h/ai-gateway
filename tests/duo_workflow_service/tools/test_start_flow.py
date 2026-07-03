@@ -13,6 +13,7 @@ from duo_workflow_service.tools.start_flow import (
     StartDeveloperFlowInput,
     StartFixPipelineFlowInput,
     StartFlow,
+    StartFlowError,
     StartFlowInput,
 )
 
@@ -555,13 +556,15 @@ async def test_execute_developer_invalid_project_url(tool, project_url):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [400, 403, 404, 422, 500])
-async def test_execute_http_failure(tool, gitlab_client_mock, status_code):
+@pytest.mark.parametrize("status_code", [400, 404, 422, 500])
+async def test_execute_http_failure_non_403(tool, gitlab_client_mock, status_code):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=status_code, body="error body")
+        return_value=GitLabHttpResponse(
+            status_code=status_code, body={"message": "some internal detail"}
+        )
     )
 
-    with pytest.raises(ToolException) as exc_info:
+    with pytest.raises(StartFlowError) as exc_info:
         await tool._execute(
             flow=StartFixPipelineFlowInput(
                 name="fix_pipeline",
@@ -572,6 +575,37 @@ async def test_execute_http_failure(tool, gitlab_client_mock, status_code):
         )
 
     assert str(status_code) in str(exc_info.value)
+    assert "An internal error occurred while starting the flow." in str(exc_info.value)
+    assert "some internal detail" not in str(exc_info.value)
+    assert (
+        exc_info.value.response == "An internal error occurred while starting the flow."
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_http_failure_403_returns_permission_message(
+    tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=403,
+            body={"message": "Can not execute workflow in CI"},
+        )
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool._execute(
+            flow=StartCodeReviewFlowInput(
+                name="code_review",
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+            ),
+        )
+
+    assert "permissions" in str(exc_info.value)
+    assert "Can not execute workflow in CI" not in str(exc_info.value)
+    assert exc_info.value.response == (
+        "This flow isn't available, or you don't have sufficient permissions to start it."
+    )
 
 
 @pytest.mark.asyncio

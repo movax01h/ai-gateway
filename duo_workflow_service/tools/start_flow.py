@@ -20,6 +20,22 @@ FLOW_IDENTIFIER_MAP = {
 }
 
 
+class StartFlowError(ToolException):
+    """Raised when starting a flow fails.
+
+    ``response`` is read by ToolsExecutor._handle_tool_error to surface the
+    failure reason in the UI chat log, not just the LLM-facing message.
+
+    Args:
+        message: Human-readable description of the failure, forwarded to the LLM.
+        response: Optional user-facing reason surfaced in the UI chat log. Defaults to None.
+    """
+
+    def __init__(self, message: str, response: Optional[str] = None):
+        super().__init__(message)
+        self.response = response
+
+
 class StartDeveloperFlowInput(BaseModel):
     """Input for the developer agent."""
 
@@ -173,9 +189,16 @@ class StartFlow(DuoBaseTool):
                 body=response.body,
                 workflow_definition=flow_name,
             )
-            raise ToolException(
-                f"Failed to start flow: HTTP {response.status_code}: "
-                f"{str(response.body)[:300]}"
+            if response.status_code == 403:
+                detail = (
+                    "This flow isn't available, or you don't have sufficient "
+                    "permissions to start it."
+                )
+            else:
+                detail = "An internal error occurred while starting the flow."
+            raise StartFlowError(
+                f"Failed to start flow: HTTP {response.status_code}: {detail}",
+                response=detail,
             )
 
         body = response.body
