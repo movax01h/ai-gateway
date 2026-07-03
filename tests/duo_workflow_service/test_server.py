@@ -46,6 +46,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
+from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
     CONTAINER_APPLICATION_PACKAGES,
     DuoWorkflowService,
@@ -3323,3 +3324,10 @@ def test_extract_error_message_model_error(raw, error_type, status_code, expecte
         message=raw,
     )
     assert _extract_error_message(error) == expected
+
+
+def test_extract_error_message_security_exception_returns_generic_message():
+    error = SecurityException("Flow config prompt contains dangerous content.")
+    assert (
+        _extract_error_message(error) == "Flow configuration failed security validation"
+    )
