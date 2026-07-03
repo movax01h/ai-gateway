@@ -128,7 +128,7 @@ check-dws-dependencies:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 sanity-tests:
-  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}alpine:3.24
+  image: ${GITLAB_DEPENDENCY_PROXY}alpine:3.24
   stage: test
   needs: []
   allow_failure: true # TODO: to be removed once swe-bench pipelines are stable enough
@@ -190,7 +190,7 @@ feature-tests:
 
 check-proto-go:
   extends: [.proto-variables]
-  image: golang:${GO_VERSION}-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY}golang:${GO_VERSION}-${DEBIAN_VERSION}
   stage: test
   script:
     - apt update
@@ -205,7 +205,7 @@ check-proto-go:
 
 check-proto-python:
   extends: [.proto-variables]
-  image: python:${PYTHON_VERSION}-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY}python:${PYTHON_VERSION}-${DEBIAN_VERSION}
   stage: test
   script:
     - pip install poetry==${POETRY_VERSION}
@@ -220,7 +220,7 @@ check-proto-python:
 
 check-proto-ruby:
   extends: [.proto-variables]
-  image: ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY}ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
   stage: test
   script:
     - make gen-proto-ruby
@@ -233,7 +233,7 @@ check-proto-ruby:
 
 check-proto-node:
   extends: [.proto-variables]
-  image: node:18-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY}node:18-${DEBIAN_VERSION}
   stage: test
   script:
     - make gen-proto-node

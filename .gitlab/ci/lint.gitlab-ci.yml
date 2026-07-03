@@ -75,7 +75,7 @@ lint:doc:
 
 lint:commit:
   stage: test
-  image: registry.hub.docker.com/library/node:alpine
+  image: ${GITLAB_DEPENDENCY_PROXY}node:alpine
   needs: []
   variables:
     GIT_DEPTH: 0
