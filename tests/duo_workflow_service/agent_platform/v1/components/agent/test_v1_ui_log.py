@@ -187,7 +187,7 @@ class TestUILogWriterAgentTools:
         assert args.event == UILogEventsAgent.ON_AGENT_REASONING
         assert args.record["content"] == reasoning_text
         assert args.record["message_type"] == MessageTypeEnum.AGENT
-        assert args.record["status"] is None
+        assert args.record["status"] == ToolStatus.SUCCESS
         assert args.record["tool_info"] is None
         assert args.record["message_sub_type"] == "reasoning"
         assert args.record["component_name"] == "developer"

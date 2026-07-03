@@ -225,6 +225,7 @@ class TestUILogWriterOneOffTools:  # pylint: disable=too-many-public-methods
         assert result["component_name"] == "my_component"
         assert result["message_type"] == MessageTypeEnum.AGENT
         assert result["message_sub_type"] == "reasoning"
+        assert result["status"] == ToolStatus.SUCCESS
 
     def test_log_warning_subsession_id_from_kwargs(
         self, ui_log_writer_with_component_name
