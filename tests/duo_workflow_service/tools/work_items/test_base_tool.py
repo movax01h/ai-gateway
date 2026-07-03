@@ -228,6 +228,55 @@ async def test_fetch_work_item_data_calls_version_compatibility(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "graphql_return, parent_type, full_path, expected_message",
+    [
+        (
+            None,
+            "project",
+            "namespace/project",
+            "Project 'namespace/project' not found or not accessible",
+        ),
+        (
+            {},
+            "project",
+            "namespace/project",
+            "Project 'namespace/project' not found or not accessible",
+        ),
+        (
+            {"namespace": None},
+            "group",
+            "namespace/group",
+            "Group 'namespace/group' not found or not accessible",
+        ),
+    ],
+)
+async def test_get_work_item_data_raises_on_bad_response(
+    gitlab_client_mock,
+    metadata,
+    graphql_return,
+    parent_type,
+    full_path,
+    expected_message,
+):
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_return)
+
+    tool = GetWorkItem(description="get work item", metadata=metadata)
+
+    resolved = ResolvedWorkItem(
+        parent=ResolvedParent(type=parent_type, full_path=full_path),
+        work_item_iid=42,
+    )
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._get_work_item_data(resolved)
+
+    message = str(exc_info.value)
+    assert expected_message in message
+    assert "None" not in message
+
+
+@pytest.mark.asyncio
 @patch(
     "duo_workflow_service.tools.work_items.base_tool.get_query_variables_for_version"
 )

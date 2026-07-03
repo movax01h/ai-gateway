@@ -197,7 +197,9 @@ async def test_get_work_item_missing_root_key(gitlab_client_mock, metadata):
     with pytest.raises(ToolException) as exc_info:
         await tool._arun(project_id="namespace/project", work_item_iid=42)
 
-    assert "No project found in response" in str(exc_info.value)
+    assert "Project 'namespace/project' not found or not accessible" in str(
+        exc_info.value
+    )
 
     gitlab_client_mock.graphql.assert_called_once()
 

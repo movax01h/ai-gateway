@@ -727,8 +727,13 @@ class WorkItemBaseTool(DuoBaseTool):
 
         response = await self.gitlab_client.graphql(query, query_variables)
 
-        if not response.get(root_key):
-            raise ToolException(f"No {root_key} found in response")
+        if not isinstance(response, dict) or not response.get(root_key):
+            raise ToolException(
+                f"{resolved.parent.type.capitalize()} "
+                f"'{resolved.parent.full_path}' not found or not accessible. "
+                "Verify the full namespace path and that the workflow user "
+                "has access to it."
+            )
 
         work_items = response.get(root_key, {}).get("workItems", {}).get("nodes", [])
 
