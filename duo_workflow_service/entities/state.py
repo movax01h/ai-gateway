@@ -256,14 +256,3 @@ class ChatWorkflowState(TypedDict):
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]
-
-
-class WorkflowContext(TypedDict):
-    id: int
-    plan: Plan
-    goal: str
-    summary: str
-
-
-class Context(TypedDict):
-    workflow: WorkflowContext

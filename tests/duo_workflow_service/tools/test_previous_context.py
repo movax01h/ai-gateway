@@ -6,6 +6,8 @@ from langchain_core.tools import ToolException
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.previous_context import (
+    MAX_TOOL_RESPONSE_CHARS,
+    MAX_UI_CHAT_LOG_ENTRIES,
     GetSessionContext,
     GetSessionContextInput,
 )
@@ -13,183 +15,590 @@ from duo_workflow_service.tools.previous_context import (
 
 @pytest.fixture(name="gitlab_client")
 def gitlab_client_fixture():
-    client = AsyncMock()
-    return client
+    return AsyncMock()
 
 
-@pytest.fixture(name="get_last_checkpoint_tool")
-def get_last_checkpoint_tool_fixture(gitlab_client):
+@pytest.fixture(name="tool")
+def tool_fixture(gitlab_client):
     return GetSessionContext(
         metadata={"gitlab_client": gitlab_client, "gitlab_host": "gitlab.example.com"}
     )
 
 
-class TestGetSessionContext:
-    def test_format_display_message(self, get_last_checkpoint_tool):
+def _make_checkpoint(channel_values: dict) -> dict:
+    return {
+        "checkpoint": {"channel_values": channel_values},
+        "metadata": {"step": 1, "source": "loop", "writes": {}, "parents": {}},
+    }
+
+
+def _make_response(body) -> GitLabHttpResponse:
+    return GitLabHttpResponse(status_code=200, body=body)
+
+
+def _make_workflow_record(**fields) -> dict:
+    record = {
+        "id": 1,
+        "title": None,
+        "summary": None,
+        "status": None,
+        "workflow_definition": None,
+    }
+    record.update(fields)
+    return record
+
+
+def _route_aget(checkpoints, record):
+    """Build an aget side_effect that serves both endpoints the tool calls.
+
+    The tool makes two GET requests: the checkpoints list and the workflow
+    record (``.../workflows/{id}``). This helper routes each path to the
+    appropriate mocked response.
+    """
+
+    async def _aget(path, parse_json=True, **_kwargs):
+        if path.endswith("/checkpoints?per_page=1"):
+            return _make_response(checkpoints)
+        return _make_response(record)
+
+    return _aget
+
+
+class TestGetSessionContextFormatDisplayMessage:
+    def test_returns_session_id_label(self, tool):
         args = GetSessionContextInput(previous_session_id=123)
-        result = get_last_checkpoint_tool.format_display_message(args)
+        assert tool.format_display_message(args) == "Get context for session 123"
 
-        assert result == "Get context for session 123"
 
+class TestGetSessionContextApiCall:
     @pytest.mark.asyncio
-    async def test_arun_success(self, get_last_checkpoint_tool, gitlab_client):
-        mock_checkpoint = {
-            "checkpoint": {
-                "channel_values": {
-                    "plan": {
-                        "steps": [
-                            {"id": "1", "description": "Task 1", "status": "Completed"}
-                        ]
-                    },
-                    "status": "Completed",
-                    "handover": [
-                        {"type": "system", "content": "System message"},
-                        {"type": "human", "content": "Your goal is: Create a feature"},
-                        {"type": "ai", "content": "Task summary"},
-                    ],
-                }
-            },
-            "metadata": {
-                "step": 4,
-                "source": "loop",
-                "writes": {},
-                "parents": {},
-            },
-        }
-        mock_response = GitLabHttpResponse(
-            status_code=200,
-            body=[mock_checkpoint],
-        )
-        gitlab_client.aget.return_value = mock_response
-
-        result = await get_last_checkpoint_tool._arun(previous_session_id=123)
-
-        gitlab_client.aget.assert_called_once_with(
-            path="/api/v4/ai/duo_workflows/workflows/123/checkpoints?per_page=1",
-            parse_json=True,
+    async def test_calls_correct_endpoint(self, tool, gitlab_client):
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})], _make_workflow_record()
         )
 
-        parsed_result = json.loads(result)
-        assert "context" in parsed_result
-        formatted_checkpoint = parsed_result["context"]
+        await tool._arun(previous_session_id=42)
 
-        context_dict = json.loads(formatted_checkpoint)
-        assert isinstance(context_dict, dict)
-        assert "workflow" in context_dict
-
-        workflow = context_dict["workflow"]
-        assert workflow["id"] == 123
-        assert workflow["goal"] == "Create a feature"
-        assert workflow["summary"] == "Task summary"
-        assert "plan" in workflow
-
-    @pytest.mark.asyncio
-    async def test_arun_empty_response(self, get_last_checkpoint_tool, gitlab_client):
-        mock_response = GitLabHttpResponse(
-            status_code=200,
-            body=[],
+        called_paths = [
+            call.kwargs.get("path") for call in gitlab_client.aget.call_args_list
+        ]
+        assert (
+            "/api/v4/ai/duo_workflows/workflows/42/checkpoints?per_page=1"
+            in called_paths
         )
-        gitlab_client.aget.return_value = mock_response
-
-        # Should raise ToolException instead of returning error JSON
-        with pytest.raises(ToolException) as exc_info:
-            await get_last_checkpoint_tool._arun(previous_session_id=123)
-
-        assert "Unable to find checkpoint for this session" in str(exc_info.value)
+        # The tool also fetches the workflow record for title/summary/status.
+        assert "/api/v4/ai/duo_workflows/workflows/42" in called_paths
 
     @pytest.mark.asyncio
-    async def test_arun_api_error(self, get_last_checkpoint_tool, gitlab_client):
-        mock_response = GitLabHttpResponse(
-            status_code=404,
-            body={"message": "unexpected status code: 404"},
-        )
-        gitlab_client.aget.return_value = mock_response
-
-        # Should raise ToolException instead of returning error JSON
-        with pytest.raises(ToolException) as exc_info:
-            await get_last_checkpoint_tool._arun(previous_session_id=123)
-
-        assert "HTTP 404" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_format_checkpoint_context_no_checkpoint_data(
-        self, get_last_checkpoint_tool
-    ):
-        checkpoint = {
-            "checkpoint": {},
-            "metadata": {
-                "step": 4,
-                "source": "loop",
-                "writes": {},
-                "parents": {},
-            },
-        }
-
-        context_str = get_last_checkpoint_tool._format_checkpoint_context(
-            checkpoint, 123
-        )
-
-        context = json.loads(context_str)
-        assert isinstance(context, dict)
-        assert context["workflow"]["id"] == 123
-        assert context["workflow"]["plan"] == {"steps": []}
-        assert context["workflow"]["goal"] == "No goal available"
-        assert context["workflow"]["summary"] == "No summary available"
-
-    @pytest.mark.asyncio
-    async def test_format_checkpoint_context_invalid_data(
-        self, get_last_checkpoint_tool
-    ):
-        invalid_checkpoint = {
-            "checkpoint": {"invalid": "data"},
-            "metadata": {
-                "step": 4,
-                "source": "loop",
-                "writes": {},
-                "parents": {},
-            },
-        }
-
-        context_str = get_last_checkpoint_tool._format_checkpoint_context(
-            invalid_checkpoint, 123
-        )
-
-        context = json.loads(context_str)
-        assert isinstance(context, dict)
-        assert context["workflow"]["id"] == 123
-        assert context["workflow"]["plan"] == {"steps": []}
-        assert context["workflow"]["goal"] == "No goal available"
-        assert context["workflow"]["summary"] == "No summary available"
-
-    @pytest.mark.asyncio
-    async def test_format_checkpoint_context_parsing_exception(
-        self, get_last_checkpoint_tool
-    ):
-        # Create a checkpoint that will cause an exception during parsing
-        bad_checkpoint = {
-            "checkpoint": {
-                "channel_values": {"handover": "not-a-list", "status": "Completed"}
-            },
-            "metadata": {
-                "step": 4,
-                "source": "loop",
-                "writes": {},
-                "parents": {},
-            },
-        }
+    async def test_empty_checkpoint_list_raises(self, tool, gitlab_client):
+        gitlab_client.aget.return_value = _make_response([])
 
         with pytest.raises(
-            ValueError,
-            match="Unable to parse context from last checkpoint for this session",
+            ToolException, match="Unable to find checkpoint for this session"
         ):
-            get_last_checkpoint_tool._format_checkpoint_context(bad_checkpoint, 123)
+            await tool._arun(previous_session_id=123)
 
     @pytest.mark.asyncio
-    async def test_arun_exception_propagates(
-        self, get_last_checkpoint_tool, gitlab_client
-    ):
-        """Test that exceptions from the API propagate instead of being swallowed."""
+    async def test_api_error_raises(self, tool, gitlab_client):
+        gitlab_client.aget.return_value = GitLabHttpResponse(
+            status_code=404, body={"message": "not found"}
+        )
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(previous_session_id=123)
+
+    @pytest.mark.asyncio
+    async def test_client_exception_propagates(self, tool, gitlab_client):
         gitlab_client.aget.side_effect = Exception("Connection error")
 
         with pytest.raises(Exception, match="Connection error"):
-            await get_last_checkpoint_tool._arun(previous_session_id=123)
+            await tool._arun(previous_session_id=123)
+
+
+class TestGetSessionContextHappyPath:
+    @pytest.mark.asyncio
+    async def test_returns_status_goal_summary_and_activity(self, tool, gitlab_client):
+        channel_values = {
+            "status": "finished",
+            "goal": "Fix the login bug",
+            "ui_chat_log": [
+                {
+                    "message_type": "user",
+                    "content": "Please fix the login bug",
+                    "timestamp": "2024-01-01T00:00:00Z",
+                },
+                {
+                    "message_type": "agent",
+                    "content": "I have fixed the login bug by patching auth.py",
+                    "timestamp": "2024-01-01T00:01:00Z",
+                },
+            ],
+        }
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint(channel_values)],
+            _make_workflow_record(
+                title="Fix login", status="finished", summary="Fixed on error"
+            ),
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=99))
+
+        assert result["session_id"] == 99
+        # Record-backed fields.
+        assert result["title"] == "Fix login"
+        assert result["status"] == "finished"
+        assert result["summary"] == "Fixed on error"
+        # Checkpoint-backed fields.
+        assert result["goal"] == "Fix the login bug"
+        assert (
+            result["last_message"] == "I have fixed the login bug by patching auth.py"
+        )
+        assert len(result["recent_activity"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_activity_entries_have_expected_fields(self, tool, gitlab_client):
+        channel_values = {
+            "status": "finished",
+            "goal": "Do something",
+            "ui_chat_log": [
+                {
+                    "message_type": "agent",
+                    "content": "Done",
+                    "timestamp": "2024-01-01T00:00:00Z",
+                }
+            ],
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        entry = result["recent_activity"][0]
+
+        assert entry["message_type"] == "agent"
+        assert entry["content"] == "Done"
+        assert entry["timestamp"] == "2024-01-01T00:00:00Z"
+
+    @pytest.mark.asyncio
+    async def test_tool_entries_include_tool_info(self, tool, gitlab_client):
+        channel_values = {
+            "status": "finished",
+            "goal": "Read a file",
+            "ui_chat_log": [
+                {
+                    "message_type": "tool",
+                    "content": "read_file result",
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "tool_info": {
+                        "name": "read_file",
+                        "args": {"path": "auth.py"},
+                        "tool_response": "def login(): pass",
+                    },
+                }
+            ],
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        entry = result["recent_activity"][0]
+
+        assert entry["tool_info"]["name"] == "read_file"
+        assert entry["tool_info"]["args"] == {"path": "auth.py"}
+        assert entry["tool_info"]["tool_response"] == "def login(): pass"
+
+
+class TestGetSessionContextTruncation:
+    @pytest.mark.asyncio
+    async def test_tool_response_truncated_when_over_limit(self, tool, gitlab_client):
+        extra_chars = 100
+        long_response = "x" * (MAX_TOOL_RESPONSE_CHARS + extra_chars)
+        channel_values = {
+            "ui_chat_log": [
+                {
+                    "message_type": "tool",
+                    "content": "tool output",
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "tool_info": {
+                        "name": "read_file",
+                        "args": {},
+                        "tool_response": long_response,
+                    },
+                }
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        tool_response = result["recent_activity"][0]["tool_info"]["tool_response"]
+
+        # Truncated to the limit, with an inline marker appended (mirrors
+        # mr_discussions.py's _truncate_note_body convention) so the LLM doesn't
+        # mistake a cut-off response for the complete output.
+        assert tool_response.startswith("x" * MAX_TOOL_RESPONSE_CHARS)
+        assert f"<TRUNCATED: {extra_chars} CHARACTERS DROPPED DUE TO SIZE LIMIT>" in (
+            tool_response
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_response_not_truncated_when_under_limit(
+        self, tool, gitlab_client
+    ):
+        short_response = "x" * (MAX_TOOL_RESPONSE_CHARS - 10)
+        channel_values = {
+            "ui_chat_log": [
+                {
+                    "message_type": "tool",
+                    "content": "tool output",
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "tool_info": {
+                        "name": "read_file",
+                        "args": {},
+                        "tool_response": short_response,
+                    },
+                }
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        tool_response = result["recent_activity"][0]["tool_info"]["tool_response"]
+
+        assert tool_response == short_response
+        assert "TRUNCATED" not in tool_response
+
+    @pytest.mark.asyncio
+    async def test_agent_content_not_truncated(self, tool, gitlab_client):
+        long_content = "word " * 500  # well over any limit
+        channel_values = {
+            "ui_chat_log": [
+                {
+                    "message_type": "agent",
+                    "content": long_content,
+                    "timestamp": "2024-01-01T00:00:00Z",
+                }
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        assert result["recent_activity"][0]["content"] == long_content
+
+    @pytest.mark.asyncio
+    async def test_only_last_n_entries_returned(self, tool, gitlab_client):
+        total = MAX_UI_CHAT_LOG_ENTRIES + 5
+        entries = [
+            {
+                "message_type": "agent",
+                "content": f"message {i}",
+                "timestamp": "2024-01-01T00:00:00Z",
+            }
+            for i in range(total)
+        ]
+        channel_values = {"ui_chat_log": entries}
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        activity = result["recent_activity"]
+
+        # +1 for the leading system marker entry that signals omitted entries,
+        # mirroring repository_files.py's "[Showing X of Y]" convention.
+        assert len(activity) == MAX_UI_CHAT_LOG_ENTRIES + 1
+        assert activity[0]["message_type"] == "system"
+        assert (
+            f"Showing last {MAX_UI_CHAT_LOG_ENTRIES} of {total}"
+            in (activity[0]["content"])
+        )
+        # The remaining entries should be the actual last N entries.
+        assert activity[1]["content"] == "message 5"
+        assert activity[-1]["content"] == f"message {total - 1}"
+
+    @pytest.mark.asyncio
+    async def test_no_marker_entry_when_log_within_limit(self, tool, gitlab_client):
+        entries = [
+            {
+                "message_type": "agent",
+                "content": f"message {i}",
+                "timestamp": "2024-01-01T00:00:00Z",
+            }
+            for i in range(MAX_UI_CHAT_LOG_ENTRIES)
+        ]
+        channel_values = {"ui_chat_log": entries}
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        activity = result["recent_activity"]
+
+        assert len(activity) == MAX_UI_CHAT_LOG_ENTRIES
+        assert all(entry["message_type"] != "system" for entry in activity)
+
+
+class TestGetSessionContextLastMessageExtraction:
+    @pytest.mark.asyncio
+    async def test_last_message_is_last_agent_message(self, tool, gitlab_client):
+        channel_values = {
+            "ui_chat_log": [
+                {
+                    "message_type": "agent",
+                    "content": "First agent message",
+                    "timestamp": "t",
+                },
+                {"message_type": "tool", "content": "tool output", "timestamp": "t"},
+                {
+                    "message_type": "agent",
+                    "content": "Final agent message",
+                    "timestamp": "t",
+                },
+                {"message_type": "user", "content": "User follow-up", "timestamp": "t"},
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["last_message"] == "Final agent message"
+
+    @pytest.mark.asyncio
+    async def test_last_message_is_none_when_no_agent_messages(
+        self, tool, gitlab_client
+    ):
+        channel_values = {
+            "ui_chat_log": [
+                {"message_type": "user", "content": "Hello", "timestamp": "t"},
+                {"message_type": "tool", "content": "tool output", "timestamp": "t"},
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["last_message"] is None
+
+
+class TestGetSessionContextMissingData:
+    @pytest.mark.asyncio
+    async def test_missing_channel_values_returns_nulls(self, tool, gitlab_client):
+        checkpoint = {"checkpoint": {}, "metadata": {}}
+        gitlab_client.aget.return_value = _make_response([checkpoint])
+
+        result = json.loads(await tool._arun(previous_session_id=123))
+
+        assert result["session_id"] == 123
+        assert result["status"] is None
+        assert result["goal"] is None
+        assert result["title"] is None
+        assert result["summary"] is None
+        assert result["workflow_definition"] is None
+        assert result["last_message"] is None
+        assert result["recent_activity"] == []
+
+    @pytest.mark.asyncio
+    async def test_missing_goal_returns_none(self, tool, gitlab_client):
+        channel_values = {"status": "finished", "ui_chat_log": []}
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["goal"] is None
+
+    @pytest.mark.asyncio
+    async def test_missing_status_returns_none(self, tool, gitlab_client):
+        channel_values = {"goal": "Do something", "ui_chat_log": []}
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["status"] is None
+
+    @pytest.mark.asyncio
+    async def test_missing_ui_chat_log_returns_empty_activity(
+        self, tool, gitlab_client
+    ):
+        channel_values = {"status": "finished", "goal": "Do something"}
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["recent_activity"] == []
+
+    @pytest.mark.asyncio
+    async def test_non_dict_log_entries_skipped(self, tool, gitlab_client):
+        channel_values = {
+            "ui_chat_log": [
+                "not-a-dict",
+                {"message_type": "agent", "content": "valid", "timestamp": "t"},
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert len(result["recent_activity"]) == 1
+        assert result["recent_activity"][0]["content"] == "valid"
+
+    @pytest.mark.asyncio
+    async def test_goal_read_from_context_dict_for_v1_flows(self, tool, gitlab_client):
+        # v1 FlowState stores goal under channel_values["context"]["goal"],
+        # not as a top-level channel_values["goal"] field.
+        channel_values = {
+            "status": "finished",
+            "context": {"goal": "Distill AGENTS.md pitfalls"},
+            "ui_chat_log": [],
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["goal"] == "Distill AGENTS.md pitfalls"
+
+    @pytest.mark.asyncio
+    async def test_top_level_goal_takes_precedence_over_context_dict(
+        self, tool, gitlab_client
+    ):
+        # WorkflowState stores goal at top level; context dict should be ignored
+        # when top-level goal is present.
+        channel_values = {
+            "status": "finished",
+            "goal": "Top-level goal",
+            "context": {"goal": "Nested goal"},
+            "ui_chat_log": [],
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["goal"] == "Top-level goal"
+
+    @pytest.mark.asyncio
+    async def test_non_string_tool_response_passed_through(self, tool, gitlab_client):
+        channel_values = {
+            "ui_chat_log": [
+                {
+                    "message_type": "tool",
+                    "content": "tool output",
+                    "timestamp": "t",
+                    "tool_info": {
+                        "name": "some_tool",
+                        "args": {},
+                        "tool_response": {"key": "value"},
+                    },
+                }
+            ]
+        }
+        gitlab_client.aget.return_value = _make_response(
+            [_make_checkpoint(channel_values)]
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        tool_response = result["recent_activity"][0]["tool_info"]["tool_response"]
+
+        assert tool_response == {"key": "value"}
+
+
+class TestGetSessionContextWorkflowRecord:
+    @pytest.mark.asyncio
+    async def test_title_summary_definition_from_record(self, tool, gitlab_client):
+        channel_values = {"status": "Completed", "goal": "g", "ui_chat_log": []}
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint(channel_values)],
+            _make_workflow_record(
+                title="Fix login bug",
+                summary="Failed on step 3",
+                workflow_definition="software_development/v1",
+                status="failed",
+            ),
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["title"] == "Fix login bug"
+        assert result["summary"] == "Failed on step 3"
+        assert result["workflow_definition"] == "software_development/v1"
+
+    @pytest.mark.asyncio
+    async def test_status_prefers_record_over_checkpoint(self, tool, gitlab_client):
+        # Checkpoint status is "Completed" but the canonical record status is
+        # "finished"; the record value should win.
+        channel_values = {"status": "Completed", "ui_chat_log": []}
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint(channel_values)],
+            _make_workflow_record(status="finished"),
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["status"] == "finished"
+
+    @pytest.mark.asyncio
+    async def test_status_falls_back_to_checkpoint_when_record_missing(
+        self, tool, gitlab_client
+    ):
+        channel_values = {"status": "Completed", "ui_chat_log": []}
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint(channel_values)],
+            _make_workflow_record(status=None),
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["status"] == "Completed"
+
+    @pytest.mark.asyncio
+    async def test_degrades_gracefully_when_record_fetch_fails(
+        self, tool, gitlab_client
+    ):
+        # The checkpoint fetch succeeds but the workflow-record fetch raises.
+        # The tool must still return checkpoint-derived context with record-backed
+        # fields left null, rather than failing.
+        channel_values = {
+            "status": "Completed",
+            "goal": "Do the thing",
+            "ui_chat_log": [
+                {"message_type": "agent", "content": "done", "timestamp": "t"}
+            ],
+        }
+        checkpoints = [_make_checkpoint(channel_values)]
+
+        async def _aget(path, parse_json=True, **_kwargs):
+            if path.endswith("/checkpoints?per_page=1"):
+                return _make_response(checkpoints)
+            raise Exception("record endpoint 500")
+
+        gitlab_client.aget.side_effect = _aget
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+
+        assert result["title"] is None
+        assert result["summary"] is None
+        assert result["workflow_definition"] is None
+        # Checkpoint-derived fields survive; status falls back to the checkpoint.
+        assert result["status"] == "Completed"
+        assert result["goal"] == "Do the thing"
+        assert result["last_message"] == "done"
