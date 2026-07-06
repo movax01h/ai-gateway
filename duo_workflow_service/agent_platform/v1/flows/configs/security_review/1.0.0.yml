@@ -209,6 +209,7 @@ flow:
     # false, so every field it carries must be declared here. This flow only consumes
     # service_account_name; the rest are declared (all optional) solely so the envelope validates.
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string
@@ -225,4 +226,22 @@ flow:
         service_account_name:
           type: string
           description: Username of this flow's per-group review service account
+          optional: true
+    # Trigger metadata (how the flow was started) travels in its own envelope, which Rails
+    # sends only when a trigger set at least one of these values. It is deliberately NOT a
+    # part of agent_platform_standard_context: envelopes validate with additionalProperties
+    # false, so a new field in a category an already-deployed service declares would fail
+    # envelope validation on version skew, while an unknown category is skipped with a
+    # warning. The category itself and both fields are optional. Reserved for routing a
+    # mention (follow-up question) to a targeted response instead of a full re-review.
+    - category: agent_platform_trigger_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        event_type:
+          type: string
+          description: The trigger event type (e.g. "assign", "mention").
+          optional: true
+        triggering_conversation:
+          type: string
+          description: The conversation context of the note that triggered the flow on a mention. Carries the developer's follow-up question.
           optional: true
