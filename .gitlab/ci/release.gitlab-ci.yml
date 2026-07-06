@@ -82,7 +82,7 @@ release-docker-hub-self-hosted-fips-image:nightly:
 
 publish-node-client:
   stage: release
-  image: ${GITLAB_DEPENDENCY_PROXY}node:20-alpine
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:20-alpine
   allow_failure: true
   script:
     - cd clients/node

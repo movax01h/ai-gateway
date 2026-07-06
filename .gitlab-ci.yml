@@ -7,10 +7,17 @@ workflow:
       auto_cancel:
         on_new_commit: conservative
     - if: $CI_PIPELINE_SOURCE == "schedule"
+
+    # This works around an issue that prevents usage of the dependency proxy
+    # when the pipeline is triggered by a project access token.
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITLAB_USER_LOGIN =~ /project_\d+_bot\d*/'
+      variables:
+        GITLAB_DEPENDENCY_PROXY_ADDRESS: ""
+
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
-image: ${GITLAB_DEPENDENCY_PROXY}python:3.12.13
+image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:3.12.13
 
 default:
   interruptible: true
@@ -27,6 +34,11 @@ stages:
   - deploy_pages
 
 variables:
+  # We set $GITLAB_DEPENDENCY_PROXY to another variable (since it's set at the
+  # group level and has higher precedence than .gitlab-ci.yml) so that we can
+  # override $GITLAB_DEPENDENCY_PROXY_ADDRESS in workflow rules.
+  GITLAB_DEPENDENCY_PROXY_ADDRESS: "${GITLAB_DEPENDENCY_PROXY}"
+
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   POETRY_CACHE_DIR: "$CI_PROJECT_DIR/.cache/poetry"
   POETRY_VERSION: "2.4.1"
@@ -192,9 +204,9 @@ Internal event definitions validation:
     - poetry config --list
 
 .docker:
-  image: ${GITLAB_DEPENDENCY_PROXY}docker:${DOCKER_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}docker:${DOCKER_VERSION}
   services:
-    - name: ${GITLAB_DEPENDENCY_PROXY}docker:${DOCKER_VERSION}-dind
+    - name: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}docker:${DOCKER_VERSION}-dind
       alias: docker
   variables:
     REGISTRY_USER: "$CI_REGISTRY_USER"
