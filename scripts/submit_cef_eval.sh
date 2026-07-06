@@ -17,7 +17,7 @@
 #
 # Required environment variables:
 #   CEF_SERVICE_URL          Base URL of the CEF service.
-#   CEF_SERVICE_ACCOUNT_PAT  GitLab PAT for a user in the gitlab-org group.
+#   CEF_SERVICE_ACCOUNT_PAT  GitLab PAT (see docs/tests.md for rotation steps).
 #   CEF_POLL_INTERVAL        Seconds between status polls.
 #   CEF_POLL_TIMEOUT         Overall timeout (seconds) before giving up.
 #
