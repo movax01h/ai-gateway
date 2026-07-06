@@ -167,6 +167,31 @@ Agent tests run as manual jobs in CI (for example, `tests:agents:analytics`).
 Each agent has its own CI job extending the `.tests:agents` base template.
 The jobs require the `ANTHROPIC_API_KEY` CI variable to be configured.
 
+## Sanity test
+
+The `sanity-tests` CI job submits a SWE-bench evaluation to the
+[CEF service](https://cef.runway.gitlab.net) via `scripts/submit_cef_eval.sh` and polls until it
+completes. It runs on MR pipelines that change `duo_workflow_service/**`.
+
+### `CEF_SERVICE_ACCOUNT_PAT`
+
+Authentication uses a GitLab PAT stored as a masked CI/CD variable named `CEF_SERVICE_ACCOUNT_PAT`.
+
+- **How to rotate**: from the
+  [AI Evaluation](https://gitlab.com/groups/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/-/settings/service_accounts)
+  group's service account settings, open `cef-service-prod` and generate a new access token
+  (`read_api` scope), then replace the `CEF_SERVICE_ACCOUNT_PAT` value under this project's
+  **Settings > CI/CD > Variables** (keep it masked). Revoke the old token once the new one is confirmed
+  working.
+- **Who/cadence**: managed by the AI Core Infra group. The token belongs to the `cef-service-prod`
+  service account in the
+  [AI Evaluation](https://gitlab.com/groups/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/)
+  group (token name `ai-gateway-ci-pat`). GitLab PATs expire at most 365 days after creation;
+  rotate before the current token's expiry date to avoid a silent `sanity-tests` failure.
+- **Proposed improvement**: OIDC ID-token auth for CI jobs is being proposed in
+  [ai-evaluation#962](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/work_items/962),
+  which would remove the need for a stored PAT entirely.
+
 ## Code guidelines
 
 - Avoid using [provider overriding](https://python-dependency-injector.ets-labs.org/providers/overriding.html),
