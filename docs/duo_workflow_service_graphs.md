@@ -385,7 +385,6 @@ graph TD;
     __start__ --> git_unshallow;
     git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
     developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    research_agent(research_agent<br>#91;AgentComponent#93;);
     git_unshallow --> developer_agent;
     developer_agent --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
