@@ -6,10 +6,8 @@ components:
     type: DeterministicStepComponent
     tool_name: "get_merge_request"
     inputs:
-      - from: "context:project_id"
-        as: "project_id"
       - from: "context:goal"
-        as: "merge_request_iid"
+        as: "url"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -19,10 +17,8 @@ components:
     type: DeterministicStepComponent
     tool_name: "update_merge_request"
     inputs:
-      - from: "context:project_id"
-        as: "project_id"
       - from: "context:goal"
-        as: "merge_request_iid"
+        as: "url"
       - from: "security-review::triggered"
         as: "add_labels"
         literal: true
@@ -170,10 +166,8 @@ components:
     type: DeterministicStepComponent
     tool_name: "update_merge_request"
     inputs:
-      - from: "context:project_id"
-        as: "project_id"
       - from: "context:goal"
-        as: "merge_request_iid"
+        as: "url"
       - from: "security-review::completed"
         as: "add_labels"
         literal: true
