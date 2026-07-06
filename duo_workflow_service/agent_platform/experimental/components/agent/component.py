@@ -15,13 +15,16 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.constants import (
+    NODE_ROLE_SEPARATOR,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentNode,
     FinalResponseNode,
@@ -92,6 +95,12 @@ class AgentComponentBase(BaseComponent):
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "final_answer"],
     )
 
+    _cycle_count_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "cycle_count"],
+        optional=True,
+    )
+
     _tool_approval_decision_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_approval_decision"],
@@ -121,6 +130,29 @@ class AgentComponentBase(BaseComponent):
     response_schema_id: Optional[str] = None
     response_schema_version: Optional[str] = None
     response_schema_tracking: bool = False
+    _DEFAULT_SOFT_LIMIT_OFFSET: ClassVar[int] = 20
+    _DEFAULT_MAX_CYCLES: ClassVar[int] = max(
+        1, RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET
+    )
+
+    max_cycles: int = _DEFAULT_MAX_CYCLES
+    max_wrap_up_retries: int = 3
+
+    @field_validator("max_cycles")
+    @classmethod
+    def validate_max_cycles(cls, v: int) -> int:
+        """Validate that max_cycles is at least 1."""
+        if v < 1:
+            raise ValueError("max_cycles must be at least 1.")
+        return v
+
+    @field_validator("max_wrap_up_retries")
+    @classmethod
+    def validate_max_wrap_up_retries(cls, v: int) -> int:
+        """Validate that max_wrap_up_retries is at least 1."""
+        if v < 1:
+            raise ValueError("max_wrap_up_retries must be at least 1.")
+        return v
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -135,6 +167,24 @@ class AgentComponentBase(BaseComponent):
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
     _response_schema: Optional[Type[BaseAgentOutput]] = PrivateAttr()
+    _cycle_count_key: RuntimeIOKey = PrivateAttr()
+
+    @model_validator(mode="after")
+    def initialize_cycle_count_key(self) -> Self:
+        """Initialize the cycle count key with a component-scoped default RuntimeIOKey.
+
+        As with ``tool_approval_decision_key``, subagents may override this key via
+        ``bind_to_supervisor`` to use a subsession-scoped key, preventing race conditions
+        when the same subagent runs in multiple subsessions in parallel.
+        """
+        static_key = self._cycle_count_key_template.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        )
+        self._cycle_count_key = RuntimeIOKey(
+            alias="cycle_count",
+            factory=lambda _: static_key,
+        )
+        return self
 
     @model_validator(mode="after")
     def validate_and_resolve_response_schema(self) -> Self:
@@ -325,6 +375,7 @@ class AgentComponent(AgentComponentBase):
         goal_key: RuntimeIOKey,
         session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
         tool_approval_decision_key: RuntimeIOKey,
+        cycle_count_key: RuntimeIOKey,
     ) -> None:
         """Bind this agent to a supervisor.
 
@@ -353,6 +404,10 @@ class AgentComponent(AgentComponentBase):
                 tool approval decision is stored under a subsession-scoped key,
                 preventing race conditions when the same subagent runs in
                 multiple subsessions in parallel.
+            cycle_count_key: ``RuntimeIOKey`` that resolves the subsession-scoped
+                cycle count key at runtime.  The cycle count is stored under a
+                subsession-scoped key, preventing race conditions when the same
+                subagent runs in multiple subsessions in parallel.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -365,6 +420,7 @@ class AgentComponent(AgentComponentBase):
         self._output_key = output_key
         self._session_id_key = session_id_key
         self._tool_approval_decision_key = tool_approval_decision_key
+        self._cycle_count_key = cycle_count_key
         self._is_bound_to_supervisor = True
 
         # Ensure subagent does not read shared `context:goal` directly
@@ -558,6 +614,9 @@ class AgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            max_cycles=self.max_cycles,
+            cycle_count_key=self._cycle_count_key,
+            max_wrap_up_retries=self.max_wrap_up_retries,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

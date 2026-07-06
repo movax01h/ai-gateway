@@ -203,6 +203,16 @@ class SupervisorAgentComponent(AgentComponentBase):
         ],
         optional=True,
     )
+    _subsession_cycle_count_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[
+            IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE,
+            IOKeyTemplate.COMPONENT_NAME_TEMPLATE,
+            IOKeyTemplate.SUBSESSION_ID_TEMPLATE,
+            "cycle_count",
+        ],
+        optional=True,
+    )
 
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         # Supervisor's own conversation history and final answer
@@ -565,6 +575,29 @@ class SupervisorAgentComponent(AgentComponentBase):
             ),
         )
 
+    def _subagent_cycle_count_key_for(self, subagent_name: str) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` that resolves the cycle_count IOKey for a specific subagent.
+
+        Reads the active subsession ID from state at runtime so parallel subsessions of the same
+        subagent each maintain an independent cycle counter, preventing one runaway subsession
+        from exhausting the cycle budget for its siblings.
+
+        Args:
+            subagent_name: The name of the subagent this key is scoped to.
+        """
+        return RuntimeIOKey(
+            alias="cycle_count",
+            factory=lambda state: self._subsession_cycle_count_key.to_iokey(
+                {
+                    IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
+                    IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,
+                    IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(
+                        self._resolved_active_subsession_key.value_from_state(state)
+                    ),
+                }
+            ),
+        )
+
     @property
     def _active_subagent_final_answer_key(self) -> RuntimeIOKey:
         """Return a ``RuntimeIOKey`` that resolves the final_answer IOKey for the currently active subagent.
@@ -652,6 +685,9 @@ class SupervisorAgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            max_cycles=self.max_cycles,
+            cycle_count_key=self._cycle_count_key,
+            max_wrap_up_retries=self.max_wrap_up_retries,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
@@ -785,5 +821,6 @@ class SupervisorAgentComponent(AgentComponentBase):
                 tool_approval_decision_key=self._subagent_tool_approval_decision_key_for(
                     agent_name
                 ),
+                cycle_count_key=self._subagent_cycle_count_key_for(agent_name),
             )
             subagent.attach(graph, subagent_router)
