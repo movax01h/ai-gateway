@@ -9,7 +9,7 @@
   - .gitlab/ci/performance.gitlab-ci.yml
 
 dotenv-vars:
-  image: ${GITLAB_DEPENDENCY_PROXY}alpine:3.23.3
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}alpine:3.23.3
   stage: test
   needs: []
   script:

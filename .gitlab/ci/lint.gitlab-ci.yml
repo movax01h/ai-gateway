@@ -75,7 +75,7 @@ lint:doc:
 
 lint:commit:
   stage: test
-  image: ${GITLAB_DEPENDENCY_PROXY}node:alpine
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:alpine
   needs: []
   variables:
     GIT_DEPTH: 0
