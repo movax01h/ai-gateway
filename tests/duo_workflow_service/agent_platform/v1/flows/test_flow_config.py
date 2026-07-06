@@ -1053,6 +1053,40 @@ class TestSecurityReviewToolOptions:
         assert set(options).issubset(valid_fields)
 
 
+class TestSecurityReviewTriggerContext:
+    """Guard the security_review flow's trigger-context input declaration (#604317).
+
+    Trigger metadata (event_type / triggering_conversation) rides in its own optional
+    agent_platform_trigger_context envelope rather than in agent_platform_standard_context:
+    envelopes validate with additionalProperties false, so extending the standard category
+    would fail envelope validation on Rails/service version skew, while an unknown
+    category is skipped with a warning.
+    """
+
+    def test_trigger_context_category_is_fully_optional(self):
+        config = FlowConfig.from_yaml_config("security_review", "1.0.0")
+        schema = config.input_json_schemas_by_category()[
+            "agent_platform_trigger_context"
+        ]
+        assert schema["required"] == []
+        assert schema["additionalProperties"] is False
+        assert set(schema["properties"]) == {"event_type", "triggering_conversation"}
+
+    def test_standard_context_stays_frozen(self):
+        # The standard-context schema must not grow trigger fields again — that is
+        # exactly the skew hazard the separate category exists to avoid.
+        config = FlowConfig.from_yaml_config("security_review", "1.0.0")
+        schema = config.input_json_schemas_by_category()[
+            "agent_platform_standard_context"
+        ]
+        assert set(schema["properties"]) == {
+            "workload_branch",
+            "primary_branch",
+            "session_owner_id",
+            "service_account_name",
+        }
+
+
 class TestShippedConfigRouterIndentation:
     """Regression guard for the 2026-06-23 resolve_sast_vulnerability incident.
 
