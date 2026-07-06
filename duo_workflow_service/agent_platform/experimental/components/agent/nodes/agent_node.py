@@ -3,6 +3,7 @@
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentFinalOutput,
     AgentNode,
+    AgentStuckError,
 )
 
-__all__ = ["AgentFinalOutput", "AgentNode"]
+__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError"]

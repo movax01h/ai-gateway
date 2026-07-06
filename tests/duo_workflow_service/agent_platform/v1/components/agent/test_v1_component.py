@@ -15,6 +15,7 @@ from ai_gateway.response_schemas import (
 )
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -90,6 +91,36 @@ def agent_component_fixture(
         ui_log_events=ui_log_events,
         ui_role_as=ui_role_as,
     )
+
+
+@pytest.fixture(name="make_agent_component")
+def make_agent_component_fixture(
+    component_name,
+    flow_id,
+    flow_type,
+    user,
+    prompt_id,
+    mock_toolset,
+    mock_prompt_registry,
+    mock_internal_event_client,
+):
+    """Factory building a minimal AgentComponent, overridable per test."""
+
+    def _make(**overrides):
+        kwargs = {
+            "name": component_name,
+            "flow_id": flow_id,
+            "flow_type": flow_type,
+            "user": user,
+            "prompt_id": prompt_id,
+            "toolset": mock_toolset,
+            "prompt_registry": mock_prompt_registry,
+            "internal_event_client": mock_internal_event_client,
+        }
+        kwargs.update(overrides)
+        return AgentComponent(**kwargs)
+
+    return _make
 
 
 @pytest.fixture(name="agent_component_with_custom_schema")
@@ -1665,6 +1696,7 @@ class TestAgentComponentBindToSupervisor:
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         # Bind to supervisor
         component.bind_to_supervisor(
@@ -1672,6 +1704,7 @@ class TestAgentComponentBindToSupervisor:
             output_key=mock_output_key,
             goal_key=mock_goal_key,
             tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # Keys should now be set to the provided values
@@ -1711,12 +1744,14 @@ class TestAgentComponentBindToSupervisor:
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         new_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=new_goal_key,
             tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # The old goal key should have been removed and replaced by the new one
@@ -1751,6 +1786,7 @@ class TestAgentComponentBindToSupervisor:
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         with pytest.raises(ValueError, match="must have a description"):
             component.bind_to_supervisor(
@@ -1758,6 +1794,7 @@ class TestAgentComponentBindToSupervisor:
                 output_key=mock_output_key,
                 goal_key=mock_goal_key,
                 tool_approval_decision_key=mock_approval_key,
+                cycle_count_key=mock_cycle_count_key,
             )
 
     def test_outputs_returns_empty_when_bound(
@@ -1792,11 +1829,13 @@ class TestAgentComponentBindToSupervisor:
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
             tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # After binding, outputs should be empty
@@ -1836,6 +1875,7 @@ class TestAgentComponentBindToSupervisor:
             target="context", subkeys=["supervisor", "active_subsession"], optional=True
         )
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
@@ -1843,6 +1883,7 @@ class TestAgentComponentBindToSupervisor:
             goal_key=mock_goal_key,
             session_id_key=mock_session_id_key,
             tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # session_id_key should now be set to the provided value
@@ -1876,6 +1917,7 @@ class TestAgentComponentBindToSupervisor:
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         # Bind without session_id_key
         component.bind_to_supervisor(
@@ -1883,6 +1925,7 @@ class TestAgentComponentBindToSupervisor:
             output_key=mock_output_key,
             goal_key=mock_goal_key,
             tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # session_id_key should be NoneIOKey (always resolves to None)
@@ -1946,12 +1989,14 @@ class TestAgentComponentBindToSupervisor:
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
         mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
             tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # tool_approval_decision_key should now be set to the provided value
@@ -2369,3 +2414,85 @@ class TestAgentNodeInvokeConfig:
             mock_router=mock_router,
         )
         assert invoke_config == AgentComponentBase.STREAMING_DISABLED_CONFIG
+
+
+class TestAgentComponentMaxCycles:
+    """Test suite for AgentComponentBase max_cycles field and validator."""
+
+    def test_max_cycles_default_derived_from_recursion_limit(
+        self, make_agent_component
+    ):
+        """max_cycles defaults to RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET, always-on."""
+        component = make_agent_component()
+        assert component.max_cycles == AgentComponentBase._DEFAULT_MAX_CYCLES
+        # Clamped to >= 1 regardless of RECURSION_LIMIT value
+        assert component.max_cycles >= 1
+        assert component.max_cycles == max(
+            1, RECURSION_LIMIT - AgentComponentBase._DEFAULT_SOFT_LIMIT_OFFSET
+        )
+
+    @pytest.mark.parametrize("max_cycles", [1, 5, 280])
+    def test_max_cycles_valid_values(self, make_agent_component, max_cycles):
+        """max_cycles accepts any positive integer."""
+        component = make_agent_component(max_cycles=max_cycles)
+        assert component.max_cycles == max_cycles
+
+    @pytest.mark.parametrize("max_cycles", [0, -1, -100])
+    def test_max_cycles_rejects_non_positive(self, make_agent_component, max_cycles):
+        """max_cycles must be at least 1; zero or negative raises ValidationError."""
+        with pytest.raises(ValidationError, match="max_cycles must be at least 1"):
+            make_agent_component(max_cycles=max_cycles)
+
+    def test_cycle_count_key_initialized(self, make_agent_component, component_name):
+        """_cycle_count_key is initialized as a component-scoped IOKey."""
+        component = make_agent_component()
+        key = component._cycle_count_key
+        assert isinstance(key, RuntimeIOKey)
+        # Resolve the factory (state unused for standalone default) and inspect the concrete IOKey
+        resolved = key.to_iokey({})
+        assert resolved.target == "context"
+        subkeys = list(resolved.subkeys or [])
+        assert component_name in subkeys
+        assert "cycle_count" in subkeys
+
+
+class TestAgentComponentMaxWrapUpRetries:
+    """Test suite for AgentComponentBase max_wrap_up_retries field and validator."""
+
+    def test_max_wrap_up_retries_default_is_three(self, make_agent_component):
+        """max_wrap_up_retries defaults to 3."""
+        component = make_agent_component()
+        assert component.max_wrap_up_retries == 3
+
+    @pytest.mark.parametrize("max_wrap_up_retries", [1, 3, 10])
+    def test_max_wrap_up_retries_valid_values(
+        self, make_agent_component, max_wrap_up_retries
+    ):
+        """max_wrap_up_retries accepts any positive integer."""
+        component = make_agent_component(max_wrap_up_retries=max_wrap_up_retries)
+        assert component.max_wrap_up_retries == max_wrap_up_retries
+
+    @pytest.mark.parametrize("max_wrap_up_retries", [0, -1, -5])
+    def test_max_wrap_up_retries_rejects_non_positive(
+        self, make_agent_component, max_wrap_up_retries
+    ):
+        """max_wrap_up_retries must be at least 1; zero or negative raises ValidationError."""
+        with pytest.raises(
+            ValidationError, match="max_wrap_up_retries must be at least 1"
+        ):
+            make_agent_component(max_wrap_up_retries=max_wrap_up_retries)
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_attach_passes_max_wrap_up_retries_to_agent_node(
+        self,
+        make_agent_component,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+    ):
+        """Attach() forwards max_wrap_up_retries to AgentNode."""
+        component = make_agent_component(max_wrap_up_retries=5)
+        component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["max_wrap_up_retries"] == 5

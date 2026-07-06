@@ -146,6 +146,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
     _max_context_tokens: Optional[int]
     _invoke_config: RunnableConfig
+    _max_cycles: Optional[int]
+    _cycle_count_key: Optional[RuntimeIOKey]
+    _max_wrap_up_retries: int
 
     def __init__(
         self,
@@ -161,6 +164,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         response_schema: Optional[Type[BaseAgentOutput]] = None,
         ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]] = None,
         max_context_tokens: Optional[int] = None,
+        max_cycles: Optional[int] = None,
+        cycle_count_key: Optional[RuntimeIOKey] = None,
+        max_wrap_up_retries: int = 3,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -175,10 +181,18 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._ui_history = ui_history
         self._max_context_tokens = max_context_tokens
         self._invoke_config = invoke_config
+        self._max_cycles = max_cycles
+        self._cycle_count_key = cycle_count_key
+        self._max_wrap_up_retries = max_wrap_up_retries
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
         "Be more concise and use smaller, incremental steps."
+    )
+
+    _MAX_CYCLES_REACHED_MESSAGE = (
+        "You have reached the maximum number of iterations for this task. "
+        "You must now {instruction}."
     )
 
     _MAX_TRUNCATION_RETRIES: int = 5
@@ -243,6 +257,50 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             "current_timezone": now.tzname() or "",
         }
 
+    def _check_and_increment_cycle_count(self, state: FlowState) -> tuple[int, dict]:
+        """Read current cycle count from state, increment it, and return updated state fragment.
+
+        Returns:
+            A tuple of (new_cycle_count, state_update_dict).
+            state_update_dict is empty when max_cycles is not configured.
+        """
+        if self._max_cycles is None or self._cycle_count_key is None:
+            return 0, {}
+
+        cycle_count_iokey = self._cycle_count_key.to_iokey(state)
+        current_count: int = cycle_count_iokey.value_from_state(state) or 0
+        new_count = current_count + 1
+        state_update = cycle_count_iokey.to_nested_dict(new_count)
+        return new_count, state_update
+
+    def _wrap_up_message(self) -> str:
+        """Return the wrap-up instruction message, tailored to the response schema if configured."""
+        if self._response_schema is not None:
+            instruction = (
+                f"call the {self._response_schema.tool_title} tool to provide your "
+                "final answer without making any other tool calls"
+            )
+        else:
+            instruction = (
+                "provide your final answer without making any further tool calls"
+            )
+        return self._MAX_CYCLES_REACHED_MESSAGE.format(instruction=instruction)
+
+    def _completion_has_non_final_tool_calls(self, completion: AIMessage) -> bool:
+        """Return True if the completion contains tool calls other than the final response tool.
+
+        When a response schema is configured, only the schema's tool call counts as a final answer. Without a schema,
+        any text-only response (no tool calls) is a final answer.
+        """
+        if self._response_schema is None and not completion.tool_calls:
+            return False
+        if self._response_schema is not None:
+            return not all(
+                tc["name"] == self._response_schema.tool_title
+                for tc in completion.tool_calls
+            )
+        return True
+
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
@@ -253,6 +311,22 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
         history = restore_message_consistency(history)
 
+        cycle_count, cycle_count_state_update = self._check_and_increment_cycle_count(
+            state
+        )
+        wrap_up_active = (
+            self._max_cycles is not None and cycle_count >= self._max_cycles
+        )
+        if wrap_up_active:
+            log.warning(
+                "Agent reached max_cycles soft limit; injecting wrap-up instruction",
+                agent=self.name,
+                cycle_count=cycle_count,
+                max_cycles=self._max_cycles,
+            )
+            history = [*history, HumanMessage(content=self._wrap_up_message())]
+
+        wrap_up_retries: int = 0
         truncation_retries: int = 0
 
         while True:
@@ -300,6 +374,32 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     history = [*history, *updates]
                     continue
 
+                if wrap_up_active and self._completion_has_non_final_tool_calls(
+                    completion
+                ):
+                    wrap_up_retries += 1
+                    log.warning(
+                        "Agent ignored wrap-up instruction and made non-final tool calls; "
+                        "re-injecting wrap-up instruction",
+                        agent=self.name,
+                        wrap_up_retries=wrap_up_retries,
+                        max_wrap_up_retries=self._max_wrap_up_retries,
+                    )
+                    if wrap_up_retries >= self._max_wrap_up_retries:
+                        raise AgentStuckError(
+                            f"Agent '{self.name}' is stuck: "
+                            f"ignored the wrap-up instruction {wrap_up_retries} times in a row, "
+                            f"exceeding the maximum of {self._max_wrap_up_retries} retries."
+                        )
+                    history = restore_message_consistency(
+                        [
+                            *history,
+                            completion,
+                            HumanMessage(content=self._wrap_up_message()),
+                        ]
+                    )
+                    continue
+
                 # Only emit reasoning if there are tool calls (i.e. omit for text-only messages)
                 if completion.tool_calls:
                     self._emit_reasoning(completion)
@@ -314,10 +414,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     ui_updates,
                     history_iokey.to_nested_dict(history + [completion]),
                 )
-                return merge_nested_dict(
+                result = merge_nested_dict(
                     state_update,
                     self._agent_context_limits_update(history_iokey),
                 )
+                return merge_nested_dict(result, cycle_count_state_update)
             except ContextOverflowError as e:
                 model_error = ModelError(
                     error_type=ModelErrorType.REQUEST_TOO_LARGE,
