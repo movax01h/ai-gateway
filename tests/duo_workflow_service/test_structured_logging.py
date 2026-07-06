@@ -9,6 +9,10 @@ import pytest
 import structlog
 
 from duo_workflow_service.structured_logging import LoggingConfig, setup_logging
+from duo_workflow_service.tracking.monitoring_context import (
+    MonitoringContext,
+    current_monitoring_context,
+)
 from lib.context.request_metadata import gitlab_instance_id, gitlab_realm
 
 
@@ -86,6 +90,7 @@ def json_logging_setup_fixture():
     root_logger.handlers = original_handlers
     gitlab_realm.set(None)
     gitlab_instance_id.set(None)
+    current_monitoring_context.set(MonitoringContext())
 
 
 def test_add_gitlab_realm_processor_with_value(json_logging_setup):
@@ -134,3 +139,90 @@ def test_add_gitlab_instance_id_processor_without_value(json_logging_setup):
     assert output, "Expected log output but got none"
     log_entry = json.loads(output.strip().splitlines()[-1])
     assert "gitlab_instance_id" not in log_entry
+
+
+def test_add_workflow_identity_processor_with_values(json_logging_setup):
+    """Test that workflow identity fields are injected when set."""
+    current_monitoring_context.set(
+        MonitoringContext(
+            workflow_definition="developer/v1",
+            flow_id="developer",
+            flow_version="1.2.3",
+            schema_version="v1",
+        )
+    )
+    log = structlog.stdlib.get_logger("test")
+    log.info("test event")
+
+    output = json_logging_setup.getvalue()
+    assert output, "Expected log output but got none"
+    log_entry = json.loads(output.strip().splitlines()[-1])
+    assert log_entry.get("workflow_definition") == "developer/v1"
+    assert log_entry.get("flow_name") == "developer"
+    assert log_entry.get("item_version") == "1.2.3"
+    assert log_entry.get("schema_version") == "v1"
+
+
+def test_add_workflow_identity_processor_without_values(json_logging_setup):
+    """Test that workflow identity fields are omitted when not set."""
+    current_monitoring_context.set(MonitoringContext())
+    log = structlog.stdlib.get_logger("test")
+    log.info("test event")
+
+    output = json_logging_setup.getvalue()
+    assert output, "Expected log output but got none"
+    log_entry = json.loads(output.strip().splitlines()[-1])
+    assert "workflow_definition" not in log_entry
+    assert "flow_name" not in log_entry
+    assert "item_version" not in log_entry
+    assert "schema_version" not in log_entry
+
+
+def test_add_workflow_identity_processor_with_partial_values(json_logging_setup):
+    """Test that each workflow identity field is omitted independently."""
+    current_monitoring_context.set(
+        MonitoringContext(
+            workflow_definition="developer/v1",
+            flow_id="",
+            flow_version="1.2.3",
+            schema_version=None,
+        )
+    )
+    log = structlog.stdlib.get_logger("test")
+    log.info("test event")
+
+    output = json_logging_setup.getvalue()
+    assert output, "Expected log output but got none"
+    log_entry = json.loads(output.strip().splitlines()[-1])
+    assert log_entry.get("workflow_definition") == "developer/v1"
+    assert "flow_name" not in log_entry
+    assert log_entry.get("item_version") == "1.2.3"
+    assert "schema_version" not in log_entry
+
+
+def test_add_workflow_identity_processor_does_not_overwrite_extra_values(
+    json_logging_setup,
+):
+    """Test that explicit log extra fields are not overwritten by context values."""
+    current_monitoring_context.set(
+        MonitoringContext(
+            workflow_definition="context-definition",
+            flow_id="context-flow",
+            flow_version="1.2.3",
+            schema_version="v1",
+        )
+    )
+    log = structlog.stdlib.get_logger("test")
+    log.info(
+        "test event",
+        workflow_definition="extra-definition",
+        item_version="9.9.9",
+    )
+
+    output = json_logging_setup.getvalue()
+    assert output, "Expected log output but got none"
+    log_entry = json.loads(output.strip().splitlines()[-1])
+    assert log_entry.get("workflow_definition") == "extra-definition"
+    assert log_entry.get("flow_name") == "context-flow"
+    assert log_entry.get("item_version") == "9.9.9"
+    assert log_entry.get("schema_version") == "v1"
