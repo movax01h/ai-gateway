@@ -42,27 +42,39 @@ def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
     kwargs["extra_body"] = extra_body
 
 
-def _remove_claude_opus_temperature_parameters(kwargs: Dict[str, Any]) -> None:
-    """Claude Opus 4.7 and 4.8 Bedrock are the only model that deprecated the  temperature parameters. This cause a Bad
-    Request response. We need to remove the temperature in order to avoid that.
+def _remove_deprecated_temperature_parameters(kwargs: Dict[str, Any]) -> None:
+    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, and Mythos 5 deprecated the temperature parameter. Passing it causes a
+    Bad Request response, so we drop it to avoid that.
 
     https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
     """
     model = kwargs.get("model")
-    if not model or not _is_deprecated_temperature_claude_opus_model(model):
+    if not model or not _is_deprecated_temperature_model(model):
         return
     if kwargs.get("temperature") is None:
         return
     del kwargs["temperature"]
 
 
-def _is_deprecated_temperature_claude_opus_model(model: str) -> bool:
+def _is_deprecated_temperature_model(model: str) -> bool:
+    """Check whether the model deprecated the temperature parameter."""
     if AnthropicConfig._is_opus_4_7_model(model):
         return True
     model_lower = model.lower()
-    """Check if the model is specifically Claude Opus 4.8."""
     return any(
-        v in model_lower for v in ("opus-4-8", "opus_4_8", "opus-4.8", "opus_4.8")
+        v in model_lower
+        for v in (
+            "opus-4-8",
+            "opus_4_8",
+            "opus-4.8",
+            "opus_4.8",
+            "sonnet-5",
+            "sonnet_5",
+            "fable-5",
+            "fable_5",
+            "mythos-5",
+            "mythos_5",
+        )
     )
 
 
@@ -199,7 +211,7 @@ class ChatLiteLLM(_LChatLiteLLM):
     ) -> Any:
         # kwargs has the merged model, provider, and max_tokens by this point.
         _force_gpt_5_max_completion_tokens(kwargs)
-        _remove_claude_opus_temperature_parameters(kwargs)
+        _remove_deprecated_temperature_parameters(kwargs)
         _rewrite_trailing_assistant_prefill(kwargs)
         return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
 
