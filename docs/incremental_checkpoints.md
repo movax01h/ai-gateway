@@ -85,3 +85,13 @@ GraphQL latest, and latest-fetch). It accepts both `current_thread` (REST) and
 `currentThread` (GraphQL), and tolerates the field being absent (older Rails) or malformed
 by keeping the default. After a restart, a fetch followed by a write reuses the server's
 `current_thread` and emits a correct delta with no spurious bump.
+
+## Monitoring which strategy is in use
+
+Each `aput` tags its strategy (`incremental` or `full`) in two places so both sides are
+searchable in Kibana:
+
+- **Request path**: the checkpoint POST carries a `?checkpoint_strategy=` query parameter.
+  Rails doesn't read it (it's ignored by strong parameters), but it appears in
+  Rails/workhorse request logs, so the backend side is searchable without any Rails change.
+- **Gateway log**: the `Checkpoint saved` log line includes a `checkpoint_strategy` field.

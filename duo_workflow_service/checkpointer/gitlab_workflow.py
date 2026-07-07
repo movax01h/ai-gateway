@@ -997,9 +997,19 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if not self._orbit_called:
             self._orbit_called = _get_orbit_tool_calls(checkpoint)
 
+        incremental_enabled = self._workflow_config.get(
+            "incremental_checkpoints_enabled", False
+        )
+        checkpoint_strategy = "incremental" if incremental_enabled else "full"
+
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
-        endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
+        # checkpoint_strategy is a query param (not read by Rails) so it appears in
+        # request logs and is searchable in Kibana for strategy monitoring.
+        endpoint = (
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
+            f"?checkpoint_strategy={checkpoint_strategy}"
+        )
 
         payload: Dict[str, Any] = {
             "thread_ts": checkpoint["id"],
@@ -1008,7 +1018,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
 
-        if self._workflow_config.get("incremental_checkpoints_enabled", False):
+        if incremental_enabled:
             parent_checkpoint_id = configurable.get("checkpoint_id")
             stale_cache = (
                 self._prev_checkpoint_id is not None
@@ -1069,6 +1079,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "Checkpoint saved",
             thread_ts=checkpoint["id"],
             parent_ts=configurable.get("checkpoint_id"),
+            checkpoint_strategy=checkpoint_strategy,
         )
 
         return {

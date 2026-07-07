@@ -1118,6 +1118,50 @@ async def test_aput(
     }
 
 
+def _checkpoint_saved_kwargs(logger):
+    for logger_call in logger.info.call_args_list:
+        if logger_call.args and logger_call.args[0] == "Checkpoint saved":
+            return logger_call.kwargs
+    raise AssertionError("'Checkpoint saved' was not logged")
+
+
+@pytest.mark.asyncio
+async def test_aput_logs_full_checkpoint_strategy(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    gitlab_workflow._logger = Mock()
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint_data[0]["checkpoint"], checkpoint_metadata, ChannelVersions()
+    )
+
+    assert _checkpoint_saved_kwargs(gitlab_workflow._logger)["checkpoint_strategy"] == (
+        "full"
+    )
+    assert "?checkpoint_strategy=full" in http_client.apost.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("incremental_enabled")
+async def test_aput_logs_incremental_checkpoint_strategy(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    gitlab_workflow._logger = Mock()
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint_data[0]["checkpoint"], checkpoint_metadata, ChannelVersions()
+    )
+
+    assert _checkpoint_saved_kwargs(gitlab_workflow._logger)["checkpoint_strategy"] == (
+        "incremental"
+    )
+    assert "?checkpoint_strategy=incremental" in http_client.apost.call_args[1]["path"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("workflow_id")
 async def test_aput_includes_model_metadata_json_when_context_is_set(
