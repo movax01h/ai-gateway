@@ -2953,6 +2953,43 @@ async def test_execute_workflow_value_error_from_resolve_returns_invalid_argumen
     assert len(abort_calls) > 0, "Expected INVALID_ARGUMENT abort"
 
 
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_flow_config_validation_error_is_collapsed(
+    mock_resolve_flow,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """FlowConfig Pydantic validation errors are collapsed before being surfaced."""
+    mock_resolve_flow.side_effect = ValueError(
+        "Failed to create flow from FlowConfig protobuf: 1 validation error for "
+        "FlowConfig\nprompts.0.unit_primitives.0\n  Input should be 'duo_chat' "
+        "[type=enum, input_value='unkk', input_type=str]\n"
+        "For further information visit https://errors.pydantic.dev/2.13/v/enum"
+    )
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    abort_calls = [
+        c
+        for c in mock_context.abort.call_args_list
+        if c[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    ]
+    assert len(abort_calls) > 0, "Expected INVALID_ARGUMENT abort"
+    assert (
+        abort_calls[0][0][1]
+        == "Failed to create flow from FlowConfig protobuf: validation error"
+    )
+
+
 # ---------------------------------------------------------------------------
 # ValidateFlowConfig tests
 # ---------------------------------------------------------------------------
@@ -3366,4 +3403,42 @@ def test_extract_error_message_security_exception_returns_generic_message():
     error = SecurityException("Flow config prompt contains dangerous content.")
     assert (
         _extract_error_message(error) == "Flow configuration failed security validation"
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param(
+            "Failed to create flow from FlowConfig protobuf: 1 validation error for "
+            "FlowConfig\nprompts.0.unit_primitives.0\n  Input should be 'duo_chat' "
+            "[type=enum, input_value='read_issue', input_type=str]\n"
+            "For further information visit https://errors.pydantic.dev/2.13/v/enum",
+            id="single_validation_error",
+        ),
+        pytest.param(
+            "Failed to create flow from FlowConfig protobuf: 2 validation errors for "
+            "FlowConfig\nprompts.0.unit_primitives.0\n  Input should be 'duo_chat' "
+            "[type=enum, input_value='read_issue', input_type=str]\n"
+            "prompts.0.unit_primitives.1\n  Input should be 'duo_chat' "
+            "[type=enum, input_value='update_issue', input_type=str]\n"
+            "For further information visit https://errors.pydantic.dev/2.13/v/enum",
+            id="multiple_validation_errors",
+        ),
+    ],
+)
+def test_extract_error_message_flow_config_validation_error(message):
+    error = ValueError(message)
+    assert (
+        _extract_error_message(error)
+        == "Failed to create flow from FlowConfig protobuf: validation error"
+    )
+
+
+def test_extract_error_message_flow_config_non_validation_error_preserved():
+    # A FlowConfig failure that isn't a Pydantic validation error keeps its full message.
+    error = ValueError("Failed to create flow from FlowConfig protobuf: boom")
+    assert (
+        _extract_error_message(error)
+        == "Failed to create flow from FlowConfig protobuf: boom"
     )

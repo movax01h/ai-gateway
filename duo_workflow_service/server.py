@@ -188,6 +188,16 @@ def _extract_error_message(error: BaseException) -> str:
         ) or str(error)
     elif isinstance(error, SecurityException):
         message = "Flow configuration failed security validation"
+    elif re.match(
+        r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
+        str(error),
+    ):
+        # FlowConfig parsing wraps a Pydantic ValidationError, embedding the full
+        # field-by-field breakdown (e.g. "2 validation errors for FlowConfig\n
+        # prompts.0.unit_primitives.0\n..."). Collapse it to a generic message so we
+        # don't surface the enum list / internals. The count varies ("1 validation
+        # error" / "N validation errors"), which is why the pattern matches both.
+        message = "Failed to create flow from FlowConfig protobuf: validation error"
     elif isinstance(error, ModelError):
         raw = error.message
         # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
@@ -349,7 +359,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 workflow_definition=workflow_definition,
                 error=str(e),
             )
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, _extract_error_message(e)
+            )
 
         monitoring_context.set_flow_identity(**resolved_flow.tracking_fields())
 
