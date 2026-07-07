@@ -20,6 +20,7 @@ from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
     _force_gpt_5_max_completion_tokens,
     _remove_claude_opus_temperature_parameters,
+    _rewrite_trailing_assistant_prefill,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
@@ -812,3 +813,132 @@ class TestClaudeOpusTemperatureRemoval:
         assert result == "ok"
         super_kwargs = super_call.call_args.kwargs
         assert "temperature" not in super_kwargs
+
+
+class TestTrailingAssistantPrefillRewrite:
+    def _prefilled_messages(self):
+        return [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "Thought: "},
+        ]
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7",
+            "us.anthropic.claude-opus-4-7",
+            "claude-opus-4-8",
+            "anthropic.claude-opus-4-8-20250101-v1:0",
+            "claude-3-5-sonnet",
+            "claude-3-opus-20240229",
+        ],
+    )
+    def test_prefill_incompatible_claude_is_rewritten(self, model):
+        kwargs = {"model": model, "messages": self._prefilled_messages()}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"][-1] == {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"{PREVIOUS_ASSISTANT_CONTEXT_PREFIX}Thought: ",
+                }
+            ],
+        }
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-1",
+            "claude-opus-4-5",
+            "anthropic/claude-opus-4-5",
+            "claude-sonnet-4-5",
+            "us.anthropic.claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            # Legacy pre-4.6 models still available for self-hosting.
+            "anthropic.claude-sonnet-4-20250514-v1:0",
+            "anthropic.claude-3-haiku-20240307-v1:0",
+            "anthropic.claude-3-sonnet-20240229-v1:0",
+        ],
+    )
+    def test_allowlisted_claude_keeps_prefill(self, model):
+        messages = self._prefilled_messages()
+        kwargs = {"model": model, "messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gpt-5",
+            "deepseek/deepseek-chat",
+            "llama-3-70b",
+        ],
+    )
+    def test_non_claude_keeps_prefill(self, model):
+        messages = self._prefilled_messages()
+        kwargs = {"model": model, "messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    def test_trailing_user_message_is_noop(self):
+        messages = [
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "hi"},
+        ]
+        kwargs = {"model": "claude-opus-4-7", "messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    def test_missing_model_is_noop(self):
+        messages = self._prefilled_messages()
+        kwargs = {"messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    def test_missing_messages_is_noop(self):
+        kwargs = {"model": "claude-opus-4-7"}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert "messages" not in kwargs
+
+    def test_empty_messages_list_is_noop(self):
+        kwargs = {"model": "claude-opus-4-7", "messages": []}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_acompletion_with_retry_rewrites_before_calling_super(self):
+        chat = ChatLiteLLM(model="claude-opus-4-7", custom_llm_provider="bedrock")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(return_value="ok"),
+        ) as super_call:
+            result = await chat.acompletion_with_retry(
+                model="us.anthropic.claude-opus-4-7",
+                custom_llm_provider="bedrock",
+                messages=[
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "Thought: "},
+                ],
+            )
+
+        assert result == "ok"
+        assert super_call.call_args.kwargs["messages"][-1]["role"] == "user"
