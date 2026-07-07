@@ -19,7 +19,7 @@ from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
     _force_gpt_5_max_completion_tokens,
-    _remove_claude_opus_temperature_parameters,
+    _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
@@ -748,7 +748,7 @@ class TestBedrockGuardrailConfig:
             assert call_kwargs["guardrailConfig"] == self._expected_guardrail_config()
 
 
-class TestClaudeOpusTemperatureRemoval:
+class TestDeprecatedTemperatureRemoval:
     @pytest.mark.parametrize(
         "model",
         [
@@ -757,12 +757,18 @@ class TestClaudeOpusTemperatureRemoval:
             "claude-opus-4-8",
             "claude-opus-4.8",
             "anthropic.claude-opus-4-8-20250101-v1:0",
+            "claude-sonnet-5",
+            "anthropic.claude-sonnet-5",
+            "claude-fable-5",
+            "anthropic.claude-fable-5",
+            "claude-mythos-5",
+            "anthropic.claude-mythos-5",
         ],
     )
-    def test_opus_4_7_and_4_8_removes_temperature(self, model):
+    def test_removes_temperature(self, model):
         kwargs = {"model": model, "temperature": 0.7}
 
-        _remove_claude_opus_temperature_parameters(kwargs)
+        _remove_deprecated_temperature_parameters(kwargs)
 
         assert "temperature" not in kwargs
 
@@ -772,10 +778,10 @@ class TestClaudeOpusTemperatureRemoval:
             "claude-opus-4-7",
         ],
     )
-    def test_opus_4_7_with_no_temperature(self, model):
+    def test_deprecated_model_with_no_temperature(self, model):
         kwargs = {"model": model}
 
-        _remove_claude_opus_temperature_parameters(kwargs)
+        _remove_deprecated_temperature_parameters(kwargs)
 
         assert "temperature" not in kwargs
 
@@ -785,13 +791,14 @@ class TestClaudeOpusTemperatureRemoval:
             "claude-opus-4-6",
             "claude-opus-4.6",
             "claude-3-5-sonnet",
+            "claude-sonnet-4-5",
             "gpt-5",
         ],
     )
     def test_other_models_keep_temperature(self, model):
         kwargs = {"model": model, "temperature": 0.7}
 
-        _remove_claude_opus_temperature_parameters(kwargs)
+        _remove_deprecated_temperature_parameters(kwargs)
 
         assert kwargs.get("temperature") == 0.7
 
