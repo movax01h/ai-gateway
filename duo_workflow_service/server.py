@@ -118,7 +118,11 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
-_PROPAGATED_EXTRA_CLAIMS = {SKIP_USAGE_CUTOFF_CLAIM, "tool_access_policies"}
+_PROPAGATED_EXTRA_CLAIMS = {
+    SKIP_USAGE_CUTOFF_CLAIM,
+    "tool_access_policies",
+    "gitlab_root_namespace_id",
+}
 
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
