@@ -51,6 +51,21 @@ TRUSTED_ABSOLUTE_PATH_SEGMENTS = (
 # Path-traversal patterns rejected for every path, regardless of tool or trust level.
 PATH_TRAVERSAL_PATTERNS = ("../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e")
 
+# NOTE appended to file-access tool descriptions to explain gitignore and secrets-denylist
+# restrictions.  Kept in one place so all five tools stay in sync.
+GITIGNORED_FILE_NOTE = (
+    "NOTE on file-access restrictions:\n"
+    "- Gitignored files: This tool cannot access files listed in .gitignore. If the file is\n"
+    "    not sensitive, you may fall back to the `run_command` tool with a shell command\n"
+    '    (e.g. `cat <file>`, `sed -i`, `echo "content" > file`). Do NOT use `git rm --cached`\n'
+    "    as a workaround.\n"
+    "- Secrets-denylisted files: Files such as `.env`, `.env.*`, `.ssh/`, `.gnupg/`,\n"
+    "    `Dockerfile.secrets`, and similar sensitive paths are protected by the Duo security\n"
+    "    denylist. Do NOT attempt to access these files by any means, including via\n"
+    "    `run_command` or any shell command. This restriction exists to prevent accidental\n"
+    "    exposure of secrets."
+)
+
 # Security denylist of sensitive directories and files that should not be accessed
 DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
     [
@@ -181,12 +196,13 @@ class ReadFileInput(BaseModel):
 
 class ReadFile(DuoBaseTool):
     name: str = "read_file"
-    description: str = """Read the contents of a file.
+    description: str = f"""Read the contents of a file.
 
     IMPORTANT:
     - When a task requires reading multiple files, include batches of tool calls in a single response
     - Do not make separate responses for each file - group related files together
 
+    {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileInput
     handle_tool_error: bool = True
@@ -236,7 +252,7 @@ class ReadFileChunked(DuoBaseTool):
     """
 
     name: str = "read_file"
-    description: str = """Read a file from the local filesystem.
+    description: str = f"""Read a file from the local filesystem.
 
     Usage:
     - By default, returns up to 2000 lines from the start of the file.
@@ -245,6 +261,8 @@ class ReadFileChunked(DuoBaseTool):
     - If the file is truncated, a hint is returned at the end with the next offset value — use it to continue reading.
     - Call this tool in parallel when you need to read multiple files.
     - Avoid tiny repeated slices; if you need more context, read a larger window.
+
+    {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileChunkedInput
     handle_tool_error: bool = True
@@ -287,7 +305,9 @@ class ReadFilesInput(BaseModel):
 
 class ReadFiles(DuoBaseTool):
     name: str = "read_files"
-    description: str = """Read one or more files in a single operation.
+    description: str = f"""Read one or more files in a single operation.
+
+    {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFilesInput
     handle_tool_error: bool = True
@@ -375,12 +395,14 @@ class WriteFileInput(BaseModel):
 class WriteFile(DuoBaseTool):
     name: str = "create_file_with_contents"
     description: str = dedent(
-        """\
+        f"""\
         Use this tool to create a brand new file with the given contents.
 
         IMPORTANT:
         - This tool is only for creating files that do not yet exist. It writes the full contents of a new file.
-        - Do not use this tool to modify, append to, or overwrite an existing file. If the file already exists, use other dedicated tools instead."""
+        - Do not use this tool to modify, append to, or overwrite an existing file. If the file already exists, use other dedicated tools instead.
+
+        {GITIGNORED_FILE_NOTE}"""
     )
     args_schema: Type[BaseModel] = WriteFileInput
     handle_tool_error: bool = True
@@ -546,7 +568,7 @@ class EditFileInput(BaseModel):
 class EditFile(DuoBaseTool):
     name: str = "edit_file"
     description: str = dedent(
-        """\
+        f"""\
         Use this tool to edit an existing file by replacing `old_str` with `new_str`.
 
         IMPORTANT:
@@ -554,6 +576,8 @@ class EditFile(DuoBaseTool):
         - `old_str` must match the file exactly (including whitespace) and be unique; include enough surrounding context. Only the first match is replaced.
         - To edit multiple files, batch the tool calls in a single response rather than one response per file.
         - Secret-like values may appear as `[REDACTED]`. This is a placeholder, not the real content, so an `old_str` containing it will never match. Anchor edits on surrounding non-secret text.
+
+        {GITIGNORED_FILE_NOTE}
 
         Examples:
 
