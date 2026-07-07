@@ -22,8 +22,10 @@ from duo_workflow_service.tools.ascp import (
     ListAscpScans,
 )
 from duo_workflow_service.tools.branch import CreateBranch
-from duo_workflow_service.tools.code_review import (
+from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
+)
+from duo_workflow_service.tools.code_review.post_duo_code_review import (
     PostDuoCodeReview,
 )
 from duo_workflow_service.tools.command import RunCommand, ShellCommand

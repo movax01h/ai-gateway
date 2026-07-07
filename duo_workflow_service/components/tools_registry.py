@@ -16,8 +16,10 @@ from duo_workflow_service.gitlab.gitlab_api import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
-from duo_workflow_service.tools.code_review import (
+from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
+)
+from duo_workflow_service.tools.code_review.post_duo_code_review import (
     PostDuoCodeReview,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
