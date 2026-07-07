@@ -1349,6 +1349,42 @@ async def test_generate_token_propagates_tool_access_policies(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {"gitlab_root_namespace_id": "123"},
+        {},  # no gitlab_root_namespace_id
+        None,  # no extra claims
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_gitlab_root_namespace_id(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    kwargs = mock_token_authority.return_value.encode.call_args.kwargs
+    if claims_extra and "gitlab_root_namespace_id" in claims_extra:
+        assert (
+            kwargs["extra_claims"].get("gitlab_root_namespace_id")
+            == claims_extra["gitlab_root_namespace_id"]
+        )
+    else:
+        assert "gitlab_root_namespace_id" not in kwargs["extra_claims"]
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.TokenAuthority")
 @patch("contract.contract_pb2.GenerateTokenResponse")
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
