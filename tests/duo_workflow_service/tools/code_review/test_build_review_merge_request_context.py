@@ -1,48 +1,16 @@
 # pylint: disable=line-too-long,too-many-lines
 import base64
 import json
-from unittest.mock import AsyncMock, Mock, _Call, patch
+from unittest.mock import AsyncMock, _Call, patch
 
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.code_review import (
+from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
     BuildReviewMergeRequestContextInput,
-    PostDuoCodeReview,
-    PostDuoCodeReviewInput,
 )
-
-
-@pytest.fixture(name="gitlab_client_mock")
-def gitlab_client_mock_fixture():
-    return Mock()
-
-
-@pytest.fixture(name="project_mock")
-def project_mock_fixture():
-    return Project(
-        id=1,
-        name="test-project",
-        description="Test project",
-        http_url_to_repo="http://example.com/repo.git",
-        web_url="http://example.com/repo",
-        default_branch="main",
-        languages=[],
-        exclusion_rules=["**/*.log", "/secrets/**", "**/node_modules/**"],
-    )
-
-
-@pytest.fixture(name="metadata")
-def metadata_fixture(gitlab_client_mock, project_mock):
-    return {
-        "workflow_id": "test-workflow-123",
-        "gitlab_client": gitlab_client_mock,
-        "gitlab_host": "gitlab.com",
-        "project": project_mock,
-    }
 
 
 @pytest.fixture(name="mr_data")
@@ -136,66 +104,6 @@ instructions:
             2. Follow Ruby naming conventions
 """
     return {"content": base64.b64encode(yaml_content.encode("utf-8")).decode("utf-8")}
-
-
-@pytest.mark.asyncio
-async def test_post_duo_code_review(gitlab_client_mock, metadata):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(
-            status_code=200, body=json.dumps({"message": "Comments added successfully"})
-        )
-    )
-    tool = PostDuoCodeReview(metadata=metadata)
-    response = await tool._arun(
-        project_id="123", merge_request_iid=45, review_output="<review>test</review>"
-    )
-    expected_response = json.dumps(
-        {"status": "success", "message": "Review posted to MR !45"}
-    )
-    assert response == expected_response
-    gitlab_client_mock.apost.assert_called_once_with(
-        path="/api/v4/ai/duo_workflows/code_review/add_comments",
-        body=json.dumps(
-            {
-                "project_id": "123",
-                "merge_request_iid": 45,
-                "review_output": "<review>test</review>",
-                "workflow_id": "test-workflow-123",
-            }
-        ),
-        parse_json=False,
-    )
-
-
-@pytest.mark.asyncio
-async def test_post_duo_code_review_exception(gitlab_client_mock, metadata):
-    """Test that exceptions from PostDuoCodeReview._execute propagate rather than being swallowed."""
-    error_message = "API error"
-    gitlab_client_mock.apost = AsyncMock(side_effect=Exception(error_message))
-    tool = PostDuoCodeReview(metadata=metadata)
-    with pytest.raises(Exception, match=error_message):
-        await tool._arun(
-            project_id=123, merge_request_iid=45, review_output="<review>test</review>"
-        )
-
-
-@pytest.mark.parametrize(
-    "input_data,expected_message",
-    [
-        (
-            PostDuoCodeReviewInput(
-                project_id=42,
-                merge_request_iid=123,
-                review_output="<review>test</review>",
-            ),
-            "Post Duo Code Review to merge request !123 in project 42",
-        ),
-    ],
-)
-def test_post_duo_code_review_format_display_message(input_data, expected_message):
-    tool = PostDuoCodeReview(description="Post Duo Code Review")
-    message = tool.format_display_message(input_data)
-    assert message == expected_message
 
 
 def test_parse_and_format_diff(metadata):
