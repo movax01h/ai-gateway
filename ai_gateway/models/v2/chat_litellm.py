@@ -66,6 +66,79 @@ def _is_deprecated_temperature_claude_opus_model(model: str) -> bool:
     )
 
 
+# Claude families that still accept an assistant message as the final turn (prefill).
+# Mirrors the `supports_assistant_prefill: true` entries in models.yml (Opus 4.1, Opus
+# 4.5, Sonnet 4.5, Haiku 4.5) so self-hosted deployments behave the same as the
+# GitLab-managed models. Anthropic removed prefill support starting with Claude 4.6 and
+# states the removal is permanent, so any Claude model outside this allowlist no longer
+# supports prefill. Keep in sync with models.yml.
+#
+# The datestamped entries are the only pre-4.6 legacy models still available for
+# self-hosting; they support prefill but have no models.yml entry, so they are pinned
+# here explicitly.
+# https://platform.claude.com/docs/en/about-claude/models/migration-guide#breaking-changes
+_ASSISTANT_PREFILL_SUPPORTED_MODEL_SUBSTRINGS = (
+    "opus-4-1",
+    "opus_4_1",
+    "opus-4.1",
+    "opus_4.1",
+    "opus-4-5",
+    "opus_4_5",
+    "opus-4.5",
+    "opus_4.5",
+    "sonnet-4-5",
+    "sonnet_4_5",
+    "sonnet-4.5",
+    "sonnet_4.5",
+    "haiku-4-5",
+    "haiku_4_5",
+    "haiku-4.5",
+    "haiku_4.5",
+    # Legacy pre-4.6 models still available for self-hosting.
+    "sonnet-4-20250514",
+    "3-haiku-20240307",
+    "3-sonnet-20240229",
+)
+
+
+def _model_supports_assistant_prefill(model: str) -> bool:
+    """Name-based counterpart to `supports_assistant_prefill` for self-hosted models.
+
+    True means the model accepts an assistant message as the final turn, so the request is left untouched. Non-Claude
+    models always support prefill; a Claude model supports it only if it matches the allowlist above.
+    """
+    model_lower = model.lower()
+    if "claude" not in model_lower:
+        return True
+    return any(v in model_lower for v in _ASSISTANT_PREFILL_SUPPORTED_MODEL_SUBSTRINGS)
+
+
+def _rewrite_trailing_assistant_prefill(kwargs: Dict[str, Any]) -> None:
+    """Re-role a trailing assistant (prefill) turn as a user turn for self-hosted Claude models that do not support
+    assistant prefill.
+
+    Claude 4.6+ reject any request whose conversation ends with an assistant turn; Anthropic removed prefill support and
+    states the removal is permanent. We skip models that support prefill (`_model_supports_assistant_prefill`, the
+    name-based equivalent of the `supports_assistant_prefill: true` allowlist) rather than gating on a "4.6+" version
+    check, so self-hosted models mirror the GitLab-managed set exactly. Older Claude models outside the allowlist are
+    also rewritten -- a benign re-role -- even though they technically still accept prefill.
+
+    The `_create_message_dicts` gate only fixes models resolvable via `models.yml`; self-hosted models reach here with
+    the real identifier in `kwargs["model"]`, so we detect and rewrite at the same point as the temperature strip.
+
+    https://platform.claude.com/docs/en/about-claude/models/migration-guide#breaking-changes
+    """
+    model = kwargs.get("model")
+    if not model or _model_supports_assistant_prefill(model):
+        return
+    messages = kwargs.get("messages")
+    if not messages:
+        return
+    kwargs["messages"] = remove_trailing_assistant_message({"messages": messages})[
+        "messages"
+    ]
+
+
 # Register built-in model metadata for models that ship in our model_selection
 # registry but are absent from the pinned LiteLLM bundled `model_cost` registry
 # (e.g., Claude Opus 4.8 Bedrock until the next LiteLLM bump).
@@ -127,6 +200,7 @@ class ChatLiteLLM(_LChatLiteLLM):
         # kwargs has the merged model, provider, and max_tokens by this point.
         _force_gpt_5_max_completion_tokens(kwargs)
         _remove_claude_opus_temperature_parameters(kwargs)
+        _rewrite_trailing_assistant_prefill(kwargs)
         return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
 
     @property
