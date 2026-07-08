@@ -1,11 +1,11 @@
 from enum import StrEnum
-from typing import AsyncIterator, Callable, Optional, Sequence, Union, override
+from typing import Any, AsyncIterator, Callable, Optional, Sequence, Union, override
 
 from litellm import CustomStreamWrapper, ModelResponse, acompletion
 from litellm.exceptions import APIConnectionError, InternalServerError
 from openai import AsyncOpenAI
 
-from ai_gateway.config import ConfigBedrockGuardrail
+from ai_gateway.config import ConfigBedrockGuardrail, get_config
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import (
     KindModelProvider,
@@ -191,6 +191,15 @@ class LiteLlmChatModel(ChatModelBase):
     def metadata(self) -> ModelMetadata:
         return self._metadata
 
+    @property
+    def specifications(self) -> dict[str, Any]:
+        return MODEL_SPECIFICATIONS.get(self.provider, {}).get(self.model_name, {})
+
+    def _request_timeout(self) -> float:
+        """Resolve the per-request timeout: per-model override, then global config default."""
+        default_timeout = get_config().duo_chat.model_request_timeout
+        return self.specifications.get("timeout", default_timeout)
+
     @override
     async def generate(
         self,
@@ -217,7 +226,7 @@ class LiteLlmChatModel(ChatModelBase):
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_output_tokens,
-            "timeout": 30.0,
+            "timeout": self._request_timeout(),
             "stop": self.stop_tokens,
             **metadata_params,
         }
@@ -352,8 +361,13 @@ class LiteLlmTextGenModel(TextGenModelBase):
         return self._metadata
 
     @property
-    def specifications(self):
+    def specifications(self) -> dict[str, Any]:
         return MODEL_SPECIFICATIONS.get(self.provider, {}).get(self.model_name, {})
+
+    def _request_timeout(self) -> float:
+        """Resolve the per-request timeout: per-model override, then global config default."""
+        default_timeout = get_config().duo_chat.model_request_timeout
+        return self.specifications.get("timeout", default_timeout)
 
     @override
     async def generate(
@@ -442,7 +456,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             "temperature": temperature,
             "top_p": top_p,
             "stream": stream,
-            "timeout": self.specifications.get("timeout", 30.0),
+            "timeout": self._request_timeout(),
             "stop": self._get_stop_tokens(suffix),
         }
 
