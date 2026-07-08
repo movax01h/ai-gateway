@@ -147,6 +147,17 @@ class ConfigCustomModels(BaseModel):
 
 class ConfigDuoChat(BaseModel):
     max_tokens: Optional[int] = None
+    model_request_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Default timeout in seconds for a single chat model request on the "
+            "AI Gateway -> model leg. Applies to every chat model unless a "
+            "per-model timeout is set in MODEL_SPECIFICATIONS. Increase this for "
+            "long-running agentic prompts against slower self-hosted models. "
+            "Set via AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT."
+        ),
+    )
 
 
 class ConfigAbuseDetection(BaseModel):

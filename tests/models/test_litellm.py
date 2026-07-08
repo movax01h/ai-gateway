@@ -1,11 +1,11 @@
 # pylint: disable=too-many-lines
 from typing import AsyncIterator, Optional, cast
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
 from litellm.exceptions import APIConnectionError, InternalServerError
 
-from ai_gateway.config import ConfigBedrockGuardrail
+from ai_gateway.config import ConfigBedrockGuardrail, get_config
 from ai_gateway.models import KindLiteLlmModel, LiteLlmChatModel
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.base_chat import Message, Role
@@ -250,6 +250,90 @@ class TestLiteLlmChatModel:
             custom_llm_provider="provider",
         )
 
+    def test_specifications_defaults_to_empty(self, lite_llm_chat_model):
+        # A model without an entry in MODEL_SPECIFICATIONS exposes an empty
+        # specifications mapping.
+        assert lite_llm_chat_model.specifications == {}
+
+    def test_request_timeout_uses_global_config(self, lite_llm_chat_model):
+        # A global AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT applies to every chat
+        # model that has no per-model override.
+        config = get_config()
+        with patch.object(config.duo_chat, "model_request_timeout", 600.0):
+            assert lite_llm_chat_model._request_timeout() == 600.0
+
+    def test_request_timeout_prefers_per_model_override(self, lite_llm_chat_model):
+        # A per-model MODEL_SPECIFICATIONS timeout takes precedence over the
+        # global default.
+        config = get_config()
+        with (
+            patch.object(config.duo_chat, "model_request_timeout", 600.0),
+            patch(
+                "ai_gateway.models.litellm.LiteLlmChatModel.specifications",
+                new_callable=PropertyMock,
+                return_value={"timeout": 120.0},
+            ),
+        ):
+            assert lite_llm_chat_model._request_timeout() == 120.0
+
+    @pytest.mark.asyncio
+    async def test_generate_forwards_configured_timeout(
+        self, lite_llm_chat_model, mock_litellm_acompletion
+    ):
+        # The resolved timeout must be forwarded to litellm.acompletion.
+        messages = [Message(content="Test message", role=Role.USER)]
+        config = get_config()
+
+        with patch.object(config.duo_chat, "model_request_timeout", 600.0):
+            output = await lite_llm_chat_model.generate(messages)
+
+        assert isinstance(output, TextGenModelOutput)
+
+        _args, call_kwargs = mock_litellm_acompletion.call_args
+        assert call_kwargs["timeout"] == 600.0
+
+    @pytest.mark.asyncio
+    async def test_generate_stream_forwards_configured_timeout(
+        self, lite_llm_chat_model
+    ):
+        # The resolved timeout must be forwarded to litellm.acompletion on the
+        # streaming path, not just the non-streaming path.
+        streamed_response = AsyncMock()
+        streamed_response.__aiter__.return_value = iter(
+            [
+                AsyncMock(
+                    choices=[AsyncMock(delta=AsyncMock(content="Streamed content"))]
+                )
+            ]
+        )
+
+        config = get_config()
+        with (
+            patch("ai_gateway.models.litellm.acompletion") as mock_acompletion,
+            patch(
+                "ai_gateway.instrumentators.model_requests.ModelRequestInstrumentator.watch"
+            ) as mock_watch,
+            patch.object(config.duo_chat, "model_request_timeout", 600.0),
+        ):
+            watcher = Mock()
+            mock_watch.return_value.__enter__.return_value = watcher
+            mock_acompletion.return_value = streamed_response
+
+            messages = [Message(content="Test message", role=Role.USER)]
+            response = await lite_llm_chat_model.generate(
+                messages=messages,
+                stream=True,
+            )
+
+            content = []
+            async for chunk in cast(AsyncIterator[TextGenModelChunk], response):
+                content.append(chunk.text)
+
+        _args, call_kwargs = mock_acompletion.call_args
+        assert call_kwargs["timeout"] == 600.0, (
+            "Streaming path must forward the configured timeout, not a hard-coded 30.0"
+        )
+
     @pytest.mark.asyncio
     async def test_override_stream(
         self, endpoint, api_key, identifier, mock_litellm_acompletion
@@ -419,6 +503,42 @@ class TestLiteLlmTextGenModel:
     def test_max_model_len(self, model_name: str, expected_limit: int):
         model = LiteLlmTextGenModel.from_model_name(name=model_name)
         assert model.input_token_limit == expected_limit
+
+    def test_request_timeout_uses_global_config(self, lite_llm_text_model):
+        # A global AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT applies to every text-gen
+        # model that has no per-model override.
+        config = get_config()
+        with patch.object(config.duo_chat, "model_request_timeout", 600.0):
+            assert lite_llm_text_model._request_timeout() == 600.0
+
+    def test_request_timeout_prefers_per_model_override(self, lite_llm_text_model):
+        # A per-model MODEL_SPECIFICATIONS timeout takes precedence over the
+        # global default.
+        config = get_config()
+        with (
+            patch.object(config.duo_chat, "model_request_timeout", 600.0),
+            patch(
+                "ai_gateway.models.litellm.LiteLlmTextGenModel.specifications",
+                new_callable=PropertyMock,
+                return_value={"timeout": 120.0},
+            ),
+        ):
+            assert lite_llm_text_model._request_timeout() == 120.0
+
+    @pytest.mark.asyncio
+    async def test_generate_forwards_configured_timeout(
+        self, lite_llm_text_model, mock_litellm_acompletion
+    ):
+        # The resolved timeout must be forwarded to litellm.acompletion.
+        config = get_config()
+
+        with patch.object(config.duo_chat, "model_request_timeout", 600.0):
+            output = await lite_llm_text_model.generate(prefix="def hello():")
+
+        assert isinstance(output, TextGenModelOutput)
+
+        _args, call_kwargs = mock_litellm_acompletion.call_args
+        assert call_kwargs["timeout"] == 600.0
 
     @pytest.mark.parametrize(
         (

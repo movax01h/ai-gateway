@@ -15,6 +15,7 @@ from ai_gateway.config import (
     ConfigBillingEvent,
     ConfigCachingProxy,
     ConfigCustomModels,
+    ConfigDuoChat,
     ConfigDuoWorkflow,
     ConfigFastApi,
     ConfigFeatureFlags,
@@ -1033,3 +1034,24 @@ class TestConfigDuoWorkflowTLS:
         assert cfg.tls.enabled is True
         assert cfg.tls.cert_file == str(cert)
         assert cfg.tls.key_file == str(key)
+
+
+class TestConfigDuoChat:
+    def test_model_request_timeout_default(self):
+        """ConfigDuoChat.model_request_timeout defaults to 30.0 seconds."""
+        cfg = ConfigDuoChat()
+        assert cfg.model_request_timeout == 30.0
+
+    def test_model_request_timeout_reads_from_env_var(self, monkeypatch):
+        """AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT overrides the default."""
+        monkeypatch.setenv("AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT", "120.0")
+        config = Config(_env_file=None)
+        assert config.duo_chat.model_request_timeout == 120.0
+
+    def test_model_request_timeout_must_be_positive(self):
+        """model_request_timeout rejects non-positive values."""
+        with pytest.raises(ValidationError):
+            ConfigDuoChat(model_request_timeout=0.0)
+
+        with pytest.raises(ValidationError):
+            ConfigDuoChat(model_request_timeout=-1.0)
