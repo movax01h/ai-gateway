@@ -421,6 +421,53 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_success(
 
 
 @pytest.mark.asyncio
+async def test_get_pipeline_failing_jobs_includes_job_url(gitlab_client_mock, metadata):
+    """Test that each failed job's web_url is surfaced as a job_url element."""
+    jobs_response = [
+        {
+            "id": 102,
+            "name": "job2",
+            "status": "failed",
+            "web_url": "https://gitlab.com/namespace/project/-/jobs/102",
+        },
+        # A job missing web_url should not break the response; it simply has no job_url element.
+        {"id": 103, "name": "job3", "status": "failed"},
+    ]
+    responses = [
+        GitLabHttpResponse(
+            status_code=200, body=json.dumps(jobs_response), headers={"X-Next-Page": ""}
+        ),
+    ]
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses)
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    expected_traces = (
+        "Failed Jobs:\n<jobs>\n"
+        "  <job>\n"
+        "    <job_name>job2</job_name>\n"
+        "    <job_id>102</job_id>\n"
+        "    <job_url>https://gitlab.com/namespace/project/-/jobs/102</job_url>\n"
+        "  </job>\n"
+        "  <job>\n"
+        "    <job_name>job3</job_name>\n"
+        "    <job_id>103</job_id>\n"
+        "  </job>\n"
+        "</jobs>\n"
+    )
+
+    assert response_json == {
+        "pipeline_id": 123,
+        "failed_jobs": expected_traces,
+    }
+
+
+@pytest.mark.asyncio
 async def test_get_pipeline_failing_jobs_filters_allow_failure_jobs(
     gitlab_client_mock, metadata
 ):
