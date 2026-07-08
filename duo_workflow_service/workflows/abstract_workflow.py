@@ -51,6 +51,7 @@ from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEn
 from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
+    InvalidRequestException,
     NamespaceLevelWorkflowNotSupportedException,
     NotifiableException,
 )
@@ -485,12 +486,23 @@ class AbstractWorkflow(ABC):
         is_notifiable = isinstance(e, NotifiableException)
         is_notifiable_agent = isinstance(e, NotifiableAgentException)
         is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+        is_invalid_request = isinstance(e, InvalidRequestException)
 
         if isinstance(e, GraphRecursionError):
             msg = "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated"
             self.log.error(msg, recursion_limit=RECURSION_LIMIT)  # fmt: skip
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
+
+        # InvalidRequestException: the input itself was invalid (e.g. an empty goal
+        # on resume).  We must NOT transition the workflow to FAILED — the Rails state
+        # must remain unchanged so the user can correct their input and retry.  We also
+        # must NOT send an error UI event to the client (that would corrupt the chat
+        # log).  The gRPC status is set to INVALID_ARGUMENT by the server layer so the
+        # caller gets a clear signal that the input was wrong.  Skip all side-effects
+        # and terminate.
+        if is_invalid_request:
+            raise TraceableException(e)
 
         # NotifiableException is chat-specific and carries its own UI semantics; the
         # send_event below surfaces str(e) directly so subclass _handle_workflow_failure
