@@ -369,7 +369,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `developer 2.0.0-local (v1)` (Flow Registry)
+## Graph: `developer 2.0.0-interactive (v1)` (Flow Registry)
 
 ```mermaid
 ---
