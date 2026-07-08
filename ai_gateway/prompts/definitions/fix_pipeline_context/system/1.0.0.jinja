@@ -309,7 +309,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>summary</name>
-    <requirement>A self-contained description of the failing job(s), the observed error(s), the identified root cause, and any files or lines implicated. Downstream components (plan creation, code suggestions, branch naming, MR comments, fix execution) rely on this summary instead of the gathered context, so include every detail needed to plan, explain, or execute the fix.</requirement>
+    <requirement>A self-contained description of the failing job(s), the observed error(s), the identified root cause, and any files or lines implicated. For each failing job discussed, include its name and its job URL (the `job_url` in `<failing_jobs>`), so downstream components can link back to the specific job. Downstream components (plan creation, code suggestions, branch naming, MR comments, fix execution) rely on this summary instead of the gathered context, so include every detail needed to plan, explain, or execute the fix.</requirement>
   </field>
 </final_answer_contract>
 

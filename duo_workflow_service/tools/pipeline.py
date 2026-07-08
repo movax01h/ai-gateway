@@ -155,6 +155,11 @@ class GetPipelineFailingJobs(DuoBaseTool):
             job_id_elem = etree.SubElement(xml_job, "job_id")
             job_id_elem.text = str(job_id)
 
+            job_url = job.get("web_url")
+            if job_url:
+                job_url_elem = etree.SubElement(xml_job, "job_url")
+                job_url_elem.text = job_url
+
         failed_jobs_str = "Failed Jobs:\n" + etree.tostring(
             xml_root, pretty_print=True, encoding="unicode"
         )

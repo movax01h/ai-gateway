@@ -51,7 +51,7 @@
         },
         "summary": {
             "type": "string",
-            "description": "Self-contained description of the failing job(s), the observed error(s), the identified root cause, and any files or lines implicated. Downstream components rely on this summary instead of the gathered context, so it must include every detail needed to plan, explain, or execute the fix."
+            "description": "Self-contained description of the failing job(s), the observed error(s), the identified root cause, and any files or lines implicated. For each failing job discussed, include its name and its job URL (the job_url in failing_jobs). Downstream components rely on this summary instead of the gathered context, so it must include every detail needed to plan, explain, or execute the fix."
         }
     },
     "required": ["failure_category", "suggested_fix_type", "decision", "summary"]

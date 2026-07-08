@@ -47,6 +47,7 @@ You MUST follow these steps in order. Do not skip any step.
   - Identify the file path:
     - **Validated path**: from the local `git diff` output
     - **Fast path**: from `<context_summary>`
+  - Identify which failing job (name and job URL) this change addresses, from `<context_summary>`
   - Locate the matching `<file_diff filename="...">` block in the MR diff
   - Find the exact `<line>` tag in the MR diff that needs to change
   - Note the `old_line` and `new_line` attributes from that `<line>` tag
@@ -61,7 +62,15 @@ You MUST follow these steps in order. Do not skip any step.
   - `new_path`: the file path
   - `old_line`: the old_line number from the `<line>` tag (omit for added lines where old_line is empty)
   - `new_line`: the new_line number from the `<line>` tag (omit for deleted lines where new_line is empty)
-  - `body`: a brief explanation followed by a suggestion block:
+  - `body`: an italicized reference to the failing job this suggestion addresses, followed by a brief
+    explanation and a suggestion block. Phrase it as:
+
+    _Recommended fix for the failing job: [`<job_name>`](<job_url>)_
+
+    If `<context_summary>` does not give a job URL for this job, omit the link and write the job name
+    as plain code instead. Never invent a URL:
+
+    _Recommended fix for the failing job: `<job_name>`_
 
     Brief explanation of the fix.
     ```suggestion:-0+0
