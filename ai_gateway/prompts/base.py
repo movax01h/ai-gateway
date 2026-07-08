@@ -368,7 +368,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         if tools and isinstance(model, BaseChatModel):
             if bind_tools_cache:
                 # Use cached bind_tools to avoid expensive repeated operations
-                model_id = f"{model_provider}:{config.model.params.model}"
+                # For custom models, config.model.params.model is None; derive the
+                # real identifier from model_metadata when available so that the
+                # cache key and logs reflect the actual model being used.
+                effective_model = (
+                    model_metadata.to_params().get("model") if model_metadata else None
+                ) or config.model.params.model
+                model_id = f"{model_provider}:{effective_model}"
                 model = bind_tools_cache.get_or_bind(  # type: ignore[assignment]
                     model=model,
                     model_id=model_id,
