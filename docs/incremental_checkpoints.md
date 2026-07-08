@@ -50,8 +50,9 @@ When the capability is enabled, the `aput` POST body gains `current_thread` and
 `_serialize_channel_blobs` walks `new_versions` (LangGraph's set of channels changed this
 step) and emits one blob per changed channel:
 
-- **Scalar channels** (`status`, `goal`, `project`, …) are skipped — they're tiny, always
-  full replacements, and always recoverable from `compressed_checkpoint`.
+- **Scalar channels** (`goal`, `project`, …) are skipped — they're tiny, always
+  full replacements, and always recoverable from `compressed_checkpoint`. The exception is
+  `status`, which is always blobbed because it's required for blob reconstruction.
 - **List channels** use `_list_delta`: if the previous value is a prefix of the current
   one, only the appended tail is sent (`step_action="conversation"`); any other change
   (shrink, reorder, in-place edit) sends the full list (`step_action="compaction"`).

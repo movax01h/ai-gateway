@@ -2528,9 +2528,42 @@ def test_serialize_channel_blobs_skips_scalar_channels():
     blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, serde, {})
 
     channels = [b["channel"] for b in blobs]
-    assert "status" not in channels
     assert "goal" not in channels
     assert "messages" in channels
+    # status is always blobbed for reconstruction, even though it is a scalar
+    assert "status" in channels
+
+
+def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
+    """Status blobs must carry step_action='compaction' and must not set is_compaction.
+
+    status is a scalar channel so it bypasses the list/dict delta branches entirely. This means it always serialises as
+    a full replacement (step_action='compaction') and a status-only change must not trigger is_compaction=True (which
+    would incorrectly bump current_thread).
+    """
+    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
+
+    serde = CheckpointSerializer()
+    checkpoint = {
+        "id": "ckpt1",
+        "channel_values": {
+            "status": "running",
+        },
+    }
+    new_versions = ChannelVersions({"status": "2.0"})
+    prev_channel_values = {"status": "waiting"}
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, serde, prev_channel_values
+    )
+
+    assert len(blobs) == 1
+    status_blob = blobs[0]
+    assert status_blob["channel"] == "status"
+    # Scalar path always produces a full replacement, never a delta
+    assert status_blob["step_action"] == "compaction"
+    # A status-only change must NOT set is_compaction — that would incorrectly bump current_thread
+    assert is_compaction is False
 
 
 def test_serialize_channel_blobs_list_delta():
