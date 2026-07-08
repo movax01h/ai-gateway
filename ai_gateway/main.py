@@ -11,10 +11,12 @@ def run_app():
 
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None
+    ssl_ciphers: str = "TLSv1"
 
     if config.fastapi.tls.enabled:
         ssl_certfile = config.fastapi.tls.cert_file
         ssl_keyfile = config.fastapi.tls.key_file
+        ssl_ciphers = config.fastapi.tls.ssl_ciphers
         logger.info("Starting the server with TLS encryption.")
 
     # For now, trust all IPs for proxy headers until https://github.com/encode/uvicorn/pull/1611 is available.
@@ -28,6 +30,7 @@ def run_app():
         factory=True,
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
+        ssl_ciphers=ssl_ciphers,
     )
 
 
