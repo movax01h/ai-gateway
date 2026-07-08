@@ -133,8 +133,9 @@ sanity-tests:
   needs: []
   allow_failure: true # TODO: to be removed once swe-bench pipelines are stable enough
   rules:
+    # Manual trigger on any AIGW merge request. Kept manual because the eval
+    # takes ~30 minutes, so authors run it on demand (see MR checklist).
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes: !reference [.duo-workflow-service-dependencies, changes]
       when: manual
   variables:
     CEF_SERVICE_URL: "https://cef.runway.gitlab.net"
