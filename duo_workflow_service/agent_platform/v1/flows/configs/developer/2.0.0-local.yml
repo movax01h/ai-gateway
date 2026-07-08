@@ -1,7 +1,7 @@
 version: "v1"
 environment: chat
 
-# Interactive variant of the developer flow, tailored for chat
+# Local/interactive variant of the developer flow, tailored for chat
 # environments such as the Duo CLI. It uses the same concise system prompt
 # via the shared `common/developer/system` partial (no subagents) but:
 #   * runs in the `chat` environment and loops through a HumanInputComponent so
