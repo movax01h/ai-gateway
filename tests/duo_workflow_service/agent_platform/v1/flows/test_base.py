@@ -37,7 +37,10 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.typing import EnvelopeVersionMismatchException
+from duo_workflow_service.errors.typing import (
+    EnvelopeVersionMismatchException,
+    InvalidRequestException,
+)
 from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
@@ -529,6 +532,63 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     "message" not in input.resume  # type: ignore[operator]
                     or input.resume.get("message") is None  # type: ignore[union-attr]
                 )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_graph_input_resume_empty_goal_passes_empty_command_to_graph(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """Regression test for https://gitlab.com/gitlab-org/gitlab/-/work_items/602799.
+
+        When the websocket drops while a turn is paused at INPUT_REQUIRED, the Duo CLI
+        auto-retries by RESUMING the workflow with an empty goal (no approval). The
+        flow layer must forward this as a ``Command(resume=FlowEvent(RESPONSE,
+        message=""))`` to the graph — it is the recipient component (``FetchNode``)
+        that detects the missing message and raises ``InvalidRequestException``.
+
+        This test verifies that:
+        - The graph IS invoked (the flow layer does not short-circuit).
+        - The graph receives a ``Command`` with an empty-message RESPONSE event.
+        - The ``InvalidRequestException`` raised by ``FetchNode`` propagates correctly
+            so the server layer can map it to ``INVALID_ARGUMENT``.
+        """
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+
+        # Make the mocked graph raise InvalidRequestException to simulate FetchNode behaviour.
+        bad_request_error = InvalidRequestException(
+            "RESPONSE event must include a non-empty message. "
+            "The workflow remains paused; please provide real user input to continue."
+        )
+
+        async def _raising_gen():
+            """Async generator that immediately raises InvalidRequestException."""
+            if True:  # pylint: disable=using-constant-test
+                raise bad_request_error
+            yield  # pragma: no cover — makes this an async generator
+
+        mock_state_graph.compile.return_value.astream = Mock(
+            return_value=_raising_gen()
+        )
+
+        await flow_instance.run("")
+
+        # The graph MUST have been invoked — the flow layer passes the empty-message
+        # command through to the graph rather than short-circuiting.
+        mock_state_graph.compile.return_value.astream.assert_called_once()
+
+        # The Command passed to the graph must carry an empty-message RESPONSE event.
+        kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        graph_input = kwargs.get("input")
+        assert isinstance(graph_input, Command)
+        assert graph_input.resume["event_type"] == FlowEventType.RESPONSE  # type: ignore[index]
+        assert graph_input.resume.get("message") == ""  # type: ignore[union-attr]
+
+        # The workflow's last_error must be a InvalidRequestException so the server layer
+        # can map it to INVALID_ARGUMENT.
+        assert isinstance(flow_instance.last_error, InvalidRequestException)
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tools_registry")

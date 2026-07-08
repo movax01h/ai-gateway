@@ -38,6 +38,7 @@ from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
     EnvelopeVersionMismatchException,
+    InvalidRequestException,
     InvalidWorkflowIdException,
 )
 from duo_workflow_service.executor.outbox import OutboxSignal
@@ -1021,6 +1022,16 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             None,
             grpc.StatusCode.FAILED_PRECONDITION,
             "Envelope 'agent_platform_standard_context' version '2.0.0'",
+        ),
+        (
+            InvalidRequestException(
+                "RESPONSE event must include a non-empty message. "
+                "The workflow remains paused; please provide real user input to continue."
+            ),
+            False,
+            None,
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "RESPONSE event must include a non-empty message.",
         ),
     ],
 )

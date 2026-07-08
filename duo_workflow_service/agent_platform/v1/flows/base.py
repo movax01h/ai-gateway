@@ -413,7 +413,11 @@ class Flow(AbstractWorkflow):
 
         event = FlowEvent(event_type=FlowEventType.RESPONSE, message=goal)
         if not self._approval or self._approval.WhichOneof("user_decision") is None:
-            # Handle case where approval is None
+            # No approval — forward the goal as a RESPONSE event to the graph.
+            # If the goal is empty (e.g. a websocket-drop auto-retry), the
+            # recipient component (e.g. FetchNode) is responsible for detecting
+            # the bad input and raising InvalidRequestException so the workflow
+            # state is preserved and the caller receives INVALID_ARGUMENT.
             return Command(resume=event, update=state_update or None)
 
         ui_chat_log_update: list[UiChatLog] = []

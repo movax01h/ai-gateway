@@ -50,3 +50,23 @@ class EnvelopeVersionMismatchException(Exception):
     gRPC status so that callers receive a clear, actionable error rather than a
     generic ``INTERNAL`` failure.
     """
+
+
+class InvalidRequestException(Exception):
+    """Raised when a workflow request contains invalid input and cannot be processed.
+
+    Unlike most workflow errors, this exception must NOT transition the workflow
+    to ``FAILED`` in Rails — the workflow state should remain unchanged so the
+    user can correct their input and retry.  The gRPC call is terminated with
+    ``INVALID_ARGUMENT`` so the caller receives a clear, actionable signal that
+    the request was rejected due to bad input, without needing to inspect the
+    session state further.
+
+    The distinction from ``FAILED_PRECONDITION`` is intentional: the problem is
+    the *input itself* (e.g. an empty goal on resume), not the state of the
+    system.  ``INVALID_ARGUMENT`` is the correct gRPC status for arguments that
+    are problematic regardless of system state.
+
+    The ``message`` argument should describe the specific reason the request was
+    rejected, as it is surfaced directly to the caller via the gRPC status detail.
+    """

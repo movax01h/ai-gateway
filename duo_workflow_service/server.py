@@ -39,6 +39,7 @@ from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
     EnvelopeVersionMismatchException,
+    InvalidRequestException,
     InvalidWorkflowIdException,
 )
 from duo_workflow_service.executor.outbox import OutboxSignal
@@ -470,6 +471,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ):
                 context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
                 context.set_details(str(workflow.last_error.__cause__))
+            elif workflow.last_error and isinstance(
+                workflow.last_error, InvalidRequestException
+            ):
+                # The request contained invalid input (e.g. an empty goal on resume).
+                # The workflow state remains unchanged in Rails; we return
+                # INVALID_ARGUMENT so the caller gets a clear signal that the input
+                # itself was wrong, not the system state.
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(str(workflow.last_error))
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(

@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.errors.typing import InvalidRequestException
 
 __all__ = ["FetchNode"]
 
@@ -105,11 +106,9 @@ class FetchNode:
         if event["event_type"] in (FlowEventType.MODIFY, FlowEventType.RESPONSE):
             if "message" not in event or not event["message"]:
                 event_name = event["event_type"].value.upper()
-                raise NotifiableAgentException(
-                    "An internal error occurred: the user input event did not include a message.",
-                    internal_detail=(
-                        f"{event_name} event must include a message with user feedback"
-                    ),
+                raise InvalidRequestException(
+                    f"{event_name} event must include a non-empty message. "
+                    "The workflow remains paused; please provide real user input to continue."
                 )
 
             # Extract user message from event

@@ -25,7 +25,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    InvalidRequestException,
+    NotifiableException,
+)
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -652,6 +655,350 @@ async def test_workflow_context_manager_resume_interrupted(
             ),
         ]
     )
+
+
+def _make_workflow_for_reconciliation(
+    http_client,
+    workflow_id,
+    workflow_type,
+    *,
+    checkpoint_status: WorkflowStatusEnum,
+    use_prev_channel_values: bool = True,
+) -> tuple[GitLabWorkflow, AsyncMock]:
+    """Build a GitLabWorkflow wired for reconciliation tests.
+
+    Constructs the workflow with a resumable config and replaces _status_handler with an AsyncMock so tests can assert
+    on update_workflow_status calls.  Returns both the workflow and the mock so callers can configure
+    get_workflow_status.return_value and inspect call_args_list with proper typing.
+
+    Does NOT configure http_client.aget — each test is responsible for setting up the HTTP responses it needs
+    (checkpoint API, Rails status, etc.).
+
+    When use_prev_channel_values=True the checkpoint status is injected into _prev_channel_values
+    (incremental_checkpoints fast path).  Set it to False to leave _prev_channel_values empty, forcing the API fallback
+    path.
+    """
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": WorkflowStatusEnum.INPUT_REQUIRED,
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    status_handler_mock = AsyncMock()
+    gitlab_workflow._status_handler = status_handler_mock
+
+    if use_prev_channel_values:
+        gitlab_workflow._prev_channel_values = {"status": checkpoint_status}
+
+    return gitlab_workflow, status_handler_mock
+
+
+def _make_checkpoint_aget(
+    workflow_id: str, checkpoint_status: WorkflowStatusEnum, rails_status: str
+):
+    """Return an async aget function that serves checkpoint and workflow status responses."""
+    inner = {"id": "cp-1", "channel_values": {"status": checkpoint_status}}
+    compressed = compress_checkpoint(inner)  # type: ignore[arg-type]
+
+    async def mock_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            return GitLabHttpResponse(
+                status_code=200,
+                body=[
+                    {
+                        "thread_ts": "cp-1",
+                        "parent_ts": None,
+                        "compressed_checkpoint": compressed,
+                        "metadata": {},
+                    }
+                ],
+            )
+        if f"/workflows/{workflow_id}" in path:
+            return GitLabHttpResponse(status_code=200, body={"status": rails_status})
+        raise ValueError(f"Unexpected path: {path}")
+
+    return mock_aget
+
+
+@pytest.mark.asyncio
+async def test_bad_request_reconciles_rails_to_checkpoint_status_via_prev_channel_values(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Core bug (gitlab-org/gitlab#602799): after an empty-goal reconnect is rejected, Rails is driven back to
+    INPUT_REQUIRED using the in-memory checkpoint status (_prev_channel_values, incremental_checkpoints-capable client).
+
+    The checkpoint API must NOT be called — the status is read from memory.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=True,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    checkpoint_api_calls = []
+
+    async def tracking_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            checkpoint_api_calls.append(path)
+        raise ValueError(f"Unexpected path: {path}")
+
+    http_client.aget = tracking_aget
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.REQUIRE_INPUT,
+    ]
+    assert not checkpoint_api_calls, (
+        "checkpoint API must not be called when _prev_channel_values is populated"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bad_request_reconciles_rails_to_checkpoint_status_via_api_fallback(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Same reconciliation but via the API fallback path (older client without incremental_checkpoints, so
+    _prev_channel_values is empty).
+
+    The checkpoint API MUST be called to fetch the status.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    checkpoint_api_calls = []
+    real_aget = _make_checkpoint_aget(
+        workflow_id, WorkflowStatusEnum.INPUT_REQUIRED, "running"
+    )
+
+    async def tracking_aget(path, **kwargs):
+        if "checkpoints?per_page=1" in path:
+            checkpoint_api_calls.append(path)
+        return await real_aget(path, **kwargs)
+
+    http_client.aget = tracking_aget
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.REQUIRE_INPUT,
+    ]
+    assert len(checkpoint_api_calls) == 1, (
+        "checkpoint API must be called when _prev_channel_values is empty"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_rails_already_matches(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when Rails already reflects the checkpoint status."""
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = (
+        WorkflowStatusEnum.INPUT_REQUIRED
+    )
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_checkpoint_status_has_no_rails_event(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when the checkpoint status has no corresponding Rails event.
+
+    EXECUTION maps to RUNNING which has no entry in CHECKPOINT_STATUS_TO_STATUS_EVENT.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.EXECUTION,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_reconciliation_survives_checkpoint_api_error(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """A checkpoint API failure during reconciliation must not mask the original exception."""
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    async def failing_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            return GitLabHttpResponse(status_code=500, body={"error": "server error"})
+        raise ValueError(f"Unexpected path: {path}")
+
+    http_client.aget = failing_aget
+
+    # The InvalidRequestException must still propagate despite the API error.
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_no_checkpoints_exist(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when the checkpoint API returns an empty list.
+
+    Covers the ``_fetch_most_recent_checkpoint`` → ``return None`` path
+    and the ``_reconcile_session_status`` early-return when
+    ``_get_latest_checkpoint_status`` returns ``None``.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    async def empty_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            return GitLabHttpResponse(status_code=200, body=[])
+        raise ValueError(f"Unexpected path: {path}")
+
+    http_client.aget = empty_aget
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    # Only the entry RESUME — no reconciliation update because there are no checkpoints.
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_checkpoint_status_has_no_workflow_mapping(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when the checkpoint status has no WORKFLOW_STATUS_TO_CHECKPOINT_STATUS entry.
+
+    Covers the ``checkpoint_status_str is None`` early-return in
+    ``_reconcile_session_status``.  We inject a raw string value that is
+    not a member of ``WorkflowStatusEnum`` directly into ``_prev_channel_values`` to
+    simulate a future/unknown status that the current mapping does not cover.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    # Inject an unknown status value that has no entry in WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.
+    gitlab_workflow._prev_channel_values = {"status": "UNKNOWN_FUTURE_STATUS"}
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    # Only the entry RESUME — no reconciliation update because the status is unmapped.
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
 
 
 @pytest.mark.asyncio

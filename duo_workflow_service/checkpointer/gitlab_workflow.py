@@ -55,7 +55,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
 from duo_workflow_service.entities import WorkflowStatusEnum
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    InvalidRequestException,
+    NotifiableException,
+)
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.gitlab.gitlab_api import (
     WorkflowConfig,
@@ -621,6 +624,29 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # update status to DROP, track failure event,
         # and return False
         if exc_type:
+            # An InvalidRequestException (e.g. an empty-goal "reconnect"/auto-retry
+            # that reaches a live interrupt with no real user input) must NOT
+            # transition the workflow to FAILED. Skip both _handle_workflow_exception
+            # and _update_workflow_status_safely(DROP) and let the exception propagate,
+            # so the workflow stays resumable at its current status (e.g.
+            # INPUT_REQUIRED) and the server layer maps it to INVALID_ARGUMENT.
+            # See gitlab-org/gitlab#602799.
+            if isinstance(exc_value, InvalidRequestException):
+                # The resume/retry event sent in __aenter__ may have advanced the
+                # Rails workflow state (e.g. input_required → running) before the
+                # graph inspected and rejected the invalid input.  Reconcile Rails
+                # back to whatever the latest checkpoint declares as the true pause
+                # boundary, so the next reconnect sees the correct status and is
+                # classified as RESUME (not RETRY).  See gitlab-org/gitlab#602799.
+                self._logger.info(
+                    "InvalidRequestException at interrupt; leaving workflow status "
+                    "untouched (no DROP transition) so it stays resumable.",
+                    workflow_id=self._workflow_id,
+                )
+                if not self._offline_mode:
+                    await self._reconcile_session_status()
+                return False
+
             stop_exception = str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
 
             if not stop_exception:
@@ -654,7 +680,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         status = await self._status_handler.get_workflow_status(
             workflow_id=self._workflow_id
         )
-
         await self._track_workflow_completion(status)
         return True
 
@@ -785,6 +810,141 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             log_exception(e, extra={"workflow_id": self._workflow_id})
         return False
 
+    async def _fetch_most_recent_checkpoint(self) -> Optional[Dict[str, Any]]:
+        """Fetch the most recent checkpoint dict directly from the Rails API.
+
+        Always goes to the API — does not use the ``latest_checkpoint`` cached in
+        ``_workflow_config``, which is populated at session start and may be stale.
+        Returns the raw checkpoint dict (with ``checkpoint["checkpoint"]`` already
+        decompressed) or ``None`` when no checkpoints exist yet.
+        """
+        endpoint = add_compression_param(
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
+        )
+        with duo_workflow_metrics.time_gitlab_response(
+            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints?per_page=1",
+            method="GET",
+        ):
+            response = await self._client.aget(
+                path=endpoint,
+                object_hook=checkpoint_decoder,
+            )
+
+        if not response.is_success():
+            self._logger.error(
+                "Failed to fetch checkpoints",
+                workflow_id=self._workflow_id,
+                status_code=response.status_code,
+                response_body=response.body,
+            )
+            raise Exception(f"Failed to fetch checkpoints: {response.body}")
+
+        gl_checkpoints = response.body
+        if not gl_checkpoints:
+            return None
+
+        checkpoint = gl_checkpoints[0]
+        if "compressed_checkpoint" in checkpoint:
+            checkpoint["checkpoint"] = uncompress_checkpoint(
+                checkpoint["compressed_checkpoint"]
+            )
+        return checkpoint
+
+    async def _get_latest_checkpoint_status(self) -> Optional[WorkflowStatusEnum]:
+        """Return the workflow status from the most recent checkpoint.
+
+        Primary source: ``_prev_channel_values["status"]``, which is kept current by
+        ``_hydrate_incremental_state`` (session start) and ``aput`` (every write).
+        Only populated when the client supports ``incremental_checkpoints``.
+
+        Fallback: ``_fetch_most_recent_checkpoint`` — fetches fresh from the Rails
+        API, bypassing the stale session-start cache.
+        """
+        checkpoint_status_value: Optional[WorkflowStatusEnum] = (
+            self._prev_channel_values.get("status")
+        )
+        if checkpoint_status_value is not None:
+            return checkpoint_status_value
+
+        checkpoint = await self._fetch_most_recent_checkpoint()
+        if checkpoint is None:
+            return None
+        return checkpoint["checkpoint"].get("channel_values", {}).get("status")
+
+    async def _reconcile_session_status(self) -> None:
+        """Reconcile Rails workflow status against the latest checkpoint.
+
+        After an ``InvalidRequestException`` the session status in Rails may have
+        been advanced (e.g. ``input_required`` → ``running``) by the ``resume``/
+        ``retry`` event sent in ``__aenter__``, while the LangGraph checkpoint still
+        reflects the true pause boundary (e.g. ``INPUT_REQUIRED``).  This method
+        treats the checkpoint as the single source of truth and — when Rails disagrees
+        — drives it back to the status the checkpoint declares.
+
+        The method is intentionally decoupled from any specific component design
+        (e.g. ``HumanInputComponent`` / ``FetchNode``): it does not assume *why* the
+        mismatch occurred, only that the checkpoint is authoritative.
+        """
+        try:
+            checkpoint_status_value = await self._get_latest_checkpoint_status()
+
+            if checkpoint_status_value is None:
+                self._logger.info(
+                    "No checkpoint status available for reconciliation; skipping.",
+                    workflow_id=self._workflow_id,
+                )
+                return
+
+            checkpoint_status_str = WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.get(
+                checkpoint_status_value
+            )
+            if checkpoint_status_str is None:
+                self._logger.info(
+                    "Checkpoint status has no Rails mapping; skipping reconciliation.",
+                    workflow_id=self._workflow_id,
+                    checkpoint_status=checkpoint_status_value,
+                )
+                return
+
+            target_event = CHECKPOINT_STATUS_TO_STATUS_EVENT.get(checkpoint_status_str)
+            if target_event is None:
+                self._logger.info(
+                    "Checkpoint status maps to no Rails status event; skipping reconciliation.",
+                    workflow_id=self._workflow_id,
+                    checkpoint_status_str=checkpoint_status_str,
+                )
+                return
+
+            rails_status = await self._status_handler.get_workflow_status(
+                workflow_id=self._workflow_id
+            )
+
+            if rails_status == checkpoint_status_value:
+                self._logger.info(
+                    "Rails status already matches checkpoint; no reconciliation needed.",
+                    workflow_id=self._workflow_id,
+                    status=rails_status,
+                )
+                return
+
+            self._logger.info(
+                "Reconciling Rails status to match checkpoint.",
+                workflow_id=self._workflow_id,
+                rails_status=rails_status,
+                checkpoint_status=checkpoint_status_value,
+                target_event=target_event,
+            )
+            await self._update_workflow_status_safely(target_event)
+
+        except Exception as e:
+            log_exception(
+                e,
+                extra={
+                    "workflow_id": self._workflow_id,
+                    "context": "Failed to reconcile session status",
+                },
+            )
+
     def _decode_graphql_latest_checkpoint(
         self, checkpoint: GitLabCheckpoint
     ) -> Optional[CheckpointTuple]:
@@ -900,38 +1060,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 return None
 
             # If a flow is resumed and the latest checkpoint couldn't be fetched (<18.8 version of GitLab), fetch it
-            endpoint = add_compression_param(
-                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
-            )
-
-            with duo_workflow_metrics.time_gitlab_response(
-                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints?per_page=1",
-                method="GET",
-            ):
-                response = await self._client.aget(
-                    path=endpoint,
-                    object_hook=checkpoint_decoder,
-                )
-
-                if not response.is_success():
-                    self._logger.error(
-                        "Failed to fetch checkpoints",
-                        workflow_id=self._workflow_id,
-                        status_code=response.status_code,
-                        response_body=response.body,
-                    )
-                    raise Exception(f"Failed to fetch checkpoints: {response.body}")
-
-                gl_checkpoints = response.body
-
-            checkpoint = gl_checkpoints[0] if gl_checkpoints else None
+            checkpoint = await self._fetch_most_recent_checkpoint()
 
             if checkpoint:
-                if "compressed_checkpoint" in checkpoint:
-                    checkpoint["checkpoint"] = uncompress_checkpoint(
-                        checkpoint["compressed_checkpoint"]
-                    )
-                # else: checkpoint["checkpoint"] already exists from old instance, use as-is
                 self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
 
         if checkpoint:
