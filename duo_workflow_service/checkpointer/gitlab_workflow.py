@@ -117,6 +117,9 @@ def not_implemented_sync_method(func: T) -> T:
 
 PROPERTY_MAX_LENGTH = 1000
 
+# status is required for blob reconstruction
+_ALWAYS_BLOBBED_SCALAR_CHANNELS = frozenset({"status"})
+
 
 def _attribute_dirty(
     attribute: str, writes: Sequence[Tuple[str, Any]]
@@ -222,12 +225,12 @@ def _serialize_channel_blobs(
             continue
 
         val = channel_values[channel]
-        # Scalar channels (status, goal, project, etc.) are always full
-        # replacements and are tiny — incremental savings come entirely from
-        # append-heavy list/dict-of-list channels like conversation_history.
-        # Scalars are always recoverable from compressed_checkpoint, so
-        # excluding them keeps channel_blobs small without information loss.
-        if not isinstance(val, (list, dict)):
+        # Scalars are recoverable from compressed_checkpoint, so exclude them —
+        # except those needed for blob reconstruction.
+        if (
+            not isinstance(val, (list, dict))
+            and channel not in _ALWAYS_BLOBBED_SCALAR_CHANNELS
+        ):
             continue
 
         prev = prev_channel_values.get(channel)
