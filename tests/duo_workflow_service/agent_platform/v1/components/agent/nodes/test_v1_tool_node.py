@@ -1,4 +1,5 @@
 # pylint: disable=file-naming-for-tests,too-many-lines
+import asyncio
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
@@ -1198,3 +1199,502 @@ class TestToolNodeTodoWriteContextWrite:
         result = await node.run(state)
 
         assert result["context"][component_name]["last_todo_write"] == second_args
+
+
+class TestToolNodeConcurrency:
+    """Test suite verifying that multiple tool calls in one step execute concurrently."""
+
+    def _build_node_with_toolset(
+        self,
+        toolset,
+        component_name,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
+        static_key = IOKey(
+            target="conversation_history",
+            subkeys=[component_name],
+            optional=True,
+        )
+        return ToolNode(
+            name="test_tool_node",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: static_key
+            ),
+            toolset=toolset,
+            ui_history=ui_history,
+            tracker=tracker,
+        )
+
+    def _make_state(self, base_flow_state, component_name, tool_calls):
+        msg = Mock(spec=AIMessage)
+        msg.tool_calls = tool_calls
+        state = base_flow_state.copy()
+        state["conversation_history"] = {component_name: [msg]}
+        return state
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    @pytest.mark.parametrize(
+        "waiter_first",
+        [True, False],
+        ids=["waiter_listed_first", "waiter_listed_second"],
+    )
+    async def test_tool_calls_executed_concurrently(
+        self,
+        waiter_first,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        """Prove that tool coroutines run concurrently regardless of their listing order.
+
+        The waiter tool suspends until the signaller tool sets an event. Under sequential execution the signaller never
+        gets scheduled while the waiter is suspended, so the test would hang. Completing within the timeout proves that
+        both coroutines run at the same time.
+
+        Parametrized over waiter_first so we confirm concurrency whether the blocking tool appears first or second in
+        tool_calls.
+        """
+        signalled = asyncio.Event()
+
+        waiter = Mock(spec=BaseTool)
+        waiter.name = "waiter"
+
+        async def _waiter(_args):
+            await asyncio.wait_for(signalled.wait(), timeout=2.0)
+            return "waiter_result"
+
+        waiter.ainvoke = _waiter
+
+        signaller = Mock(spec=BaseTool)
+        signaller.name = "signaller"
+
+        async def _signaller(_args):
+            signalled.set()
+            return "signaller_result"
+
+        signaller.ainvoke = _signaller
+
+        tools = {"waiter": waiter, "signaller": signaller}
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(side_effect=tools.__getitem__)
+        toolset.get = Mock(side_effect=tools.get)
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        ordered = (
+            [
+                {"name": "waiter", "args": {}, "id": "w_id"},
+                {"name": "signaller", "args": {}, "id": "s_id"},
+            ]
+            if waiter_first
+            else [
+                {"name": "signaller", "args": {}, "id": "s_id"},
+                {"name": "waiter", "args": {}, "id": "w_id"},
+            ]
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning",
+            side_effect=lambda response, **_: response,
+        ):
+            result = await node.run(
+                self._make_state(base_flow_state, component_name, ordered)
+            )
+
+        tool_messages = [
+            m
+            for m in result["conversation_history"][component_name]
+            if isinstance(m, ToolMessage)
+        ]
+        by_id = {m.tool_call_id: m for m in tool_messages}
+        assert by_id["w_id"].content == "waiter_result"
+        assert by_id["s_id"].content == "signaller_result"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    @pytest.mark.parametrize(
+        "slow_listed_first",
+        [True, False],
+        ids=["slow_listed_first", "fast_listed_first"],
+    )
+    async def test_response_order_matches_tool_call_order(
+        self,
+        slow_listed_first,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        """ToolMessages are returned in tool_calls order even when completion order differs.
+
+        Parametrized so we verify ordering is preserved whether the slow tool appears first or second in the input list.
+        """
+        fast_done = asyncio.Event()
+
+        tool_slow = Mock(spec=BaseTool)
+        tool_slow.name = "tool_slow"
+
+        async def _slow(_args):
+            await asyncio.sleep(0)  # yield so tool_fast can run first
+            await fast_done.wait()
+            return "slow_result"
+
+        tool_slow.ainvoke = _slow
+
+        tool_fast = Mock(spec=BaseTool)
+        tool_fast.name = "tool_fast"
+
+        async def _fast(_args):
+            fast_done.set()
+            return "fast_result"
+
+        tool_fast.ainvoke = _fast
+
+        tools = {"tool_slow": tool_slow, "tool_fast": tool_fast}
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(side_effect=tools.__getitem__)
+        toolset.get = Mock(side_effect=tools.get)
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        if slow_listed_first:
+            tool_calls = [
+                {"name": "tool_slow", "args": {}, "id": "slow_id"},
+                {"name": "tool_fast", "args": {}, "id": "fast_id"},
+            ]
+            expected_ids = ["slow_id", "fast_id"]
+            expected_contents = ["slow_result", "fast_result"]
+        else:
+            tool_calls = [
+                {"name": "tool_fast", "args": {}, "id": "fast_id"},
+                {"name": "tool_slow", "args": {}, "id": "slow_id"},
+            ]
+            expected_ids = ["fast_id", "slow_id"]
+            expected_contents = ["fast_result", "slow_result"]
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning",
+            side_effect=lambda response, **_: response,
+        ):
+            result = await node.run(
+                self._make_state(base_flow_state, component_name, tool_calls)
+            )
+
+        tool_messages = [
+            m
+            for m in result["conversation_history"][component_name]
+            if isinstance(m, ToolMessage)
+        ]
+        assert len(tool_messages) == 2
+        assert [m.tool_call_id for m in tool_messages] == expected_ids
+        assert [m.content for m in tool_messages] == expected_contents
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    async def test_invalid_response_type_raises_value_error(
+        self,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        """A tool response that isn't str/list/dict raises ValueError out of run()."""
+        tool_bad_type = Mock(spec=BaseTool)
+        tool_bad_type.name = "tool_bad_type"
+
+        async def _bad_type(_args):
+            return 42  # not a str, list, or dict
+
+        tool_bad_type.ainvoke = _bad_type
+
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(return_value=tool_bad_type)
+        toolset.get = Mock(return_value=tool_bad_type)
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        tool_calls = [{"name": "tool_bad_type", "args": {}, "id": "bad_type_id"}]
+
+        with pytest.raises(ValueError, match="Invalid response type for tool"):
+            await node.run(
+                self._make_state(base_flow_state, component_name, tool_calls)
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    async def test_exception_in_one_tool_propagates(
+        self,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        """An unhandled exception raised during sanitization propagates out of run().
+
+        _execute_tool catches all tool-invocation exceptions and returns an error string, so the exceptions that can
+        escape _execute_one are those raised by _sanitize_response (e.g. an unexpected error from
+        apply_security_scanning that is not a SecurityException). With return_exceptions=True all tasks are allowed to
+        complete before the exception is re-raised, so the other tool is not cancelled mid-flight. The exception must
+        still surface to the caller so the workflow can handle the failure correctly.
+        """
+        tool_ok = Mock(spec=BaseTool)
+        tool_ok.name = "tool_ok"
+
+        async def _ok(_args):
+            return "ok_result"
+
+        tool_ok.ainvoke = _ok
+
+        tool_bad = Mock(spec=BaseTool)
+        tool_bad.name = "tool_bad"
+
+        async def _bad(_args):
+            return "bad_result"
+
+        tool_bad.ainvoke = _bad
+
+        tools = {"tool_ok": tool_ok, "tool_bad": tool_bad}
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(side_effect=tools.__getitem__)
+        toolset.get = Mock(side_effect=tools.get)
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        tool_calls = [
+            {"name": "tool_ok", "args": {}, "id": "ok_id"},
+            {"name": "tool_bad", "args": {}, "id": "bad_id"},
+        ]
+
+        boom = RuntimeError("sanitization exploded")
+
+        def _scanning_side_effect(response, **_kwargs):
+            if response == "bad_result":
+                raise boom
+            return response
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning",
+            side_effect=_scanning_side_effect,
+        ):
+            with pytest.raises(RuntimeError, match="sanitization exploded"):
+                await node.run(
+                    self._make_state(base_flow_state, component_name, tool_calls)
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    async def test_multiple_tool_failures_are_all_logged(
+        self,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+        mock_logger,
+    ):
+        """When two concurrent tool calls fail, only the first is raised but both are logged.
+
+        Regression test for a gap where return_exceptions=True captured every failure, but only the first BaseException
+        in the results list was surfaced; the rest were silently dropped with no log entry.
+        """
+        tool_bad_one = Mock(spec=BaseTool)
+        tool_bad_one.name = "tool_bad_one"
+
+        async def _bad_one(_args):
+            return "bad_one_result"
+
+        tool_bad_one.ainvoke = _bad_one
+
+        tool_bad_two = Mock(spec=BaseTool)
+        tool_bad_two.name = "tool_bad_two"
+
+        async def _bad_two(_args):
+            return "bad_two_result"
+
+        tool_bad_two.ainvoke = _bad_two
+
+        tools = {"tool_bad_one": tool_bad_one, "tool_bad_two": tool_bad_two}
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(side_effect=tools.__getitem__)
+        toolset.get = Mock(side_effect=tools.get)
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        tool_calls = [
+            {"name": "tool_bad_one", "args": {}, "id": "bad_one_id"},
+            {"name": "tool_bad_two", "args": {}, "id": "bad_two_id"},
+        ]
+
+        first_error = RuntimeError("first tool exploded")
+        second_error = RuntimeError("second tool exploded")
+
+        def _scanning_side_effect(response, **_kwargs):
+            if response == "bad_one_result":
+                raise first_error
+            if response == "bad_two_result":
+                raise second_error
+            return response
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning",
+            side_effect=_scanning_side_effect,
+        ):
+            with pytest.raises(RuntimeError, match="first tool exploded"):
+                await node.run(
+                    self._make_state(base_flow_state, component_name, tool_calls)
+                )
+
+        logged_errors = [
+            call.args[0]
+            for call in mock_logger.error.call_args_list
+            if "second tool exploded" in call.args[0]
+        ]
+        assert logged_errors, "Expected the non-raised failure to be logged"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    async def test_cancellation_while_tools_pending_cleans_up_tasks(
+        self,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        """CancelledError during gather cancels inner tasks and propagates cleanly.
+
+        This guards against the 'RuntimeError: Event loop is closed' regression that occurred when the gRPC client
+        stream closed (e.g. workhorse restart) while concurrent tool-call Tasks from asyncio.gather were still pending.
+        The fix ensures that when the outer workflow task is cancelled, all inner tasks are explicitly cancelled and
+        awaited before the CancelledError is re-raised, so no tasks are left dangling when the event loop shuts down.
+        """
+        # A barrier that keeps the slow tool suspended until we cancel the outer task.
+        barrier = asyncio.Event()
+        slow_started = asyncio.Event()
+
+        tool_slow = Mock(spec=BaseTool)
+        tool_slow.name = "tool_slow"
+
+        async def _slow(_args):
+            slow_started.set()
+            await barrier.wait()  # blocks until cancelled
+            return "slow_result"
+
+        tool_slow.ainvoke = _slow
+
+        tool_fast = Mock(spec=BaseTool)
+        tool_fast.name = "tool_fast"
+
+        async def _fast(_args):
+            return "fast_result"
+
+        tool_fast.ainvoke = _fast
+
+        tools = {"tool_slow": tool_slow, "tool_fast": tool_fast}
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(side_effect=tools.__getitem__)
+        toolset.get = Mock(side_effect=tools.get)
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        tool_calls = [
+            {"name": "tool_slow", "args": {}, "id": "slow_id"},
+            {"name": "tool_fast", "args": {}, "id": "fast_id"},
+        ]
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning",
+            side_effect=lambda response, **_: response,
+        ):
+            # Wrap run() in a Task so we can cancel it from outside.
+            outer_task = asyncio.ensure_future(
+                node.run(self._make_state(base_flow_state, component_name, tool_calls))
+            )
+
+            # Wait until the slow tool has actually started (i.e. gather is running).
+            await asyncio.wait_for(slow_started.wait(), timeout=2.0)
+
+            # Cancel the outer task, simulating gRPC stream closure / server shutdown.
+            outer_task.cancel()
+
+            # The outer task must raise CancelledError (not RuntimeError or hang).
+            with pytest.raises(asyncio.CancelledError):
+                await outer_task
+
+        # After cancellation, no tasks should be left pending in the event loop.
+        # If inner tasks were not properly cancelled and awaited, they would still
+        # be running here and could trigger "Event loop is closed" on shutdown.
+        pending = [
+            t
+            for t in asyncio.all_tasks()
+            if not t.done() and t is not asyncio.current_task()
+        ]
+        assert pending == [], f"Leaked tasks after cancellation: {pending}"
