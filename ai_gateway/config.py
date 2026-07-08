@@ -55,6 +55,7 @@ class ConfigTLS(BaseModel):
     enabled: bool = False
     cert_file: Optional[str] = None
     key_file: Optional[str] = None
+    ssl_ciphers: str = "TLSv1"
 
     @model_validator(mode="after")
     def validate_when_enabled(self) -> "ConfigTLS":

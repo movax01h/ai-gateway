@@ -991,24 +991,29 @@ class TestConfigFastApiTLS:
         monkeypatch.delenv("AIGW_FASTAPI__TLS__ENABLED", raising=False)
         monkeypatch.delenv("AIGW_FASTAPI__TLS__CERT_FILE", raising=False)
         monkeypatch.delenv("AIGW_FASTAPI__TLS__KEY_FILE", raising=False)
+        monkeypatch.delenv("AIGW_FASTAPI__TLS__SSL_CIPHERS", raising=False)
         cfg = ConfigFastApi()
         assert cfg.tls.enabled is False
         assert cfg.tls.cert_file is None
         assert cfg.tls.key_file is None
+        assert cfg.tls.ssl_ciphers == "TLSv1"
 
     def test_tls_reads_from_env_via_top_level_config(self, monkeypatch, tmp_path):
         """ConfigFastApi is a plain BaseModel; TLS env vars are read via the top-level Config."""
         cert = tmp_path / "server.crt"
         key = tmp_path / "server.key"
+        ciphers = "TLSv1.2"
         cert.touch()
         key.touch()
         monkeypatch.setenv("AIGW_FASTAPI__TLS__ENABLED", "true")
         monkeypatch.setenv("AIGW_FASTAPI__TLS__CERT_FILE", str(cert))
         monkeypatch.setenv("AIGW_FASTAPI__TLS__KEY_FILE", str(key))
+        monkeypatch.setenv("AIGW_FASTAPI__TLS__SSL_CIPHERS", str(ciphers))
         cfg = Config(_env_file=None)
         assert cfg.fastapi.tls.enabled is True
         assert cfg.fastapi.tls.cert_file == str(cert)
         assert cfg.fastapi.tls.key_file == str(key)
+        assert cfg.fastapi.tls.ssl_ciphers == str(ciphers)
 
 
 class TestConfigDuoWorkflowTLS:
