@@ -113,8 +113,12 @@ async def persist_error_to_ui_chat_log(
     """
     if isinstance(error, NotifiableAgentException):
         error_message = error.ui_message
+    elif isinstance(error, ValueError):
+        error_str = str(error)
+        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE + f"\n```\n{error_str}\n```"
     else:
-        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE
+        typestr = type(error).__name__
+        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE + f"\n```\nError: {typestr}\n```"
 
     error_log = UiChatLog(
         message_type=MessageTypeEnum.AGENT,
