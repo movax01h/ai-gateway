@@ -269,6 +269,109 @@ def test_tree_format_display_message(tool, args, expected_message):
     assert msg == expected_message
 
 
+class TestGetRepositoryFile404Dedup:
+    """Gitlab-org/gitlab#604564: repeated requests for a 404'd path short-circuit."""
+
+    @pytest.fixture
+    def not_found_response(self):
+        return GitLabHttpResponse(
+            status_code=404,
+            body={"message": "404 File Not Found"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_repeated_404_short_circuits(
+        self, tool, gitlab_client_mock, not_found_response
+    ):
+        gitlab_client_mock.aget.return_value = not_found_response
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="3", ref="master", file_path="missing.rb")
+
+        with pytest.raises(
+            ToolException, match="already returned 404 earlier in this session"
+        ):
+            await tool._arun(project_id="3", ref="master", file_path="missing.rb")
+
+        gitlab_client_mock.aget.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_different_path_still_fetched(
+        self, tool, gitlab_client_mock, not_found_response
+    ):
+        gitlab_client_mock.aget.return_value = not_found_response
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="3", ref="master", file_path="missing_a.rb")
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="3", ref="master", file_path="missing_b.rb")
+
+        assert gitlab_client_mock.aget.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_different_ref_still_fetched(
+        self, tool, gitlab_client_mock, not_found_response
+    ):
+        gitlab_client_mock.aget.return_value = not_found_response
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="3", ref="master", file_path="missing.rb")
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="3", ref="main", file_path="missing.rb")
+
+        assert gitlab_client_mock.aget.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_different_project_still_fetched(
+        self, tool, gitlab_client_mock, not_found_response
+    ):
+        gitlab_client_mock.aget.return_value = not_found_response
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="3", ref="master", file_path="missing.rb")
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await tool._arun(project_id="4", ref="master", file_path="missing.rb")
+
+        assert gitlab_client_mock.aget.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fresh_instance_refetches(
+        self, metadata, gitlab_client_mock, not_found_response
+    ):
+        gitlab_client_mock.aget.return_value = not_found_response
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await GetRepositoryFile(metadata=metadata)._arun(
+                project_id="3", ref="master", file_path="missing.rb"
+            )
+
+        with pytest.raises(ToolException, match="HTTP 404"):
+            await GetRepositoryFile(metadata=metadata)._arun(
+                project_id="3", ref="master", file_path="missing.rb"
+            )
+
+        assert gitlab_client_mock.aget.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_successful_fetch_is_not_cached(self, tool, gitlab_client_mock):
+        content = base64.b64encode(b"file content").decode("utf-8")
+        gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+            status_code=200,
+            body={"content": content},
+        )
+
+        for _ in range(2):
+            result = await tool._arun(
+                project_id="3", ref="master", file_path="README.md"
+            )
+            assert json.loads(result) == {"content": "file content"}
+
+        assert gitlab_client_mock.aget.call_count == 2
+
+
 # Test cases for offset/limit pagination
 class TestGetRepositoryFilePagination:
     """Test GetRepositoryFile tool with offset/limit pagination."""
