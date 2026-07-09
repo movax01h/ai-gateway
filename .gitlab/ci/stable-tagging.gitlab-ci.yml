@@ -1,0 +1,12 @@
+tag-stable-patch:
+  stage: release
+  # Runs on every new commit to a stable-X-Y-ee branch and cuts the next
+  # patch tag (self-hosted-vX.Y.<n+1>-ee). The tag then triggers its own
+  # pipeline that builds and releases the self-hosted images.
+  needs: []
+  script:
+    - python scripts/tag_stable_patch.py
+  rules:
+    - if: '$AIGW_TAGGING_ACCESS_TOKEN == null || $AIGW_TAGGING_ACCESS_TOKEN == ""'
+      when: never
+    - if: $CI_COMMIT_BRANCH =~ /^stable-\d+-\d+-ee$/
