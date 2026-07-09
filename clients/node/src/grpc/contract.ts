@@ -315,6 +315,24 @@ export interface GenerateTokenResponse {
   server_capabilities: string[];
 }
 
+/** Capability describes a single server capability advertised for negotiation. */
+export interface Capability {
+  /** name is the unique identifier of the capability (e.g. "tool_call_approval"). */
+  name: string;
+  /** metadata is an optional JSON-encoded string carrying additional details about the capability. */
+  metadata: string;
+}
+
+/** ListCapabilitiesRequest is an empty request to retrieve the server's advertised capabilities. */
+export interface ListCapabilitiesRequest {
+}
+
+/** ListCapabilitiesResponse returns the capabilities advertised by the server for this session. */
+export interface ListCapabilitiesResponse {
+  /** capabilities lists the capabilities advertised by the server. */
+  capabilities: Capability[];
+}
+
 /** ListToolsRequest is an empty request to retrieve the available tool definitions. */
 export interface ListToolsRequest {
 }
@@ -2791,6 +2809,187 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
   },
 };
 
+function createBaseCapability(): Capability {
+  return { name: "", metadata: "" };
+}
+
+export const Capability: MessageFns<Capability> = {
+  encode(message: Capability, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.metadata !== "") {
+      writer.uint32(18).string(message.metadata);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Capability {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCapability();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.metadata = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Capability {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      metadata: isSet(object.metadata) ? globalThis.String(object.metadata) : "",
+    };
+  },
+
+  toJSON(message: Capability): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.metadata !== "") {
+      obj.metadata = message.metadata;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Capability>, I>>(base?: I): Capability {
+    return Capability.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Capability>, I>>(object: I): Capability {
+    const message = createBaseCapability();
+    message.name = object.name ?? "";
+    message.metadata = object.metadata ?? "";
+    return message;
+  },
+};
+
+function createBaseListCapabilitiesRequest(): ListCapabilitiesRequest {
+  return {};
+}
+
+export const ListCapabilitiesRequest: MessageFns<ListCapabilitiesRequest> = {
+  encode(_: ListCapabilitiesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListCapabilitiesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListCapabilitiesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListCapabilitiesRequest {
+    return {};
+  },
+
+  toJSON(_: ListCapabilitiesRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListCapabilitiesRequest>, I>>(base?: I): ListCapabilitiesRequest {
+    return ListCapabilitiesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListCapabilitiesRequest>, I>>(_: I): ListCapabilitiesRequest {
+    const message = createBaseListCapabilitiesRequest();
+    return message;
+  },
+};
+
+function createBaseListCapabilitiesResponse(): ListCapabilitiesResponse {
+  return { capabilities: [] };
+}
+
+export const ListCapabilitiesResponse: MessageFns<ListCapabilitiesResponse> = {
+  encode(message: ListCapabilitiesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.capabilities) {
+      Capability.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListCapabilitiesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListCapabilitiesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.capabilities.push(Capability.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListCapabilitiesResponse {
+    return {
+      capabilities: globalThis.Array.isArray(object?.capabilities)
+        ? object.capabilities.map((e: any) => Capability.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ListCapabilitiesResponse): unknown {
+    const obj: any = {};
+    if (message.capabilities?.length) {
+      obj.capabilities = message.capabilities.map((e) => Capability.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListCapabilitiesResponse>, I>>(base?: I): ListCapabilitiesResponse {
+    return ListCapabilitiesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListCapabilitiesResponse>, I>>(object: I): ListCapabilitiesResponse {
+    const message = createBaseListCapabilitiesResponse();
+    message.capabilities = object.capabilities?.map((e) => Capability.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseListToolsRequest(): ListToolsRequest {
   return {};
 }
@@ -5099,6 +5298,18 @@ export const DuoWorkflowService = {
       Buffer.from(GenerateTokenResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): GenerateTokenResponse => GenerateTokenResponse.decode(value),
   },
+  /** ListCapabilities returns the capabilities advertised by the server for capability negotiation. */
+  listCapabilities: {
+    path: "/DuoWorkflow/ListCapabilities",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ListCapabilitiesRequest): Buffer =>
+      Buffer.from(ListCapabilitiesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListCapabilitiesRequest => ListCapabilitiesRequest.decode(value),
+    responseSerialize: (value: ListCapabilitiesResponse): Buffer =>
+      Buffer.from(ListCapabilitiesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListCapabilitiesResponse => ListCapabilitiesResponse.decode(value),
+  },
   /** ListTools returns the set of tools available to the workflow executor. */
   listTools: {
     path: "/DuoWorkflow/ListTools",
@@ -5156,6 +5367,8 @@ export interface DuoWorkflowServer extends UntypedServiceImplementation {
   executeWorkflow: handleBidiStreamingCall<ClientEvent, Action>;
   /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken: handleUnaryCall<GenerateTokenRequest, GenerateTokenResponse>;
+  /** ListCapabilities returns the capabilities advertised by the server for capability negotiation. */
+  listCapabilities: handleUnaryCall<ListCapabilitiesRequest, ListCapabilitiesResponse>;
   /** ListTools returns the set of tools available to the workflow executor. */
   listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
   /** ListFlows returns the set of flow configurations available for execution. */
@@ -5192,6 +5405,22 @@ export interface DuoWorkflowClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GenerateTokenResponse) => void,
+  ): ClientUnaryCall;
+  /** ListCapabilities returns the capabilities advertised by the server for capability negotiation. */
+  listCapabilities(
+    request: ListCapabilitiesRequest,
+    callback: (error: ServiceError | null, response: ListCapabilitiesResponse) => void,
+  ): ClientUnaryCall;
+  listCapabilities(
+    request: ListCapabilitiesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListCapabilitiesResponse) => void,
+  ): ClientUnaryCall;
+  listCapabilities(
+    request: ListCapabilitiesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListCapabilitiesResponse) => void,
   ): ClientUnaryCall;
   /** ListTools returns the set of tools available to the workflow executor. */
   listTools(

@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DuoWorkflow_ExecuteWorkflow_FullMethodName                = "/DuoWorkflow/ExecuteWorkflow"
 	DuoWorkflow_GenerateToken_FullMethodName                  = "/DuoWorkflow/GenerateToken"
+	DuoWorkflow_ListCapabilities_FullMethodName               = "/DuoWorkflow/ListCapabilities"
 	DuoWorkflow_ListTools_FullMethodName                      = "/DuoWorkflow/ListTools"
 	DuoWorkflow_ListFlows_FullMethodName                      = "/DuoWorkflow/ListFlows"
 	DuoWorkflow_TrackSelfHostedExecuteWorkflow_FullMethodName = "/DuoWorkflow/TrackSelfHostedExecuteWorkflow"
@@ -40,6 +41,8 @@ type DuoWorkflowClient interface {
 	ExecuteWorkflow(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientEvent, Action], error)
 	// GenerateToken issues a short-lived authentication token for a workflow session.
 	GenerateToken(ctx context.Context, in *GenerateTokenRequest, opts ...grpc.CallOption) (*GenerateTokenResponse, error)
+	// ListCapabilities returns the capabilities advertised by the server for capability negotiation.
+	ListCapabilities(ctx context.Context, in *ListCapabilitiesRequest, opts ...grpc.CallOption) (*ListCapabilitiesResponse, error)
 	// ListTools returns the set of tools available to the workflow executor.
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
 	// ListFlows returns the set of flow configurations available for execution.
@@ -79,6 +82,16 @@ func (c *duoWorkflowClient) GenerateToken(ctx context.Context, in *GenerateToken
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GenerateTokenResponse)
 	err := c.cc.Invoke(ctx, DuoWorkflow_GenerateToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *duoWorkflowClient) ListCapabilities(ctx context.Context, in *ListCapabilitiesRequest, opts ...grpc.CallOption) (*ListCapabilitiesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCapabilitiesResponse)
+	err := c.cc.Invoke(ctx, DuoWorkflow_ListCapabilities_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +154,8 @@ type DuoWorkflowServer interface {
 	ExecuteWorkflow(grpc.BidiStreamingServer[ClientEvent, Action]) error
 	// GenerateToken issues a short-lived authentication token for a workflow session.
 	GenerateToken(context.Context, *GenerateTokenRequest) (*GenerateTokenResponse, error)
+	// ListCapabilities returns the capabilities advertised by the server for capability negotiation.
+	ListCapabilities(context.Context, *ListCapabilitiesRequest) (*ListCapabilitiesResponse, error)
 	// ListTools returns the set of tools available to the workflow executor.
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
 	// ListFlows returns the set of flow configurations available for execution.
@@ -168,6 +183,9 @@ func (UnimplementedDuoWorkflowServer) ExecuteWorkflow(grpc.BidiStreamingServer[C
 }
 func (UnimplementedDuoWorkflowServer) GenerateToken(context.Context, *GenerateTokenRequest) (*GenerateTokenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GenerateToken not implemented")
+}
+func (UnimplementedDuoWorkflowServer) ListCapabilities(context.Context, *ListCapabilitiesRequest) (*ListCapabilitiesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListCapabilities not implemented")
 }
 func (UnimplementedDuoWorkflowServer) ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTools not implemented")
@@ -223,6 +241,24 @@ func _DuoWorkflow_GenerateToken_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DuoWorkflowServer).GenerateToken(ctx, req.(*GenerateTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DuoWorkflow_ListCapabilities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCapabilitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DuoWorkflowServer).ListCapabilities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DuoWorkflow_ListCapabilities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DuoWorkflowServer).ListCapabilities(ctx, req.(*ListCapabilitiesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -298,6 +334,10 @@ var DuoWorkflow_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GenerateToken",
 			Handler:    _DuoWorkflow_GenerateToken_Handler,
+		},
+		{
+			MethodName: "ListCapabilities",
+			Handler:    _DuoWorkflow_ListCapabilities_Handler,
 		},
 		{
 			MethodName: "ListTools",

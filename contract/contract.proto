@@ -14,6 +14,8 @@ service DuoWorkflow {
     rpc ExecuteWorkflow (stream ClientEvent) returns (stream Action);
     // GenerateToken issues a short-lived authentication token for a workflow session.
     rpc GenerateToken (GenerateTokenRequest) returns (GenerateTokenResponse);
+    // ListCapabilities returns the capabilities advertised by the server for capability negotiation.
+    rpc ListCapabilities (ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
     // ListTools returns the set of tools available to the workflow executor.
     rpc ListTools (ListToolsRequest) returns (ListToolsResponse);
     // ListFlows returns the set of flow configurations available for execution.
@@ -270,6 +272,25 @@ message GenerateTokenResponse {
     int64 expiresAt = 2;
     // server_capabilities lists the capabilities advertised by the server for this session.
     repeated string server_capabilities = 3;
+}
+
+// Capability describes a single server capability advertised for negotiation.
+message Capability {
+    // name is the unique identifier of the capability (e.g. "tool_call_approval").
+    string name = 1;
+    // metadata is an optional JSON-encoded string carrying additional details about the capability.
+    string metadata = 2;
+}
+
+// ListCapabilitiesRequest is an empty request to retrieve the server's advertised capabilities.
+message ListCapabilitiesRequest {
+    // Intentionally empty
+}
+
+// ListCapabilitiesResponse returns the capabilities advertised by the server for this session.
+message ListCapabilitiesResponse {
+    // capabilities lists the capabilities advertised by the server.
+    repeated Capability capabilities = 1;
 }
 
 // ListToolsRequest is an empty request to retrieve the available tool definitions.

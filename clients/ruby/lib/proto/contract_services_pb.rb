@@ -22,6 +22,8 @@ module DuoWorkflowService
       rpc :ExecuteWorkflow, stream(::DuoWorkflowService::ClientEvent), stream(::DuoWorkflowService::Action)
       # GenerateToken issues a short-lived authentication token for a workflow session.
       rpc :GenerateToken, ::DuoWorkflowService::GenerateTokenRequest, ::DuoWorkflowService::GenerateTokenResponse
+      # ListCapabilities returns the capabilities advertised by the server for capability negotiation.
+      rpc :ListCapabilities, ::DuoWorkflowService::ListCapabilitiesRequest, ::DuoWorkflowService::ListCapabilitiesResponse
       # ListTools returns the set of tools available to the workflow executor.
       rpc :ListTools, ::DuoWorkflowService::ListToolsRequest, ::DuoWorkflowService::ListToolsResponse
       # ListFlows returns the set of flow configurations available for execution.

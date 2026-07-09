@@ -238,6 +238,24 @@ class GenerateTokenResponse(_message.Message):
     server_capabilities: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ..., server_capabilities: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class Capability(_message.Message):
+    __slots__ = ("name", "metadata")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    metadata: str
+    def __init__(self, name: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...
+
+class ListCapabilitiesRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListCapabilitiesResponse(_message.Message):
+    __slots__ = ("capabilities",)
+    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    capabilities: _containers.RepeatedCompositeFieldContainer[Capability]
+    def __init__(self, capabilities: _Optional[_Iterable[_Union[Capability, _Mapping]]] = ...) -> None: ...
+
 class ListToolsRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
