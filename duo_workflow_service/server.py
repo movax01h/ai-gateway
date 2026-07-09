@@ -199,6 +199,15 @@ def _extract_error_message(error: BaseException) -> str:
         # don't surface the enum list / internals. The count varies ("1 validation
         # error" / "N validation errors"), which is why the pattern matches both.
         message = "Failed to create flow from FlowConfig protobuf: validation error"
+    elif schema_match := re.match(
+        r"input '.*?' does not match specified schema", str(error)
+    ):
+        # Additional-context validation wraps a jsonschema.ValidationError, whose str()
+        # dumps the full schema and offending instance (e.g. "... does not match
+        # specified schema: ...\n\nFailed validating ...\n\nOn instance: {...}").
+        # Keep only the "input '<category>' does not match specified schema" prefix so
+        # we don't surface the schema/instance internals to the client.
+        message = schema_match.group()
     elif isinstance(error, ModelError):
         raw = error.message
         # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:

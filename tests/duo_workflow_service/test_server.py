@@ -3453,3 +3453,19 @@ def test_extract_error_message_flow_config_non_validation_error_preserved():
         _extract_error_message(error)
         == "Failed to create flow from FlowConfig protobuf: boom"
     )
+
+
+def test_extract_error_message_additional_context_schema_error_is_collapsed():
+    # jsonschema.ValidationError str() embeds the full schema and instance; only the
+    # "input '<category>' does not match specified schema" prefix should be surfaced.
+    error = ValueError(
+        "input 'agent_platform_standard_context' does not match specified schema: "
+        "Additional properties are not allowed ('service_account_name' was unexpected)"
+        "\n\nFailed validating 'additionalProperties' in schema:\n"
+        "{'$schema': 'https://json-schema.org/draft/2020-12/schema#', ...}\n\n"
+        "On instance:\n{'service_account_name': 'some-account-name-...'}"
+    )
+    assert (
+        _extract_error_message(error)
+        == "input 'agent_platform_standard_context' does not match specified schema"
+    )
