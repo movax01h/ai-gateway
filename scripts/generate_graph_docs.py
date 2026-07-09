@@ -129,7 +129,8 @@ def main():
                         for condition_output, edge_to in edge_condition[
                             "routes"
                         ].items():
-                            diagram += f"    {edge_from} -.->|{condition_output}| {clean_name(edge_to)};\n"
+                            label = condition_output or "(empty)"
+                            diagram += f"    {edge_from} -.->|{label}| {clean_name(edge_to)};\n"
 
                 diagram += "    classDef default fill:#f2f0ff,line-height:1.2;\n"
                 diagram += "    classDef first fill-opacity:0;\n"
