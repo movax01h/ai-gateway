@@ -181,7 +181,8 @@ class PromptSecurity:
         list[SecurityFunctionType],
     ] = {
         "read_file": [],
-        "read_repository_file": [],
+        # File content must be returned verbatim so create_commit can match exact strings.
+        "get_repository_file": [],
         "build_review_merge_request_context": [
             encode_dangerous_tags,
             strip_hidden_markdown_comments,
