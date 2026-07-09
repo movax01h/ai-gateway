@@ -79,7 +79,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -130,7 +130,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -139,7 +139,7 @@ class TestFlowConfig:
             },
             "system_config": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "timeout": {
@@ -192,7 +192,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"},

@@ -824,26 +824,28 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         with pytest.raises(ValueError, match="Invalid JSON in input item.*"):
             flow_instance._process_additional_context(additional_context)
 
-    def test_process_additional_context_schema_validation_error(
+    def test_process_additional_context_extra_property_is_tolerated(
         self,
         flow_instance,
     ):
-        """Test _process_additional_context raises error when JSON doesn't match schema."""
+        """Test _process_additional_context ignores unknown properties instead of raising.
+
+        Adding a new field to an envelope (e.g. service_account_name) must not break custom flows that have not yet
+        declared the field in their input_schema.
+        """
         additional_context = [
             AdditionalContext(
                 category="file",
-                content='{"file_type": "file.txt"}',
+                content='{"contents": "hello", "file_name": "test.txt", "file_type": "text"}',
             )
         ]
 
-        with pytest.raises(
-            ValueError,
-            match=(
-                r".*input 'file' does not match specified schema: "
-                r"Additional properties are not allowed \('file_type' was unexpected\).*"
-            ),
-        ):
-            flow_instance._process_additional_context(additional_context)
+        result = flow_instance._process_additional_context(additional_context)
+
+        # The extra field is accepted; the declared fields are present
+        assert result["file"]["contents"] == "hello"
+        assert result["file"]["file_name"] == "test.txt"
+        assert result["file"]["file_type"] == "text"
 
     def test_process_additional_context_agent_skills_routing(self, flow_instance):
         """Test that user_rule with agent-skills-instructions id routes to workspace_agent_skills."""

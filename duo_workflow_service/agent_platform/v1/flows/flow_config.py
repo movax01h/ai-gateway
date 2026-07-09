@@ -113,7 +113,7 @@ class BaseFlowConfig(BaseModel):
 
             jsonschema = {
                 "$schema": INPUT_JSONSCHEMA_VERSION,
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": schema,
                 "required": required_keys,
