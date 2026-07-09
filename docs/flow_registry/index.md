@@ -469,36 +469,35 @@ status with a human-readable message instructing the user to upgrade their GitLa
 surfaced in the UI chat log.
 
 > **Version resolution and schema validation are two separate gates.** After an envelope is selected by version, its
-> `content` is validated against the flow's `input_schema` with **`additionalProperties: false`** and every
+> `content` is validated against the flow's `input_schema` with **`additionalProperties: true`** and every
 > non-`optional` field marked **required**. This means:
 >
-> - An envelope whose `content` carries a field the flow's `input_schema` does **not** declare fails validation, even
->   if its `version` satisfies the constraint.
+> - An envelope whose `content` carries a field the flow's `input_schema` does **not** declare is **accepted** — extra
+>   fields are silently ignored. This makes envelope schema changes that only add new fields backwards-compatible.
 > - An envelope missing a required (non-`optional`) field fails validation.
 >
-> Both failures raise a `ValueError` during flow setup — they are not silently ignored. (Note: this is field-level
-> validation within a recognized category. An envelope of an entirely *unknown* category is skipped with a warning,
-> not failed.)
+> A missing required field raises a `ValueError` during flow setup — it is not silently ignored. (Note: this is
+> field-level validation within a recognized category. An envelope of an entirely *unknown* category is skipped with a
+> warning, not failed.)
 
 #### Adding (or removing) a field in an existing envelope
 
-Changing an envelope's field set is a **breaking change** — including *adding* a field. A flow validates `content`
-with `additionalProperties: false` and `resolve_version` always hands it the highest envelope version that satisfies
-its constraint. So a flow pinned to `^1.0.0` will pick up a `1.1.0` envelope and then **reject** it for the
-undeclared field. A minor bump does not shield existing flows; only a major bump does, because `^1.0.0` excludes
-`2.x.x`.
+**Adding** a field to an existing envelope is now a **backwards-compatible** change. Because envelopes validate with
+`additionalProperties: true`, flows that have not yet declared the new field in their `input_schema` simply ignore it.
+The new field is available in the envelope's `content` dict and can be accessed by flows that do declare it.
 
-To evolve an envelope's fields (e.g. `agent_platform_standard_context`):
+**Removing or renaming** a field is still a **breaking change** if any flow declares that field as required. In that
+case, use a major version bump:
 
 1. **Bump the envelope to a new major version** in the GitLab monolith (e.g. `1.0.0` → `2.0.0`) by setting
    `metadata.version`, and keep sending the previous major (`1.x.x`) alongside it.
-1. **Create a new flow version** (e.g. `2.0.0.yml`) that declares the new field set in `input_schema` and pins
+1. **Create a new flow version** (e.g. `2.0.0.yml`) that declares the updated field set in `input_schema` and pins
    `version_constraint: "^2.0.0"`.
 1. **Leave existing flow versions on `^1.0.0`.** They keep selecting the `1.x.x` envelope the monolith still sends, so
    legacy GitLab instances are unaffected.
 
-> **Reserve `MINOR`/`PATCH` for changes that do not alter the field set** (e.g. a value-level bug fix). Those are safe
-> for `^`-pinned flows because the validated field set is unchanged.
+> **Reserve `MINOR`/`PATCH` for changes that do not alter the required field set** (e.g. a value-level bug fix or
+> adding an optional field). Those are safe for `^`-pinned flows because the validated required field set is unchanged.
 
 See [Envelope versioning](contribution_guidelines.md#envelope-versioning) in the Contribution Guidelines for the full
 policy on when to bump versions and how to handle breaking changes.

@@ -82,7 +82,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -133,7 +133,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -142,7 +142,7 @@ class TestFlowConfig:
             },
             "system_config": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "timeout": {
@@ -195,7 +195,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"},
@@ -1057,10 +1057,13 @@ class TestSecurityReviewTriggerContext:
     """Guard the security_review flow's trigger-context input declaration (#604317).
 
     Trigger metadata (event_type / triggering_conversation) rides in its own optional
-    agent_platform_trigger_context envelope rather than in agent_platform_standard_context:
-    envelopes validate with additionalProperties false, so extending the standard category
-    would fail envelope validation on Rails/service version skew, while an unknown
-    category is skipped with a warning.
+    agent_platform_trigger_context envelope rather than in agent_platform_standard_context.
+    Unknown categories are skipped with a warning, so using a separate category avoids
+    breaking flows on Rails/service version skew.
+
+    Envelopes now validate with additionalProperties: true so that adding a new field to
+    an envelope no longer breaks flows that have not yet declared the field in their
+    input_schema (see issue #2515).
     """
 
     def test_trigger_context_category_is_fully_optional(self):
@@ -1069,7 +1072,7 @@ class TestSecurityReviewTriggerContext:
             "agent_platform_trigger_context"
         ]
         assert schema["required"] == []
-        assert schema["additionalProperties"] is False
+        assert schema["additionalProperties"] is True
         assert set(schema["properties"]) == {"event_type", "triggering_conversation"}
 
     def test_standard_context_stays_frozen(self):
