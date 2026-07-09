@@ -54,10 +54,9 @@ Prefer pulling from the GitLab Container Registry. DockerHub is a mirror and may
 
 ## Self-hosted AI Gateway release process
 
-When a new minor GitLab version is released (vX.Y.0-ee), a new branch is created with the name `stable-{gitlab-major}-{gitlab-minor}-ee`, and new tag with name `self-hosted-vX.Y.0-ee` is created, which triggers the release of a new image. Users on self-hosted environments can use this to download a version of AI Gateway that is compatible with their GitLab installation. These images are available both on
+When a new minor GitLab version is released (vX.Y.0-ee), a new branch with the name `stable-{gitlab-major}-{gitlab-minor}-ee` is created by [the script in GitLab-Rails](https://gitlab.com/gitlab-org/gitlab/-/blob/master/scripts/aigw-tagging.sh) that runs in tag pipelines. Creating the branch triggers a pipeline in this project that cuts the baseline `self-hosted-vX.Y.0-ee` tag (see [`scripts/tag_stable_patch.py`](../../scripts/tag_stable_patch.py)), which in turn triggers the release of a new image. Users on self-hosted environments can use this to download a version of AI Gateway that is compatible with their GitLab installation. These images are available both on
 [GitLab container registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284)
 and on [DockerHub](https://hub.docker.com/repository/docker/gitlab/model-gateway/tags).
-These tags and branches are created by [the script in GitLab-Rails](https://gitlab.com/gitlab-org/gitlab/-/blob/master/scripts/aigw-tagging.sh) that runs in tag pipelines.
 
 ### Releasing patches to previous versions
 
@@ -72,17 +71,9 @@ When you need to backport a fix to a specific AI Gateway release version:
 
 1. **Get the merge request reviewed and merged**: Follow the standard review process and merge the backport MR.
 
-1. **Tag the stable branch**: After the MR is merged, a maintainer needs to create a new patch version tag following the format `self-hosted-vX.Y.Z-ee`. The tag must be created out of the corresponding stable branch (e.g. `stable-18-4-ee`), so that it points at the latest backported commit on that branch rather than at `main`.
-   - For example, if backporting to version 18.4.1, the new tag would be `self-hosted-v18.4.2-ee`.
-
-     ```shell
-     git tag -l "self-hosted-v18.4.*"
-
-     self-hosted-v18.4.0-ee
-     self-hosted-v18.4.1-ee
-     ```
-
-   - If a tag of the same version already exists but its release jobs are failing and you need to re-create the tag, delete the existing tag first and then create a new one:
+1. **Automatic patch tagging and release**: Once the MR is merged, a pipeline runs on the stable branch and automatically creates the next patch tag (`self-hosted-vX.Y.Z-ee`, with `Z` incremented from the latest tag on that branch), pointing at the merged commit. This is handled by the `tag-stable-patch` job ([`scripts/tag_stable_patch.py`](../../scripts/tag_stable_patch.py)). No manual tagging is required. Creating the tag automatically triggers the [release jobs](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/pipelines) which build and publish a new Docker image.
+   - For example, if `self-hosted-v18.4.1-ee` is the latest tag on `stable-18-4-ee`, merging the backport produces `self-hosted-v18.4.2-ee`.
+   - If you need to re-create a tag whose release jobs failed, delete it and push it again from the stable branch (this re-triggers the release):
 
      ```shell
      # Delete the existing tag locally and on the remote
@@ -94,8 +85,6 @@ When you need to backport a fix to a specific AI Gateway release version:
      git tag self-hosted-v18.4.2-ee
      git push origin self-hosted-v18.4.2-ee
      ```
-
-1. **Trigger the release**: Creating the tag automatically triggers the [release jobs](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/pipelines) which build and publish a new Docker image.
 
 1. **Verify the image**: Once the release jobs succeed, verify the new image is available in:
    - [GitLab Container Registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284)
