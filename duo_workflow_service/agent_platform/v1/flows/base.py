@@ -653,9 +653,13 @@ class Flow(AbstractWorkflow):
                 ].items():
                     to_components[route_key] = components[comp_name]
 
+                # A condition input is either a plain state-path string or, like
+                # component inputs, a mapping ({from: ..., optional: true}) so a
+                # router can branch on a key that may be absent from the state.
+                # BaseRouter parses both forms via IOKey.parse_key.
                 input_field = router_config["condition"]["input"]
-                if not isinstance(input_field, str):
-                    raise ValueError("Router input must be a string.")
+                if not isinstance(input_field, (str, dict)):
+                    raise ValueError("Router input must be a string or a mapping.")
 
                 router = Router(
                     from_component=from_comp,

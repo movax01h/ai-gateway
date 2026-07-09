@@ -1089,6 +1089,21 @@ class TestSecurityReviewTriggerContext:
             "service_account_name",
         }
 
+    def test_mention_router_branches_on_optional_trigger_context(self):
+        # The router condition must use the optional mapping-form input so an
+        # absent trigger-context category falls to the full review (default
+        # route) instead of raising a KeyError at routing time.
+        config = FlowConfig.from_yaml_config("security_review", "1.0.0")
+        router = next(r for r in config.routers if r["from"] == "check_existing_review")
+        assert router["condition"]["input"] == {
+            "from": "context:inputs.agent_platform_trigger_context.event_type",
+            "optional": True,
+        }
+        assert router["condition"]["routes"] == {
+            "mention": "respond_to_comment",
+            "default_route": "apply_triggered_label",
+        }
+
 
 class TestShippedConfigRouterIndentation:
     """Regression guard for the 2026-06-23 resolve_sast_vulnerability incident.
