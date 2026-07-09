@@ -178,9 +178,57 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  # Respond path: when a developer @-mentions the reviewer to ask a follow-up
+  # question (event_type == "mention"), answer in context instead of running a
+  # full re-review. This handles BOTH a reply inside a finding thread and a
+  # standalone top-level MR comment (the latter is not inside any flow-authored
+  # thread, so the validate step's CASE 4 cannot match it -- see #604317). Skips
+  # prescan + perform_security_review, so a question-only mention does not consume
+  # a full review's worth of GitLab Credits.
+  - name: "respond_to_comment"
+    type: AgentComponent
+    prompt_id: "security_review_respond"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_standard_context.service_account_name"
+        as: "service_account_name"
+        optional: True
+      - from: "context:inputs.agent_platform_trigger_context.triggering_conversation"
+        as: "triggering_conversation"
+        optional: True
+    toolset:
+      # Read-only: the respond component answers via its final response, which the mention
+      # adapter posts as the single reply. It must NOT post itself (that double-posted: the
+      # tool reply + the adapter's final-answer note). See #604317 follow-up.
+      - "build_review_merge_request_context"
+      - "list_mr_discussions"
+      - "get_repository_file"
+      - "read_file"
+      - "get_issue"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
 routers:
+  # Branch on the trigger event type. A "mention" (developer asked a follow-up
+  # question) routes to respond_to_comment; everything else (an "assign" trigger,
+  # any other/unknown trigger, or no trigger context at all) runs the full review
+  # pipeline as before. The trigger-context envelope is optional — Rails omits it
+  # entirely when nothing set it — so the input is declared in mapping form with
+  # optional: true: an absent category resolves to None, matches no route and
+  # falls through to default_route instead of raising a KeyError.
   - from: "check_existing_review"
-    to: "apply_triggered_label"
+    condition:
+      input:
+        from: "context:inputs.agent_platform_trigger_context.event_type"
+        optional: true
+      routes:
+        "mention": "respond_to_comment"
+        "default_route": "apply_triggered_label"
   - from: "apply_triggered_label"
     to: "fetch_mr_data"
   - from: "fetch_mr_data"
@@ -194,6 +242,8 @@ routers:
   - from: "validate_and_publish"
     to: "apply_completed_label"
   - from: "apply_completed_label"
+    to: "end"
+  - from: "respond_to_comment"
     to: "end"
 
 flow:

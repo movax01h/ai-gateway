@@ -1315,6 +1315,98 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert call_kwargs["flow_type"] == flow_type
             assert "internal_event_client" in call_kwargs
 
+    @pytest.mark.usefixtures("mock_state_graph")
+    def test_build_routers_accepts_mapping_condition_input(
+        self,
+        mock_flow_metadata,
+        user,
+        flow_type: GLReportingEventContext,
+    ):
+        """A condition input may be a mapping ({from: ..., optional: true})."""
+        mapping_input = {
+            "from": "context:inputs.agent_platform_trigger_context.event_type",
+            "optional": True,
+        }
+        config = FlowConfig(
+            version="v1",
+            environment="ambient",
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[
+                {
+                    "from": "agent",
+                    "condition": {
+                        "input": mapping_input,
+                        "routes": {"mention": "end"},
+                    },
+                },
+            ],
+            flow=FlowConfigMetadata(entry_point="agent"),
+        )
+
+        components = {
+            "agent": self.mock_component("agent"),
+            "end": self.mock_component("end"),
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.Router"
+        ) as mock_router_class:
+            mock_router_class.return_value = Mock(spec=Router)
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+            )
+
+            flow._build_routers(components, Mock(spec=StateGraph))
+
+            assert mock_router_class.call_args[1]["input"] == mapping_input
+
+    @pytest.mark.usefixtures("mock_state_graph")
+    def test_build_routers_rejects_non_string_non_mapping_condition_input(
+        self,
+        mock_flow_metadata,
+        user,
+        flow_type: GLReportingEventContext,
+    ):
+        """Anything that is not a string or a mapping is still rejected."""
+        config = FlowConfig(
+            version="v1",
+            environment="ambient",
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[
+                {
+                    "from": "agent",
+                    "condition": {
+                        "input": ["status"],
+                        "routes": {"Execution": "end"},
+                    },
+                },
+            ],
+            flow=FlowConfigMetadata(entry_point="agent"),
+        )
+
+        components = {
+            "agent": self.mock_component("agent"),
+            "end": self.mock_component("end"),
+        }
+
+        flow = Flow(
+            workflow_id="test-workflow-123",
+            workflow_metadata=mock_flow_metadata,
+            workflow_type=flow_type,
+            user=user,
+            config=config,
+        )
+
+        with pytest.raises(
+            ValueError, match="Router input must be a string or a mapping"
+        ):
+            flow._build_routers(components, Mock(spec=StateGraph))
+
     @pytest.mark.asyncio
     async def test_handle_workflow_failure_appends_error_log(self, flow_instance):
         """Existing ui_chat_log entries are preserved."""
