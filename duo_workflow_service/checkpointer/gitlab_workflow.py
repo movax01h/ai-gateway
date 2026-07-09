@@ -8,6 +8,7 @@ import os
 import time
 import zlib
 from contextlib import AbstractAsyncContextManager
+from datetime import datetime, timezone
 from typing import (
     Any,
     AsyncIterator,
@@ -26,6 +27,7 @@ from typing import (
 )
 
 import structlog
+import uuid_utils
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.runnables import RunnableConfig
@@ -37,7 +39,6 @@ from langgraph.checkpoint.base import (
     CheckpointTuple,
 )
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.serde.base import SerializerProtocol
 
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.audit_events.context import get_audit_collector
@@ -190,10 +191,28 @@ def _dict_of_list_delta(
     return Delta(delta, True)
 
 
+def _thread_started_at_from_id(checkpoint_id: str) -> Optional[str]:
+    """ISO8601 UTC start time of a current_thread group, decoded from the group's first checkpoint id and floored to the
+    second.
+
+    ``uuid_utils.UUID.timestamp`` returns Unix milliseconds for v1/v6/v7, matching the value Rails derives via
+    ``Gitlab::Utils.time_from_uuid`` (langgraph emits v6). Rails bounds the partition-scanned blob query with
+    ``created_at >= current_thread_started_at``, so the marker must never be later than the earliest blob's
+    ``created_at`` or that blob is dropped from reconstruction. Flooring to the second keeps the marker at-or-before the
+    sub-second value Rails stores for the same id, and daily partitioning makes the slack irrelevant to pruning. Returns
+    None for non-time-based or malformed ids (uuid_utils raises ValueError for both).
+    """
+    try:
+        timestamp_ms = uuid_utils.UUID(checkpoint_id).timestamp
+    except (ValueError, TypeError):
+        return None
+
+    return datetime.fromtimestamp(timestamp_ms // 1_000, tz=timezone.utc).isoformat()
+
+
 def _serialize_channel_blobs(
     checkpoint: Checkpoint,
     new_versions: ChannelVersions,
-    serde: SerializerProtocol,
     prev_channel_values: Dict[str, Any],
     *,
     force_rewrite: bool = False,
@@ -259,13 +278,18 @@ def _serialize_channel_blobs(
             else:
                 is_compaction = True
 
-        t, bval = serde.dumps_typed(val)
+        # Encode with CustomEncoder JSON (not the langgraph msgpack serde) so blob
+        # deltas match the header's channel_values representation, which Rails stores
+        # as JSON via compress_checkpoint. That keeps reconstruction (which merges
+        # blobs onto the JSON header) consistent and lets Rails decode without
+        # reimplementing langgraph's msgpack extension types.
+        bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
         blobs.append(
             {
                 "channel": channel,
                 "version": str(version),
                 "data": base64.b64encode(zlib.compress(bval)).decode("utf-8"),
-                "write_type": t,
+                "write_type": "json",
                 "step_action": step_action,
             }
         )
@@ -311,6 +335,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._prev_channel_values: Dict[str, Any] = {}
         self._prev_checkpoint_id: Optional[str] = None
         self._current_thread: int = 0
+        self._current_thread_started_at: Optional[str] = None
 
     @override
     @not_implemented_sync_method
@@ -983,9 +1008,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     ) -> None:
         """Restore in-memory incremental-checkpoint state from a fetched checkpoint.
 
-        On gateway restart, ``_current_thread`` / ``_prev_channel_values`` / ``_prev_checkpoint_id`` reset to their
-        __init__ defaults. Without this, the next aput would either trigger a stale-cache rewrite or emit a
-        current_thread that no longer matches the server's view. Accepts both REST (snake_case) and GraphQL
+        On gateway restart, ``_current_thread`` / ``_current_thread_started_at`` / ``_prev_channel_values`` /
+        ``_prev_checkpoint_id`` reset to their __init__ defaults. Without this, the next aput would either trigger a
+        stale-cache rewrite or emit a current_thread that no longer matches the server's view. Accepts both REST
+        (snake_case) and GraphQL
         (camelCase) field names. Absent values are tolerated: older Rails versions don't expose current_thread, in
         which case the in-memory default is kept.
         """
@@ -1003,6 +1029,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     "Unexpected current_thread value from server; keeping default",
                     current_thread=current_thread,
                 )
+
+        started_at = gl_checkpoint.get(
+            "current_thread_started_at"
+        ) or gl_checkpoint.get("currentThreadStartedAt")
+        if started_at is not None:
+            # Restore the group's original start time so a post-restart checkpoint doesn't
+            # re-pin the marker to a mid-group time and drop the group's earlier blobs.
+            self._current_thread_started_at = started_at
 
         self._prev_checkpoint_id = decoded_checkpoint.get("id")
         self._prev_channel_values = dict(decoded_checkpoint.get("channel_values", {}))
@@ -1169,20 +1203,33 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             channel_blobs, is_compaction = _serialize_channel_blobs(
                 checkpoint,
                 new_versions,
-                self.serde,
                 self._prev_channel_values,
                 force_rewrite=stale_cache,
             )
+            # A new current_thread group starts on the first checkpoint and whenever
+            # current_thread is bumped; its start time bounds the created_at range of a
+            # later blob query. Carried forward (and restored on restart) otherwise so the
+            # marker stays pinned to the group's first checkpoint.
+            starts_new_thread = (
+                self._current_thread_started_at is None or stale_cache or is_compaction
+            )
             if stale_cache or is_compaction:
                 self._current_thread += 1
+            if starts_new_thread:
+                self._current_thread_started_at = _thread_started_at_from_id(
+                    checkpoint["id"]
+                )
             self._prev_channel_values = dict(checkpoint.get("channel_values", {}))
             self._prev_checkpoint_id = checkpoint["id"]
             payload["channel_blobs"] = channel_blobs
             payload["current_thread"] = self._current_thread
+            if self._current_thread_started_at is not None:
+                payload["current_thread_started_at"] = self._current_thread_started_at
             self._logger.info(
                 "Incremental checkpoint sizes",
                 thread_ts=checkpoint["id"],
                 current_thread=self._current_thread,
+                current_thread_started_at=self._current_thread_started_at,
                 compressed_checkpoint_bytes=len(payload["compressed_checkpoint"]),
                 channel_blobs_total_bytes=sum(len(b["data"]) for b in channel_blobs),
                 channel_blob_count=len(channel_blobs),
