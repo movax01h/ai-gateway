@@ -423,3 +423,12 @@ configurable_unit_primitives:
       - "claude_sonnet_4_6_vertex"
       - "gpt_5_2"
       - "gpt_5_3_codex"
+  - feature_setting: "resolve_dependency_bump"
+    unit_primitives: []
+    # Only native-provider models are selectable: they honor provider-native web
+    # search, whereas LiteLLM (_vertex/_bedrock) variants discard web_search_options.
+    default_models:
+      - "claude_sonnet_5"
+    selectable_models:
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_5"
