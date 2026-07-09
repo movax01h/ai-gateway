@@ -1393,6 +1393,119 @@ class TestToolCallApprovals:
         assert registry.is_preapproved("read_file")
         assert not registry.is_preapproved("run_command")
 
+    @pytest.mark.asyncio
+    async def test_approved_result_is_cached(self, tool_metadata):
+        """Approved tool calls are cached; subsequent checks skip GraphQL."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        args = {"path": "/tmp/test.txt"}
+        assert not await registry.approval_required("read_file", args)
+        assert not await registry.approval_required("read_file", args)
+
+        mock_client.graphql.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_different_args_not_served_from_cache(self, tool_metadata):
+        """Different tool args are separate cache entries and still call GraphQL."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        await registry.approval_required("read_file", {"path": "/tmp/a.txt"})
+        await registry.approval_required("read_file", {"path": "/tmp/b.txt"})
+
+        assert mock_client.graphql.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_same_args_different_key_order_hits_cache(self, tool_metadata):
+        """Semantically identical args with different key order should hit cache."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        await registry.approval_required(
+            "read_file", {"path": "/tmp/t.txt", "mode": "r"}
+        )
+        await registry.approval_required(
+            "read_file", {"mode": "r", "path": "/tmp/t.txt"}
+        )
+
+        mock_client.graphql.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_not_approved_result_is_not_cached(self, tool_metadata):
+        """Not-approved results must not be cached so new patterns can take effect."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": False}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        args = {"path": "/tmp/test.txt"}
+        assert await registry.approval_required("read_file", args)
+        assert await registry.approval_required("read_file", args)
+
+        assert mock_client.graphql.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_error_result_is_not_cached(self, tool_metadata):
+        """GraphQL errors must not be cached so retries can succeed."""
+        mock_client = AsyncMock()
+        mock_client.graphql.side_effect = [
+            Exception("connection error"),
+            {"duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}},
+        ]
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        args = {"path": "/tmp/test.txt"}
+        assert await registry.approval_required("read_file", args)
+        assert not await registry.approval_required("read_file", args)
+
+        assert mock_client.graphql.call_count == 2
+
 
 class TestMcpToolApprovals:
     """Tests for MCP tool approval and deny functionality."""
