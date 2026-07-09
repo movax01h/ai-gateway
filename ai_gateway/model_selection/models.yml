@@ -570,6 +570,48 @@ models:
       thinking_level: "low"
       streaming: "true"
 
+  - name: "GPT-5.6 Sol"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_5_6_sol"
+    description: "OpenAI's flagship model."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
+    proxy_provider: openai
+    model_class_provider: "openai"
+    family:
+      - gpt_5
+    params:
+      model: gpt-5.6-sol
+      max_tokens: 128_000
+
+  - name: "GPT-5.6 Terra"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_5_6_terra"
+    description: "OpenAI's balanced model for everyday work."
+    cost_indicator: "$$$"
+    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.6-terra
+    proxy_provider: openai
+    model_class_provider: "openai"
+    family:
+      - gpt_5
+    params:
+      model: gpt-5.6-terra
+      max_tokens: 128_000
+
+  - name: "GPT-5.6 Luna"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_5_6_luna"
+    description: "OpenAI's fast and affordable model."
+    cost_indicator: "$$"
+    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.6-luna
+    proxy_provider: openai
+    model_class_provider: "openai"
+    family:
+      - gpt_5
+    params:
+      model: gpt-5.6-luna
+      max_tokens: 128_000
+
   - name: "GPT-5.5"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_5"
