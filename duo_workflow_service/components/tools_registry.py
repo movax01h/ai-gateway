@@ -294,6 +294,7 @@ class ToolsRegistry:
 
         self._gl_http_client = gl_http_client
         self._workflow_id = workflow_id
+        self._approved_cache: set[tuple[str, str]] = set()
 
         for privilege in enabled_tools:
             for tool_cls_or_config in tools_for_agent_privileges.get(privilege, []):
@@ -411,7 +412,9 @@ class ToolsRegistry:
             return True
 
         try:
-            tool_args_json = json.dumps(tool_args, separators=(",", ":"))
+            tool_args_json = json.dumps(
+                tool_args, sort_keys=True, separators=(",", ":")
+            )
         except TypeError:
             log.warning(
                 "Tool args not JSON-serializable, defaulting to requiring approval",
@@ -421,6 +424,14 @@ class ToolsRegistry:
                 },
             )
             return True
+
+        cache_key = (tool_name, tool_args_json)
+        if cache_key in self._approved_cache:
+            log.debug(
+                "Tool call approved from cache",
+                extra={"tool_name": tool_name},
+            )
+            return False
 
         try:
             response = await self._gl_http_client.graphql(
@@ -435,6 +446,8 @@ class ToolsRegistry:
             nodes = response.get("duoWorkflowWorkflows", {}).get("nodes", [])
             if nodes:
                 approved = nodes[0].get("toolCallApproved", False)
+                if approved:
+                    self._approved_cache.add(cache_key)
                 return not approved
 
             log.warning(
