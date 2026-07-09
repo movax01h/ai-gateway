@@ -22,6 +22,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     _dict_of_list_delta,
     _get_orbit_tool_calls,
     _serialize_channel_blobs,
+    _thread_started_at_from_id,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
@@ -2490,9 +2491,6 @@ def test_dict_of_list_delta_unchanged_returns_none():
 def test_serialize_channel_blobs_only_changed_channels():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt1",
         "channel_values": {
@@ -2502,19 +2500,16 @@ def test_serialize_channel_blobs_only_changed_channels():
     }
     new_versions = ChannelVersions({"messages": "2.0"})
 
-    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, serde, {})
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
 
     assert len(blobs) == 1
     assert blobs[0]["channel"] == "messages"
     assert blobs[0]["version"] == "2.0"
-    assert blobs[0]["write_type"] == "msgpack"
+    assert blobs[0]["write_type"] == "json"
     assert base64.b64decode(blobs[0]["data"])
 
 
 def test_serialize_channel_blobs_skips_scalar_channels():
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt1",
         "channel_values": {
@@ -2525,7 +2520,7 @@ def test_serialize_channel_blobs_skips_scalar_channels():
     }
     new_versions = ChannelVersions({"messages": "2.0", "status": "1.0", "goal": "1.0"})
 
-    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, serde, {})
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
 
     channels = [b["channel"] for b in blobs]
     assert "goal" not in channels
@@ -2541,9 +2536,6 @@ def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
     a full replacement (step_action='compaction') and a status-only change must not trigger is_compaction=True (which
     would incorrectly bump current_thread).
     """
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt1",
         "channel_values": {
@@ -2554,7 +2546,7 @@ def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
     prev_channel_values = {"status": "waiting"}
 
     blobs, is_compaction = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
+        checkpoint, new_versions, prev_channel_values
     )
 
     assert len(blobs) == 1
@@ -2569,9 +2561,6 @@ def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
 def test_serialize_channel_blobs_list_delta():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt2",
         "channel_values": {"messages": ["a", "b", "c"]},
@@ -2579,33 +2568,23 @@ def test_serialize_channel_blobs_list_delta():
     new_versions = ChannelVersions({"messages": "3.0"})
     prev_channel_values = {"messages": ["a", "b"]}
 
-    blobs, _ = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
-    )
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, prev_channel_values)
 
     assert len(blobs) == 1
-    val = serde.loads_typed(
-        (blobs[0]["write_type"], zlib.decompress(base64.b64decode(blobs[0]["data"])))
-    )
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
     assert val == ["c"]
 
 
 def test_serialize_channel_blobs_skips_unknown_channels():
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {"id": "ckpt3", "channel_values": {}}
     new_versions = ChannelVersions({"nonexistent": "1.0"})
 
-    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, serde, {})
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
 
     assert not blobs
 
 
 def test_serialize_channel_blobs_list_unchanged_skips():
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt_unchanged",
         "channel_values": {"messages": ["a", "b"]},
@@ -2614,7 +2593,7 @@ def test_serialize_channel_blobs_list_unchanged_skips():
     prev_channel_values = {"messages": ["a", "b"]}
 
     blobs, is_compaction = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
+        checkpoint, new_versions, prev_channel_values
     )
 
     assert not blobs
@@ -2624,9 +2603,6 @@ def test_serialize_channel_blobs_list_unchanged_skips():
 def test_serialize_channel_blobs_list_shrink_stores_full():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt5",
         "channel_values": {"messages": ["a"]},
@@ -2635,23 +2611,18 @@ def test_serialize_channel_blobs_list_shrink_stores_full():
     prev_channel_values = {"messages": ["a", "b", "c"]}
 
     blobs, is_compaction = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
+        checkpoint, new_versions, prev_channel_values
     )
 
     assert is_compaction
     assert len(blobs) == 1
-    val = serde.loads_typed(
-        (blobs[0]["write_type"], zlib.decompress(base64.b64decode(blobs[0]["data"])))
-    )
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
     assert val == ["a"]
 
 
 def test_serialize_channel_blobs_dict_channel_delta():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt4",
         "channel_values": {
@@ -2669,27 +2640,20 @@ def test_serialize_channel_blobs_dict_channel_delta():
         }
     }
 
-    blobs, _ = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
-    )
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, prev_channel_values)
 
     assert len(blobs) == 1
     assert blobs[0]["channel"] == "conversation_history"
-    delta = serde.loads_typed(
-        (blobs[0]["write_type"], zlib.decompress(base64.b64decode(blobs[0]["data"])))
-    )
+    delta = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
     assert delta == {"planner": ["msg3"]}
 
 
 def test_serialize_channel_blobs_dict_unchanged_skips_blob():
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     values = {"conversation_history": {"planner": ["msg1"], "executor": ["a"]}}
     checkpoint = {"id": "ckpt6", "channel_values": values}
     new_versions = ChannelVersions({"conversation_history": "2.0"})
 
-    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, serde, dict(values))
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, dict(values))
 
     assert not blobs
 
@@ -2697,9 +2661,6 @@ def test_serialize_channel_blobs_dict_unchanged_skips_blob():
 def test_serialize_channel_blobs_compaction_stores_full_value():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     prev_channel_values = {
         "conversation_history": {"planner": ["msg1", "msg2", "msg3", "msg4", "msg5"]}
     }
@@ -2710,22 +2671,17 @@ def test_serialize_channel_blobs_compaction_stores_full_value():
     new_versions = ChannelVersions({"conversation_history": "3.0"})
 
     blobs, is_compaction = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
+        checkpoint, new_versions, prev_channel_values
     )
 
     assert is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
-    val = serde.loads_typed(
-        (blobs[0]["write_type"], zlib.decompress(base64.b64decode(blobs[0]["data"])))
-    )
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
     assert val == {"planner": ["summary", "msg5"]}
 
 
 def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     prev_channel_values = {"conversation_history": {"planner": ["msg1", "msg2"]}}
     checkpoint = {
         "id": "ckpt9",
@@ -2736,7 +2692,7 @@ def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
     new_versions = ChannelVersions({"conversation_history": "3.0"})
 
     blobs, is_compaction = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, prev_channel_values
+        checkpoint, new_versions, prev_channel_values
     )
 
     assert is_compaction
@@ -2747,9 +2703,6 @@ def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
 def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt_force",
         "channel_values": {"messages": ["a", "b", "c"]},
@@ -2760,7 +2713,6 @@ def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
     blobs, is_compaction = _serialize_channel_blobs(
         checkpoint,
         new_versions,
-        serde,
         prev_channel_values,
         force_rewrite=True,
     )
@@ -2768,18 +2720,13 @@ def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
     assert not is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
-    val = serde.loads_typed(
-        (blobs[0]["write_type"], zlib.decompress(base64.b64decode(blobs[0]["data"])))
-    )
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
     assert val == ["a", "b", "c"]
 
 
 def test_serialize_channel_blobs_conversation_sends_delta():
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = {
         "id": "ckpt8",
         "channel_values": {"messages": ["a", "b", "c"]},
@@ -2787,16 +2734,59 @@ def test_serialize_channel_blobs_conversation_sends_delta():
     new_versions = ChannelVersions({"messages": "3.0"})
 
     blobs, is_compaction = _serialize_channel_blobs(
-        checkpoint, new_versions, serde, {"messages": ["a", "b"]}
+        checkpoint, new_versions, {"messages": ["a", "b"]}
     )
 
     assert not is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "conversation"
-    val = serde.loads_typed(
-        (blobs[0]["write_type"], zlib.decompress(base64.b64decode(blobs[0]["data"])))
-    )
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
     assert val == ["c"]
+
+
+def _v6_uuid_for(unix_seconds: int, sub_second_100ns: int = 0) -> str:
+    """Build a valid UUIDv6 whose embedded timestamp is unix_seconds (+ optional 100ns)."""
+    gregorian_100ns = unix_seconds * 10_000_000 + sub_second_100ns + 0x01B21DD213814000
+    time_high = (gregorian_100ns >> 28) & 0xFFFFFFFF
+    time_mid = (gregorian_100ns >> 12) & 0xFFFF
+    time_low = gregorian_100ns & 0x0FFF
+    return f"{time_high:08x}-{time_mid:04x}-6{time_low:03x}-8000-000000000000"
+
+
+def test_thread_started_at_from_id_decodes_v6():
+    # 1_700_000_000 == 2023-11-14T22:13:20Z
+    assert (
+        _thread_started_at_from_id(_v6_uuid_for(1_700_000_000))
+        == "2023-11-14T22:13:20+00:00"
+    )
+
+
+def test_thread_started_at_from_id_decodes_v7():
+    # 48-bit millisecond timestamp: 1_700_000_000_000 ms
+    value = (1_700_000_000_000 << 80) | (0x7 << 76) | (0x8 << 62)
+    uuid = f"{value:032x}"
+    dashed = f"{uuid[:8]}-{uuid[8:12]}-{uuid[12:16]}-{uuid[16:20]}-{uuid[20:]}"
+    assert _thread_started_at_from_id(dashed) == "2023-11-14T22:13:20+00:00"
+
+
+def test_thread_started_at_from_id_floors_to_second():
+    # Sub-second 100ns component must be dropped so the marker never exceeds the
+    # created_at Rails derives from the same id.
+    assert (
+        _thread_started_at_from_id(
+            _v6_uuid_for(1_700_000_000, sub_second_100ns=9_999_999)
+        )
+        == "2023-11-14T22:13:20+00:00"
+    )
+
+
+def test_thread_started_at_from_id_returns_none_for_non_time_uuid():
+    # Version 4 (random) UUID embeds no timestamp.
+    assert _thread_started_at_from_id("f47ac10b-58cc-4372-a567-0e02b2c3d479") is None
+
+
+def test_thread_started_at_from_id_returns_none_for_malformed():
+    assert _thread_started_at_from_id("not-a-uuid") is None
 
 
 @pytest.mark.asyncio
@@ -2848,9 +2838,6 @@ async def test_aput_accumulates_list_deltas_across_calls(
     previous checkpoint."""
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
     checkpoint = checkpoint_data[0]["checkpoint"]
@@ -2864,11 +2851,8 @@ async def test_aput_accumulates_list_deltas_across_calls(
         ChannelVersions({"messages": "1.0"}),
     )
     body1 = json.loads(http_client.apost.call_args[1]["body"])
-    val1 = serde.loads_typed(
-        (
-            body1["channel_blobs"][0]["write_type"],
-            zlib.decompress(base64.b64decode(body1["channel_blobs"][0]["data"])),
-        )
+    val1 = json.loads(
+        zlib.decompress(base64.b64decode(body1["channel_blobs"][0]["data"]))
     )
     assert val1 == ["a", "b"]
 
@@ -2881,11 +2865,8 @@ async def test_aput_accumulates_list_deltas_across_calls(
         ChannelVersions({"messages": "2.0"}),
     )
     body2 = json.loads(http_client.apost.call_args[1]["body"])
-    val2 = serde.loads_typed(
-        (
-            body2["channel_blobs"][0]["write_type"],
-            zlib.decompress(base64.b64decode(body2["channel_blobs"][0]["data"])),
-        )
+    val2 = json.loads(
+        zlib.decompress(base64.b64decode(body2["channel_blobs"][0]["data"]))
     )
     assert val2 == ["c", "d"]
 
@@ -2940,6 +2921,105 @@ async def test_aput_increments_thread_id_on_compaction(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_pins_current_thread_started_at_to_group_start(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """current_thread_started_at pins to the group's first checkpoint and re-pins on compaction."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    id_start = _v6_uuid_for(1_700_000_000)
+    id_mid = _v6_uuid_for(1_700_000_005)
+    id_compaction = _v6_uuid_for(1_700_000_010)
+
+    # First checkpoint of the group — marker takes its start time.
+    checkpoint["id"] = id_start
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_start)
+
+    # Conversation step — marker stays pinned to the first checkpoint, not id_mid.
+    checkpoint["id"] = id_mid
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": id_start}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 0
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_start)
+
+    # Compaction (list shrank) starts a new group — marker re-pins to id_compaction.
+    checkpoint["id"] = id_compaction
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": id_mid}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "3.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(
+        id_compaction
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_repins_current_thread_started_at_on_stale_cache(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A stale cache (skipped parent) re-pins the marker to the stale checkpoint, not the original group start."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    id_start = _v6_uuid_for(1_700_000_000)
+    id_stale = _v6_uuid_for(1_700_000_020)
+
+    checkpoint["id"] = id_start
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    # Wrong parent → stale cache → thread bumps and the marker re-pins to id_stale.
+    checkpoint["id"] = id_stale
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-unknown"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_stale)
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_resets_cache_on_stale_checkpoint_id(
     _mock_duo_workflow_metrics,
     incremental_enabled,
@@ -2951,9 +3031,6 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
     """When parent checkpoint_id doesn't match the cached id, cache is reset and a warning is logged."""
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     checkpoint = checkpoint_data[0]["checkpoint"]
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
@@ -2979,11 +3056,8 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
 
     # Cache was reset to {} so full list is stored (no delta), not just ["c"]
     body = json.loads(http_client.apost.call_args[1]["body"])
-    val = serde.loads_typed(
-        (
-            body["channel_blobs"][0]["write_type"],
-            zlib.decompress(base64.b64decode(body["channel_blobs"][0]["data"])),
-        )
+    val = json.loads(
+        zlib.decompress(base64.b64decode(body["channel_blobs"][0]["data"]))
     )
     assert val == ["a", "b", "c"]
     # Thread must be bumped so Rails starts reconstruction from this checkpoint
@@ -3037,6 +3111,30 @@ async def test_aget_tuple_hydrates_current_thread_from_response(
     assert gitlab_workflow._current_thread == 3
     assert gitlab_workflow._prev_checkpoint_id == "5678"
     assert "conversation_history" in gitlab_workflow._prev_channel_values
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_current_thread_started_at(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """On resume the marker is restored so a post-restart aput doesn't re-pin it mid-group."""
+    compressed_checkpoint_data[0]["current_thread_started_at"] = (
+        "2026-07-08T10:00:00+00:00"
+    )
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
 
 
 @pytest.mark.asyncio
@@ -3160,9 +3258,6 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
     """End-to-end: simulate a restart by hydrating then writing — must reuse server thread, no current_thread bump."""
     import base64
 
-    from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-
-    serde = CheckpointSerializer()
     compressed_checkpoint_data[0]["current_thread"] = 2
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=200, body=compressed_checkpoint_data
@@ -3192,9 +3287,7 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
     blob = body["channel_blobs"][0]
     assert blob["channel"] == "messages"
     assert blob["step_action"] == "compaction"
-    val = serde.loads_typed(
-        (blob["write_type"], zlib.decompress(base64.b64decode(blob["data"])))
-    )
+    val = json.loads(zlib.decompress(base64.b64decode(blob["data"])))
     assert val == ["new"]
 
 
@@ -3213,3 +3306,20 @@ def test_decode_graphql_latest_checkpoint_hydrates(gitlab_workflow):
     assert gitlab_workflow._current_thread == 4
     assert gitlab_workflow._prev_checkpoint_id == "gql-ckpt"
     assert gitlab_workflow._prev_channel_values == {"x": [1]}
+
+
+def test_decode_graphql_latest_checkpoint_hydrates_current_thread_started_at(
+    gitlab_workflow,
+):
+    gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
+    gitlab_workflow._decode_graphql_latest_checkpoint(
+        {
+            "threadTs": "gql-ckpt",
+            "parentTs": None,
+            "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {}}),
+            "metadata": "{}",
+            "currentThreadStartedAt": "2026-07-08T10:00:00+00:00",
+        }
+    )
+
+    assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
