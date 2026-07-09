@@ -48,6 +48,11 @@ class DuoWorkflowStub(object):
                 request_serializer=contract_dot_contract__pb2.GenerateTokenRequest.SerializeToString,
                 response_deserializer=contract_dot_contract__pb2.GenerateTokenResponse.FromString,
                 _registered_method=True)
+        self.ListCapabilities = channel.unary_unary(
+                '/DuoWorkflow/ListCapabilities',
+                request_serializer=contract_dot_contract__pb2.ListCapabilitiesRequest.SerializeToString,
+                response_deserializer=contract_dot_contract__pb2.ListCapabilitiesResponse.FromString,
+                _registered_method=True)
         self.ListTools = channel.unary_unary(
                 '/DuoWorkflow/ListTools',
                 request_serializer=contract_dot_contract__pb2.ListToolsRequest.SerializeToString,
@@ -86,6 +91,13 @@ class DuoWorkflowServicer(object):
 
     def GenerateToken(self, request, context):
         """GenerateToken issues a short-lived authentication token for a workflow session.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListCapabilities(self, request, context):
+        """ListCapabilities returns the capabilities advertised by the server for capability negotiation.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -135,6 +147,11 @@ def add_DuoWorkflowServicer_to_server(servicer, server):
                     servicer.GenerateToken,
                     request_deserializer=contract_dot_contract__pb2.GenerateTokenRequest.FromString,
                     response_serializer=contract_dot_contract__pb2.GenerateTokenResponse.SerializeToString,
+            ),
+            'ListCapabilities': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListCapabilities,
+                    request_deserializer=contract_dot_contract__pb2.ListCapabilitiesRequest.FromString,
+                    response_serializer=contract_dot_contract__pb2.ListCapabilitiesResponse.SerializeToString,
             ),
             'ListTools': grpc.unary_unary_rpc_method_handler(
                     servicer.ListTools,
@@ -215,6 +232,33 @@ class DuoWorkflow(object):
             '/DuoWorkflow/GenerateToken',
             contract_dot_contract__pb2.GenerateTokenRequest.SerializeToString,
             contract_dot_contract__pb2.GenerateTokenResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListCapabilities(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/DuoWorkflow/ListCapabilities',
+            contract_dot_contract__pb2.ListCapabilitiesRequest.SerializeToString,
+            contract_dot_contract__pb2.ListCapabilitiesResponse.FromString,
             options,
             channel_credentials,
             insecure,

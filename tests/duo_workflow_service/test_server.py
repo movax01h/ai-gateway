@@ -653,6 +653,24 @@ async def test_list_flows_with_filters(
 
 
 @pytest.mark.asyncio
+async def test_list_capabilities(mock_context, servicer):
+    response = await servicer.ListCapabilities(
+        contract_pb2.ListCapabilitiesRequest(), mock_context
+    )
+
+    assert isinstance(response, contract_pb2.ListCapabilitiesResponse)
+    capabilities = [
+        {"name": capability.name, "metadata": capability.metadata}
+        for capability in response.capabilities
+    ]
+    assert capabilities == [
+        {"name": "tool_call_approval", "metadata": ""},
+        {"name": "tool_call_pattern_approval", "metadata": ""},
+        {"name": "flow_semantic_versioning", "metadata": ""},
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "acompletion_response_fixture",
     ["acompletion_stream_response"],

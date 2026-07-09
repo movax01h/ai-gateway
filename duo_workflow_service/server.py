@@ -77,7 +77,10 @@ from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
-from duo_workflow_service.server_capabilities import get_dws_capabilities
+from duo_workflow_service.server_capabilities import (
+    get_dws_capabilities,
+    get_dws_capabilities_with_metadata,
+)
 from duo_workflow_service.server_helpers import (
     build_logging_context,
     clean_start_request,
@@ -622,6 +625,25 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 request_id=item.requestID,
                 action_class=item.WhichOneof("action"),
             )
+
+    @override
+    async def ListCapabilities(
+        self,
+        request: contract_pb2.ListCapabilitiesRequest,
+        context: grpc.ServicerContext,
+    ) -> contract_pb2.ListCapabilitiesResponse:
+        log.info("Listing DWS server capabilities")
+
+        capabilities = get_dws_capabilities_with_metadata()
+
+        return contract_pb2.ListCapabilitiesResponse(
+            capabilities=[
+                contract_pb2.Capability(
+                    name=capability.name, metadata=capability.metadata
+                )
+                for capability in capabilities
+            ]
+        )
 
     @override
     async def ListTools(
