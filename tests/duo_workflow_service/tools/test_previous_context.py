@@ -12,6 +12,13 @@ from duo_workflow_service.tools.previous_context import (
     GetSessionContextInput,
 )
 
+# The current session's own workflow_id (distinct from the previous_session_id
+# values used throughout this file, e.g. 1, 42, 99, 123).
+CURRENT_WORKFLOW_ID = "555"
+
+# Default flow type used by both records in _route_aget() unless overridden.
+DEFAULT_FLOW_TYPE = "chat"
+
 
 @pytest.fixture(name="gitlab_client")
 def gitlab_client_fixture():
@@ -21,7 +28,11 @@ def gitlab_client_fixture():
 @pytest.fixture(name="tool")
 def tool_fixture(gitlab_client):
     return GetSessionContext(
-        metadata={"gitlab_client": gitlab_client, "gitlab_host": "gitlab.example.com"}
+        metadata={
+            "gitlab_client": gitlab_client,
+            "gitlab_host": "gitlab.example.com",
+            "workflow_id": CURRENT_WORKFLOW_ID,
+        }
     )
 
 
@@ -43,23 +54,48 @@ def _make_workflow_record(**fields) -> dict:
         "summary": None,
         "status": None,
         "workflow_definition": None,
+        "ai_catalog_item_version_id": None,
     }
     record.update(fields)
     return record
 
 
-def _route_aget(checkpoints, record):
-    """Build an aget side_effect that serves both endpoints the tool calls.
+def _current_record_path() -> str:
+    return f"/api/v4/ai/duo_workflows/workflows/{CURRENT_WORKFLOW_ID}"
 
-    The tool makes two GET requests: the checkpoints list and the workflow
-    record (``.../workflows/{id}``). This helper routes each path to the
-    appropriate mocked response.
+
+def _route_aget(
+    checkpoints=None,
+    *,
+    checkpoints_response=None,
+    previous_record=None,
+    current_record=None,
+):
+    """Route the tool's up-to-three GET calls (current record, previous record, checkpoints) to the appropriate mocked
+    response.
+
+    If ``current_record`` isn't given, it defaults to mirroring
+    ``previous_record``'s flow-type fields, so the flow-type check passes by
+    default and tests unrelated to that restriction don't need to set it up.
     """
+    if previous_record is None:
+        previous_record = _make_workflow_record(workflow_definition=DEFAULT_FLOW_TYPE)
+    if current_record is None:
+        current_record = _make_workflow_record(
+            workflow_definition=previous_record.get("workflow_definition"),
+            ai_catalog_item_version_id=previous_record.get(
+                "ai_catalog_item_version_id"
+            ),
+        )
 
     async def _aget(path, parse_json=True, **_kwargs):
         if path.endswith("/checkpoints?per_page=1"):
+            if checkpoints_response is not None:
+                return checkpoints_response
             return _make_response(checkpoints)
-        return _make_response(record)
+        if path == _current_record_path():
+            return _make_response(current_record)
+        return _make_response(previous_record)
 
     return _aget
 
@@ -74,7 +110,10 @@ class TestGetSessionContextApiCall:
     @pytest.mark.asyncio
     async def test_calls_correct_endpoint(self, tool, gitlab_client):
         gitlab_client.aget.side_effect = _route_aget(
-            [_make_checkpoint({})], _make_workflow_record()
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(
+                workflow_definition=DEFAULT_FLOW_TYPE
+            ),
         )
 
         await tool._arun(previous_session_id=42)
@@ -86,12 +125,12 @@ class TestGetSessionContextApiCall:
             "/api/v4/ai/duo_workflows/workflows/42/checkpoints?per_page=1"
             in called_paths
         )
-        # The tool also fetches the workflow record for title/summary/status.
         assert "/api/v4/ai/duo_workflows/workflows/42" in called_paths
+        assert _current_record_path() in called_paths
 
     @pytest.mark.asyncio
     async def test_empty_checkpoint_list_raises(self, tool, gitlab_client):
-        gitlab_client.aget.return_value = _make_response([])
+        gitlab_client.aget.side_effect = _route_aget([])
 
         with pytest.raises(
             ToolException, match="Unable to find checkpoint for this session"
@@ -100,8 +139,10 @@ class TestGetSessionContextApiCall:
 
     @pytest.mark.asyncio
     async def test_api_error_raises(self, tool, gitlab_client):
-        gitlab_client.aget.return_value = GitLabHttpResponse(
-            status_code=404, body={"message": "not found"}
+        gitlab_client.aget.side_effect = _route_aget(
+            checkpoints_response=GitLabHttpResponse(
+                status_code=404, body={"message": "not found"}
+            )
         )
 
         with pytest.raises(ToolException, match="HTTP 404"):
@@ -109,7 +150,14 @@ class TestGetSessionContextApiCall:
 
     @pytest.mark.asyncio
     async def test_client_exception_propagates(self, tool, gitlab_client):
-        gitlab_client.aget.side_effect = Exception("Connection error")
+        async def _aget(path, parse_json=True, **_kwargs):
+            if path.endswith("/checkpoints?per_page=1"):
+                raise Exception("Connection error")
+            return _make_response(
+                _make_workflow_record(workflow_definition=DEFAULT_FLOW_TYPE)
+            )
+
+        gitlab_client.aget.side_effect = _aget
 
         with pytest.raises(Exception, match="Connection error"):
             await tool._arun(previous_session_id=123)
@@ -136,8 +184,11 @@ class TestGetSessionContextHappyPath:
         }
         gitlab_client.aget.side_effect = _route_aget(
             [_make_checkpoint(channel_values)],
-            _make_workflow_record(
-                title="Fix login", status="finished", summary="Fixed on error"
+            previous_record=_make_workflow_record(
+                title="Fix login",
+                status="finished",
+                summary="Fixed on error",
+                workflow_definition=DEFAULT_FLOW_TYPE,
             ),
         )
 
@@ -168,9 +219,7 @@ class TestGetSessionContextHappyPath:
                 }
             ],
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         entry = result["recent_activity"][0]
@@ -197,9 +246,7 @@ class TestGetSessionContextHappyPath:
                 }
             ],
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         entry = result["recent_activity"][0]
@@ -228,9 +275,7 @@ class TestGetSessionContextTruncation:
                 }
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         tool_response = result["recent_activity"][0]["tool_info"]["tool_response"]
@@ -262,9 +307,7 @@ class TestGetSessionContextTruncation:
                 }
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         tool_response = result["recent_activity"][0]["tool_info"]["tool_response"]
@@ -284,9 +327,7 @@ class TestGetSessionContextTruncation:
                 }
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         assert result["recent_activity"][0]["content"] == long_content
@@ -303,9 +344,7 @@ class TestGetSessionContextTruncation:
             for i in range(total)
         ]
         channel_values = {"ui_chat_log": entries}
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         activity = result["recent_activity"]
@@ -333,9 +372,7 @@ class TestGetSessionContextTruncation:
             for i in range(MAX_UI_CHAT_LOG_ENTRIES)
         ]
         channel_values = {"ui_chat_log": entries}
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         activity = result["recent_activity"]
@@ -363,9 +400,7 @@ class TestGetSessionContextLastMessageExtraction:
                 {"message_type": "user", "content": "User follow-up", "timestamp": "t"},
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -381,9 +416,7 @@ class TestGetSessionContextLastMessageExtraction:
                 {"message_type": "tool", "content": "tool output", "timestamp": "t"},
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -394,7 +427,7 @@ class TestGetSessionContextMissingData:
     @pytest.mark.asyncio
     async def test_missing_channel_values_returns_nulls(self, tool, gitlab_client):
         checkpoint = {"checkpoint": {}, "metadata": {}}
-        gitlab_client.aget.return_value = _make_response([checkpoint])
+        gitlab_client.aget.side_effect = _route_aget([checkpoint])
 
         result = json.loads(await tool._arun(previous_session_id=123))
 
@@ -403,16 +436,14 @@ class TestGetSessionContextMissingData:
         assert result["goal"] is None
         assert result["title"] is None
         assert result["summary"] is None
-        assert result["workflow_definition"] is None
+        assert result["workflow_definition"] == DEFAULT_FLOW_TYPE
         assert result["last_message"] is None
         assert result["recent_activity"] == []
 
     @pytest.mark.asyncio
     async def test_missing_goal_returns_none(self, tool, gitlab_client):
         channel_values = {"status": "finished", "ui_chat_log": []}
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -421,9 +452,7 @@ class TestGetSessionContextMissingData:
     @pytest.mark.asyncio
     async def test_missing_status_returns_none(self, tool, gitlab_client):
         channel_values = {"goal": "Do something", "ui_chat_log": []}
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -434,9 +463,7 @@ class TestGetSessionContextMissingData:
         self, tool, gitlab_client
     ):
         channel_values = {"status": "finished", "goal": "Do something"}
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -450,9 +477,7 @@ class TestGetSessionContextMissingData:
                 {"message_type": "agent", "content": "valid", "timestamp": "t"},
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -468,9 +493,7 @@ class TestGetSessionContextMissingData:
             "context": {"goal": "Distill AGENTS.md pitfalls"},
             "ui_chat_log": [],
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -488,9 +511,7 @@ class TestGetSessionContextMissingData:
             "context": {"goal": "Nested goal"},
             "ui_chat_log": [],
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
 
@@ -512,9 +533,7 @@ class TestGetSessionContextMissingData:
                 }
             ]
         }
-        gitlab_client.aget.return_value = _make_response(
-            [_make_checkpoint(channel_values)]
-        )
+        gitlab_client.aget.side_effect = _route_aget([_make_checkpoint(channel_values)])
 
         result = json.loads(await tool._arun(previous_session_id=1))
         tool_response = result["recent_activity"][0]["tool_info"]["tool_response"]
@@ -528,7 +547,7 @@ class TestGetSessionContextWorkflowRecord:
         channel_values = {"status": "Completed", "goal": "g", "ui_chat_log": []}
         gitlab_client.aget.side_effect = _route_aget(
             [_make_checkpoint(channel_values)],
-            _make_workflow_record(
+            previous_record=_make_workflow_record(
                 title="Fix login bug",
                 summary="Failed on step 3",
                 workflow_definition="software_development/v1",
@@ -549,7 +568,9 @@ class TestGetSessionContextWorkflowRecord:
         channel_values = {"status": "Completed", "ui_chat_log": []}
         gitlab_client.aget.side_effect = _route_aget(
             [_make_checkpoint(channel_values)],
-            _make_workflow_record(status="finished"),
+            previous_record=_make_workflow_record(
+                status="finished", workflow_definition=DEFAULT_FLOW_TYPE
+            ),
         )
 
         result = json.loads(await tool._arun(previous_session_id=1))
@@ -563,7 +584,9 @@ class TestGetSessionContextWorkflowRecord:
         channel_values = {"status": "Completed", "ui_chat_log": []}
         gitlab_client.aget.side_effect = _route_aget(
             [_make_checkpoint(channel_values)],
-            _make_workflow_record(status=None),
+            previous_record=_make_workflow_record(
+                status=None, workflow_definition=DEFAULT_FLOW_TYPE
+            ),
         )
 
         result = json.loads(await tool._arun(previous_session_id=1))
@@ -571,12 +594,13 @@ class TestGetSessionContextWorkflowRecord:
         assert result["status"] == "Completed"
 
     @pytest.mark.asyncio
-    async def test_degrades_gracefully_when_record_fetch_fails(
+    async def test_denies_access_when_previous_record_fetch_fails(
         self, tool, gitlab_client
     ):
-        # The checkpoint fetch succeeds but the workflow-record fetch raises.
-        # The tool must still return checkpoint-derived context with record-backed
-        # fields left null, rather than failing.
+        # The workflow-record fetch is also how the flow-type check identifies
+        # the previous session's flow type. If it fails, that type is unknown,
+        # so the flow-type check fails closed and denies access outright
+        # (rather than degrading to a partial, record-field-less response).
         channel_values = {
             "status": "Completed",
             "goal": "Do the thing",
@@ -589,16 +613,159 @@ class TestGetSessionContextWorkflowRecord:
         async def _aget(path, parse_json=True, **_kwargs):
             if path.endswith("/checkpoints?per_page=1"):
                 return _make_response(checkpoints)
+            if path == _current_record_path():
+                return _make_response(
+                    _make_workflow_record(workflow_definition=DEFAULT_FLOW_TYPE)
+                )
             raise Exception("record endpoint 500")
 
         gitlab_client.aget.side_effect = _aget
 
-        result = json.loads(await tool._arun(previous_session_id=1))
+        with pytest.raises(
+            ToolException, match="issue retrieving the previous session"
+        ):
+            await tool._arun(previous_session_id=1)
 
-        assert result["title"] is None
-        assert result["summary"] is None
-        assert result["workflow_definition"] is None
-        # Checkpoint-derived fields survive; status falls back to the checkpoint.
-        assert result["status"] == "Completed"
-        assert result["goal"] == "Do the thing"
-        assert result["last_message"] == "done"
+        called_paths = [
+            call.kwargs.get("path") for call in gitlab_client.aget.call_args_list
+        ]
+        assert not any(
+            path.endswith("/checkpoints?per_page=1") for path in called_paths
+        )
+
+
+class TestGetSessionContextFlowTypeRestriction:
+    @pytest.mark.asyncio
+    async def test_allows_access_when_same_workflow_definition(
+        self, tool, gitlab_client
+    ):
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(workflow_definition="chat"),
+            current_record=_make_workflow_record(workflow_definition="chat"),
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        assert result["session_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_denies_access_when_different_workflow_definition(
+        self, tool, gitlab_client
+    ):
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(
+                workflow_definition="software_development"
+            ),
+            current_record=_make_workflow_record(workflow_definition="chat"),
+        )
+
+        with pytest.raises(ToolException, match="different flow type"):
+            await tool._arun(previous_session_id=1)
+
+        called_paths = [
+            call.kwargs.get("path") for call in gitlab_client.aget.call_args_list
+        ]
+        assert not any(
+            path.endswith("/checkpoints?per_page=1") for path in called_paths
+        )
+
+    @pytest.mark.asyncio
+    async def test_denies_access_for_different_custom_catalog_flows(
+        self, tool, gitlab_client
+    ):
+        # Custom catalog flows share the generic workflow_definition
+        # "ai_catalog_agent", so ai_catalog_item_version_id must also match.
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(
+                workflow_definition="ai_catalog_agent",
+                ai_catalog_item_version_id=5,
+            ),
+            current_record=_make_workflow_record(
+                workflow_definition="ai_catalog_agent",
+                ai_catalog_item_version_id=9,
+            ),
+        )
+
+        with pytest.raises(ToolException, match="different flow type"):
+            await tool._arun(previous_session_id=1)
+
+    @pytest.mark.asyncio
+    async def test_allows_access_for_same_custom_catalog_flow(
+        self, tool, gitlab_client
+    ):
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(
+                workflow_definition="ai_catalog_agent",
+                ai_catalog_item_version_id=5,
+            ),
+            current_record=_make_workflow_record(
+                workflow_definition="ai_catalog_agent",
+                ai_catalog_item_version_id=5,
+            ),
+        )
+
+        result = json.loads(await tool._arun(previous_session_id=1))
+        assert result["session_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_denies_access_when_current_record_fetch_fails(
+        self, tool, gitlab_client
+    ):
+        async def _aget(path, parse_json=True, **_kwargs):
+            if path == _current_record_path():
+                raise Exception("record endpoint 500")
+            return _make_response(
+                _make_workflow_record(workflow_definition=DEFAULT_FLOW_TYPE)
+            )
+
+        gitlab_client.aget.side_effect = _aget
+
+        with pytest.raises(ToolException, match="issue verifying the current session"):
+            await tool._arun(previous_session_id=1)
+
+    @pytest.mark.asyncio
+    async def test_denies_access_when_current_workflow_id_missing(self, gitlab_client):
+        tool_without_workflow_id = GetSessionContext(
+            metadata={
+                "gitlab_client": gitlab_client,
+                "gitlab_host": "gitlab.example.com",
+            }
+        )
+
+        with pytest.raises(
+            ToolException, match="Unable to determine the current session"
+        ):
+            await tool_without_workflow_id._arun(previous_session_id=1)
+
+        gitlab_client.aget.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_denies_access_when_previous_workflow_definition_missing(
+        self, tool, gitlab_client
+    ):
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(workflow_definition=None),
+            current_record=_make_workflow_record(workflow_definition="chat"),
+        )
+
+        with pytest.raises(
+            ToolException, match="issue retrieving the previous session"
+        ):
+            await tool._arun(previous_session_id=1)
+
+    @pytest.mark.asyncio
+    async def test_denies_access_when_current_workflow_definition_missing(
+        self, tool, gitlab_client
+    ):
+        gitlab_client.aget.side_effect = _route_aget(
+            [_make_checkpoint({})],
+            previous_record=_make_workflow_record(workflow_definition="chat"),
+            current_record=_make_workflow_record(workflow_definition=None),
+        )
+
+        with pytest.raises(ToolException, match="issue verifying the current session"):
+            await tool._arun(previous_session_id=1)
