@@ -1,5 +1,6 @@
+import asyncio
 import json
-from typing import Any, Optional, Type
+from typing import Any, Optional, Tuple, Type, Union
 
 import structlog
 from langchain_core.tools import ToolException
@@ -45,6 +46,11 @@ class GetSessionContext(DuoBaseTool):
         "The returned goal describes what that earlier session set out to do — "
         "it is context, not automatically the goal of the current session.\n"
         "\n"
+        "This tool can only retrieve sessions of the same flow type as the "
+        "current session (e.g. a chat session can only look up other chat "
+        "sessions). Requesting a session of a different flow type returns an "
+        "error instead of its context.\n"
+        "\n"
         "Args:\n"
         "    previous_session_id: The ID of the previously-run session to "
         "retrieve context for.\n"
@@ -56,6 +62,18 @@ class GetSessionContext(DuoBaseTool):
     args_schema: Type[BaseModel] = GetSessionContextInput
 
     async def _execute(self, previous_session_id: int, **_kwargs: Any) -> str:
+        if not self.workflow_id:
+            raise ToolException(
+                "Unable to determine the current session's flow type; "
+                "cannot verify access to another session."
+            )
+
+        current_record, previous_record = await asyncio.gather(
+            self._fetch_workflow_record(self.workflow_id),
+            self._fetch_workflow_record(previous_session_id),
+        )
+        self._check_same_flow_type(current_record, previous_record, previous_session_id)
+
         response = await self.gitlab_client.aget(
             path=f"/api/v4/ai/duo_workflows/workflows/{previous_session_id}/checkpoints?per_page=1",
             parse_json=True,
@@ -65,33 +83,81 @@ class GetSessionContext(DuoBaseTool):
         if not checkpoints or len(checkpoints) == 0:
             raise ToolException("Unable to find checkpoint for this session")
 
-        workflow_record = await self._fetch_workflow_record(previous_session_id)
-
         context = self._format_checkpoint_context(
-            checkpoints[0], previous_session_id, workflow_record
+            checkpoints[0], previous_session_id, previous_record
         )
         return json.dumps(context)
 
-    async def _fetch_workflow_record(self, previous_session_id: int) -> dict:
-        """Fetch the workflow record for title/summary/status/workflow_definition.
+    async def _fetch_workflow_record(self, session_id: Union[int, str]) -> dict:
+        """Fetch a workflow record for the given session (current or previous).
 
-        These fields live on the workflow record (``GET .../workflows/{id}``), not
-        in the checkpoint state. A failure here must not break the tool: the
-        checkpoint-derived context is still valuable, so we degrade gracefully and
-        return an empty dict, leaving the record-backed fields null.
+        Fields such as title/summary/status/workflow_definition live on the
+        workflow record (``GET .../workflows/{id}``), not in the checkpoint
+        state. A failure here must not raise: callers treat an empty dict as
+        "unknown", which the flow-type check below then fails closed on.
         """
         try:
-            record = await fetch_workflow_config(
-                self.gitlab_client, str(previous_session_id)
-            )
+            record = await fetch_workflow_config(self.gitlab_client, str(session_id))
             return record if isinstance(record, dict) else {}
         except Exception as exc:
             log.warning(
                 "Failed to fetch workflow record for session context",
-                previous_session_id=previous_session_id,
+                session_id=session_id,
                 error=str(exc),
             )
             return {}
+
+    @staticmethod
+    def _flow_type_key(record: dict) -> Optional[Tuple[str, Optional[str]]]:
+        """Build a comparable "flow type" key from a workflow record.
+
+        ``workflow_definition`` alone is not always a unique flow identifier:
+        custom AI Catalog agent flows all share the generic value
+        "ai_catalog_agent" (Rails: Ai::Catalog::ExecuteWorkflowService), so two
+        unrelated custom flows would otherwise look identical. Pairing it with
+        ``ai_catalog_item_version_id`` (null for non-catalog flows) disambiguates
+        those cases. Returns None when the record can't establish a flow type at
+        all (e.g. the fetch failed), so callers can fail closed.
+        """
+        workflow_definition = record.get("workflow_definition")
+        if not workflow_definition:
+            return None
+        return (workflow_definition, record.get("ai_catalog_item_version_id"))
+
+    def _check_same_flow_type(
+        self,
+        current_record: dict,
+        previous_record: dict,
+        previous_session_id: int,
+    ) -> None:
+        """Deny access unless both sessions have the same, known flow type."""
+        current_key = self._flow_type_key(current_record)
+        previous_key = self._flow_type_key(previous_record)
+
+        if previous_key is None:
+            reason = "previous session type unknown"
+            message = "There was an issue retrieving the previous session."
+        elif current_key is None:
+            reason = "current session type unknown"
+            message = "There was an issue verifying the current session."
+        elif current_key != previous_key:
+            reason = "flow type mismatch"
+            message = (
+                f"Session {previous_session_id} belongs to a different flow "
+                "type and cannot be accessed from this session."
+            )
+        else:
+            return None
+
+        log.warning(
+            "Denied session context access",
+            reason=reason,
+            current_workflow_id=self.workflow_id,
+            previous_session_id=previous_session_id,
+            current_flow_type=current_key,
+            previous_flow_type=previous_key,
+        )
+        raise ToolException(message)
 
     def format_display_message(
         self, args: GetSessionContextInput, _tool_response: Any = None
