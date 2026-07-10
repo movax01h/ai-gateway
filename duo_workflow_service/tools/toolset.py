@@ -1,5 +1,5 @@
 import collections.abc
-from typing import Any, Optional, Type, Union
+from typing import Any, Optional, Type, Union, cast
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
@@ -55,7 +55,7 @@ class Toolset(collections.abc.Mapping):
 
         for tool in self._all_tools.values():
             if isinstance(tool, BaseTool):
-                tool._tool_options = self._tool_options  # type: ignore[attr-defined]
+                setattr(tool, "_tool_options", self._tool_options)
 
         self._executable_tools: dict[str, BaseTool] = {
             tool.name: tool
@@ -125,7 +125,7 @@ class Toolset(collections.abc.Mapping):
             ValueError: If an option key is not a valid parameter for the tool,
                 or if an option value contains nested structures.
         """
-        schema_cls = tool.get_input_schema()
+        schema_cls = cast(Type[BaseModel], tool.get_input_schema())
         valid_fields = set(schema_cls.model_fields.keys())
         for key in options:
             if key not in valid_fields:
@@ -176,7 +176,7 @@ class Toolset(collections.abc.Mapping):
             tool = self._all_tools[tool_name]
 
             if isinstance(tool, BaseTool):
-                tool_input_schema_cls = tool.get_input_schema()
+                tool_input_schema_cls = cast(Type[BaseModel], tool.get_input_schema())
             else:
                 tool_input_schema_cls = tool
 

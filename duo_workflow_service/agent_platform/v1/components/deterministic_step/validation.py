@@ -2,7 +2,7 @@
 
 from typing import Any, TypeGuard
 
-from langchain_core.tools import BaseTool
+from langchain_core.tools import ArgsSchema, BaseTool
 from pydantic import BaseModel
 
 
@@ -121,7 +121,7 @@ def validate_against_schema(
 
 
 def _has_args_schema(
-    args_schema: type[BaseModel] | dict[str, Any] | None,
+    args_schema: ArgsSchema | None,
 ) -> TypeGuard[type[BaseModel]]:
     """Type guard to check if args_schema is a valid Pydantic BaseModel class.
 
