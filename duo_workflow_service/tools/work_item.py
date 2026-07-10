@@ -10,6 +10,7 @@ from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
 )
 from duo_workflow_service.tools.work_items.base_tool import (
+    GROUP_ONLY_TYPES,
     ResolvedWorkItem,
     WorkItemBaseTool,
 )
@@ -22,9 +23,16 @@ from duo_workflow_service.tools.work_items.version_compatibility import (
     get_query_variables_for_version,
 )
 
-# Supported work item types in GitLab
-GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
-ALL_TYPES = {"Issue", "Task", *GROUP_ONLY_TYPES}
+# Built-in GitLab work item types (custom types are not filterable).
+ALL_TYPES = {
+    "Issue",
+    "Incident",
+    "Test Case",
+    "Requirement",
+    "Task",
+    "Ticket",
+    *GROUP_ONLY_TYPES,
+}
 
 DEFAULT_MR_PAGE_SIZE = 20
 
@@ -486,7 +494,13 @@ class GetWorkItemNotes(WorkItemBaseTool):
 class CreateWorkItemInput(ParentResourceInput):
     title: str = Field(description="Title of the work item.")
     type_name: str = Field(
-        description="Work item type. One of: 'Issue', 'Epic', 'Task', 'Objective', 'Key Result'."
+        description=(
+            "Work item type. Common types are "
+            + ", ".join(sorted(ALL_TYPES))
+            + ", but the namespace may also define custom types (e.g. "
+            "'Request For Help'), so use the type the user asked for. If it is "
+            "not valid, the error lists the types available in the namespace."
+        )
     )
     description: Optional[str] = Field(
         default=None,
