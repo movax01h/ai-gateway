@@ -17,6 +17,9 @@ FLOW_IDENTIFIER_MAP = {
     "developer": "developer/v1",
     "fix_pipeline": "fix_pipeline/v1",
     "code_review": "code_review/v1",
+    "sast_fp_detection": "sast_fp_detection/v1",
+    "resolve_sast_vulnerability": "resolve_sast_vulnerability/v1",
+    "secrets_fp_detection": "secrets_fp_detection/v1",
 }
 
 
@@ -86,6 +89,35 @@ class StartCodeReviewFlowInput(BaseModel):
     )
 
 
+class StartSastFpDetectionFlowInput(BaseModel):
+    """Input for the SAST False Positive Detection flow."""
+
+    name: Literal["sast_fp_detection"]
+    vulnerability_id: str = Field(
+        description="The ID of the SAST vulnerability to analyse for false positives.",
+    )
+
+
+class StartResolveSastVulnerabilityFlowInput(BaseModel):
+    """Input for the SAST Vulnerability Resolution flow."""
+
+    name: Literal["resolve_sast_vulnerability"]
+    vulnerability_id: str = Field(
+        description="The ID of the SAST vulnerability to resolve.",
+    )
+
+
+class StartSecretsFpDetectionFlowInput(BaseModel):
+    """Input for the Secret Detection False Positive Detection flow."""
+
+    name: Literal["secrets_fp_detection"]
+    vulnerability_id: str = Field(
+        description=(
+            "The ID of the secret detection vulnerability to analyse for false positives."
+        ),
+    )
+
+
 class StartFlowInput(BaseModel):
     """Input schema for the start_flow tool."""
 
@@ -94,6 +126,9 @@ class StartFlowInput(BaseModel):
             StartDeveloperFlowInput,
             StartFixPipelineFlowInput,
             StartCodeReviewFlowInput,
+            StartSastFpDetectionFlowInput,
+            StartResolveSastVulnerabilityFlowInput,
+            StartSecretsFpDetectionFlowInput,
         ],
         Field(discriminator="name"),
     ]
@@ -120,6 +155,12 @@ class StartFlow(DuoBaseTool):
         "- code_review: read-only review and assessment of the changes in a merge request — "
         "not for implementing feedback or making changes "
         '(e.g. "review this MR", "can you review my merge request?").\n'
+        "- sast_fp_detection: analyse a SAST vulnerability for false positives. Requires a "
+        "vulnerability_id.\n"
+        "- resolve_sast_vulnerability: resolve a SAST vulnerability by generating a code fix. Requires a "
+        "vulnerability_id.\n"
+        "- secrets_fp_detection: analyse a secret detection vulnerability for false positives. "
+        "Requires a vulnerability_id.\n"
         "Returns a session URL the user can follow to track progress. The user is prompted to "
         "approve the handoff before the agent starts."
     )
@@ -131,6 +172,9 @@ class StartFlow(DuoBaseTool):
             StartDeveloperFlowInput
             | StartFixPipelineFlowInput
             | StartCodeReviewFlowInput
+            | StartSastFpDetectionFlowInput
+            | StartResolveSastVulnerabilityFlowInput
+            | StartSecretsFpDetectionFlowInput
         ),
         **_kwargs: Any,
     ) -> str:
@@ -229,6 +273,10 @@ class StartFlow(DuoBaseTool):
         For flows that accept a URL (fix_pipeline, code_review), the project
         is extracted from the URL so the workflow runs against the correct
         project — even when it differs from the current chat context.
+        For security flows (sast_fp_detection, resolve_sast_vulnerability,
+        secrets_fp_detection), the project falls back to ``self.project``
+        when available, since the vulnerability ID already encodes the
+        resource identity.
 
         Args:
             flow_name: The flow identifier (e.g. ``"developer"``).
@@ -303,6 +351,14 @@ class StartFlow(DuoBaseTool):
             )
             linkable_ids["merge_request_id"] = mr_iid
             return str(mr_iid), project_path, linkable_ids
+
+        if flow_name in (
+            "sast_fp_detection",
+            "resolve_sast_vulnerability",
+            "secrets_fp_detection",
+        ):
+            project_id = self.project.get("id") if self.project else None
+            return flow_data["vulnerability_id"], project_id, linkable_ids
 
         raise ToolException(f"Unknown flow: {flow_name!r}")
 
@@ -390,6 +446,12 @@ class StartFlow(DuoBaseTool):
             detail = str(flow_dict.get("pipeline_url", ""))
         elif flow_name == "code_review":
             detail = str(flow_dict.get("merge_request_url", ""))
+        elif flow_name in (
+            "sast_fp_detection",
+            "resolve_sast_vulnerability",
+            "secrets_fp_detection",
+        ):
+            detail = str(flow_dict.get("vulnerability_id", ""))
         else:
             detail = str(flow_dict)
 

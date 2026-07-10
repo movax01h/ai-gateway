@@ -15,6 +15,9 @@ from duo_workflow_service.tools.start_flow import (
     StartFlow,
     StartFlowError,
     StartFlowInput,
+    StartResolveSastVulnerabilityFlowInput,
+    StartSastFpDetectionFlowInput,
+    StartSecretsFpDetectionFlowInput,
 )
 
 
@@ -65,6 +68,9 @@ def test_flow_identifier_map_covers_all_flow_names():
         "developer": "developer/v1",
         "fix_pipeline": "fix_pipeline/v1",
         "code_review": "code_review/v1",
+        "sast_fp_detection": "sast_fp_detection/v1",
+        "resolve_sast_vulnerability": "resolve_sast_vulnerability/v1",
+        "secrets_fp_detection": "secrets_fp_detection/v1",
     }
 
 
@@ -177,6 +183,51 @@ def test_start_flow_input_discriminates_code_review():
         }
     )
     assert isinstance(inp.flow, StartCodeReviewFlowInput)
+
+
+def test_start_flow_input_discriminates_sast_fp_detection():
+    inp = StartFlowInput(
+        flow={
+            "name": "sast_fp_detection",
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        }
+    )
+    assert isinstance(inp.flow, StartSastFpDetectionFlowInput)
+
+
+def test_start_flow_input_discriminates_resolve_sast_vulnerability():
+    inp = StartFlowInput(
+        flow={
+            "name": "resolve_sast_vulnerability",
+            "vulnerability_id": "gid://gitlab/Vulnerability/456",
+        }
+    )
+    assert isinstance(inp.flow, StartResolveSastVulnerabilityFlowInput)
+
+
+def test_start_flow_input_discriminates_secrets_fp_detection():
+    inp = StartFlowInput(
+        flow={
+            "name": "secrets_fp_detection",
+            "vulnerability_id": "gid://gitlab/Vulnerability/789",
+        }
+    )
+    assert isinstance(inp.flow, StartSecretsFpDetectionFlowInput)
+
+
+def test_start_sast_fp_detection_flow_input_requires_vulnerability_id():
+    with pytest.raises(ValidationError):
+        StartSastFpDetectionFlowInput(name="sast_fp_detection")
+
+
+def test_start_resolve_sast_vulnerability_flow_input_requires_vulnerability_id():
+    with pytest.raises(ValidationError):
+        StartResolveSastVulnerabilityFlowInput(name="resolve_sast_vulnerability")
+
+
+def test_start_secrets_fp_detection_flow_input_requires_vulnerability_id():
+    with pytest.raises(ValidationError):
+        StartSecretsFpDetectionFlowInput(name="secrets_fp_detection")
 
 
 def test_start_flow_input_rejects_unknown_flow_name():
@@ -770,11 +821,113 @@ async def test_execute_raises_for_unknown_flow_name(tool):
 
 
 def test_resolve_goal_project_and_linkable_raises_for_unknown_flow(tool):
-    """Raises ToolException when flow_name is not developer/fix_pipeline/code_review."""
+    """Raises ToolException when flow_name is not a known flow."""
     with pytest.raises(ToolException, match="Unknown flow"):
         tool._resolve_goal_project_and_linkable(
             "unknown_flow", {"name": "unknown_flow"}
         )
+
+
+# ---------------------------------------------------------------------------
+# _execute: sast_fp, sast_vr, secret_detection_fp
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_name,workflow_definition",
+    [
+        ("sast_fp_detection", "sast_fp_detection/v1"),
+        ("resolve_sast_vulnerability", "resolve_sast_vulnerability/v1"),
+        ("secrets_fp_detection", "secrets_fp_detection/v1"),
+    ],
+)
+async def test_execute_security_flows_success(
+    tool, gitlab_client_mock, flow_name, workflow_definition
+):
+    vulnerability_id = "gid://gitlab/Vulnerability/42"
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-sec-1"})
+    )
+
+    result = await tool.arun(
+        {"flow": {"name": flow_name, "vulnerability_id": vulnerability_id}}
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+    assert data["flow_name"] == flow_name
+    assert data["session_url"] == (
+        "https://gitlab.com/group/project/-/automate/agent-sessions/wf-sec-1"
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["workflow_definition"] == workflow_definition
+    assert posted_body["goal"] == vulnerability_id
+    assert posted_body["project_id"] == 42  # from self.project fixture
+    assert "additional_context" not in posted_body
+    assert "issue_id" not in posted_body
+    assert "merge_request_id" not in posted_body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_name",
+    ["sast_fp_detection", "resolve_sast_vulnerability", "secrets_fp_detection"],
+)
+async def test_execute_security_flows_without_project_omits_project_id(
+    tool_no_project, gitlab_client_mock, flow_name
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-sec-np"})
+    )
+
+    await tool_no_project.arun(
+        {
+            "flow": {
+                "name": flow_name,
+                "vulnerability_id": "gid://gitlab/Vulnerability/1",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert "project_id" not in posted_body
+
+
+# ---------------------------------------------------------------------------
+# format_display_message: sast_fp, sast_vr, secret_detection_fp
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "flow_name,input_cls",
+    [
+        ("sast_fp_detection", StartSastFpDetectionFlowInput),
+        ("resolve_sast_vulnerability", StartResolveSastVulnerabilityFlowInput),
+        ("secrets_fp_detection", StartSecretsFpDetectionFlowInput),
+    ],
+)
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        "not valid json{{{",
+        json.dumps({}),
+    ],
+)
+def test_format_display_message_fallback_security_flows(
+    tool, flow_name, input_cls, response
+):
+    vulnerability_id = "gid://gitlab/Vulnerability/99"
+    args = StartFlowInput(
+        flow=input_cls(name=flow_name, vulnerability_id=vulnerability_id)
+    )
+
+    msg = tool.format_display_message(args, response)
+
+    assert flow_name in msg
+    assert vulnerability_id in msg
 
 
 # ---------------------------------------------------------------------------
