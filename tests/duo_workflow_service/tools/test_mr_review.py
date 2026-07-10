@@ -10,6 +10,7 @@ from langchain_core.tools import ToolException
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.mr_review import (
+    MAX_REVIEW_FILES,
     DiffLine,
     MrReviewComment,
     SubmitMrReview,
@@ -969,8 +970,84 @@ class TestSubmitMrReviewFetchDiffsByFile:
         assert "app.py" in result
         assert len(result["app.py"]) > 0
         gitlab_client_mock.aget.assert_called_once_with(
-            "/api/v4/projects/123/merge_requests/45/diffs", parse_json=False
+            path="/api/v4/projects/123/merge_requests/45/diffs",
+            params={"page": "1", "per_page": 100},
+            parse_json=False,
         )
+
+    @pytest.mark.asyncio
+    async def test_fetch_diffs_by_file_fetches_all_pages(
+        self, metadata, gitlab_client_mock, sample_diff
+    ):
+        """Diffs spanning multiple API pages are all available for anchoring."""
+        diffs_page_1 = [
+            {"new_path": "file_a.py", "old_path": "file_a.py", "diff": sample_diff}
+        ]
+        diffs_page_2 = [
+            {"new_path": "file_b.py", "old_path": "file_b.py", "diff": sample_diff}
+        ]
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(diffs_page_1),
+                    headers={"X-Next-Page": "2"},
+                ),
+                GitLabHttpResponse(status_code=200, body=json.dumps(diffs_page_2)),
+            ]
+        )
+
+        tool = SubmitMrReview(metadata=metadata)
+        result = await tool._fetch_diffs_by_file(123, 45)
+
+        assert "file_a.py" in result
+        assert "file_b.py" in result
+
+    @pytest.mark.asyncio
+    async def test_fetch_diffs_by_file_caps_at_max_review_files(
+        self, metadata, gitlab_client_mock, sample_diff
+    ):
+        """More than MAX_REVIEW_FILES changed files are truncated to the cap, with a warning."""
+        from structlog.testing import capture_logs
+
+        def page(start: int) -> list:
+            return [
+                {
+                    "new_path": f"file_{i}.py",
+                    "old_path": f"file_{i}.py",
+                    "diff": sample_diff,
+                }
+                for i in range(start, start + 100)
+            ]
+
+        gitlab_client_mock.aget = AsyncMock(
+            side_effect=[
+                GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(page(0)),
+                    headers={"X-Next-Page": "2"},
+                ),
+                GitLabHttpResponse(status_code=200, body=json.dumps(page(100))),
+            ]
+        )
+
+        tool = SubmitMrReview(metadata=metadata)
+
+        with capture_logs() as captured_logs:
+            result = await tool._fetch_diffs_by_file(123, 45)
+
+        assert len(result) == MAX_REVIEW_FILES
+
+        truncation_warnings = [
+            log
+            for log in captured_logs
+            if log["event"]
+            == "MR exceeds MAX_REVIEW_FILES; anchoring only the first files"
+        ]
+        assert len(truncation_warnings) == 1
+        assert truncation_warnings[0]["log_level"] == "warning"
+        assert truncation_warnings[0]["total_files"] == 200
+        assert truncation_warnings[0]["max_review_files"] == MAX_REVIEW_FILES
 
     @pytest.mark.asyncio
     async def test_fetch_diffs_skips_empty_diffs(self, metadata, gitlab_client_mock):
