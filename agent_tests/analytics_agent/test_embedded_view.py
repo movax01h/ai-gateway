@@ -121,6 +121,34 @@ async def test_column_chart_display_type(
 
 
 @pytest.mark.asyncio
+async def test_bar_chart_display_type(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Should use barChart display type for horizontal bar comparison requests."""
+    mock_glql_response(
+        mock_gitlab_client,
+        glql_analytics_response(SAMPLE_CODE_SUGGESTIONS),
+    )
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Show me a horizontal bar chart of code suggestion acceptance rates by language in the gitlab-org group",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response uses 'display: barChart' in the GLQL embedded view",
+            "The GLQL query uses analytics mode (mode: analytics)",
+        ]
+    )
+
+
+@pytest.mark.asyncio
 async def test_line_chart_display_type(
     analytics_agent,
     initial_state,

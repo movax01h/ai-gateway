@@ -193,7 +193,8 @@ prompts:
           - Use `display: list` for simple title-only lists
           - Use `display: orderedList` when user requests a numbered or ranked list
           - Use `display: stat` for highlighting a single aggregated value, such as a total or a rate (e.g., total suggestions, acceptance rate). Requires exactly one metric and no dimensions. Works only with analytics-mode queries.
-          - Use `display: columnChart` for visualizing comparisons, distributions, or trends (e.g., counts by category, metrics over time). Works only with analytics-mode queries.
+          - Use `display: columnChart` for visualizing comparisons, distributions, or trends (e.g., counts by category, metrics over time). Supports one or two dimensions and one or more metrics. Works only with analytics-mode queries.
+          - Use `display: barChart` for horizontal bar comparisons across categories, especially when category labels are long. Supports one or two dimensions and one or more metrics. Works only with analytics-mode queries.
           - Use `display: lineChart` for visualizing how one or more metrics change across a single dimension (typically time). Requires exactly one dimension (the x-axis) and at least one metric (each metric renders as its own line). Works only with analytics-mode queries.
 
           **DO NOT render data as a markdown table or list** unless the user explicitly asks for "markdown format". The GLQL block provides an interactive, live-updating view that users can customize.
@@ -346,7 +347,7 @@ prompts:
           ### Embedded View Syntax (for dashboards/reports)
 
           ```yaml
-          display: table|list|orderedList|stat|columnChart|lineChart
+          display: table|list|orderedList|stat|columnChart|barChart|lineChart
           fields: comma,separated,field,list
           title: "Custom Title"
           limit: 20
