@@ -206,14 +206,18 @@ components:
     type: AgentComponent
     prompt_id: "fix_pipeline_checkout_existing_branch"
     prompt_version: "^1.0.0"
+    response_schema_id: "create_repository_branch"
+    response_schema_version: "^1.0.0"
     inputs:
       - from: "context:inputs.pipeline.source_branch"
         as: "ref"
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
+    max_cycles: 4
     toolset:
       - "run_git_command"
     ui_log_events:
+      - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -378,7 +382,11 @@ routers:
         "no_action": "end"
         "default_route": "end"
   - from: "fix_pipeline_checkout_existing_branch"
-    to: "fix_pipeline_execution"
+    condition:
+      input: "context:fix_pipeline_checkout_existing_branch.final_answer.status"
+      routes:
+        "success": "fix_pipeline_execution"
+        "default_route": "end"
   - from: "fix_pipeline_add_comment"
     to: "end"
   - from: "fix_pipeline_execution"
