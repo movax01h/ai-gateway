@@ -438,6 +438,92 @@ async def test_fetch_workflow_and_container_data_without_exclusion_rules():
 
 
 @pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_with_flow_enablement():
+    """Test that duoWorkflowStatusCheck values are read into the workflow config."""
+    gitlab_client = AsyncMock()
+
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                        "duoWorkflowStatusCheck": {
+                            "foundationalFlowsEnabled": False,
+                            "enabledFoundationalFlows": ["code_review/v1"],
+                        },
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["features"]["foundational_flows"] == {
+        "enabled": False,
+        "enabled_flows": ["code_review/v1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_without_flow_enablement():
+    """Test that flow enablement defaults to True when duoWorkflowStatusCheck is absent."""
+    gitlab_client = AsyncMock()
+
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["features"]["foundational_flows"] == {
+        "enabled": True,
+        "enabled_flows": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_fetch_workflow_with_prompt_injection_protection_level_from_namespace():
     """Test that prompt injection protection level is parsed from workflow namespace.aiSettings."""
     gitlab_client = AsyncMock()

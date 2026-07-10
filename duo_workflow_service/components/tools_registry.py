@@ -1,6 +1,6 @@
 import copy
 import json
-from typing import Any, Optional, Sequence, Type, TypedDict, Union
+from typing import Any, NotRequired, Optional, Sequence, Type, TypedDict, Union
 
 import structlog
 from langchain.tools import BaseTool
@@ -12,6 +12,7 @@ from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import (
     Project,
     WorkflowConfig,
+    WorkflowFeatures,
     workflow_global_id,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -39,6 +40,7 @@ class ToolMetadata(TypedDict):
     gitlab_client: GitlabHttpClient
     gitlab_host: str
     project: Optional[Project]
+    features: NotRequired[WorkflowFeatures]
 
 
 # This tools agent uses to interact with its internal state, they are required for
@@ -251,6 +253,7 @@ class ToolsRegistry:
             gitlab_client=gl_http_client,
             gitlab_host=workflow_config.get("gitlab_host", ""),
             project=project,
+            features=workflow_config.get("features", {}),
         )
 
         return cls(

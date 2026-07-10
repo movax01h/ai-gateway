@@ -19,6 +19,10 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 duoContextExclusionSettings {
                     exclusionRules
                 }
+                duoWorkflowStatusCheck {
+                    foundationalFlowsEnabled
+                    enabledFoundationalFlows
+                }
                 namespace {
                     aiSettings {
                         promptInjectionProtectionLevel
