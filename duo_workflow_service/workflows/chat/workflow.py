@@ -39,6 +39,10 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
+from duo_workflow_service.tools.start_flow import (
+    enabled_flow_identifiers,
+    enabled_flow_names,
+)
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
@@ -436,9 +440,16 @@ class Workflow(AbstractWorkflow):
                 tool for tool in read_only_tools if tool not in _SEARCH_TOOLS
             ]
 
+        # Only offer start_flow when foundational flows are enabled for the
+        # project and at least one supported flow is available.
+        flow_identifiers = enabled_flow_identifiers(
+            self._workflow_config.get("features")
+        )
+        flows_available = bool(enabled_flow_names(flow_identifiers))
         flow_tools = (
             CHAT_FLOW_TOOLS
             if is_feature_enabled(FeatureFlag.AGENTIC_FOUNDATIONAL_FLOW_TOOL)
+            and flows_available
             else []
         )
 

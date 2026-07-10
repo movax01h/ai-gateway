@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, TypedDict
+from typing import NotRequired, Optional, Tuple, TypedDict
 
 from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -44,6 +44,15 @@ class Checkpoint(TypedDict, total=False):
     metadata: str
 
 
+class FoundationalFlowsFeature(TypedDict):
+    enabled: bool
+    enabled_flows: Optional[list[str]]
+
+
+class WorkflowFeatures(TypedDict, total=False):
+    foundational_flows: FoundationalFlowsFeature
+
+
 class WorkflowConfig(TypedDict):
     workflow_id: str
     agent_privileges_names: list
@@ -58,6 +67,7 @@ class WorkflowConfig(TypedDict):
     prompt_injection_protection_level: PromptInjectionProtectionLevel
     archived: bool
     stalled: bool
+    features: NotRequired[WorkflowFeatures]
 
 
 async def fetch_workflow_and_container_data(
@@ -143,6 +153,8 @@ async def fetch_workflow_and_container_data(
             f"Failed to extract gitlab host from web_url for workflow {workflow_id}"
         )
 
+    status_check = project_data.get("duoWorkflowStatusCheck") or {}
+
     workflow_config = WorkflowConfig(
         workflow_id=workflow_id,
         agent_privileges_names=workflow.get("agentPrivilegesNames", []),
@@ -161,6 +173,12 @@ async def fetch_workflow_and_container_data(
         prompt_injection_protection_level=prompt_injection_protection_level,
         archived=workflow.get("archived", None),
         stalled=workflow.get("stalled", None),
+        features={
+            "foundational_flows": {
+                "enabled": status_check.get("foundationalFlowsEnabled", True),
+                "enabled_flows": status_check.get("enabledFoundationalFlows"),
+            }
+        },
     )
 
     return project, namespace, workflow_config

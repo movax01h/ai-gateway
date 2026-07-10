@@ -59,6 +59,7 @@ class TestQueryVersionSelection:
 
         assert "incrementalCheckpointsEnabled" in result
         assert "compressedCheckpoint" in result
+        assert "duoWorkflowStatusCheck" in result
 
     def test_query_selection_unknown_version_returns_fallback(self):
         """Unknown/unparsable version returns the fallback (oldest) query."""

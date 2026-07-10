@@ -602,6 +602,41 @@ async def test_execute_developer_invalid_project_url(tool, project_url):
 
 
 # ---------------------------------------------------------------------------
+# _execute: disabled flows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "foundational_flows",
+    [
+        {"enabled": True, "enabled_flows": ["code_review/v1"]},
+        {"enabled": False, "enabled_flows": None},
+    ],
+)
+async def test_execute_returns_unavailable_when_flow_is_disabled(
+    metadata, gitlab_client_mock, foundational_flows
+):
+    metadata["features"] = {"foundational_flows": foundational_flows}
+    tool = StartFlow(metadata=metadata)
+    gitlab_client_mock.apost = AsyncMock()
+
+    result = await tool._execute(
+        flow=StartDeveloperFlowInput(
+            name="developer",
+            goal="Implement the feature",
+        ),
+    )
+
+    assert json.loads(result) == {
+        "status": "unavailable",
+        "flow_name": "developer",
+        "message": "The developer flow is not enabled for this project.",
+    }
+    gitlab_client_mock.apost.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # _execute: HTTP errors and exceptions
 # ---------------------------------------------------------------------------
 
@@ -1206,3 +1241,82 @@ async def test_execute_fix_pipeline_cross_project_mr_uses_mr_project(
     # MR project takes precedence so Rails resolves the IID correctly
     assert posted_body["project_id"] == "team-b/repo-b"
     assert posted_body["merge_request_id"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Per-flow enablement: description + runtime guard
+# ---------------------------------------------------------------------------
+
+
+def _tool_with_enabled(metadata, enabled):
+    return StartFlow(
+        metadata={
+            **metadata,
+            "features": {
+                "foundational_flows": {
+                    "enabled": True,
+                    "enabled_flows": enabled,
+                }
+            },
+        }
+    )
+
+
+def test_description_lists_all_flows_when_unrestricted(tool):
+    # No foundational flow features in metadata -> unrestricted (older GitLab).
+    for name in FLOW_IDENTIFIER_MAP:
+        assert f"- {name}:" in tool.description
+
+
+def test_description_lists_only_enabled_flows(metadata):
+    tool = _tool_with_enabled(metadata, ["code_review/v1"])
+
+    assert "- code_review:" in tool.description
+    assert "- developer:" not in tool.description
+    assert "- fix_pipeline:" not in tool.description
+
+
+def test_args_schema_restricted_to_single_enabled_flow(metadata):
+    tool = _tool_with_enabled(metadata, ["code_review/v1"])
+
+    # The enabled flow validates.
+    tool.args_schema.model_validate(
+        {
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": "https://gitlab.com/g/p/-/merge_requests/1",
+            }
+        }
+    )
+
+    # A disabled flow is not a valid option in the schema at all.
+    with pytest.raises(ValidationError):
+        tool.args_schema.model_validate({"flow": {"name": "developer", "goal": "x"}})
+
+
+def test_args_schema_restricted_to_multiple_enabled_flows(metadata):
+    tool = _tool_with_enabled(metadata, ["code_review/v1", "fix_pipeline/v1"])
+
+    tool.args_schema.model_validate(
+        {
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": "https://gitlab.com/g/p/-/pipelines/9",
+                "merge_request_url": "https://gitlab.com/g/p/-/merge_requests/1",
+                "source_branch": "feat",
+            }
+        }
+    )
+    with pytest.raises(ValidationError):
+        tool.args_schema.model_validate({"flow": {"name": "developer", "goal": "x"}})
+
+
+def test_args_schema_unrestricted_allows_all_flows(tool):
+    for payload in (
+        {"name": "developer", "goal": "x"},
+        {
+            "name": "code_review",
+            "merge_request_url": "https://gitlab.com/g/p/-/merge_requests/1",
+        },
+    ):
+        tool.args_schema.model_validate({"flow": payload})

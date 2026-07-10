@@ -576,6 +576,42 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config_value, expected",
+    [(["code_review/v1"], ["code_review/v1"]), (None, None)],
+)
+async def test_registry_plumbs_features(
+    gl_http_client, project_mock, config_value, expected
+):
+    """Workflow features flow from workflow_config into tool metadata."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["run_commands"],
+        "gitlab_host": "gitlab.example.com",
+        "features": {
+            "foundational_flows": {
+                "enabled": True,
+                "enabled_flows": config_value,
+            }
+        },
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+
+    assert registry.get("run_command").metadata["features"] == {
+        "foundational_flows": {
+            "enabled": True,
+            "enabled_flows": expected,
+        }
+    }
+
+
+@pytest.mark.asyncio
 async def test_registry_toolset_with_tool_options(gl_http_client, project_mock):
     """Test that tool_options are passed through to toolset and tools are cloned."""
     workflow_config = {

@@ -607,6 +607,80 @@ def test_tools_registry_interaction(
         assert tool in tools_passed_to_get_batch
 
 
+@pytest.mark.parametrize(
+    ("config_overrides", "expect_start_flow"),
+    [
+        ({}, True),
+        (
+            {
+                "features": {
+                    "foundational_flows": {"enabled": True, "enabled_flows": None}
+                }
+            },
+            True,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {"enabled": False, "enabled_flows": None}
+                }
+            },
+            False,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {
+                        "enabled": True,
+                        "enabled_flows": ["code_review/v1"],
+                    }
+                }
+            },
+            True,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {"enabled": True, "enabled_flows": []}
+                }
+            },
+            False,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {
+                        "enabled": True,
+                        "enabled_flows": ["unsupported/v1"],
+                    }
+                }
+            },
+            False,
+        ),
+    ],
+    ids=[
+        "defaults_to_available",
+        "foundational_flows_enabled",
+        "foundational_flows_disabled",
+        "some_flows_enabled",
+        "no_flows_enabled",
+        "only_unsupported_flows_enabled",
+    ],
+)
+def test_start_flow_tool_gated_by_enablement(
+    config_overrides, expect_start_flow, workflow_with_project
+):
+    """start_flow is only offered when foundational flows can run for the project."""
+    current_feature_flag_context.set({"agentic_foundational_flow_tool"})
+
+    workflow = workflow_with_project
+    workflow._workflow_config = {**workflow._workflow_config, **config_overrides}
+
+    tools = workflow._get_tools()
+
+    assert ("start_flow" in tools) is expect_start_flow
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.chat.workflow.uuid4")
 async def test_get_graph_input_start(mock_uuid, workflow_with_project):
