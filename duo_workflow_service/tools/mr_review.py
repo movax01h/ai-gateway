@@ -15,6 +15,10 @@ logger = structlog.stdlib.get_logger(__name__)
 
 LINE_MATCH_THRESHOLD = 3
 
+# gitlab-org/gitlab#604316: cap the number of files fetched for inline anchoring
+# (100 covers 99.8% of measured MRs; keeps the page loop bounded on mega-MRs).
+MAX_REVIEW_FILES = 100
+
 
 @dataclass
 class DiffLine:
@@ -571,11 +575,21 @@ class SubmitMrReview(DuoBaseTool):
     ) -> dict[str, list[DiffLine]]:
         """Fetch MR diffs and parse them into DiffLine objects keyed by file path."""
         path = f"/api/v4/projects/{project_id}/merge_requests/{merge_request_iid}/diffs"
-        response = await self.gitlab_client.aget(path, parse_json=False)
-        body = self._process_http_response(
-            "fetch merge request diffs", response, logger
+        # gitlab-org/gitlab#604316: paginate so anchoring sees the SAME file set the
+        # review did — a plain GET returns only GitLab's default_per_page (20) files,
+        # so findings on files 21+ fail to anchor and fall back to the summary.
+        # Mirrors code_review.py::_fetch_mr_diffs, which already paginates.
+        per_page = 100
+        diffs_data = await self._paginate_get(
+            path, per_page=per_page, max_pages=(MAX_REVIEW_FILES // per_page) + 1
         )
-        diffs_data = json.loads(body)
+        if len(diffs_data) > MAX_REVIEW_FILES:
+            logger.warning(
+                "MR exceeds MAX_REVIEW_FILES; anchoring only the first files",
+                total_files=len(diffs_data),
+                max_review_files=MAX_REVIEW_FILES,
+            )
+            diffs_data = diffs_data[:MAX_REVIEW_FILES]
 
         result: dict[str, list[DiffLine]] = {}
         for diff in diffs_data:
