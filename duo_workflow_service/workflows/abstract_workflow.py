@@ -101,6 +101,7 @@ class ToolAccessPolicies(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     allow: list[str] = []
+    ask: list[str] = []
     deny: list[str] = []
 
 
@@ -284,10 +285,25 @@ class AbstractWorkflow(ABC):
                         else ToolAccessPolicies.model_validate(raw)
                     )
                 except Exception:
+                    # Fail closed: a present-but-unparsable claim must not leave the
+                    # client-supplied preapproved_tools in effect. Log it -- a malformed
+                    # governance claim is security-relevant and operators need visibility.
+                    self.log.warning(
+                        "tool_access_policies claim present but unparsable; "
+                        "failing closed and clearing client preapproved_tools",
+                        exc_info=True,
+                    )
+                    self._preapproved_tools = []
                     return
-                if policies.allow:
-                    existing = self._preapproved_tools or []
-                    self._preapproved_tools = list(set(existing) | set(policies.allow))
+                # The JWT allow-list is the ceiling: client-supplied preapproved_tools
+                # cannot widen it, else a custom container bypasses Ask/Deny governance.
+                # `ask` counts as active so an "ask everything" policy (empty allow and
+                # deny) still enforces the ceiling.
+                governance_active = (
+                    bool(policies.allow) or bool(policies.deny) or bool(policies.ask)
+                )
+                if governance_active:
+                    self._preapproved_tools = list(set(policies.allow))
                 if policies.deny:
                     self._denied_tools = list(
                         set(self._denied_tools) | set(policies.deny)
