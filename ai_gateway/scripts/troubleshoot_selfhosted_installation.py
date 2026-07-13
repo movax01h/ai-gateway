@@ -3,9 +3,16 @@
 
 import argparse
 import os
+import re
 
 import boto3
+import grpc
 import requests
+from grpc_health.v1 import health_pb2, health_pb2_grpc
+
+TLS_ERROR_PATTERN = re.compile(
+    r"ssl|tls|handshake|certificate|wrong_version_number", re.IGNORECASE
+)
 
 SUPPORTED_MODEL_FAMILIES = ["mistral", "mixtral", "gpt", "llama3"]
 
@@ -115,6 +122,130 @@ def check_gitlab_connectivity():
             )
     except requests.RequestException as e:
         raise ValueError(f">> Failed to connect to GitLab: {e}\n")
+
+
+def check_customer_portal_reachable() -> None:
+    """Probe the effective Customer Portal OIDC discovery endpoint.
+
+    Reads the portal URL from ``DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL`` or
+    ``AIGW_CUSTOMER_PORTAL_URL``, falling back to ``https://customers.gitlab.com``,
+    and prints guidance for both online and airgapped deployments.
+    """
+    # pylint: disable=direct-environment-variable-reference
+    portal_url = (
+        os.getenv("DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL")
+        or os.getenv("AIGW_CUSTOMER_PORTAL_URL")
+        or "https://customers.gitlab.com"
+    )
+    well_known = f"{portal_url.rstrip('/')}/.well-known/openid-configuration"
+
+    print(f"Testing if the Customer Portal is reachable at {portal_url} ...")
+
+    try:
+        response = requests.get(well_known, timeout=10)
+        response.raise_for_status()
+        print(">> Customer Portal is reachable ✔\n")
+    except requests.RequestException as e:
+        print(
+            f"""
+                >> Could not reach the Customer Portal at {portal_url} (error: {e}).
+                >> - If this is an online instance, check network, DNS, and firewall rules.
+                >> - If this is an offline (airgapped) instance, this is expected. To avoid a
+                >>   ~20s delay on each request and OIDC key prefetch failures, set both
+                >>   DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL and AIGW_CUSTOMER_PORTAL_URL
+                >>   to your GitLab instance URL.
+                """
+        )
+
+
+def check_dws_health(endpoint: str = "localhost:50052") -> None:
+    """Run a gRPC health check against the Duo Workflow Service endpoint.
+
+    Uses ``grpc.health.v1.Health/Check`` (unauthenticated), honouring
+    ``DUO_WORKFLOW_TLS__ENABLED``. TLS-handshake failures are classified
+    separately from unreachability so a certificate problem is not reported
+    as an outage.
+    """
+    # pylint: disable=direct-environment-variable-reference
+    print("Testing if Duo Workflow Service is accessible ...")
+
+    secure = os.getenv("DUO_WORKFLOW_TLS__ENABLED", "") == "true"
+
+    channel = _dws_channel(endpoint, secure)
+    if channel is None:
+        return
+
+    try:
+        with channel:
+            stub = health_pb2_grpc.HealthStub(channel)
+            response = stub.Check(health_pb2.HealthCheckRequest(), timeout=10)
+
+        if response.status == health_pb2.HealthCheckResponse.SERVING:
+            print(">> Duo Workflow Service is up and running ✔\n")
+            return
+
+        status_name = health_pb2.HealthCheckResponse.ServingStatus.Name(response.status)
+        print(
+            f"""
+                >> Duo Workflow Service is reachable but not serving (status: {status_name}).
+                >> The GitLab Duo Agent Platform will not work until the service reports SERVING.
+                """
+        )
+    except grpc.RpcError as e:
+        details = e.details() or ""
+
+        if TLS_ERROR_PATTERN.search(details):
+            print(
+                f"""
+                >> Reached Duo Workflow Service at {endpoint}, but the TLS handshake failed.
+                >> The service may still be running; this is a certificate/TLS problem, not an outage.
+                >> Potential cause(s) are:
+                >> - The server uses a self-signed or private-CA certificate that is not trusted here.
+                >>   Point DUO_WORKFLOW_TLS__CERT_FILE at the server certificate (or its CA).
+                >> - DUO_WORKFLOW_TLS__ENABLED does not match the server's TLS setting.
+                >> - The certificate hostname does not match "{endpoint}".
+                >>
+                >> error: {e.code()} - {details}
+                """
+            )
+            return
+
+        print(
+            f"""
+                >> Failed to reach Duo Workflow Service at {endpoint}.
+                >> Potential cause(s) are:
+                >> - The Duo Workflow Service is not running.
+                >> - The --duo-workflow-endpoint value is incorrect.
+                >> - TLS is misconfigured. Set DUO_WORKFLOW_TLS__ENABLED to match the server.
+                >> - A firewall or network policy is blocking the connection.
+                >>
+                >> error: {e.code()} - {details}
+                """
+        )
+
+
+def _dws_channel(endpoint: str, secure: bool) -> grpc.Channel | None:
+    # pylint: disable=direct-environment-variable-reference
+    if not secure:
+        return grpc.insecure_channel(endpoint)
+
+    cert_file = os.getenv("DUO_WORKFLOW_TLS__CERT_FILE", "")
+    root_certificates = None
+    if cert_file:
+        try:
+            with open(cert_file, "rb") as f:
+                root_certificates = f.read()
+        except OSError as e:
+            print(
+                f"""
+                >> Could not read DUO_WORKFLOW_TLS__CERT_FILE at {cert_file} (error: {e}).
+                >> Verify the path is correct and the file is readable.
+                """
+            )
+            return None
+
+    credentials = grpc.ssl_channel_credentials(root_certificates=root_certificates)
+    return grpc.secure_channel(endpoint, credentials)
 
 
 def check_provider_specific_env_variables(provider):
@@ -251,6 +382,11 @@ def troubleshoot():
         "Example: custom_openai/Mixtral-8x7B-Instruct-v0.1, bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
     )
     parser.add_argument("--api-key", help="API key for the model.")
+    parser.add_argument(
+        "--duo-workflow-endpoint",
+        default="localhost:50052",
+        help="Duo Workflow Service (GitLab Duo Agent Platform) gRPC endpoint.",
+    )
 
     args = parser.parse_args()
 
@@ -279,6 +415,8 @@ def troubleshoot():
     check_general_env_variables()
     check_aigw_endpoint(endpoint)
     check_gitlab_connectivity()
+    check_customer_portal_reachable()
+    check_dws_health(args.duo_workflow_endpoint)
 
     if model_family:
         if provider:
