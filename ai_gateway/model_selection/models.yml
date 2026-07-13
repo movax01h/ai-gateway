@@ -715,24 +715,6 @@ models:
       model: gpt-5.4-nano
       max_tokens: 128_000
 
-  - name: "GPT-5-Codex"
-    provider: "OpenAI"
-    gitlab_identifier: "gpt_5_codex"
-    description: "Optimized for agentic coding, refactoring, code review, and extended tasks."
-    cost_indicator: "$$"
-    max_context_tokens: 400000 # https://platform.openai.com/docs/models/gpt-5-codex
-    proxy_provider: openai
-    model_class_provider: "openai"
-    family:
-      - gpt_5
-    params:
-      model: gpt-5-codex
-      verbosity: "medium"
-      max_tokens: 128_000
-    deprecation:
-      deprecation_date: "2026-04-23"
-      removal_version: "19.2"
-
   # proxy endpoint only
   - name: "GPT-5 (alias)"
     provider: "OpenAI"
@@ -756,37 +738,6 @@ models:
     params:
       model: gpt-5.1
       max_tokens: 128_000
-
-  - name: "GPT-5.1-Codex"
-    provider: "OpenAI"
-    gitlab_identifier: "gpt_5_1_codex"
-    description: "Earlier GPT-5.1 Codex release for coding tasks."
-    cost_indicator: "$$"
-    max_context_tokens: 400000
-    proxy_provider: openai
-    model_class_provider: "openai"
-    params:
-      model: gpt-5.1-codex
-      max_tokens: 128_000
-    deprecation:
-      deprecation_date: "2026-04-23"
-      removal_version: "19.2"
-
-  - name: "GPT-5.2-Codex"
-    provider: "OpenAI"
-    gitlab_identifier: "gpt_5_2_codex"
-    description: "Earlier GPT-5.2 Codex release for coding tasks."
-    cost_indicator: "$$$"
-    max_context_tokens: 400000
-    proxy_provider: openai
-    model_class_provider: "openai"
-    params:
-      model: gpt-5.2-codex
-      verbosity: "medium"
-      max_tokens: 128_000
-    deprecation:
-      deprecation_date: "2026-04-23"
-      removal_version: "19.2"
 
   - name: "GPT-5.3-Codex"
     provider: "OpenAI"
