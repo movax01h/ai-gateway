@@ -93,6 +93,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -109,6 +110,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -146,6 +148,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
                 "get_epic",
                 "list_epics",
                 "list_issue_notes",
@@ -223,6 +226,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
                 "get_epic",
                 "list_epics",
                 "create_epic",
@@ -300,6 +304,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -321,6 +326,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -345,6 +351,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
                 "run_tests",
             },
         ),
@@ -454,6 +461,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
         "clarification_question": tools.ClarificationQuestionTool(),
+        "render_ui": tools.RenderUiTool(),
         "get_epic": tools.GetEpic(metadata=tool_metadata),
         "list_epics": tools.ListEpics(metadata=tool_metadata),
         "create_epic": tools.CreateEpic(metadata=tool_metadata),
@@ -569,6 +577,7 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
         "handover_tool",
         "request_user_clarification_tool",
         "clarification_question",
+        "render_ui",
         "extra_tool",
     }
     assert not registry.is_preapproved("extra_tool")
@@ -786,6 +795,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "handover_tool",
         "request_user_clarification_tool",
         "clarification_question",
+        "render_ui",
     }
     # Tools from read_write_files privilege should be in preapproved_tools
     read_write_tools = {

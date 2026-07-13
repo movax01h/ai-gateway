@@ -619,6 +619,25 @@ class ToolsExecutor:
             tool_args = {**tool_args, "project_name": project_name}
 
         tool_response = redact_secrets_for_ui(tool_response, tool_name=tool_name)
+
+        tool_info: Optional[ToolInfo] = None
+        if tool_name not in _ACTION_HANDLERS:
+            if tool_response is not None:
+                tool_info = ToolInfo(
+                    name=tool_name,
+                    args=tool_args,
+                    tool_response=ToolMessage(
+                        content=tool_response.content[:TOOL_RESPONSE_MAX_DISPLAY_MSG],
+                        name=tool_response.name,
+                        tool_call_id=tool_response.tool_call_id,
+                    ),
+                )
+            else:
+                tool_info = ToolInfo(name=tool_name, args=tool_args)
+            version = self._tool_version(tool_name)
+            if version is not None:
+                tool_info["tool_version"] = version
+
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=tool_name,
@@ -626,28 +645,22 @@ class ToolsExecutor:
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=status,
             correlation_id=None,
-            tool_info=(
-                (
-                    ToolInfo(
-                        name=tool_name,
-                        args=tool_args,
-                        tool_response=ToolMessage(
-                            content=tool_response.content[
-                                :TOOL_RESPONSE_MAX_DISPLAY_MSG
-                            ],
-                            name=tool_response.name,
-                            tool_call_id=tool_response.tool_call_id,
-                        ),
-                    )
-                    if tool_response is not None
-                    else ToolInfo(name=tool_name, args=tool_args)
-                )
-                if tool_name not in _ACTION_HANDLERS
-                else None
-            ),
+            tool_info=tool_info,
             additional_context=None,
             message_id=tool_call_id,
         )
+
+    def _tool_version(self, tool_name: str) -> Optional[str]:
+        """Return the tool's semantic version (str) when it is in the toolset.
+
+        Threaded onto ``ToolInfo`` so the client can version the tool→component
+        contract for generative UI.
+        """
+        if tool_name in self._toolset:
+            version = getattr(self._toolset[tool_name], "tool_version", None)
+            if version is not None:
+                return str(version)
+        return None
 
     def get_tool_display_message(
         self, tool_name: str, args: Dict[str, Any], tool_response: Any = None

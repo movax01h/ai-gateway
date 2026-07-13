@@ -185,6 +185,15 @@ CHAT_FLOW_TOOLS = ["start_flow"]
 
 CHAT_UTILITY_TOOLS = ["clarification_question"]
 
+# Generative-UI tools: the agent composes a declarative ui_spec of catalog
+# components. Paving the way only — `render_ui` is registered but intentionally
+# NOT offered to the agent this iteration. Tool approval is rendered from the
+# trusted backend (see ChatAgent._get_approvals), never model-composed, so the
+# model must not be able to compose (or, under prompt injection, fabricate) it.
+# The next iteration adds presentational catalog components and re-enables agent
+# composition here (`["render_ui"]`), gated behind DUO_CHAT_GENERATIVE_UI.
+CHAT_GENUI_TOOLS: list[str] = []
+
 
 @support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
@@ -459,6 +468,12 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
+        genui_tools = (
+            CHAT_GENUI_TOOLS
+            if is_feature_enabled(FeatureFlag.DUO_CHAT_GENERATIVE_UI)
+            else []
+        )
+
         available_tools = (
             read_only_tools
             + CHAT_MUTATION_TOOLS
@@ -466,6 +481,7 @@ class Workflow(AbstractWorkflow):
             + CHAT_GITLAB_MUTATION_TOOLS
             + flow_tools
             + utility_tools
+            + genui_tools
         )
         return available_tools
 
