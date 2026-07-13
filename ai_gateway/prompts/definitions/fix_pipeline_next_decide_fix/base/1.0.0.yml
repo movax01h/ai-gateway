@@ -1,7 +1,7 @@
 name: fix_pipeline_next_decide_fix_prompt
 model:
   params:
-    max_tokens: 32_768
+    max_tokens: 4_096
     max_retries: 3
 unit_primitive: duo_agent_platform
 prompt_template:

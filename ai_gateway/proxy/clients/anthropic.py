@@ -63,17 +63,35 @@ def _load_allowed_upstream_models(provider_name: str = "anthropic") -> list[str]
     return config.get_proxy_models_for_provider(provider_name)
 
 
-def _build_headers_to_upstream() -> dict[str, str]:
+def _resolve_api_key(model_name: str) -> str:
+    """Resolve the Anthropic API key for a model.
+
+    Prefers a per-model `api_key` configured via `AIGW_MODEL_SELECTION__MODEL_PARAMS`
+    (which enables routing to a specific Anthropic organization/workspace, e.g. for
+    models that require data retention to be enabled). Falls back to the shared
+    `ANTHROPIC_API_KEY` environment variable.
+    """
+    config = ModelSelectionConfig.instance()
+    for llm_def in config.get_llm_definitions().values():
+        if (
+            llm_def.proxy_provider == _UPSTREAM_SERVICE
+            and llm_def.params.model == model_name
+        ):
+            api_key = getattr(llm_def.params, "api_key", None)
+            if api_key:
+                return api_key
+            break
+
     try:
-        return {
-            "x-api-key": os.environ[
-                "ANTHROPIC_API_KEY"
-            ]  # pylint: disable=direct-environment-variable-reference
-        }
+        return os.environ["ANTHROPIC_API_KEY"]  # pylint: disable=direct-environment-variable-reference
     except KeyError:
         raise fastapi.HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="API key not found"
         )
+
+
+def _build_headers_to_upstream(api_key: str) -> dict[str, str]:
+    return {"x-api-key": api_key}
 
 
 class AnthropicProxyModelFactory(BaseProxyModelFactory):
@@ -94,13 +112,15 @@ class AnthropicProxyModelFactory(BaseProxyModelFactory):
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
             )
 
+        api_key = _resolve_api_key(model_name)
+
         return ProxyModel(
             base_url="https://api.anthropic.com",
             model_name=model_name,
             upstream_path=upstream_path,
             stream=stream,
             upstream_service=_UPSTREAM_SERVICE,
-            headers_to_upstream=_build_headers_to_upstream(),
+            headers_to_upstream=_build_headers_to_upstream(api_key),
             allowed_upstream_models=allowed_upstream_models,
             allowed_headers_to_upstream=_ALLOWED_HEADERS_TO_UPSTREAM,
             allowed_headers_to_downstream=_ALLOWED_HEADERS_TO_DOWNSTREAM,

@@ -15,9 +15,9 @@ class TestContextContract:
     def test_os_information_context(self):
         pydantic_fields = OsInformationContext.model_fields.keys()
 
-        proto_fields = list(
+        proto_fields = [
             field.name for field in OsInformationContextProto.DESCRIPTOR.fields
-        )
+        ]
 
         # Verify that they have the same field names
         assert len(pydantic_fields) == len(proto_fields)
@@ -45,9 +45,9 @@ class TestContextContract:
     def test_shell_information_context(self):
         pydantic_fields = ShellInformationContext.model_fields.keys()
 
-        proto_fields = list(
+        proto_fields = [
             field.name for field in ShellInformationContextProto.DESCRIPTOR.fields
-        )
+        ]
 
         # Verify that they have the same field names
         assert len(pydantic_fields) == len(proto_fields)

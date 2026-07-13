@@ -1,0 +1,325 @@
+version: "v1"
+environment: chat
+
+components:
+  # Phase 1: Context gathering
+  - name: "context_builder"
+    type: AgentComponent
+    prompt_id: "context_builder_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: true
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: true
+    toolset:
+      # GitLab read tools
+      - "get_epic"
+      - "list_epics"
+      - "list_epic_notes"
+      - "get_work_item"
+      - "list_work_items"
+      - "get_work_item_notes"
+      - "get_issue"
+      - "list_issues"
+      - "list_issue_notes"
+      - "get_issue_note"
+      - "get_merge_request"
+      - "list_all_merge_request_notes"
+      - "list_merge_request_diffs"
+      - "get_project"
+      - "gitlab_issue_search"
+      - "gitlab_merge_request_search"
+      # File system read tools
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "grep"
+      - "list_dir"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Phase 2: Planning
+  - name: "planner"
+    type: AgentComponent
+    prompt_id: "planner_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:context_builder.final_answer"
+        as: "context_info"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+    toolset:
+      - "todo_write"
+      # Keep some read tools for additional research
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "grep"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Phase 3: Plan approval
+  - name: "plan_approval"
+    type: HumanInputComponent
+    sends_response_to: "planner"
+    interaction_type: "approval"
+    message_template: |
+      I've created an implementation plan. Please review and approve:
+
+      {{plan_summary}}
+    inputs:
+      - from: "context:planner.final_answer"
+        as: "plan_summary"
+
+  # Phase 4: Execution
+  - name: "executor"
+    type: AgentComponent
+    prompt_id: "executor_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:planner.final_answer"
+        as: "plan"
+      - from: "context:context_builder.final_answer"
+        as: "context_info"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:planner.last_todo_write.todos"
+        as: "task_list"
+        optional: true
+    toolset:
+      # GitLab read tools
+      - "get_issue"
+      - "list_issues"
+      - "list_issue_notes"
+      - "get_merge_request"
+      - "list_all_merge_request_notes"
+      - "get_project"
+      # File system read tools
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "grep"
+      - "list_dir"
+      # File system write tools
+      - "create_file_with_contents"
+      - "edit_file"
+      - "mkdir"
+      # Task tracking
+      - "todo_write"
+      # Command execution
+      - "run_command"
+    require_tool_approval: true
+    pre_approved_tools:
+      - "todo_write"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+      - "on_tool_approval_request"
+
+routers:
+  - from: "context_builder"
+    to: "planner"
+
+  - from: "planner"
+    to: "plan_approval"
+
+  - from: "plan_approval"
+    condition:
+      input: "context:plan_approval.approval"
+      routes:
+        "approve": "executor"
+        "modify": "planner"  # Loop back for revision
+        "default_route": "end"
+
+  - from: "executor"
+    to: "end"
+
+flow:
+  entry_point: "context_builder"
+
+prompts:
+  - name: "context_builder_prompt"
+    prompt_id: "context_builder_prompt"
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are a context gathering agent for software development tasks.
+        Your role is to explore and understand the codebase, project structure, and relevant context before planning begins.
+
+        # Your Goal
+        Gather comprehensive context about:
+        - Relevant files and code structure
+        - Existing patterns and conventions
+        - Dependencies and related components
+        - Any GitLab issues or MRs mentioned
+
+        # Tone and Style
+        - Be thorough but concise
+        - Focus on actionable information
+        - Output should be well-structured markdown
+
+        # Tool Usage
+        - Use find_files and grep to explore
+        - Read relevant files to understand implementation
+        - Check GitLab resources if URLs provided
+        - Parallel tool calls when independent
+
+        When done, provide structured summary of findings.
+
+        {%- if agents_dot_md %}
+        {{ agents_dot_md }}
+        {%- endif %}
+
+        {%- if workspace_agent_skills %}
+        {{ workspace_agent_skills }}
+        {%- endif %}
+
+      user: |
+        Task: {{goal}}
+
+        {%- if project_id %}
+        Project ID: {{project_id}}
+        {%- endif %}
+
+        {%- if agent_user_environment %}
+        Environment: {{agent_user_environment}}
+        {%- endif %}
+
+        Gather context needed to plan implementation.
+    params:
+      timeout: 180
+
+  - name: "planner_prompt"
+    prompt_id: "planner_prompt"
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are a planning agent for software development tasks.
+        Your role is to create detailed implementation plans based on gathered context.
+
+        # Your Goal
+        Create comprehensive plan with:
+        - Clear breakdown of tasks
+        - Logical sequence of steps
+        - Consideration of edge cases
+        - Testing approach
+
+        # Tool Usage
+        **CRITICAL:** Use todo_write tool to create structured plan. This is REQUIRED.
+        Break down work into specific, actionable tasks.
+
+        # Output Format
+        Provide:
+        1. High-level approach summary
+        2. Detailed task list (via todo_write)
+        3. Key considerations or risks
+        4. Expected outcomes
+
+        Plan will be shown to user for approval before execution.
+
+      user: |
+        Task: {{goal}}
+
+        {%- if project_id %}
+        Project ID: {{project_id}}
+        {%- endif %}
+
+        Context from exploration:
+        {{context_info}}
+
+        Create implementation plan.
+    params:
+      timeout: 180
+
+  - name: "executor_prompt"
+    prompt_id: "executor_prompt"
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are an execution agent for software development tasks.
+        Your role is to implement approved plans and complete development work.
+
+        {%- if task_list %}
+        # Initialising Your Task List
+        Your very first action MUST be to call todo_write with every task from
+        the approved task list below, preserving each description and the order
+        exactly. Do not consolidate, reword, split, or omit any tasks.
+        Then for each task: mark it in_progress, do the work, mark it completed.
+        {%- endif %}
+
+        # Your Goal
+        Execute plan systematically:
+        - Follow approved plan structure
+        - Use todo_write to track progress
+        - Mark tasks in_progress when starting
+        - Mark tasks completed when done
+        - Make necessary code changes
+        - Verify work (run tests, validate)
+
+        # Code Quality
+        - Read before modifying
+        - Follow existing patterns
+        - Avoid over-engineering
+        - Test changes when possible
+
+        # Tool Usage
+        - Use todo_write frequently for tracking
+        - Prefer dedicated tools over run_command
+        - Parallel tool calls when independent
+        - Commit intentionally with clear messages
+
+        # Important
+        - NEVER use git add -A or git add .
+        - Stage files explicitly by path
+        - Review git diff --staged before commit
+        - Match project commit style (git log)
+
+        **CRITICAL:** Before providing your final summary, you MUST call
+        todo_write to mark all in-progress tasks as completed. Do not skip
+        this step.
+
+        When done, provide summary of completed work.
+
+      user: |
+        Task: {{goal}}
+
+        {%- if project_id %}
+        Project ID: {{project_id}}
+        {%- endif %}
+
+        Approved plan:
+        {{plan}}
+
+        {%- if task_list %}
+        Approved task list:
+        {{task_list}}
+        {%- endif %}
+
+        Context:
+        {{context_info}}
+
+        Execute plan and complete task.
+    params:
+      timeout: 300

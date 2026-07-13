@@ -95,6 +95,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
     - Sets the active subsession context
     - Tracks delegation count for safety limits
     - Emits a ``delegation`` UI log entry for each successful delegation
+    - Emits a ``delegation_error`` UI log entry for each recoverable delegation failure
 
     Routing after this node is handled by
     ``SupervisorAgentComponent._delegation_router``, which owns all routing
@@ -105,6 +106,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
     """
 
     MESSAGE_SUB_TYPE = "delegation"
+    MESSAGE_SUB_TYPE_ERROR = "delegation_error"
 
     def __init__(
         self,
@@ -144,6 +146,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
         """Process a delegate_task tool call from the supervisor."""
         supervisor_history_key = self._supervisor_history_key.to_iokey(state)
         supervisor_history = supervisor_history_key.value_from_state(state) or []
+        delegate_tool_title: str = self._delegate_task_cls.tool_title
 
         try:
             call_id, delegation = self._extract_delegate_call(
@@ -186,14 +189,33 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}"
             )
             log.warning(str(e), supervisor=supervisor_key_id)
+
+            # Emit a tool-type UI log entry for the delegation error so that
+            # the client's ui_chat_log contains a non-agent entry after the
+            # supervisor's reasoning message.  This advances the client-side
+            # message counter past the reasoning entry, preventing it from
+            # being re-emitted as a new message on every streaming checkpoint.
+            self._ui_history.log.error(
+                str(e),
+                event=UILogEventsSupervisor.ON_DELEGATION_ERROR,
+                message_sub_type=self.MESSAGE_SUB_TYPE_ERROR,
+                tool_info=build_tool_info(delegate_tool_title, {}, str(e)),
+                message_id=e.call_ids[0],
+                subsession_id=None,
+            )
+            ui_updates = self._ui_history.pop_state_updates()
+
             # One ToolMessage per call ID — required because every tool call in an
             # AIMessage must be matched by a corresponding ToolMessage.
             error_messages = [
                 ToolMessage(content=str(e), tool_call_id=call_id)
                 for call_id in e.call_ids
             ]
-            return supervisor_history_key.to_nested_dict(
-                supervisor_history + error_messages
+            return merge_nested_dict(
+                supervisor_history_key.to_nested_dict(
+                    supervisor_history + error_messages
+                ),
+                ui_updates,
             )
 
         log.info(
@@ -205,8 +227,6 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             is_resume=delegation.subsession_id is not None,
         )
 
-        # Emit delegation UI log entry
-        delegate_tool_title: str = self._delegate_task_cls.tool_title
         delegate_args = {
             "subagent_name": subagent_name,
             "session_id": subsession_result.subsession_id,
@@ -217,6 +237,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             event=UILogEventsSupervisor.ON_DELEGATION,
             message_sub_type=self.MESSAGE_SUB_TYPE,
             tool_info=build_tool_info(delegate_tool_title, delegate_args),
+            message_id=call_id,
             subsession_id=None,
         )
 

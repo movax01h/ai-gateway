@@ -18,10 +18,11 @@ See [test doc](docs/tests.md).
 
 This project uses the following linting tools:
 
-- [Black](https://black.readthedocs.io/): Enforces a consistent code style.
-- [isort](https://pycqa.github.io/isort/): Organizes and sorts imports.
+- [Ruff](https://docs.astral.sh/ruff/): Lints and formats code, replacing Black, isort, and flake8 (migration tracked in work item #2237).
 - [pylint](https://pylint.pycqa.org): Analyzes code for potential errors and style issues.
 - [mypy](https://mypy-lang.org): Performs static type checking.
+- [codespell](https://github.com/codespell-project/codespell): Checks for common misspellings.
+- [docformatter](https://github.com/PyCQA/docformatter): Formats docstrings.
 
 To lint the entire projects, you can use the following command:
 
@@ -43,7 +44,7 @@ To fix linting errors, you can use the following command:
 make format
 ```
 
-The `format` command only addresses `black` and `isort` issues.
+The `format` command only addresses `codespell`, `ruff` (lint autofixes and formatting), and `docformatter` issues.
 
 There is an [internal recording](https://youtu.be/SXfLOYm4zS4) for GitLab members that provides an overview of this project.
 

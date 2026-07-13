@@ -575,6 +575,7 @@ class TestIOKey:
     def test_get_vars_from_state_multiple_keys(self):
         """Test extracting variables from state using multiple IOKeys."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {"main": [HumanMessage(content="Hello")]},
             "ui_chat_log": [],
@@ -596,6 +597,7 @@ class TestIOKey:
     def test_get_vars_from_state_overlapping_keys(self):
         """Test extracting variables with overlapping key names."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -619,6 +621,7 @@ class TestIOKey:
         """Test edge cases for IOKey functionality."""
         # Test with special characters in keys
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -722,6 +725,7 @@ class TestIOKey:
         expected_value,
     ):
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.NOT_STARTED,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1086,6 +1090,7 @@ class TestIOKeyLiteralField:
     def test_iokey_literal_template_variable_from_state(self):
         """Test template_variable_from_state with literal=True returns literal value."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1111,6 +1116,7 @@ class TestIOKeyLiteralField:
         for value in complex_values:
             io_key = IOKey(target=value, literal=True, alias="test_value")
             state: FlowState = {
+                "agent_context_limits": {},
                 "status": WorkflowStatusEnum.PLANNING,
                 "conversation_history": {},
                 "ui_chat_log": [],
@@ -1182,6 +1188,7 @@ class TestIOKeyLiteralField:
         io_key = IOKey(target=target_value, literal=True, alias=alias_value)
 
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1219,6 +1226,7 @@ class TestIOKeyLiteralField:
         io_key = IOKey(target=complex_literal_value, literal=True, alias=alias)
 
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1438,6 +1446,7 @@ class TestIOKeyTemplateVariableName:
     def test_template_variable_from_state_uses_template_variable_name(self):
         """IOKey.template_variable_from_state delegates key selection to template_variable_name."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1452,6 +1461,7 @@ class TestIOKeyTemplateVariableName:
     def test_template_variable_from_state_literal_uses_template_variable_name(self):
         """IOKey.template_variable_from_state uses template_variable_name for literal keys."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1469,6 +1479,7 @@ class TestRuntimeIOKey:
     @pytest.fixture
     def base_state(self) -> FlowState:
         return {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],

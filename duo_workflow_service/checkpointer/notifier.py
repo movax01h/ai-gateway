@@ -2,29 +2,46 @@ import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 from json import dumps
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import structlog
 from langchain_core.messages import AIMessageChunk, BaseMessage, BaseMessageChunk
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
+from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog
 from duo_workflow_service.client_capabilities import is_client_capable
+from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     UiChatLog,
     WorkflowStatusEnum,
+    get_current_model_max_context_token_limit,
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 
 log = structlog.stdlib.get_logger("notifier")
 
 CHECKPOINT_THROTTLE_SECONDS = 0.05
+
+_token_estimator = TokenEstimator()
+
+
+def _agent_token_totals(
+    conversation_history: dict[str, list[BaseMessage]],
+) -> dict[str, int]:
+    return {
+        agent: _token_estimator.count(msgs, is_complete_history=True)
+        for agent, msgs in conversation_history.items()
+        if msgs
+    }
 
 
 class _ThrottleState:
@@ -41,6 +58,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         outbox: Outbox,
         goal: str,
         workflow_id: str = "",
+        node_event_log: Optional[NodeEventLog] = None,
     ):
         self.outbox = outbox
         self.goal = goal
@@ -53,6 +71,12 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self.last_sent_ui_message_id: Optional[str] = None
         self.current_resp_id: Optional[str] = None
         self._throttle = _ThrottleState()
+        self._agent_token_totals: dict[str, int] = {}
+        self._agent_context_limits: dict[str, int] = {}
+        self._node_event_log = node_event_log
+        # Count of node-lifecycle events already sent; advances only when a
+        # checkpoint is actually composed for sending (see _pop_recent_node_events).
+        self._last_sent_event_count = 0
 
     async def send_event(
         self,
@@ -69,6 +93,10 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             self.status = state["status"]
             self.steps = state.get("plan", {}).get("steps", [])
             self.ui_chat_log = deepcopy(state["ui_chat_log"])
+            self._agent_token_totals = _agent_token_totals(
+                state.get("conversation_history") or {}
+            )
+            self._agent_context_limits = state.get("agent_context_limits") or {}
 
             collector = get_audit_collector()
             if collector and self.ui_chat_log:
@@ -89,9 +117,14 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             return
 
         if type == "messages":
-            message, _ = state
+            message, metadata = state
+            node_name = (
+                metadata.get("langgraph_node") if isinstance(metadata, dict) else None
+            )
 
-            self._append_chunk_to_ui_chat_log(message)
+            self._append_chunk_to_ui_chat_log(
+                message, component_name=component_name_from_node(node_name)
+            )
 
             return await self._execute_action(throttle=True)
 
@@ -161,19 +194,34 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
     def most_recent_new_checkpoint(self):
         recent_ui_chat_log_changes = self._pop_recent_ui_chat_log_changes()
 
-        return contract_pb2.NewCheckpoint(
+        channel_values: dict[str, Any] = {
+            "ui_chat_log": recent_ui_chat_log_changes,
+            "plan": {"steps": self.steps},
+        }
+        # Append-only node-lifecycle events for live flow visualization. Additive
+        # and ignored by clients that don't consume it; omitted when there is
+        # nothing new to send so checkpoints without lifecycle activity are
+        # unchanged. Clients fold the accumulated log into canvas state.
+        node_events = self._pop_recent_node_events()
+        if node_events:
+            channel_values["node_events"] = node_events
+
+        checkpoint = contract_pb2.NewCheckpoint(
             goal=self.goal,
             status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self.status],
-            checkpoint=dumps(
-                {
-                    "channel_values": {
-                        "ui_chat_log": recent_ui_chat_log_changes,
-                        "plan": {"steps": self.steps},
-                    }
-                },
-                cls=CustomEncoder,
-            ),
+            checkpoint=dumps({"channel_values": channel_values}, cls=CustomEncoder),
         )
+
+        if self._agent_token_totals:
+            global_max_limit = get_current_model_max_context_token_limit()
+            for agent, total in self._agent_token_totals.items():
+                checkpoint.agent_context_usage[agent].total_tokens = total
+                # Prefer the per-agent limit; fall back to the global for legacy flows.
+                checkpoint.agent_context_usage[agent].max_tokens = (
+                    self._agent_context_limits.get(agent) or global_max_limit
+                )
+
+        return checkpoint
 
     def _pop_recent_ui_chat_log_changes(self) -> list[UiChatLog]:
         """Extract UI chat log messages that need to be sent or re-rendered.
@@ -215,7 +263,34 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         return self.ui_chat_log[ui_chat_log_diff_idx:]
 
-    def _append_chunk_to_ui_chat_log(self, message: BaseMessage):
+    def _pop_recent_node_events(self) -> list[dict[str, str]]:
+        """Node-lifecycle events to include in this checkpoint.
+
+        Mirrors :meth:`_pop_recent_ui_chat_log_changes`: incremental clients get
+        only the events appended since the last *sent* checkpoint, and the cursor
+        advances only here — i.e. only when a checkpoint is actually composed for
+        sending — so the "skip stale, send latest" optimization dropping
+        intermediate checkpoints never opens a gap. Non-incremental clients get
+        the full log each time and deduplicate client-side (events are immutable
+        and identified by ``run_id``/``phase``).
+        """
+        if self._node_event_log is None:
+            return []
+
+        events = self._node_event_log.events
+        if not events:
+            return []
+
+        if not is_client_capable("incremental_streaming"):
+            return [event.to_dict() for event in events]
+
+        recent = events[self._last_sent_event_count :]
+        self._last_sent_event_count = len(events)
+        return [event.to_dict() for event in recent]
+
+    def _append_chunk_to_ui_chat_log(
+        self, message: BaseMessage, component_name: Optional[str] = None
+    ) -> None:
         """Append a message chunk to the UI chat log.
 
         Processes incoming message chunks and either creates a new chat log entry
@@ -223,6 +298,10 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         Args:
             message (BaseMessage): The message chunk to be processed and added to the log.
+            component_name (Optional[str]): The component (graph node) that produced
+                the chunk, so streamed output is attributable to a node. Only stamped
+                on newly created entries; continuations inherit it from the entry they
+                extend.
         """
         if not isinstance(message, AIMessageChunk):
             return
@@ -231,9 +310,13 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         if self.latest_ai_message and self.latest_ai_message.id == message.id:
             self.latest_ai_message += message
-            self.ui_chat_log[-1]["content"] = self.latest_ai_message.text()
+            safe_content = redact_secrets_for_ui(
+                self.latest_ai_message.text(), tool_name="streaming"
+            )
+            self.ui_chat_log[-1]["content"] = safe_content
         else:
             self.latest_ai_message = message
+            safe_content = redact_secrets_for_ui(message.text(), tool_name="streaming")
             last_ui_message = UiChatLog(
                 message_id=message.id,
                 status=None,
@@ -241,9 +324,10 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 message_type=MessageTypeEnum.AGENT,
                 message_sub_type=None,
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                content=message.text(),
+                content=safe_content,
                 tool_info=None,
                 additional_context=None,
+                component_name=component_name,
             )
             self.ui_chat_log.append(last_ui_message)
 

@@ -43,7 +43,7 @@ def tool_approval_fetch_node_fixture(conversation_history_key, status_key):
         approval_decision_key=RuntimeIOKey(
             alias="tool_approval_decision",
             factory=lambda _: IOKey(
-                target="context", subkeys=["test_agent__tool_approval_decision"]
+                target="context", subkeys=["test_agent", "tool_approval_decision"]
             ),
         ),
     )

@@ -172,6 +172,14 @@ def update_response_fixture_func():
                 }
             },
         ),
+        (
+            {"status_id": "gid://gitlab/WorkItems::Statuses::SystemDefined::Status/2"},
+            {
+                "statusWidget": {
+                    "status": "gid://gitlab/WorkItems::Statuses::SystemDefined::Status/2"
+                }
+            },
+        ),
     ],
     ids=[
         "title",
@@ -188,6 +196,7 @@ def update_response_fixture_func():
         "weight_zero_literal",
         "weight_clear",
         "agent_plan",
+        "status",
     ],
 )
 async def test_update_work_item_variants(
@@ -257,6 +266,31 @@ async def test_update_work_item_agent_plan_unsupported_version(
 
     _, variables = gitlab_client_mock.graphql.call_args[0]
     assert "agentPlanWidget" not in variables["input"]
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_with_invalid_status_id(
+    gitlab_client_mock, metadata, resolved_work_item_fixture, update_response_fixture
+):
+    """Test that an invalid status_id format produces a warning and skips the widget."""
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response_fixture)
+
+    result = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        status_id="In progress",  # name instead of a GID
+    )
+
+    response_json = json.loads(result)
+    assert "updated_work_item" in response_json
+    assert "warnings" in response_json
+    assert any("Invalid status_id" in w for w in response_json["warnings"])
+
+    call_args = gitlab_client_mock.graphql.call_args[0]
+    input_data = call_args[1]["input"]
+    assert "statusWidget" not in input_data
 
 
 @pytest.mark.asyncio

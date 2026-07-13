@@ -1,12 +1,13 @@
 import base64
 import json
-from typing import Any, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Set, Tuple, Type
 from urllib.parse import quote
 
 import structlog
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
@@ -95,7 +96,7 @@ class RepositoryFileBaseTool(DuoBaseTool):
             # Use the values from the URL
             return url_project_id, url_ref, url_file_path, errors
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return project_id, ref, file_path, errors
 
 
@@ -124,6 +125,12 @@ class GetRepositoryFile(RepositoryFileBaseTool):
 
     args_schema: Type[BaseModel] = RepositoryFileResourceInput
 
+    # gitlab-org/gitlab#604564: remember (project, ref, path) tuples that 404'd this
+    # session so the agent's repeated guesses for the same missing file short-circuit
+    # instead of re-hitting the API (a failed run made 325 calls, 113 for one missing
+    # path, exhausting the step budget).
+    _seen_missing_paths: Set[Tuple[str, str, str]] = PrivateAttr(default_factory=set)
+
     async def _execute(self, **kwargs) -> str:
         url = kwargs.get("url")
         project_id = kwargs.get("project_id")
@@ -142,6 +149,15 @@ class GetRepositoryFile(RepositoryFileBaseTool):
         if file_path is None:
             raise ToolException("Missing file_path")
 
+        # gitlab-org/gitlab#604564: short-circuit a path already known to 404 this session.
+        cache_key = (str(project_id), str(ref), file_path)
+        if cache_key in self._seen_missing_paths:
+            raise ToolException(
+                f"File '{file_path}' (ref '{ref}') already returned 404 earlier in this "
+                f"session and does not exist — not re-fetching. Do NOT request it again; "
+                f"continue with the files you already have."
+            )
+
         # Check file exclusion policy if project is available
         policy = FileExclusionPolicy(self.project)
         if file_path and not policy.is_allowed(file_path):
@@ -156,6 +172,10 @@ class GetRepositoryFile(RepositoryFileBaseTool):
             params={"ref": ref},
             parse_json=True,
         )
+
+        # gitlab-org/gitlab#604564: cache 404s so identical re-requests short-circuit above.
+        if isinstance(response, GitLabHttpResponse) and response.status_code == 404:
+            self._seen_missing_paths.add(cache_key)
 
         body = self._process_http_response("Get repository file", response, log)
 

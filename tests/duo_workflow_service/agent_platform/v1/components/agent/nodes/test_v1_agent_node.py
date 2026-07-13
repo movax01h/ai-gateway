@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import pytest
 from anthropic import APIStatusError
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ai_gateway.prompts import Prompt
@@ -23,6 +24,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     FlowStateKeys,
     IOKey,
     RuntimeIOKey,
+    merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.compaction import ConversationCompactor
@@ -72,6 +74,7 @@ def agent_node_fixture(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         internal_event_client=mock_internal_event_client,
+        invoke_config={},
     )
 
 
@@ -94,6 +97,7 @@ def agent_node_with_schema_fixture(
             alias="conversation_history", factory=lambda _: conversation_history_key
         ),
         internal_event_client=mock_internal_event_client,
+        invoke_config={},
         response_schema=AgentFinalOutput,
     )
 
@@ -127,7 +131,7 @@ def _mock_maybe_compact_history_fixture():
 
         async def return_history(*, compactor, history, agent_name):
             _ = compactor, agent_name
-            return history
+            return history, None
 
         mock_compact.side_effect = return_history
         yield mock_compact
@@ -188,7 +192,8 @@ class TestAgentNode:
                 **prompt_variables,
                 "history": [],
                 **FAKE_RUNTIME_VARS,
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -230,7 +235,8 @@ class TestAgentNode:
                 **prompt_variables,
                 "history": existing_history,
                 **FAKE_RUNTIME_VARS,
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -268,7 +274,8 @@ class TestAgentNode:
                 **prompt_variables,
                 "history": [],
                 **FAKE_RUNTIME_VARS,
-            }
+            },
+            config={},
         )
 
     @pytest.mark.asyncio
@@ -314,6 +321,7 @@ class TestAgentNode:
                     factory=lambda _: conversation_history_key,
                 ),
                 internal_event_client=mock_internal_event_client,
+                invoke_config={},
             )
             result = await agent_node.run(base_flow_state)
 
@@ -333,6 +341,57 @@ class TestAgentNode:
             ]
 
             # Verify prompt was called twice (first failed, second succeeded)
+            assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_context_overflow_error_is_handled(
+        self,
+        flow_id,
+        inputs,
+        conversation_history_key,
+        component_name,
+        mock_internal_event_client,
+        base_flow_state,
+        mock_ai_message,
+        mock_prompt,
+    ):
+        """ContextOverflowError is caught and mapped to REQUEST_TOO_LARGE ModelError."""
+        overflow_error = ContextOverflowError(
+            "Your input exceeds the context window of this model."
+        )
+        mock_prompt.ainvoke = AsyncMock(side_effect=[overflow_error, mock_ai_message])
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.ModelErrorHandler",
+        ) as mock_error_handler_cls:
+            mock_error_handler = Mock()
+            mock_error_handler_cls.return_value = mock_error_handler
+            mock_error_handler.handle_error = AsyncMock()
+
+            agent_node = AgentNode(
+                flow_id=flow_id,
+                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                name="test_agent_node",
+                prompt=mock_prompt,
+                inputs=inputs,
+                conversation_history_key=RuntimeIOKey(
+                    alias="conversation_history",
+                    factory=lambda _: conversation_history_key,
+                ),
+                internal_event_client=mock_internal_event_client,
+                invoke_config={},
+            )
+            result = await agent_node.run(base_flow_state)
+
+            mock_error_handler.handle_error.assert_called_once()
+            error = mock_error_handler.handle_error.call_args[0][0]
+            assert isinstance(error, ModelError)
+            assert error.error_type == ModelErrorType.REQUEST_TOO_LARGE
+            assert error.status_code == 413
+
+            assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name] == [
+                mock_ai_message
+            ]
             assert mock_prompt.ainvoke.call_count == 2
 
     @pytest.mark.asyncio
@@ -381,13 +440,17 @@ class TestAgentNode:
         ]
         mock_prompt.ainvoke.assert_has_calls(
             [
-                call(input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS}),
+                call(
+                    input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS},
+                    config={},
+                ),
                 call(
                     input={
                         **prompt_variables,
                         "history": retry_history,
                         **FAKE_RUNTIME_VARS,
-                    }
+                    },
+                    config={},
                 ),
             ]
         )
@@ -477,7 +540,8 @@ class TestAgentNode:
 
         prompt_calls = mock_prompt.ainvoke.call_args_list
         assert prompt_calls[0] == call(
-            input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS}
+            input={**prompt_variables, "history": [], **FAKE_RUNTIME_VARS},
+            config={},
         )
 
         retry_messages_history = prompt_calls[1][1]["input"]["history"]
@@ -489,6 +553,51 @@ class TestAgentNode:
             f"{AgentFinalOutput.tool_title} raised validation error:"
             in retry_messages_history[1].content
         )
+
+
+class TestAgentNodeContextLimits:
+    """Test suite for AgentNode stamping per-agent context-window limits."""
+
+    @pytest.fixture(name="agent_node_with_limit")
+    def agent_node_with_limit_fixture(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+    ):
+        """AgentNode constructed with an explicit per-agent max_context_tokens."""
+        return AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history",
+                factory=lambda _: conversation_history_key,
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config={},
+            max_context_tokens=64000,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_stamps_agent_context_limits_keyed_by_history_slot(
+        self,
+        agent_node_with_limit,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """The resolved max is stamped into agent_context_limits under the conversation_history key."""
+        result = await agent_node_with_limit.run(base_flow_state)
+
+        assert FlowStateKeys.AGENT_CONTEXT_LIMITS in result
+        assert result[FlowStateKeys.AGENT_CONTEXT_LIMITS] == {component_name: 64000}
 
 
 class TestAgentNodeCompaction:
@@ -520,6 +629,7 @@ class TestAgentNodeCompaction:
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             compactor=mock_compactor,
         )
 
@@ -551,7 +661,7 @@ class TestAgentNodeCompaction:
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
             new_callable=AsyncMock,
         ) as mock_compact:
-            mock_compact.return_value = []
+            mock_compact.return_value = ([], None)
 
             await agent_node_with_compactor.run(base_flow_state)
 
@@ -573,7 +683,7 @@ class TestAgentNodeCompaction:
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
             new_callable=AsyncMock,
         ) as mock_compact:
-            mock_compact.return_value = []
+            mock_compact.return_value = ([], None)
 
             await agent_node.run(base_flow_state)
 
@@ -582,6 +692,24 @@ class TestAgentNodeCompaction:
                 history=[],
                 agent_name="test_agent_node",
             )
+
+    @pytest.mark.asyncio
+    async def test_run_calls_restore_message_consistency(
+        self,
+        agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """restore_message_consistency is called on history after compaction."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.restore_message_consistency",
+        ) as mock_restore:
+            mock_restore.side_effect = lambda h: h
+
+            await agent_node.run(base_flow_state)
+
+            mock_restore.assert_called_once_with([])
 
 
 class TestAgentNodeTruncation:
@@ -637,14 +765,16 @@ class TestAgentNodeTruncation:
                         **prompt_variables,
                         "history": [],
                         **FAKE_RUNTIME_VARS,
-                    }
+                    },
+                    config={},
                 ),
                 call(
                     input={
                         **prompt_variables,
                         "history": expected_retry_history,
                         **FAKE_RUNTIME_VARS,
-                    }
+                    },
+                    config={},
                 ),
             ]
         )
@@ -772,6 +902,7 @@ class TestAgentNodeReasoning:
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             ui_history=ui_history_with_reasoning,
         )
 
@@ -976,6 +1107,7 @@ class TestAgentNodeReasoning:
                 alias="conversation_history", factory=lambda _: conversation_history_key
             ),
             internal_event_client=mock_internal_event_client,
+            invoke_config={},
             ui_history=ui_history_no_reasoning,
         )
 
@@ -1090,3 +1222,399 @@ class TestPredefinedRuntimeVariables:
             "current_time",
             "current_timezone",
         }
+
+
+class TestAgentNodeInvokeConfig:
+    """Test suite for AgentNode invoke_config (TAG_NOSTREAM) support."""
+
+    @pytest.mark.asyncio
+    async def test_invoke_config_forwarded_to_ainvoke(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+        prompt_variables,
+    ):
+        """invoke_config is passed as config= to every ainvoke call."""
+        config = {"tags": ["some tag"]}
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history",
+                factory=lambda _: conversation_history_key,
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config=config,
+        )
+
+        await node.run(base_flow_state)
+
+        mock_prompt.ainvoke.assert_called_once_with(
+            input={
+                **prompt_variables,
+                "history": [],
+                **FAKE_RUNTIME_VARS,
+            },
+            config=config,
+        )
+
+
+@pytest.fixture(name="cycle_count_key")
+def cycle_count_key_fixture(component_name):
+    """RuntimeIOKey for tracking cycle count."""
+    static_key = IOKey(
+        target="context",
+        subkeys=[component_name, "cycle_count"],
+        optional=True,
+    )
+    return RuntimeIOKey(
+        alias="cycle_count",
+        factory=lambda _: static_key,
+    )
+
+
+@pytest.fixture(name="make_agent_node")
+def make_agent_node_fixture(
+    flow_id,
+    mock_prompt,
+    inputs,
+    conversation_history_key,
+    mock_internal_event_client,
+    cycle_count_key,
+):
+    """Factory building an AgentNode with soft-cycle-limit defaults, overridable per test."""
+
+    def _make(**overrides):
+        kwargs = {
+            "flow_id": flow_id,
+            "flow_type": CategoryEnum.DEVELOPER,
+            "name": "test_agent_node",
+            "prompt": mock_prompt,
+            "inputs": inputs,
+            "conversation_history_key": RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            "internal_event_client": mock_internal_event_client,
+            "invoke_config": {},
+            "max_cycles": 3,
+            "cycle_count_key": cycle_count_key,
+            "max_wrap_up_retries": 2,
+        }
+        kwargs.update(overrides)
+        return AgentNode(**kwargs)
+
+    return _make
+
+
+@pytest.fixture(name="state_at_limit")
+def state_at_limit_fixture(base_flow_state, component_name):
+    """Flow state where cycle_count already equals max_cycles (3)."""
+    state = copy.deepcopy(base_flow_state)
+    state["context"].setdefault(component_name, {})["cycle_count"] = 3
+    return state
+
+
+class TestAgentNodeMaxCycles:
+    """Test suite for AgentNode max_cycles soft limit."""
+
+    @pytest.mark.asyncio
+    async def test_cycle_count_accumulates_across_calls(
+        self,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Cycle count is written to state and accumulates across sequential calls."""
+        agent_node = make_agent_node()
+
+        # First run: state has no cycle count, so it is written as 1
+        result1 = await agent_node.run(base_flow_state)
+        assert result1["context"][component_name]["cycle_count"] == 1
+
+        # Merge result into state the way LangGraph would, then run again
+        state2 = merge_nested_dict(copy.deepcopy(base_flow_state), result1)
+        result2 = await agent_node.run(state2)
+        assert result2["context"][component_name]["cycle_count"] == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "cycle_count, expect_wrap_up",
+        [(3, True), (1, False)],
+    )
+    async def test_wrap_up_message_injection_respects_threshold(
+        self,
+        cycle_count,
+        expect_wrap_up,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        prompt_variables,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Wrap-up HumanMessage is injected only when cycle_count >= max_cycles."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            state = copy.deepcopy(base_flow_state)
+            state["context"].setdefault(component_name, {})["cycle_count"] = cycle_count
+
+            await make_agent_node().run(state)
+
+            call_history = mock_prompt.ainvoke.call_args[1]["input"]["history"]
+            human_messages = [m for m in call_history if isinstance(m, HumanMessage)]
+            if expect_wrap_up:
+                assert len(human_messages) == 1
+                assert "maximum number of iterations" in human_messages[0].content
+            else:
+                assert not human_messages
+
+    @pytest.mark.asyncio
+    async def test_no_cycle_count_update_when_max_cycles_not_set(
+        self,
+        agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When max_cycles is not configured (None), no cycle_count is written to state."""
+        result = await agent_node.run(base_flow_state)
+
+        context = result.get("context", {})
+        for component_context in context.values():
+            if isinstance(component_context, dict):
+                assert "cycle_count" not in component_context
+
+    @pytest.mark.asyncio
+    async def test_wrap_up_logged_as_warning(
+        self,
+        make_agent_node,
+        state_at_limit,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Reaching max_cycles emits a structlog warning."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            await make_agent_node().run(state_at_limit)
+            mock_log.warning.assert_called_once()
+            call_kwargs = mock_log.warning.call_args
+            assert "max_cycles" in str(call_kwargs)
+
+
+class TestAgentNodeWrapUpRetries:
+    """Test suite for AgentNode wrap-up retry behavior after max_cycles is reached."""
+
+    @pytest.mark.asyncio
+    async def test_wrap_up_retry_when_agent_makes_tool_calls_after_limit(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        prompt_variables,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When agent makes non-final tool calls after max_cycles, wrap-up message is re-injected."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            # First response: tool call (ignores wrap-up)
+            tool_call_message = AIMessage(
+                content="",
+                tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+            )
+            tool_call_message.response_metadata = {}
+            # Second response: no tool calls (complies with wrap-up)
+            final_message = AIMessage(content="Here is my final answer.")
+            final_message.response_metadata = {}
+            final_message.tool_calls = []
+
+            mock_prompt.ainvoke = AsyncMock(
+                side_effect=[tool_call_message, final_message]
+            )
+
+            result = await make_agent_node().run(state_at_limit)
+
+            # Should have been called twice: once with tool call, once with final answer
+            assert mock_prompt.ainvoke.call_count == 2
+
+            # The second call should include the wrap-up message re-injected
+            second_call_history = mock_prompt.ainvoke.call_args_list[1][1]["input"][
+                "history"
+            ]
+            human_messages = [
+                m for m in second_call_history if isinstance(m, HumanMessage)
+            ]
+            assert len(human_messages) == 2  # original wrap-up + re-injected wrap-up
+            assert "maximum number of iterations" in human_messages[-1].content
+
+            # Final result should contain the final message
+            result_history = result["conversation_history"][component_name]
+            assert result_history[-1] == final_message
+
+    @pytest.mark.asyncio
+    async def test_agent_stuck_error_raised_after_max_wrap_up_retries(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """AgentStuckError is raised when agent repeatedly ignores wrap-up instructions."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = {}
+
+            # Always return a tool call (never complies with wrap-up)
+            tool_call_message = AIMessage(
+                content="",
+                tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+            )
+            tool_call_message.response_metadata = {}
+            mock_prompt.ainvoke = AsyncMock(return_value=tool_call_message)
+
+            with pytest.raises(AgentStuckError) as exc_info:
+                await make_agent_node().run(state_at_limit)
+
+            assert "test_agent_node" in str(exc_info.value)
+            assert "2" in str(exc_info.value)  # max_wrap_up_retries
+            # Should have been called exactly max_wrap_up_retries times
+            assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_wrap_up_retry_when_agent_complies_immediately(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When agent complies with wrap-up on first try, no retry occurs."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = {}
+
+            # Immediately returns no tool calls (complies with wrap-up)
+            final_message = AIMessage(content="Here is my final answer.")
+            final_message.response_metadata = {}
+            final_message.tool_calls = []
+            mock_prompt.ainvoke = AsyncMock(return_value=final_message)
+
+            result = await make_agent_node().run(state_at_limit)
+
+            assert mock_prompt.ainvoke.call_count == 1
+            result_history = result["conversation_history"][component_name]
+            assert result_history[-1] == final_message
+
+    @pytest.mark.asyncio
+    async def test_wrap_up_retry_uses_schema_tool_message_when_schema_configured(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When a response schema is configured, the wrap-up message names the schema tool."""
+        node = make_agent_node(response_schema=AgentFinalOutput)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = {}
+
+            # First response: non-final tool call (ignores wrap-up)
+            tool_call_message = AIMessage(
+                content="",
+                tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+            )
+            tool_call_message.response_metadata = {}
+            # Second response: final_response_tool (complies)
+            final_message = AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "tc2",
+                        "name": "final_response_tool",
+                        "args": {"final_response": "Done"},
+                    }
+                ],
+            )
+            final_message.response_metadata = {}
+            mock_prompt.ainvoke = AsyncMock(
+                side_effect=[tool_call_message, final_message]
+            )
+
+            await node.run(state_at_limit)
+
+            # The re-injected wrap-up message should mention the schema tool
+            second_call_history = mock_prompt.ainvoke.call_args_list[1][1]["input"][
+                "history"
+            ]
+            human_messages = [
+                m for m in second_call_history if isinstance(m, HumanMessage)
+            ]
+            assert any("final_response_tool" in m.content for m in human_messages), (
+                "Wrap-up message should mention the schema tool name"
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_wrap_up_retry_when_below_max_cycles(
+        self,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When below max_cycles, tool calls do not trigger wrap-up retry logic."""
+        node = make_agent_node()
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = {}
+
+            # Tool call response (cycle_count is 1, below max_cycles=3)
+            tool_call_message = AIMessage(
+                content="",
+                tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+            )
+            tool_call_message.response_metadata = {}
+            mock_prompt.ainvoke = AsyncMock(return_value=tool_call_message)
+
+            result = await node.run(base_flow_state)
+
+            # Should only be called once — no wrap-up retry below max_cycles
+            assert mock_prompt.ainvoke.call_count == 1
+            # cycle_count should be 1 (first run)
+            assert result["context"][component_name]["cycle_count"] == 1

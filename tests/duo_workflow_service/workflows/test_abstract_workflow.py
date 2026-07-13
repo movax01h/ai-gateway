@@ -1,4 +1,4 @@
-# pylint: disable=unused-variable,direct-environment-variable-reference,too-many-lines
+# pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
 import os
 from typing import Any
@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langgraph.errors import GraphRecursionError
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -18,6 +20,10 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
+from duo_workflow_service.tracking import (
+    MonitoringContext,
+    current_monitoring_context,
+)
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
@@ -28,6 +34,7 @@ from duo_workflow_service.workflows.type_definitions import (
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
+from lib.verbose_ai_logs import extended_logging_context
 
 
 # Concrete implementation for testing
@@ -42,14 +49,17 @@ class MockGraphWithUiChatLog:
     async def astream(  # pylint: disable=unused-argument  # astream() signature
         self, input, config, stream_mode
     ):
-        yield "values", {
-            "status": WorkflowStatusEnum.COMPLETED,
-            "ui_chat_log": [
-                {"content": "First message"},
-                {"content": "Second message"},
-                {"content": "Final response"},
-            ],
-        }
+        yield (
+            "values",
+            {
+                "status": WorkflowStatusEnum.COMPLETED,
+                "ui_chat_log": [
+                    {"content": "First message"},
+                    {"content": "Second message"},
+                    {"content": "Final response"},
+                ],
+            },
+        )
 
 
 class MockWorkflow(AbstractWorkflow):
@@ -74,7 +84,16 @@ class MockWorkflow(AbstractWorkflow):
 def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
     mock_duo_workflow_service_container,
 ):
-    pass
+    # ``current_monitoring_context`` defaults to a single shared, mutable ``MonitoringContext``
+    # instance. Any test (or production code path exercised by a test) that mutates it via
+    # ``set_flow_identity`` would otherwise leak flow versioning fields (flow_id / flow_version /
+    # schema_version) into later tests on the same worker, breaking order-dependent assertions
+    # such as "legacy flows carry no versioning metadata". Give each test a fresh context.
+    token = current_monitoring_context.set(MonitoringContext())
+    try:
+        yield
+    finally:
+        current_monitoring_context.reset(token)
 
 
 def test_extract_trace_output_with_valid_state(user):
@@ -122,7 +141,6 @@ def test_extract_trace_output_with_none_state(user):
 def workflow_fixture(user):
     workflow_id = "test-workflow-id"
     metadata = {
-        "extended_logging": True,
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
@@ -227,7 +245,10 @@ async def test_set_action_response(workflow):
     workflow.set_action_response(
         contract_pb2.ClientEvent(
             actionResponse=contract_pb2.ActionResponse(
-                response="the response", requestID=request_id
+                plainTextResponse=contract_pb2.PlainTextResponse(
+                    response="the response"
+                ),
+                requestID=request_id,
             )
         )
     )
@@ -280,6 +301,7 @@ async def test_compile_and_run_graph(
         workflow_config=workflow._workflow_config,
         gl_http_client=workflow._http_client,
         project=project,
+        workflow_id="id",
         mcp_tools=[mcp_tool] if mcp_enabled else [],
         language_server_version=None,
         denied_tools=[],
@@ -605,13 +627,44 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     await workflow.run("Test goal")
 
     call_args = mock_compile_and_run_graph.call_args
-    args, kwargs = call_args
+    _args, kwargs = call_args
 
     metadata = kwargs["langsmith_extra"]["metadata"]
     assert metadata["git_url"] == "https://example.com"
     assert metadata["git_sha"] == "abc123"
     assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value
     assert metadata["thread_id"] == workflow._workflow_id
+    # Flow versioning identifiers are unset for legacy flows and must not leak in.
+    assert "flow_id" not in metadata
+    assert "flow_version" not in metadata
+    assert "schema_version" not in metadata
+
+
+@pytest.mark.asyncio
+# pylint: disable=direct-environment-variable-reference
+@patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"})
+# pylint: enable=direct-environment-variable-reference
+@patch.object(MockWorkflow, "_compile_and_run_graph")
+async def test_run_passes_flow_versioning_metadata_to_langsmith_extra(
+    mock_compile_and_run_graph, workflow
+):
+    token = current_monitoring_context.set(
+        MonitoringContext(
+            flow_id="developer",
+            flow_version="1.2.3",
+            schema_version="v1",
+        )
+    )
+    try:
+        await workflow.run("Test goal")
+    finally:
+        current_monitoring_context.reset(token)
+
+    _, kwargs = mock_compile_and_run_graph.call_args
+    metadata = kwargs["langsmith_extra"]["metadata"]
+    assert metadata["flow_id"] == "developer"
+    assert metadata["flow_version"] == "1.2.3"
+    assert metadata["schema_version"] == "v1"
 
 
 @pytest.mark.asyncio
@@ -683,15 +736,20 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     """Test that tracing is enabled/disabled based on LANGSMITH_TRACING_V2 and extended_logging."""
     workflow_id = "test-workflow-id"
     metadata = {
-        "extended_logging": extended_logging,
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
-    with patch.dict(os.environ, {"LANGSMITH_TRACING_V2": env_var_value}, clear=False):
-        await workflow.run("Test goal")
+    token = extended_logging_context.set(extended_logging)
+    try:
+        with patch.dict(
+            os.environ, {"LANGSMITH_TRACING_V2": env_var_value}, clear=False
+        ):
+            await workflow.run("Test goal")
+    finally:
+        extended_logging_context.reset(token)
 
     # Verify tracing_context was called with the expected enabled value
     mock_tracing_context.assert_called_once()
@@ -733,17 +791,20 @@ async def test_tracing_context_with_parent_trace_headers(
 
     workflow_id = "test-workflow-id"
     metadata = {
-        "extended_logging": extended_logging,
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
     workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
-    with patch.dict(
-        os.environ, {"LANGSMITH_TRACING_V2": langsmith_tracing_v2}, clear=False
-    ):
-        await workflow.run("Test goal")
+    token = extended_logging_context.set(extended_logging)
+    try:
+        with patch.dict(
+            os.environ, {"LANGSMITH_TRACING_V2": langsmith_tracing_v2}, clear=False
+        ):
+            await workflow.run("Test goal")
+    finally:
+        extended_logging_context.reset(token)
 
     mock_tracing_context.assert_called_once()
     call_kwargs = mock_tracing_context.call_args[1]
@@ -968,35 +1029,6 @@ async def test_compile_and_run_graph_parses_tool_access_policies_object_format(
     assert "create_merge_request" not in workflow._preapproved_tools
 
 
-class TestInitAuditEvents:
-    @pytest.mark.asyncio
-    @patch("duo_workflow_service.workflows.abstract_workflow.AuditEventClient")
-    @patch("duo_workflow_service.workflows.abstract_workflow.AuditEventCollector")
-    async def test_does_not_pass_ip_address_to_collector(
-        self, mock_collector_cls, _mock_client_cls, user
-    ):
-        mock_collector = MagicMock()
-        mock_collector.start = AsyncMock()
-        mock_collector.capture = MagicMock()
-        mock_collector_cls.return_value = mock_collector
-
-        workflow = MockWorkflow(
-            "test-workflow-id",
-            {},
-            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-            user,
-            audit_event_enabled=True,
-            audit_event_buffer_size=100,
-            audit_event_flush_interval=10.0,
-            audit_event_max_retries=3,
-        )
-
-        await workflow._init_audit_events("test goal")
-
-        _, kwargs = mock_collector_cls.call_args
-        assert "ip_address" not in kwargs
-
-
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
@@ -1074,3 +1106,64 @@ async def test_compile_and_run_graph_notifiable_agent_exception_handling(
     assert state["ui_chat_log"][0]["content"] == "Safe message for user"
     assert secret not in state["ui_chat_log"][0]["content"]
     assert state["ui_chat_log"][0]["status"] == ToolStatus.FAILURE
+
+
+@pytest.mark.asyncio
+async def test_handle_compile_and_run_exception_logs_warning_when_checkpoint_notifier_is_none(
+    user,
+):
+    """Test that a warning is logged when checkpoint_notifier is None during error handling.
+
+    checkpoint_notifier is assigned unconditionally before the try block in _compile_and_run_graph, so this branch is
+    theoretically unreachable in normal execution. The defensive guard is tested by calling
+    _handle_compile_and_run_exception directly with checkpoint_notifier explicitly set to None.
+    """
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    # Simulate the theoretically-unreachable state where checkpoint_notifier is None
+    workflow.checkpoint_notifier = None
+
+    error = RuntimeError("graph error")
+
+    with patch.object(workflow, "log") as mock_log:
+        with pytest.raises(TraceableException):
+            await workflow._handle_compile_and_run_exception(
+                error, compiled_graph=None, graph_config={}
+            )
+
+    mock_log.warning.assert_called_once_with(
+        "checkpoint_notifier is None; error status event not sent to client",
+        workflow_id=workflow._workflow_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_compile_and_run_exception_logs_error_on_graph_recursion_error(
+    user,
+):
+    """GraphRecursionError is logged as an error with recursion_limit and workflow_id before normal handling."""
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    workflow.checkpoint_notifier = AsyncMock()
+    workflow.checkpoint_notifier.send_event = AsyncMock()
+
+    error = GraphRecursionError("Recursion limit reached")
+
+    with patch.object(workflow, "log") as mock_log:
+        with pytest.raises(TraceableException):
+            await workflow._handle_compile_and_run_exception(
+                error, compiled_graph=None, graph_config={}
+            )
+
+    mock_log.error.assert_called_once_with(
+        "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated",
+        recursion_limit=RECURSION_LIMIT,
+    )

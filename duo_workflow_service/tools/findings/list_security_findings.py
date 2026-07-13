@@ -7,7 +7,7 @@ from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from duo_workflow_service.tools.findings.queries.security_findings import (
+from duo_workflow_service.tools.findings.queries import (
     LIST_SECURITY_FINDINGS_QUERY,
 )
 from duo_workflow_service.tools.tier_access_checker import (
@@ -355,7 +355,7 @@ class ListSecurityFindings(DuoBaseTool):
             )
 
         except Exception as e:
-            raise ToolException(f"Failed to list security findings: {str(e)}")
+            raise ToolException(f"Failed to list security findings: {e!s}")
 
     def format_display_message(
         self, args: ListSecurityFindingsInput, _tool_response: Any = None

@@ -19,6 +19,7 @@ from langgraph.graph import (  # pylint: disable=no-langgraph-langchain-imports
     StateGraph,
 )
 
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agents import (
     HandoverAgent,
     PlanSupervisorAgent,
@@ -59,7 +60,6 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 # Constants
 QUEUE_MAX_SIZE = 1
 MAX_TOKENS_TO_SAMPLE = 16384
-RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 MAX_MESSAGE_LENGTH = 200
@@ -164,7 +164,7 @@ def _router(
         if last_message.tool_calls[0]["name"] == HandoverTool.tool_title:
             return Routes.HANDOVER
         if any(
-            tool_registry.approval_required(call["name"])
+            not tool_registry.is_preapproved(call["name"])
             for call in last_message.tool_calls
         ):
             return Routes.TOOLS_APPROVAL
@@ -184,6 +184,9 @@ def _should_continue(
 
 @support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
+    def _recursion_limit(self) -> int:
+        return RECURSION_LIMIT
+
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph, graph_config
     ):
@@ -202,7 +205,7 @@ class Workflow(AbstractWorkflow):
                             correlation_id=None,
                             tool_info=None,
                             additional_context=None,
-                            message_id=f"error-{str(uuid4())}",
+                            message_id=f"error-{uuid4()!s}",
                         )
                     ],
                 },
@@ -327,7 +330,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting workflow with goal: {goal}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

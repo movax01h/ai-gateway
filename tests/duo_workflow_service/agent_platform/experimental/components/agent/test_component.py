@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_gateway.response_schemas import (
     BaseResponseSchemaRegistry,
@@ -14,6 +14,7 @@ from ai_gateway.response_schemas import (
 )
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.experimental.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
@@ -31,6 +32,7 @@ from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.entities.state import WorkflowStatusEnum
 
 
 @pytest.fixture(name="prompt_id")
@@ -84,6 +86,36 @@ def agent_component_fixture(
         ui_log_events=ui_log_events,
         ui_role_as=ui_role_as,
     )
+
+
+@pytest.fixture(name="make_agent_component")
+def make_agent_component_fixture(
+    component_name,
+    flow_id,
+    flow_type,
+    user,
+    mock_toolset,
+    mock_prompt_registry,
+    mock_internal_event_client,
+):
+    """Factory building a minimal AgentComponent, overridable per test."""
+
+    def _make(**overrides):
+        kwargs = {
+            "name": component_name,
+            "flow_id": flow_id,
+            "flow_type": flow_type,
+            "user": user,
+            "inputs": [],
+            "prompt_id": "test",
+            "toolset": mock_toolset,
+            "prompt_registry": mock_prompt_registry,
+            "internal_event_client": mock_internal_event_client,
+        }
+        kwargs.update(overrides)
+        return AgentComponent(**kwargs)
+
+    return _make
 
 
 @pytest.fixture(name="agent_component_with_custom_schema")
@@ -220,6 +252,35 @@ def mock_schema_registry_fixture():
 class TestAgentComponentBase:
     """Test suite for AgentComponentBase abstract stubs."""
 
+    def test_agent_node_invoke_config_raises_not_implemented(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Base _agent_node_invoke_config must raise NotImplementedError."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        with pytest.raises(NotImplementedError):
+            component._agent_node_invoke_config()
+
     def test_agent_node_router_raises_not_implemented(
         self,
         component_name,
@@ -279,6 +340,34 @@ class TestAgentComponentBase:
         )
         with pytest.raises(NotImplementedError):
             component.attach(mock_state_graph, mock_router)
+
+    def test_entry_hook_returns_correct_node_name(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """Base __entry_hook__ returns the agent entry node name."""
+
+        class ConcreteBase(AgentComponentBase):
+            pass
+
+        component = ConcreteBase(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id="test",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        assert component.__entry_hook__() == f"{component_name}#agent"
 
     def test_default_conversation_history_key_returns_correct_runtime_io_key(
         self,
@@ -363,8 +452,8 @@ class TestAgentComponentBase:
         else:
             if schema_id:
                 mock_schema = mock_schema_registry.get.return_value
-                mock_toolset.__contains__ = (
-                    lambda self, name: name != mock_schema.tool_title
+                mock_toolset.__contains__ = lambda self, name: (
+                    name != mock_schema.tool_title
                 )
 
             component = ConcreteBase(
@@ -612,7 +701,7 @@ class TestAgentComponentAttachNodes:
         ],
     )
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    def test_attach_creates_nodes_with_correct_parameters(
+    def test_attach_creates_nodes_with_correct_parameters(  # noqa: PLR0913
         self,
         mock_final_response_node_cls,
         mock_tool_node_cls,
@@ -664,6 +753,10 @@ class TestAgentComponentAttachNodes:
         assert agent_call_kwargs["flow_id"] == flow_id
         assert agent_call_kwargs["flow_type"] == flow_type
         assert agent_call_kwargs["internal_event_client"] == mock_internal_event_client
+        # Agent Node UI logging
+        assert "ui_history" in agent_call_kwargs
+        assert isinstance(agent_call_kwargs["ui_history"], UIHistory)
+        assert agent_call_kwargs["ui_history"].events == ui_log_events
 
         # Verify ToolNode creation
         mock_tool_node_cls.assert_called_once()
@@ -1088,12 +1181,16 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         # Bind to supervisor
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # Keys should now be set to the provided values
@@ -1132,11 +1229,15 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         new_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=new_goal_key,
+            tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # The old goal key should have been removed and replaced by the new one
@@ -1170,12 +1271,16 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
 
         with pytest.raises(ValueError, match="must have a description"):
             component.bind_to_supervisor(
                 conversation_history_key=mock_history_key,
                 output_key=mock_output_key,
                 goal_key=mock_goal_key,
+                tool_approval_decision_key=mock_approval_key,
+                cycle_count_key=mock_cycle_count_key,
             )
 
     def test_outputs_returns_empty_when_bound(
@@ -1209,10 +1314,14 @@ class TestAgentComponentBindToSupervisor:
         mock_history_key = RuntimeIOKey(alias="conversation_history", factory=Mock())
         mock_output_key = RuntimeIOKey(alias="final_answer", factory=Mock())
         mock_goal_key = RuntimeIOKey(alias="goal", factory=Mock())
+        mock_approval_key = RuntimeIOKey(alias="tool_approval_decision", factory=Mock())
+        mock_cycle_count_key = RuntimeIOKey(alias="cycle_count", factory=Mock())
         component.bind_to_supervisor(
             conversation_history_key=mock_history_key,
             output_key=mock_output_key,
             goal_key=mock_goal_key,
+            tool_approval_decision_key=mock_approval_key,
+            cycle_count_key=mock_cycle_count_key,
         )
 
         # After binding, outputs should be empty
@@ -1272,10 +1381,10 @@ class TestAgentComponentToolApprovalRouter:
         state_with_tool_message[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_tool_message]
         }
-        # Add approval decision to context
-        state_with_tool_message[FlowStateKeys.CONTEXT][
-            f"{component_name}__tool_approval_decision"
-        ] = "reject"
+        # Add approval decision to context (nested under component name)
+        state_with_tool_message[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_decision": "reject"
+        }
 
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
@@ -1309,10 +1418,10 @@ class TestAgentComponentToolApprovalRouter:
         state_with_human_message[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_human_message]
         }
-        # Add approval decision to context (MODIFY case)
-        state_with_human_message[FlowStateKeys.CONTEXT][
-            f"{component_name}__tool_approval_decision"
-        ] = "modify"
+        # Add approval decision to context (MODIFY case, nested under component name)
+        state_with_human_message[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_decision": "modify"
+        }
 
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
@@ -1347,10 +1456,10 @@ class TestAgentComponentToolApprovalRouter:
         state_with_ai_message[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_ai_message]
         }
-        # Add approval decision to context (APPROVE case)
-        state_with_ai_message[FlowStateKeys.CONTEXT][
-            f"{component_name}__tool_approval_decision"
-        ] = "approve"
+        # Add approval decision to context (APPROVE case, nested under component name)
+        state_with_ai_message[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_decision": "approve"
+        }
 
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
@@ -1398,3 +1507,186 @@ class TestAgentComponentToolApprovalRouter:
             match="No approval decision found in state",
         ):
             router_function(state_with_empty_history)
+
+    def test_agent_node_router_with_pending_tool_calls_routes_to_approval_request(
+        self,
+        agent_component_with_tool_approval,
+        flow_state_with_tool_calls,
+        component_name,
+    ):
+        """With approval required, pending tool calls route to the approval request node."""
+        result = agent_component_with_tool_approval._agent_node_router(
+            flow_state_with_tool_calls
+        )
+        assert result == f"{component_name}#tool_approval_request"
+
+    @pytest.mark.parametrize(
+        ("status", "expected_role"),
+        [
+            (WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, "tool_approval_fetch"),
+            (WorkflowStatusEnum.EXECUTION, "tools"),
+        ],
+    )
+    def test_tool_approval_request_router_routes_by_status(
+        self,
+        agent_component_with_tool_approval,
+        base_flow_state,
+        component_name,
+        status,
+        expected_role,
+    ):
+        """The request router routes to fetch when approval is pending, else to tools."""
+        state = {**base_flow_state, "status": status}
+        result = agent_component_with_tool_approval._tool_approval_request_router(state)
+        assert result == f"{component_name}#{expected_role}"
+
+
+# ---------------------------------------------------------------------------
+# Tests for _agent_node_invoke_config TAG_NOSTREAM logic
+# ---------------------------------------------------------------------------
+
+
+class TestAgentNodeInvokeConfig:
+    """Tests that _agent_node_invoke_config returns the correct config based on ui_log_events."""
+
+    @pytest.mark.parametrize(
+        ("ui_log_events", "expected_config"),
+        [
+            (
+                [
+                    UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+                    UILogEventsAgent.ON_AGENT_REASONING,
+                ],
+                AgentComponentBase.STREAMING_ENABLED_CONFIG,
+            ),
+            ([], AgentComponentBase.STREAMING_DISABLED_CONFIG),
+            (
+                [UILogEventsAgent.ON_AGENT_FINAL_ANSWER],
+                AgentComponentBase.STREAMING_DISABLED_CONFIG,
+            ),
+            (
+                [UILogEventsAgent.ON_AGENT_REASONING],
+                AgentComponentBase.STREAMING_DISABLED_CONFIG,
+            ),
+            (
+                [UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS],
+                AgentComponentBase.STREAMING_DISABLED_CONFIG,
+            ),
+        ],
+        ids=[
+            "both_events_enabled",
+            "no_events",
+            "only_final_answer",
+            "only_reasoning",
+            "tool_event_only",
+        ],
+    )
+    def test_invoke_config_based_on_ui_log_events(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        ui_log_events,
+        expected_config,
+    ):
+        """_agent_node_invoke_config returns STREAMING_ENABLED_CONFIG only when both events declared."""
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=[],
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            ui_log_events=ui_log_events,
+        )
+        assert component._agent_node_invoke_config() == expected_config
+
+
+class TestAgentComponentMaxCycles:
+    """Test suite for AgentComponentBase max_cycles field and validator."""
+
+    def test_max_cycles_default_derived_from_recursion_limit(
+        self, make_agent_component
+    ):
+        """max_cycles defaults to RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET, always-on."""
+        component = make_agent_component()
+        assert component.max_cycles == AgentComponentBase._DEFAULT_MAX_CYCLES
+        # Clamped to >= 1 regardless of RECURSION_LIMIT value
+        assert component.max_cycles >= 1
+        assert component.max_cycles == max(
+            1, RECURSION_LIMIT - AgentComponentBase._DEFAULT_SOFT_LIMIT_OFFSET
+        )
+
+    @pytest.mark.parametrize("max_cycles", [1, 5, 100])
+    def test_max_cycles_valid_values(self, make_agent_component, max_cycles):
+        """max_cycles accepts any positive integer."""
+        component = make_agent_component(max_cycles=max_cycles)
+        assert component.max_cycles == max_cycles
+
+    @pytest.mark.parametrize("max_cycles", [0, -1, -100])
+    def test_max_cycles_rejects_non_positive(self, make_agent_component, max_cycles):
+        """max_cycles must be at least 1; zero or negative raises ValidationError."""
+        with pytest.raises(ValidationError, match="max_cycles must be at least 1"):
+            make_agent_component(max_cycles=max_cycles)
+
+    def test_cycle_count_key_initialized(self, make_agent_component, component_name):
+        """_cycle_count_key is initialized as a component-scoped RuntimeIOKey."""
+        component = make_agent_component()
+        key = component._cycle_count_key
+        assert isinstance(key, RuntimeIOKey)
+        # Resolve the factory (state unused for standalone default) and inspect the concrete IOKey
+        resolved = key.to_iokey({})
+        assert resolved.target == "context"
+        subkeys = list(resolved.subkeys or [])
+        assert component_name in subkeys
+        assert "cycle_count" in subkeys
+
+
+class TestAgentComponentMaxWrapUpRetries:
+    """Test suite for AgentComponentBase max_wrap_up_retries field and validator."""
+
+    def test_max_wrap_up_retries_default_is_three(self, make_agent_component):
+        """max_wrap_up_retries defaults to 3."""
+        component = make_agent_component()
+        assert component.max_wrap_up_retries == 3
+
+    @pytest.mark.parametrize("max_wrap_up_retries", [1, 3, 10])
+    def test_max_wrap_up_retries_valid_values(
+        self, make_agent_component, max_wrap_up_retries
+    ):
+        """max_wrap_up_retries accepts any positive integer."""
+        component = make_agent_component(max_wrap_up_retries=max_wrap_up_retries)
+        assert component.max_wrap_up_retries == max_wrap_up_retries
+
+    @pytest.mark.parametrize("max_wrap_up_retries", [0, -1, -5])
+    def test_max_wrap_up_retries_rejects_non_positive(
+        self, make_agent_component, max_wrap_up_retries
+    ):
+        """max_wrap_up_retries must be at least 1; zero or negative raises ValidationError."""
+        with pytest.raises(
+            ValidationError, match="max_wrap_up_retries must be at least 1"
+        ):
+            make_agent_component(max_wrap_up_retries=max_wrap_up_retries)
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_attach_passes_max_wrap_up_retries_to_agent_node(
+        self,
+        make_agent_component,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+    ):
+        """Attach() forwards max_wrap_up_retries to AgentNode."""
+        component = make_agent_component(max_wrap_up_retries=5)
+        component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["max_wrap_up_retries"] == 5

@@ -14,9 +14,10 @@
 
 dependency_check:
   stage: test
-  image: docker:20.10.24
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}docker:20.10.24
   services:
-    - docker:20.10.24-dind
+    - name: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}docker:20.10.24-dind
+      alias: docker
   extends: [".ping-appsec-for-dependency-review:rules"]
   needs: []
   variables:

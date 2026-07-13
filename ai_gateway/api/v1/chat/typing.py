@@ -10,7 +10,7 @@ from ai_gateway.models import (
     Message,
 )
 
-__all__ = ["ChatRequest", "ChatResponseMetadata", "ChatResponse", "StreamChatResponse"]
+__all__ = ["ChatRequest", "ChatResponse", "ChatResponseMetadata", "StreamChatResponse"]
 
 
 class PromptMetadata(BaseModel):

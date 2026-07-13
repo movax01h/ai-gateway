@@ -12,13 +12,19 @@ from typing import (
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
+from duo_workflow_service.agent_platform.constants import (
+    NODE_ROLE_SEPARATOR,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     AgentNode,
     FinalResponseNode,
@@ -29,6 +35,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
+    agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
@@ -55,7 +62,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 
 # Re-export RoutingError from v1 to prevent code duplication.
-from duo_workflow_service.agent_platform.v1.components.agent.component import (  # noqa: F401
+from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
@@ -80,9 +87,24 @@ class AgentComponentBase(BaseComponent):
     Do NOT use this class directly in flow configs — use AgentComponent instead.
     """
 
+    STREAMING_ENABLED_CONFIG: ClassVar[RunnableConfig] = {}
+    STREAMING_DISABLED_CONFIG: ClassVar[RunnableConfig] = {"tags": [TAG_NOSTREAM]}
+
     _final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "final_answer"],
+    )
+
+    _cycle_count_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "cycle_count"],
+        optional=True,
+    )
+
+    _tool_approval_decision_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_approval_decision"],
+        optional=True,
     )
 
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
@@ -108,6 +130,29 @@ class AgentComponentBase(BaseComponent):
     response_schema_id: Optional[str] = None
     response_schema_version: Optional[str] = None
     response_schema_tracking: bool = False
+    _DEFAULT_SOFT_LIMIT_OFFSET: ClassVar[int] = 20
+    _DEFAULT_MAX_CYCLES: ClassVar[int] = max(
+        1, RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET
+    )
+
+    max_cycles: int = _DEFAULT_MAX_CYCLES
+    max_wrap_up_retries: int = 3
+
+    @field_validator("max_cycles")
+    @classmethod
+    def validate_max_cycles(cls, v: int) -> int:
+        """Validate that max_cycles is at least 1."""
+        if v < 1:
+            raise ValueError("max_cycles must be at least 1.")
+        return v
+
+    @field_validator("max_wrap_up_retries")
+    @classmethod
+    def validate_max_wrap_up_retries(cls, v: int) -> int:
+        """Validate that max_wrap_up_retries is at least 1."""
+        if v < 1:
+            raise ValueError("max_wrap_up_retries must be at least 1.")
+        return v
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -122,6 +167,24 @@ class AgentComponentBase(BaseComponent):
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
     _response_schema: Optional[Type[BaseAgentOutput]] = PrivateAttr()
+    _cycle_count_key: RuntimeIOKey = PrivateAttr()
+
+    @model_validator(mode="after")
+    def initialize_cycle_count_key(self) -> Self:
+        """Initialize the cycle count key with a component-scoped default RuntimeIOKey.
+
+        As with ``tool_approval_decision_key``, subagents may override this key via
+        ``bind_to_supervisor`` to use a subsession-scoped key, preventing race conditions
+        when the same subagent runs in multiple subsessions in parallel.
+        """
+        static_key = self._cycle_count_key_template.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        )
+        self._cycle_count_key = RuntimeIOKey(
+            alias="cycle_count",
+            factory=lambda _: static_key,
+        )
+        return self
 
     @model_validator(mode="after")
     def validate_and_resolve_response_schema(self) -> Self:
@@ -187,7 +250,18 @@ class AgentComponentBase(BaseComponent):
         return RuntimeIOKey(alias="conversation_history", factory=lambda _: static_key)
 
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
+
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return the ``RunnableConfig`` to pass to every ``AgentNode`` ``ainvoke`` call.
+
+        Subclasses must override this method to express their own streaming policy
+        in terms of their own typed ``ui_log_events`` enum.
+
+        Return ``STREAMING_ENABLED_CONFIG`` to allow LLM chunks to stream to the
+        UI, or ``STREAMING_DISABLED_CONFIG`` to suppress them.
+        """
+        raise NotImplementedError
 
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
@@ -238,11 +312,22 @@ class AgentComponent(AgentComponentBase):
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
+    @override
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return TAG_NOSTREAM config unless both LLM output event types are declared."""
+        if (
+            UILogEventsAgent.ON_AGENT_FINAL_ANSWER in self.ui_log_events
+            and UILogEventsAgent.ON_AGENT_REASONING in self.ui_log_events
+        ):
+            return self.STREAMING_ENABLED_CONFIG
+        return self.STREAMING_DISABLED_CONFIG
+
     # Private attributes for RuntimeIOKey instances with default values.
     # Overridden by bind_to_supervisor when used as a subagent.
     _conversation_history_key: RuntimeIOKey = PrivateAttr()
     _output_key: RuntimeIOKey = PrivateAttr()
     _session_id_key: BaseIOKey = PrivateAttr()
+    _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
     _is_bound_to_supervisor: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
@@ -267,6 +352,19 @@ class AgentComponent(AgentComponentBase):
         # when used as a subagent to attribute tool calls to subsessions in UI logs.
         self._session_id_key = NoneIOKey(alias="session_id")
 
+        # Default tool approval decision key is component-scoped (no subsession namespace).
+        # Overridden by bind_to_supervisor to be subsession-scoped when used as a subagent,
+        # preventing race conditions when the same subagent runs in multiple subsessions.
+        static_tool_approval_decision_key = (
+            self._tool_approval_decision_key_template.to_iokey(
+                {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+            )
+        )
+        self._tool_approval_decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: static_tool_approval_decision_key,
+        )
+
         return self
 
     def bind_to_supervisor(
@@ -276,6 +374,8 @@ class AgentComponent(AgentComponentBase):
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
         session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        tool_approval_decision_key: RuntimeIOKey,
+        cycle_count_key: RuntimeIOKey,
     ) -> None:
         """Bind this agent to a supervisor.
 
@@ -299,6 +399,15 @@ class AgentComponent(AgentComponentBase):
             session_id_key: ``BaseIOKey`` that resolves the subsession ID at
                 runtime.  Used to attribute tool calls to subsessions in UI
                 logs.  Defaults to a no-op key when not provided.
+            tool_approval_decision_key: ``RuntimeIOKey`` that resolves the
+                subsession-scoped tool approval decision key at runtime.  The
+                tool approval decision is stored under a subsession-scoped key,
+                preventing race conditions when the same subagent runs in
+                multiple subsessions in parallel.
+            cycle_count_key: ``RuntimeIOKey`` that resolves the subsession-scoped
+                cycle count key at runtime.  The cycle count is stored under a
+                subsession-scoped key, preventing race conditions when the same
+                subagent runs in multiple subsessions in parallel.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -310,6 +419,8 @@ class AgentComponent(AgentComponentBase):
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
         self._session_id_key = session_id_key
+        self._tool_approval_decision_key = tool_approval_decision_key
+        self._cycle_count_key = cycle_count_key
         self._is_bound_to_supervisor = True
 
         # Ensure subagent does not read shared `context:goal` directly
@@ -349,18 +460,18 @@ class AgentComponent(AgentComponentBase):
                         f"for component {self.name}"
                     ),
                 )
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self.require_tool_approval:
-            return f"{self.name}#tool_approval_request"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request"
 
-        return f"{self.name}#tools"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
     def _tool_approval_request_router(self, state: FlowState) -> str:
         """Route from tool approval request node.
@@ -380,9 +491,9 @@ class AgentComponent(AgentComponentBase):
         needs_approval = status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
 
         if needs_approval:
-            target = f"{self.name}#tool_approval_fetch"
+            target = f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_fetch"
         else:
-            target = f"{self.name}#tools"
+            target = f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
         return target
 
@@ -393,14 +504,7 @@ class AgentComponent(AgentComponentBase):
             - tools: If approval was granted (decision=APPROVE)
             - agent: If approval was rejected (decision=REJECT or MODIFY)
         """
-        approval_decision_iokey = RuntimeIOKey(
-            alias="tool_approval_decision",
-            factory=lambda _: IOKey(
-                target="context",
-                subkeys=[f"{self.name}__tool_approval_decision"],
-                optional=True,
-            ),
-        ).to_iokey(state)
+        approval_decision_iokey = self._tool_approval_decision_key.to_iokey(state)
 
         decision = approval_decision_iokey.value_from_state(state)
 
@@ -409,15 +513,15 @@ class AgentComponent(AgentComponentBase):
 
         # Route based on explicit decision
         if decision == FlowEventType.APPROVE:
-            return f"{self.name}#tools"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
         if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
-            return f"{self.name}#agent"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
         raise RoutingError(f"Unexpected approval decision: {decision}")
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
     @property
     def outputs(self) -> tuple[IOKey, ...]:
@@ -486,6 +590,7 @@ class AgentComponent(AgentComponentBase):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            invoke_config=self._agent_node_invoke_config(),
             compactor=(
                 create_conversation_compactor(
                     config=(
@@ -503,6 +608,15 @@ class AgentComponent(AgentComponentBase):
                 else None
             ),
             response_schema=self._response_schema,
+            ui_history=UIHistory(
+                events=self.ui_log_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
+            ),
+            max_cycles=self.max_cycles,
+            cycle_count_key=self._cycle_count_key,
+            max_wrap_up_retries=self.max_wrap_up_retries,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
@@ -510,17 +624,20 @@ class AgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             conversation_history_key=self._conversation_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
-                events=self.ui_log_events, writer_class=UILogWriterAgentTools
+                events=self.ui_log_events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name=self.name,
+                ),
             ),
             tracker=tracker,
             session_id_key=self._session_id_key,
         )
         node_final_response = FinalResponseNode(
-            name=f"{self.name}#final_response",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
             conversation_history_key=self._conversation_history_key,
             output_key=self._output_key,
             ui_history=UIHistory(
@@ -544,7 +661,7 @@ class AgentComponent(AgentComponentBase):
         # Conditionally add tool approval nodes
         if self.require_tool_approval:
             node_tool_approval_request = ToolApprovalRequestNode(
-                name=f"{self.name}#tool_approval_request",
+                name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request",
                 conversation_history_key=self._conversation_history_key,
                 toolset=self.toolset,
                 pre_approved_tools=self.pre_approved_tools,
@@ -559,20 +676,13 @@ class AgentComponent(AgentComponentBase):
             )
 
             node_tool_approval_fetch = ToolApprovalFetchNode(
-                name=f"{self.name}#tool_approval_fetch",
+                name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_fetch",
                 conversation_history_key=self._conversation_history_key,
                 status_key=RuntimeIOKey(
                     alias="status",
                     factory=lambda _: IOKey(target="status"),
                 ),
-                approval_decision_key=RuntimeIOKey(
-                    alias="tool_approval_decision",
-                    factory=lambda _: IOKey(
-                        target="context",
-                        subkeys=[f"{self.name}__tool_approval_decision"],
-                        optional=True,
-                    ),
-                ),
+                approval_decision_key=self._tool_approval_decision_key,
             )
 
             # Add approval nodes to graph

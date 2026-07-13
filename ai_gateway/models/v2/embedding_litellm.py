@@ -14,7 +14,7 @@ from langchain_core.runnables import Runnable, RunnableConfig, RunnableSerializa
 
 from ai_gateway.models.base import validate_custom_endpoint
 
-__all__ = ["EmbeddingLiteLLM", "EmbeddingBadRequestError", "EmbeddingRateLimitError"]
+__all__ = ["EmbeddingBadRequestError", "EmbeddingLiteLLM", "EmbeddingRateLimitError"]
 
 logger = logging.getLogger(__name__)
 

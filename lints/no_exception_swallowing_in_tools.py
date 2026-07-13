@@ -98,7 +98,7 @@ class NoExceptionSwallowingInToolsChecker(BaseChecker):
             if self._is_json_error_return(return_node):
                 self.add_message("error-json-return-in-tool", node=return_node)
 
-    def _is_json_error_return(self, node: nodes.Return) -> bool:
+    def _is_json_error_return(self, node: nodes.Return) -> bool:  # noqa: PLR0911  # AST shape guards
         """Check if return statement is: return json.dumps({"error": ...})."""
         # pylint: disable=too-many-return-statements,too-many-branches
         if node.value is None:

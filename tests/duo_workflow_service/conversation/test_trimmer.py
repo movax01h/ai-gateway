@@ -754,6 +754,70 @@ def test_restore_message_consistency_drops_blank_ai_messages(
         assert ai_messages[0].content == content
 
 
+def test_restore_message_consistency_adds_missing_thinking_field():
+    """Thinking blocks without a 'thinking' key get it set to empty string.
+
+    This happens when a thinking-capable model returns a block with only a signature and no reasoning text. The
+    Anthropic API requires the 'thinking' field to be present.
+    """
+    messages = [
+        HumanMessage(content="who is the owner?"),
+        AIMessage(
+            content=[
+                {"type": "thinking", "signature": "abc123"},
+                {
+                    "type": "tool_use",
+                    "name": "gitlab_api_get",
+                    "input": {"endpoint": "/api/v4/projects/1"},
+                    "id": "toolu_1",
+                },
+            ],
+            tool_calls=[
+                {
+                    "id": "toolu_1",
+                    "name": "gitlab_api_get",
+                    "args": {"endpoint": "/api/v4/projects/1"},
+                }
+            ],
+        ),
+        ToolMessage(content="project data", tool_call_id="toolu_1"),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    ai_msg = result[1]
+    assert isinstance(ai_msg, AIMessage)
+    thinking_block = ai_msg.content[0]
+    assert thinking_block["type"] == "thinking"
+    assert thinking_block["thinking"] == ""
+    assert thinking_block["signature"] == "abc123"
+
+
+def test_restore_message_consistency_preserves_existing_thinking_field():
+    """Thinking blocks with an existing 'thinking' key are not modified."""
+    messages = [
+        HumanMessage(content="hello"),
+        AIMessage(
+            content=[
+                {
+                    "type": "thinking",
+                    "thinking": "Let me think...",
+                    "signature": "sig1",
+                },
+                {"type": "text", "text": "Here is my answer."},
+            ],
+        ),
+    ]
+
+    result = restore_message_consistency(messages)
+
+    ai_msg = result[1]
+    assert isinstance(ai_msg, AIMessage)
+    thinking_block = ai_msg.content[0]
+    assert thinking_block["thinking"] == "Let me think..."
+    assert thinking_block["signature"] == "sig1"
+
+
 @patch("duo_workflow_service.conversation.trimmer.trim_messages")
 @patch(
     "duo_workflow_service.conversation.trimmer._token_estimator.count",
@@ -832,9 +896,9 @@ def test_apply_token_based_trim_single_human_message_no_unnecessary_fallback(
     ]
     fallback_triggered = len(warning_calls) > 0
 
-    assert (
-        not fallback_triggered
-    ), "Fallback should not trigger for valid single human message"
+    assert not fallback_triggered, (
+        "Fallback should not trigger for valid single human message"
+    )
 
     # Second call: add another human message
     messages_2 = [

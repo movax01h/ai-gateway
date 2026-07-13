@@ -9,10 +9,10 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser
 
 from contract import contract_pb2
-from duo_workflow_service import server as server_module
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import DuoWorkflowService
+from duo_workflow_service.workflows.registry import ResolvedFlow
 
 
 def create_mock_internal_event_client():
@@ -33,7 +33,6 @@ def mock_usage_quota_service(mock_duo_workflow_service_container):
     service_instance.execute = AsyncMock()
     service_instance.aclose = AsyncMock()
 
-    mock_duo_workflow_service_container.wire(modules=[server_module])
     mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
 
     yield service_instance
@@ -66,7 +65,9 @@ async def test_execute_workflow_enhanced_logging_with_context(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = ResolvedFlow(
+        factory=mock_abstract_workflow_class
+    )
 
     # Setup event context with test data
     test_event_context = EventContext(
@@ -128,12 +129,18 @@ async def test_execute_workflow_enhanced_logging_with_context(
 
     assert extra_fields["workflow_id"] == "#123"
     assert extra_fields["workflow_definition"] == "software_development"
+    # Canonical field names
+    assert extra_fields["gitlab_instance_id"] == "test-instance-123"
+    assert extra_fields["gitlab_host_name"] == "gitlab.example.com"
+    assert extra_fields["gitlab_realm"] == "saas"
+    assert extra_fields["is_gitlab_team_member"] == "True"
+    assert extra_fields["gitlab_global_user_id"] == "user-456"
+    assert extra_fields["correlation_id"] == "corr-789"
+    # Deprecated aliases kept for dashboard migration
     assert extra_fields["instance_id"] == "test-instance-123"
     assert extra_fields["host_name"] == "gitlab.example.com"
     assert extra_fields["realm"] == "saas"
-    assert extra_fields["is_gitlab_team_member"] == "True"
     assert extra_fields["global_user_id"] == "user-456"
-    assert extra_fields["correlation_id"] == "corr-789"
 
 
 @pytest.mark.asyncio
@@ -158,7 +165,9 @@ async def test_execute_workflow_enhanced_logging_without_context(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_workflow.return_value = mock_abstract_workflow_class
+    mock_resolve_workflow.return_value = ResolvedFlow(
+        factory=mock_abstract_workflow_class
+    )
 
     # Setup event context to return None
     mock_current_event_context.get.return_value = None
@@ -221,10 +230,14 @@ async def test_execute_workflow_enhanced_logging_without_context(
     assert extra_fields["workflow_id"] == "#123"
     assert extra_fields["workflow_definition"] == "software_development"
 
-    # Verify event context fields are not present
+    # Verify event context fields are not present (neither canonical nor deprecated aliases)
+    assert "gitlab_instance_id" not in extra_fields
+    assert "gitlab_host_name" not in extra_fields
+    assert "gitlab_realm" not in extra_fields
+    assert "is_gitlab_team_member" not in extra_fields
+    assert "gitlab_global_user_id" not in extra_fields
+    assert "correlation_id" not in extra_fields
     assert "instance_id" not in extra_fields
     assert "host_name" not in extra_fields
     assert "realm" not in extra_fields
-    assert "is_gitlab_team_member" not in extra_fields
     assert "global_user_id" not in extra_fields
-    assert "correlation_id" not in extra_fields

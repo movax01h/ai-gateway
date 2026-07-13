@@ -18,7 +18,6 @@ __all__ = ["DuoChatToolsRegistry"]
 
 
 class DuoChatToolsRegistry(BaseToolsRegistry):
-
     def __init__(self, self_hosted_documentation_enabled: bool = False):
         self.self_hosted_documentation_enabled = self_hosted_documentation_enabled
 

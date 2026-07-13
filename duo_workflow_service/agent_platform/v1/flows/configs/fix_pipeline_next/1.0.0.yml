@@ -8,6 +8,40 @@ version: "v1"
 environment: ambient
 
 components:
+  - name: "fetch_failing_jobs"
+    type: DeterministicStepComponent
+    tool_name: "get_pipeline_failing_jobs"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "true"
+        as: "exclude_allow_failure"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fetch_failing_bridge_jobs"
+    type: DeterministicStepComponent
+    tool_name: "get_failing_bridge_jobs"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "list_merge_request_diffs"
+    inputs:
+      - from: "context:inputs.merge_request.url"
+        as: "url"
+        optional: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "fix_pipeline_next_context"
     type: AgentComponent
     prompt_id: "fix_pipeline_next_context"
@@ -23,6 +57,14 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
+      - from: "context:fetch_failing_jobs.tool_responses"
+        as: "failing_jobs"
+      - from: "context:fetch_failing_bridge_jobs.tool_responses"
+        as: "failing_bridge_jobs"
+        optional: True
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+        optional: True
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -30,11 +72,9 @@ components:
         as: "workspace_agent_skills"
         optional: True
     toolset:
-      - get_downstream_pipelines
       - get_pipeline_failing_jobs:
           exclude_allow_failure: true
       - get_job_logs
-      - list_merge_request_diffs
       - read_file
       - find_files
       - list_dir
@@ -76,6 +116,8 @@ components:
         as: "merge_request_url"
       - from: "context:project_id"
         as: "project_id"
+      - from: "context:fix_pipeline_next_context.final_answer.summary"
+        as: "context_summary"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -115,9 +157,25 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "create_repository_branch"
+  - name: "git_fetch_for_branch"
+    type: DeterministicStepComponent
+    tool_name: "run_git_command"
+    inputs:
+      - from: "context:project_http_url_to_repo"
+        as: "repository_url"
+      - from: "fetch"
+        as: "command"
+        literal: True
+      - from: "origin"
+        as: "args"
+        literal: True
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fix_pipeline_next_create_branch"
     type: AgentComponent
-    prompt_id: "create_repository_branch"
+    prompt_id: "fix_pipeline_next_create_branch"
     prompt_version: "^1.0.0"
     response_schema_id: "create_repository_branch"
     response_schema_version: "^1.0.0"
@@ -206,32 +264,13 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  - name: "git_add_all"
-    type: DeterministicStepComponent
-    tool_name: "run_git_command"
-    inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "add"
-        as: "command"
-        literal: True
-      - from: "-A"
-        as: "args"
-        literal: True
-    ui_log_events:
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
-
-  - name: "fix_pipeline_next_commit"
-    type: OneOffComponent
-    prompt_id: "fix_pipeline_next_commit"
+  - name: "fix_pipeline_git_commit"
+    type: AgentComponent
+    prompt_id: "commit_changes"
     prompt_version: "^1.0.0"
-    max_correction_attempts: 3
     inputs:
       - from: "context:project_http_url_to_repo"
         as: "repository_url"
-      - from: "context:fix_pipeline_next_execution.final_answer"
-        as: "execution_summary"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -241,7 +280,6 @@ components:
     toolset:
       - "run_git_command"
     ui_log_events:
-      - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -291,7 +329,7 @@ components:
         as: "source_branch"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "default_branch"
-      - from: "context:create_repository_branch.final_answer.branch_name"
+      - from: "context:fix_pipeline_next_create_branch.final_answer.branch_name"
         as: "source_branch_name"
       - from: "context:fix_pipeline_next_execution.final_answer"
         as: "execution_results"
@@ -316,14 +354,29 @@ components:
       - "on_tool_execution_failed"
 
 routers:
+  - from: "fetch_failing_jobs"
+    to: "fetch_failing_bridge_jobs"
+  - from: "fetch_failing_bridge_jobs"
+    condition:
+      input: "context:inputs.merge_request.url"
+      routes:
+        # No MR: the merge_request schema requires url to be a non-null string,
+        # so the no-MR case always arrives as "". Skip fetch_mr_diffs (which
+        # would fail tool validation on an empty url); a real url falls through
+        # to default_route and fetches the diffs.
+        "": "fix_pipeline_next_context"
+        "default_route": "fetch_mr_diffs"
+  - from: "fetch_mr_diffs"
+    to: "fix_pipeline_next_context"
   - from: "fix_pipeline_next_context"
     condition:
       input: "context:fix_pipeline_next_context.final_answer.decision"
       routes:
         "add_comment": "fix_pipeline_add_comment"
         "create_plan": "fix_pipeline_next_checkout_existing_branch"
+        "direct_code_suggestions": "fix_pipeline_next_code_suggestions"
         "no_action": "end"
-        "default_route": "fix_pipeline_add_comment"
+        "default_route": "end"
   - from: "fix_pipeline_next_checkout_existing_branch"
     to: "fix_pipeline_next_execution"
   - from: "fix_pipeline_add_comment"
@@ -337,20 +390,20 @@ routers:
       input: "context:fix_pipeline_next_decide_fix.final_answer.decision"
       routes:
         "create_fix_on_existing_mr": "fix_pipeline_next_code_suggestions"
-        "create_fix_on_new_mr": "create_repository_branch"
+        "create_fix_on_new_mr": "git_fetch_for_branch"
         "no_action_needed": "end"
-        "default_route": "create_repository_branch"
+        "default_route": "git_fetch_for_branch"
   - from: "fix_pipeline_next_code_suggestions"
     to: "end"
-  - from: "create_repository_branch"
+  - from: "git_fetch_for_branch"
+    to: "fix_pipeline_next_create_branch"
+  - from: "fix_pipeline_next_create_branch"
     condition:
-      input: "context:create_repository_branch.final_answer.status"
+      input: "context:fix_pipeline_next_create_branch.final_answer.status"
       routes:
-        "success": "git_add_all"
+        "success": "fix_pipeline_git_commit"
         "default_route": "end"
-  - from: "git_add_all"
-    to: "fix_pipeline_next_commit"
-  - from: "fix_pipeline_next_commit"
+  - from: "fix_pipeline_git_commit"
     to: "git_fetch_unshallow"
   - from: "git_fetch_unshallow"
     to: "git_push_branch"
@@ -364,15 +417,17 @@ routers:
     to: "end"
 
 flow:
-  entry_point: "fix_pipeline_next_context"
+  entry_point: "fetch_failing_jobs"
   inputs:
     - category: merge_request
+      version_constraint: "^1.0.0"
       input_schema:
         url:
           type: string
           format: uri
           description: The URL for the GitLab Merge Request
     - category: pipeline
+      version_constraint: "^1.0.0"
       input_schema:
         source_branch:
           type: string
@@ -381,6 +436,7 @@ flow:
           description: The pipeline source (e.g. merge_request_event, push)
           optional: true
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string
@@ -391,3 +447,7 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true

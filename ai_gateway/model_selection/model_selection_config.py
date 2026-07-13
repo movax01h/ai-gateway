@@ -38,6 +38,10 @@ class PromptParams(BaseModel):
     vertex_location: str | None = None
     cache_control_injection_points: list[dict] | None = None
     context_management: dict | None = None
+    # Bedrock expects the inference profile / model ARN to be passed at
+    # invocation time via model_id, not at client initialization.
+    # See https://docs.litellm.ai/docs/providers/bedrock#set-via-model_id
+    model_id: str | None = None
 
 
 class BaseLLMDefinition(BaseModel):
@@ -52,11 +56,18 @@ class BaseLLMDefinition(BaseModel):
     cost_indicator: Literal["$", "$$", "$$$", "$$$$"] | None = None
     params: BaseModelParams
     family: list[str] = []
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Semantic tags for this model (e.g. 'small', 'large', 'reasoning'). Used as metadata; resolution is driven by models_for_tags in unit_primitives.yml.",
+    )
     deprecation: Optional[DeprecationInfo] = None
     proxy_provider: Optional[str] = None
     # Claude 4.6+ rejects requests ending with an assistant turn (prefill).
     # Opt in by setting to true for models that still accept prefill.
     supports_assistant_prefill: bool = False
+    # Some reasoning models (e.g. Qwen) leak <think>...</think> reasoning into responses.
+    # When true, the ReAct parser strips that block before it reaches the user.
+    strip_reasoning: bool = False
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):
@@ -122,9 +133,7 @@ class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
     default_models: list[str] = Field(min_length=1)
-    models_for_size_preference: dict[Literal["small", "large"], str] = Field(
-        default_factory=dict
-    )
+    models_for_tags: dict[str, str] = Field(default_factory=dict)
     selectable_models: list[str] = Field(default_factory=list)
     beta_models: list[str] = Field(default_factory=list)
     dev: DevConfig | None = None
@@ -133,10 +142,17 @@ class UnitPrimitiveConfig(BaseModel):
 class ModelSelectionConfig:
     _instance: Optional["ModelSelectionConfig"] = None
 
-    def __init__(self, default_models_override: dict[str, list[str]]) -> None:
+    def __init__(
+        self,
+        default_models_override: dict[str, list[str]],
+        model_params_override: dict[str, dict] | None = None,
+        prompt_params_override: dict[str, dict] | None = None,
+    ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
+        self._model_params_override: dict[str, dict] = model_params_override or {}
+        self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
 
     @classmethod
     def instance(cls) -> "ModelSelectionConfig":
@@ -148,22 +164,38 @@ class ModelSelectionConfig:
         if cls._instance is None:
             cfg = get_config()
             cls._instance = cls(
-                default_models_override=cfg.model_selection.default_models
+                default_models_override=cfg.model_selection.default_models,
+                model_params_override=cfg.model_selection.model_params,
+                prompt_params_override=cfg.model_selection.prompt_params,
             )
         return cls._instance
 
     def get_llm_definitions(self) -> dict[str, LLMDefinition]:
         if not self._llm_definitions:
-
             with open(MODELS_CONFIG_PATH, "r") as f:
                 config_data = yaml.safe_load(f)
 
-            self._llm_definitions = {
-                model_data["gitlab_identifier"]: TypeAdapter(
+            self._llm_definitions = {}
+            for model_data in config_data["models"]:
+                identifier = model_data["gitlab_identifier"]
+                if identifier in self._model_params_override:
+                    params_override = self._model_params_override[identifier]
+                    model_data = {
+                        **model_data,
+                        "params": {**model_data.get("params", {}), **params_override},
+                    }
+                if identifier in self._prompt_params_override:
+                    prompt_params_override = self._prompt_params_override[identifier]
+                    model_data = {
+                        **model_data,
+                        "prompt_params": {
+                            **model_data.get("prompt_params", {}),
+                            **prompt_params_override,
+                        },
+                    }
+                self._llm_definitions[identifier] = TypeAdapter(
                     LLMDefinition
                 ).validate_python(model_data)
-                for model_data in config_data["models"]
-            }
 
         return self._llm_definitions
 
@@ -179,9 +211,9 @@ class ModelSelectionConfig:
 
             for feature_setting, models in self._default_models_override.items():
                 if feature_setting in self._unit_primitive_configs:
-                    self._unit_primitive_configs[feature_setting].default_models = (
-                        models
-                    )
+                    self._unit_primitive_configs[
+                        feature_setting
+                    ].default_models = models
 
         return self._unit_primitive_configs
 
@@ -197,7 +229,7 @@ class ModelSelectionConfig:
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
                 unit_primitive_config.default_models,
-                unit_primitive_config.models_for_size_preference.values(),
+                unit_primitive_config.models_for_tags.values(),
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
                 (

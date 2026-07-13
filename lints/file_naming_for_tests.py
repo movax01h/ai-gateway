@@ -12,6 +12,7 @@ EXCLUDED_FILES = {
     "/tests/code_suggestions/test_logging.py",
     "/tests/prompts/test_litellm_prompt.py",
     "/tests/duo_workflow_service/agent_platform/test_configs.py",
+    "/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py",
 }
 
 # Folders to scan for implementation files

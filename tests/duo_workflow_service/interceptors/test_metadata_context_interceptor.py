@@ -14,6 +14,10 @@ from lib.events.contextvar import (
 )
 from lib.langsmith_tracing import X_GITLAB_LANGSMITH_TRACE_HEADER
 from lib.mcp_server_tools.context import current_mcp_server_tools_context
+from lib.verbose_ai_logs import (
+    X_GITLAB_EXTENDED_LOGGING_HEADER,
+    extended_logging_context,
+)
 
 
 @pytest.fixture(name="mock_config")
@@ -96,6 +100,25 @@ async def test_gitlab_realm_header(interceptor_setup):
 
 
 @pytest.mark.asyncio
+async def test_gitlab_instance_id_header(interceptor_setup):
+    """Test that GitLab instance ID header is properly set."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-instance-id", "test-instance-123"),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.gitlab_instance_id"
+    ) as mock_gitlab_instance_id:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_gitlab_instance_id.set.assert_called_once_with("test-instance-123")
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "header_name,header_value,expected",
     [
@@ -141,44 +164,6 @@ async def test_is_gitlab_team_member_both_headers_conflicting(interceptor_setup)
         result = await interceptor.intercept_service(continuation, handler_call_details)
 
         mock_team_member.set.assert_called_once_with(True)
-        continuation.assert_called_once_with(handler_call_details)
-        assert result == "mocked_response"
-
-
-@pytest.mark.asyncio
-async def test_ip_address_metadata_propagation(interceptor_setup):
-    """Test that x-gitlab-client-ip header is propagated to the ip_address context var."""
-    interceptor, handler_call_details, continuation = interceptor_setup(
-        [
-            ("x-gitlab-client-ip", "203.0.113.7"),
-        ]
-    )
-
-    with patch(
-        "duo_workflow_service.interceptors.metadata_context_interceptor.ip_address"
-    ) as mock_ip_address:
-        result = await interceptor.intercept_service(continuation, handler_call_details)
-
-        mock_ip_address.set.assert_called_once_with("203.0.113.7")
-        continuation.assert_called_once_with(handler_call_details)
-        assert result == "mocked_response"
-
-
-@pytest.mark.asyncio
-async def test_ip_address_absent_leaves_default(interceptor_setup):
-    """Test that a missing x-gitlab-client-ip header leaves the context var untouched."""
-    interceptor, handler_call_details, continuation = interceptor_setup(
-        [
-            ("other-header", "other-value"),
-        ]
-    )
-
-    with patch(
-        "duo_workflow_service.interceptors.metadata_context_interceptor.ip_address"
-    ) as mock_ip_address:
-        result = await interceptor.intercept_service(continuation, handler_call_details)
-
-        mock_ip_address.set.assert_not_called()
         continuation.assert_called_once_with(handler_call_details)
         assert result == "mocked_response"
 
@@ -259,6 +244,44 @@ async def test_verbose_ai_logs_header(interceptor_setup, header_value, expected_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "header_value,expected_bool",
+    [
+        ("true", True),
+        ("false", False),
+        ("True", False),
+        ("", False),
+    ],
+)
+async def test_extended_logging_header(interceptor_setup, header_value, expected_bool):
+    """Test that extended logging header is properly converted to boolean."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            (X_GITLAB_EXTENDED_LOGGING_HEADER, header_value),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.extended_logging_context"
+    ) as mock_extended_logging:
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_extended_logging.set.assert_called_once_with(expected_bool)
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "mocked_response"
+
+
+@pytest.mark.asyncio
+async def test_extended_logging_header_missing(interceptor_setup):
+    """Test that missing extended logging header defaults to False."""
+    interceptor, handler_call_details, continuation = interceptor_setup([])
+
+    await interceptor.intercept_service(continuation, handler_call_details)
+
+    assert extended_logging_context.get() is False
+
+
+@pytest.mark.asyncio
 async def test_prompt_caching_header(interceptor_setup):
     """Test that prompt caching header calls the setter function."""
     interceptor, handler_call_details, continuation = interceptor_setup(
@@ -290,6 +313,7 @@ async def test_all_headers_together(interceptor_setup):
             ("x-gitlab-model-prompt-cache-enabled", "false"),
             ("x-gitlab-enabled-mcp-server-tools", "postgres,context7"),
             ("x-gitlab-is-team-member", "true"),
+            (X_GITLAB_EXTENDED_LOGGING_HEADER, "true"),
         ]
     )
 
@@ -318,6 +342,9 @@ async def test_all_headers_together(interceptor_setup):
         patch(
             "duo_workflow_service.interceptors.metadata_context_interceptor.is_gitlab_team_member"
         ) as mock_team_member,
+        patch(
+            "duo_workflow_service.interceptors.metadata_context_interceptor.extended_logging_context"
+        ) as mock_extended_logging,
     ):
         mock_lsp_instance = MagicMock()
         mock_lsp_class.from_string.return_value = mock_lsp_instance
@@ -332,6 +359,7 @@ async def test_all_headers_together(interceptor_setup):
         mock_verbose_logs.set.assert_called_once_with(True)
         mock_prompt_caching.assert_called_once_with("false")
         mock_team_member.set.assert_called_once_with(True)
+        mock_extended_logging.set.assert_called_once_with(True)
         assert current_mcp_server_tools_context.get() == {
             "postgres",
             "context7",

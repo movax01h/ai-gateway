@@ -61,6 +61,10 @@ class TestHumanInputComponent:
         assert status_output.target == "status"
         assert status_output.subkeys is None
 
+    def test_entry_hook_returns_correct_node_name(self, human_input_component):
+        """Test that __entry_hook__ returns the component's request node name."""
+        assert human_input_component.__entry_hook__() == "test_human_input#request"
+
     def test_attach_method_creates_nodes(self, human_input_component):
         """Test that attach method creates proper nodes in the graph."""
 
@@ -76,7 +80,6 @@ class TestHumanInputComponent:
                 "duo_workflow_service.agent_platform.experimental.components.human_input.component.FetchNode"
             ) as mock_fetch_node,
         ):
-
             # Mock node instances
             request_instance = Mock()
             request_instance.name = "test_human_input#request"

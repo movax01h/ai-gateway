@@ -5,7 +5,7 @@ import threading
 import time
 from collections import OrderedDict
 from functools import lru_cache
-from typing import Any, Optional, Protocol, Sequence, Type, Union
+from typing import Any, Optional, Protocol, Sequence, Type, Union, cast
 
 import structlog
 from langchain_core.language_models import BaseChatModel
@@ -16,8 +16,8 @@ from prometheus_client import Counter, Gauge, Histogram
 from pydantic import BaseModel
 
 __all__ = [
-    "BindToolsCacheProtocol",
     "BindToolsCache",
+    "BindToolsCacheProtocol",
     "NoOpBindToolsCache",
     "compute_tool_signature",
 ]
@@ -125,7 +125,7 @@ def compute_tool_signature(tools: Sequence[Union[BaseTool, Type[BaseModel]]]) ->
             if isinstance(tool.args_schema, dict):
                 schema = tool.args_schema
             else:
-                schema = tool.args_schema.model_json_schema()
+                schema = cast(Type[BaseModel], tool.args_schema).model_json_schema()
             schema_str = json.dumps(schema, sort_keys=True)
             signature_parts.append(f"schema:{schema_str}")
         elif inspect.isclass(tool) and issubclass(tool, BaseModel):

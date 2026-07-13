@@ -5,7 +5,7 @@ from ai_gateway.model_selection import PromptParams
 from ai_gateway.model_selection.models import BaseModelParams
 from lib.billing_events.service import LLMOperationType
 
-__all__ = ["PromptConfig", "ModelConfig"]
+__all__ = ["ModelConfig", "PromptConfig"]
 
 
 class ModelConfig(BaseModel):
@@ -20,7 +20,7 @@ class PromptConfig(BaseModel):
     name: str
     model: ModelConfig = ModelConfig()
     unit_primitive: GitLabUnitPrimitive
-    prompt_template: dict[str, str]
+    prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
 
@@ -33,7 +33,7 @@ class InMemoryPromptConfig(BaseModel):
     name: str
     model: ModelConfig | None = None
     unit_primitives: list[GitLabUnitPrimitive]
-    prompt_template: dict[str, str]
+    prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
 

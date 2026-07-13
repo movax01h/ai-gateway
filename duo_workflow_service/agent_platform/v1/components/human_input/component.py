@@ -3,6 +3,7 @@ from typing import Annotated, Any, ClassVar, Literal, Self, override
 from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -27,8 +28,8 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 
 __all__ = [
-    "HumanInputComponent",
     "ChatHumanInputComponent",
+    "HumanInputComponent",
 ]
 
 
@@ -118,7 +119,7 @@ class HumanInputComponent(BaseComponent):
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
-        return f"{self.name}#request"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}request"
 
     @property
     @override
@@ -162,7 +163,7 @@ class HumanInputComponent(BaseComponent):
 
         # Create request node
         request_node = RequestNode(
-            name=f"{self.name}#request",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}request",
             component_name=self.name,
             message_template=self.message_template,
             inputs=self.inputs,
@@ -173,7 +174,7 @@ class HumanInputComponent(BaseComponent):
 
         # Create fetch node with approval output
         fetch_node = FetchNode(
-            name=f"{self.name}#fetch",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}fetch",
             component_name=self.name,
             output=self._approval_output,
             conversation_history_key=self._conversation_history_input,

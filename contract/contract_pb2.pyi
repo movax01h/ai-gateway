@@ -20,7 +20,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ..., stopWorkflow: _Optional[_Union[StopWorkflowRequest, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -35,6 +35,7 @@ class StartWorkflowRequest(_message.Message):
     PREAPPROVED_TOOLS_FIELD_NUMBER: _ClassVar[int]
     FLOWCONFIGID_FIELD_NUMBER: _ClassVar[int]
     FLOWVERSION_FIELD_NUMBER: _ClassVar[int]
+    STREAMING_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -49,19 +50,18 @@ class StartWorkflowRequest(_message.Message):
     preapproved_tools: _containers.RepeatedScalarFieldContainer[str]
     flowConfigId: str
     flowVersion: str
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ...) -> None: ...
+    streaming: bool
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ...) -> None: ...
 
 class ActionResponse(_message.Message):
-    __slots__ = ("requestID", "response", "plainTextResponse", "httpResponse")
+    __slots__ = ("requestID", "plainTextResponse", "httpResponse")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
-    RESPONSE_FIELD_NUMBER: _ClassVar[int]
     PLAINTEXTRESPONSE_FIELD_NUMBER: _ClassVar[int]
     HTTPRESPONSE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
-    response: str
     plainTextResponse: PlainTextResponse
     httpResponse: HttpResponse
-    def __init__(self, requestID: _Optional[str] = ..., response: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ...) -> None: ...
+    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("timestamp",)
@@ -238,6 +238,24 @@ class GenerateTokenResponse(_message.Message):
     server_capabilities: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, token: _Optional[str] = ..., expiresAt: _Optional[int] = ..., server_capabilities: _Optional[_Iterable[str]] = ...) -> None: ...
 
+class Capability(_message.Message):
+    __slots__ = ("name", "metadata")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    metadata: str
+    def __init__(self, name: _Optional[str] = ..., metadata: _Optional[str] = ...) -> None: ...
+
+class ListCapabilitiesRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListCapabilitiesResponse(_message.Message):
+    __slots__ = ("capabilities",)
+    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    capabilities: _containers.RepeatedCompositeFieldContainer[Capability]
+    def __init__(self, capabilities: _Optional[_Iterable[_Union[Capability, _Mapping]]] = ...) -> None: ...
+
 class ListToolsRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
@@ -272,17 +290,34 @@ class ListFlowsResponse(_message.Message):
     configs: _containers.RepeatedCompositeFieldContainer[_struct_pb2.Struct]
     def __init__(self, configs: _Optional[_Iterable[_Union[_struct_pb2.Struct, _Mapping]]] = ...) -> None: ...
 
+class TokenBreakdown(_message.Message):
+    __slots__ = ("total_tokens", "max_tokens")
+    TOTAL_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    total_tokens: int
+    max_tokens: int
+    def __init__(self, total_tokens: _Optional[int] = ..., max_tokens: _Optional[int] = ...) -> None: ...
+
 class NewCheckpoint(_message.Message):
-    __slots__ = ("status", "checkpoint", "goal", "errors")
+    __slots__ = ("status", "checkpoint", "goal", "errors", "agent_context_usage")
+    class AgentContextUsageEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: TokenBreakdown
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[TokenBreakdown, _Mapping]] = ...) -> None: ...
     STATUS_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
     GOAL_FIELD_NUMBER: _ClassVar[int]
     ERRORS_FIELD_NUMBER: _ClassVar[int]
+    AGENT_CONTEXT_USAGE_FIELD_NUMBER: _ClassVar[int]
     status: str
     checkpoint: str
     goal: str
     errors: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, status: _Optional[str] = ..., checkpoint: _Optional[str] = ..., goal: _Optional[str] = ..., errors: _Optional[_Iterable[str]] = ...) -> None: ...
+    agent_context_usage: _containers.MessageMap[str, TokenBreakdown]
+    def __init__(self, status: _Optional[str] = ..., checkpoint: _Optional[str] = ..., goal: _Optional[str] = ..., errors: _Optional[_Iterable[str]] = ..., agent_context_usage: _Optional[_Mapping[str, TokenBreakdown]] = ...) -> None: ...
 
 class ListDirectory(_message.Message):
     __slots__ = ("directory",)

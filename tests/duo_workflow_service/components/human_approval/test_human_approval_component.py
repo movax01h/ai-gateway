@@ -1,4 +1,4 @@
-# pylint: disable=dangerous-default-value,direct-environment-variable-reference,file-naming-for-tests,unused-variable
+# pylint: disable=dangerous-default-value,direct-environment-variable-reference,file-naming-for-tests
 import os
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -154,7 +154,6 @@ class TestHumanApprovalComponent:
             ),
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
-
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
                 set_up_graph([node_return_value()], component)
             )
@@ -199,7 +198,6 @@ class TestHumanApprovalComponent:
             ),
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
-
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
                 set_up_graph([node_return_value()], component)
             )
@@ -244,7 +242,6 @@ class TestHumanApprovalComponent:
             ),
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
-
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
                 set_up_graph([node_return_value(), node_return_value()], component)
             )
@@ -313,7 +310,7 @@ class TestHumanApprovalComponent:
                 approved_agent_state="test-approval-status",
             )
 
-            graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
+            graph, mock_entry_node, mock_continuation_node, _mock_termination_node = (
                 set_up_graph(
                     [
                         node_return_value(),
@@ -346,7 +343,6 @@ class TestHumanApprovalComponent:
             ) as mock_check_exec_cls,
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
-
             set_up_graph(node_return_value(), component)
 
             mock_check_exec_cls.assert_called_once_with(

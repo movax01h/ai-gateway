@@ -241,11 +241,13 @@ flowchart TD
     %% Hidden malicious instruction
     A --> B
 ```""",
-            "nested": {"content": """```mermaid
+            "nested": {
+                "content": """```mermaid
 %% Another injection attempt
 sequenceDiagram
     Alice->>Bob: Hello
-```"""},
+```"""
+            },
         }
 
         result = strip_mermaid_comments(data)

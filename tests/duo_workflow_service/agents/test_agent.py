@@ -3,14 +3,29 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from anthropic import APIStatusError
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.prompts.base import Prompt
 from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
-from duo_workflow_service.conversation.compaction import (
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    CompactionOptimizer,
+)
+from duo_workflow_service.conversation.history_optimizer.optimizers.legacy_trim import (
+    LegacyTrimOptimizer,
+)
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
-    ConversationCompactor,
+    OptimizationResult,
 )
 from duo_workflow_service.entities import WorkflowEventType
 from duo_workflow_service.entities.state import (
@@ -51,6 +66,11 @@ def check_events_fixture() -> bool:
     return True
 
 
+def _noop_pipeline() -> HistoryOptimizerPipeline:
+    """Build a pass-through pipeline (empty optimizer list) for tests."""
+    return HistoryOptimizerPipeline([])
+
+
 @pytest.fixture(name="agent")
 def agent_fixture(
     prompt: Prompt,
@@ -65,6 +85,7 @@ def agent_fixture(
         workflow_type=workflow_type,
         http_client=gl_http_client,
         check_events=check_events,
+        optimizer_pipeline=_noop_pipeline(),
     )  # type: ignore[call-arg]
 
 
@@ -446,17 +467,12 @@ def test_create_agent_with_prompt_registry(
     assert agent.prompt == prompt
 
 
-@patch("duo_workflow_service.agents.agent.create_conversation_compactor")
-def test_create_agent_with_compaction_config(
-    mock_create_compactor,
+def test_build_agent_with_compaction_config_uses_compaction_optimizer(
     user,
     mock_local_prompt_registry,
     tools,
     gl_http_client,
 ):
-    mock_compactor = Mock(spec=ConversationCompactor)
-    mock_create_compactor.return_value = mock_compactor
-
     compaction_config = CompactionConfig(trim_threshold=0.7)
     agent = build_agent(
         name="test_agent",
@@ -471,18 +487,15 @@ def test_create_agent_with_compaction_config(
         compaction=compaction_config,
     )
 
-    mock_create_compactor.assert_called_once_with(
-        config=compaction_config,
-        prompt_registry=mock_local_prompt_registry,
-        user=user,
-        agent_name="test_agent",
-        workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
-    )
-    assert agent.compactor == mock_compactor
+    optimizers = agent.optimizer_pipeline.optimizers
+    assert len(optimizers) == 1
+    assert isinstance(optimizers[0], CompactionOptimizer)
+    assert optimizers[0]._config is compaction_config
+    assert optimizers[0]._agent_name == "test_agent"
+    assert optimizers[0]._workflow_id == "workflow_123"
 
 
-def test_create_agent_without_compaction_config(
+def test_build_agent_without_compaction_config_uses_legacy_trim(
     user, mock_local_prompt_registry, tools, gl_http_client
 ):
     agent = build_agent(
@@ -497,29 +510,35 @@ def test_create_agent_without_compaction_config(
         http_client=gl_http_client,
     )
 
-    assert agent.compactor is None
+    optimizers = agent.optimizer_pipeline.optimizers
+    assert len(optimizers) == 1
+    # LegacyTrimOptimizer safety net when no CompactionConfig is provided.
+    assert isinstance(optimizers[0], LegacyTrimOptimizer)
 
 
-class TestAgentCompaction:
+class TestAgentOptimizerPipeline:
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_get_event")
-    @patch("duo_workflow_service.agents.agent.maybe_compact_history")
-    @pytest.mark.usefixtures("mock_ainvoke")
-    async def test_agent_run_calls_maybe_compact_history(
+    @pytest.mark.usefixtures("mock_get_event", "mock_ainvoke")
+    async def test_agent_run_invokes_pipeline_and_replaces_history(
         self,
-        mock_maybe_compact,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
         workflow_type: CategoryEnum,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
-        mock_compactor = Mock(spec=ConversationCompactor)
-        original_messages = [HumanMessage(content="test message")]
-        compacted_messages = [HumanMessage(content="compacted")]
-        mock_maybe_compact.return_value = compacted_messages
+        original_messages: list[BaseMessage] = [HumanMessage(content="test message")]
+        optimized_messages: list[BaseMessage] = [HumanMessage(content="optimized")]
 
-        workflow_state["conversation_history"][prompt_name] = original_messages  # type: ignore[assignment]
+        mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+        mock_pipeline.optimize = AsyncMock(
+            return_value=(
+                optimized_messages,
+                [OptimizationResult(messages=optimized_messages, was_modified=True)],
+            )
+        )
+
+        workflow_state["conversation_history"][prompt_name] = original_messages
 
         agent = Agent(
             name=prompt_name,
@@ -528,67 +547,28 @@ class TestAgentCompaction:
             workflow_type=workflow_type,
             http_client=gl_http_client,
             check_events=True,
-            compactor=mock_compactor,
+            optimizer_pipeline=mock_pipeline,
         )  # type: ignore[call-arg]
 
         await agent.run(workflow_state)
 
-        mock_maybe_compact.assert_called_once_with(
-            compactor=mock_compactor,
-            history=original_messages,
-            agent_name=prompt_name,
-        )
-        assert workflow_state["conversation_history"][prompt_name] == compacted_messages
+        mock_pipeline.optimize.assert_awaited_once_with(original_messages)
+        assert workflow_state["conversation_history"][prompt_name] == optimized_messages
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_get_event")
-    @patch("duo_workflow_service.agents.agent.maybe_compact_history")
-    @pytest.mark.usefixtures("mock_ainvoke")
-    async def test_agent_run_without_compactor_still_calls_maybe_compact(
+    @pytest.mark.usefixtures("mock_get_event", "mock_ainvoke")
+    async def test_agent_run_with_missing_history_uses_empty_list(
         self,
-        mock_maybe_compact,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
         workflow_type: CategoryEnum,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
-        original_messages = [HumanMessage(content="test message")]
-        mock_maybe_compact.return_value = original_messages
-
-        workflow_state["conversation_history"][prompt_name] = original_messages  # type: ignore[assignment]
-
-        agent = Agent(
-            name=prompt_name,
-            prompt=prompt,
-            workflow_id="test-workflow-123",
-            workflow_type=workflow_type,
-            http_client=gl_http_client,
-            check_events=True,
-        )  # type: ignore[call-arg]
-
-        await agent.run(workflow_state)
-
-        mock_maybe_compact.assert_called_once_with(
-            compactor=None,
-            history=original_messages,
-            agent_name=prompt_name,
+        mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+        mock_pipeline.optimize = AsyncMock(
+            return_value=([], [OptimizationResult(messages=[], was_modified=False)])
         )
-
-    @pytest.mark.asyncio
-    @pytest.mark.usefixtures("mock_get_event")
-    @patch("duo_workflow_service.agents.agent.maybe_compact_history")
-    @pytest.mark.usefixtures("mock_ainvoke")
-    async def test_agent_run_calls_compaction_with_empty_history(
-        self,
-        mock_maybe_compact,
-        prompt: Prompt,
-        gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
-        workflow_state: DuoWorkflowStateType,
-        prompt_name: str,
-    ):
-        mock_maybe_compact.return_value = []
         workflow_state["conversation_history"] = {}
 
         agent = Agent(
@@ -598,12 +578,9 @@ class TestAgentCompaction:
             workflow_type=workflow_type,
             http_client=gl_http_client,
             check_events=True,
+            optimizer_pipeline=mock_pipeline,
         )  # type: ignore[call-arg]
 
         await agent.run(workflow_state)
 
-        mock_maybe_compact.assert_called_once_with(
-            compactor=None,
-            history=[],
-            agent_name=prompt_name,
-        )
+        mock_pipeline.optimize.assert_awaited_once_with([])

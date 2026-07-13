@@ -5,8 +5,10 @@ from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -16,7 +18,12 @@ from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     EndComponent,
 )
-from duo_workflow_service.agent_platform.v1.flows.base import Flow, UserDecision
+from duo_workflow_service.agent_platform.v1.flows.base import (
+    _ENVELOPE_DEFAULT_CONSTRAINT,
+    _ENVELOPE_DEFAULT_VERSION,
+    Flow,
+    UserDecision,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     FlowConfigInput,
@@ -30,14 +37,20 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import (
+    EnvelopeVersionMismatchException,
+    InvalidRequestException,
+)
 from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
+from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.internal_events.context import (
     merge_request_url_context,
     pipeline_source_context,
 )
+from lib.version import resolve_version
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
@@ -271,7 +284,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
 
         input = kwargs.get("input")
-        if expected_type == dict:
+        if expected_type is dict:
             assert isinstance(input, expected_type)
             assert input["context"]["goal"] == goal
             assert input["context"]["project_id"] == project["id"]
@@ -519,6 +532,205 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     "message" not in input.resume  # type: ignore[operator]
                     or input.resume.get("message") is None  # type: ignore[union-attr]
                 )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_graph_input_resume_empty_goal_passes_empty_command_to_graph(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """Regression test for https://gitlab.com/gitlab-org/gitlab/-/work_items/602799.
+
+        When the websocket drops while a turn is paused at INPUT_REQUIRED, the Duo CLI
+        auto-retries by RESUMING the workflow with an empty goal (no approval). The
+        flow layer must forward this as a ``Command(resume=FlowEvent(RESPONSE,
+        message=""))`` to the graph — it is the recipient component (``FetchNode``)
+        that detects the missing message and raises ``InvalidRequestException``.
+
+        This test verifies that:
+        - The graph IS invoked (the flow layer does not short-circuit).
+        - The graph receives a ``Command`` with an empty-message RESPONSE event.
+        - The ``InvalidRequestException`` raised by ``FetchNode`` propagates correctly
+            so the server layer can map it to ``INVALID_ARGUMENT``.
+        """
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+
+        # Make the mocked graph raise InvalidRequestException to simulate FetchNode behaviour.
+        bad_request_error = InvalidRequestException(
+            "RESPONSE event must include a non-empty message. "
+            "The workflow remains paused; please provide real user input to continue."
+        )
+
+        async def _raising_gen():
+            """Async generator that immediately raises InvalidRequestException."""
+            if True:  # pylint: disable=using-constant-test
+                raise bad_request_error
+            yield  # pragma: no cover — makes this an async generator
+
+        mock_state_graph.compile.return_value.astream = Mock(
+            return_value=_raising_gen()
+        )
+
+        await flow_instance.run("")
+
+        # The graph MUST have been invoked — the flow layer passes the empty-message
+        # command through to the graph rather than short-circuiting.
+        mock_state_graph.compile.return_value.astream.assert_called_once()
+
+        # The Command passed to the graph must carry an empty-message RESPONSE event.
+        kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        graph_input = kwargs.get("input")
+        assert isinstance(graph_input, Command)
+        assert graph_input.resume["event_type"] == FlowEventType.RESPONSE  # type: ignore[index]
+        assert graph_input.resume.get("message") == ""  # type: ignore[union-attr]
+
+        # The workflow's last_error must be a InvalidRequestException so the server layer
+        # can map it to INVALID_ARGUMENT.
+        assert isinstance(flow_instance.last_error, InvalidRequestException)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_refreshes_inputs_from_additional_context(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """Inputs are re-resolved on resume so per-turn additional context refreshes state.
+
+        `context.inputs` is otherwise populated only once, at workflow START, so
+        without this the resume Command would carry no input update and a flow
+        input changed between turns (e.g. an operating mode toggle) would never
+        reach the running graph.
+        """
+        additional_context = AdditionalContext(
+            category="agent_user_environment",
+            content='{"shell_name": "fish"}',
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-resume-inputs",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                additional_context=[additional_context],
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is not None
+            assert input.update["context"]["inputs"]["agent_user_environment"] == (
+                '{"shell_name": "fish"}'
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_without_additional_context_sends_no_update(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """With no additional context the resume Command carries no state update."""
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-resume-no-inputs",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_refreshes_inputs_and_appends_rejection_log(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """Both refreshed inputs and a rejection message land in the same update.
+
+        When additional context is sent alongside a rejection approval that
+        carries a message, the resume Command must merge both keys into its
+        `update`: `context.inputs` (refreshed per-turn inputs) and `ui_chat_log`
+        (the user's feedback entry). This guards against a future refactor
+        dropping either key from the combined `state_update`.
+        """
+        additional_context = AdditionalContext(
+            category="agent_user_environment",
+            content='{"shell_name": "fish"}',
+        )
+        rejection_message = "please redo this"
+        approval = Mock(spec=contract_pb2.Approval)
+        approval.WhichOneof.return_value = UserDecision.REJECT
+        mock_rejection = Mock()
+        mock_rejection.message = rejection_message
+        approval.rejection = mock_rejection
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-resume-inputs-and-rejection",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                approval=approval,
+                additional_context=[additional_context],
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run(rejection_message)
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is not None
+            assert input.update["context"]["inputs"]["agent_user_environment"] == (
+                '{"shell_name": "fish"}'
+            )
+            ui_chat_log = input.update["ui_chat_log"]
+            assert len(ui_chat_log) == 1
+            assert ui_chat_log[0]["content"] == rejection_message
+            assert ui_chat_log[0]["message_type"] == MessageTypeEnum.USER
+            assert input.resume["event_type"] == FlowEventType.MODIFY  # type: ignore[index]
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_checkpointer", "mock_tools_registry")
@@ -985,26 +1197,28 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         with pytest.raises(ValueError, match="Invalid JSON in input item.*"):
             flow_instance._process_additional_context(additional_context)
 
-    def test_process_additional_context_schema_validation_error(
+    def test_process_additional_context_extra_property_is_tolerated(
         self,
         flow_instance,
     ):
-        """Test _process_additional_context raises error when JSON doesn't match schema."""
+        """Test _process_additional_context ignores unknown properties instead of raising.
+
+        Adding a new field to an envelope (e.g. service_account_name) must not break custom flows that have not yet
+        declared the field in their input_schema.
+        """
         additional_context = [
             AdditionalContext(
                 category="file",
-                content='{"file_type": "file.txt"}',
+                content='{"contents": "hello", "file_name": "test.txt", "file_type": "text"}',
             )
         ]
 
-        with pytest.raises(
-            ValueError,
-            match=(
-                r".*input 'file' does not match specified schema: "
-                r"Additional properties are not allowed \('file_type' was unexpected\).*"
-            ),
-        ):
-            flow_instance._process_additional_context(additional_context)
+        result = flow_instance._process_additional_context(additional_context)
+
+        # The extra field is accepted; the declared fields are present
+        assert result["file"]["contents"] == "hello"
+        assert result["file"]["file_name"] == "test.txt"
+        assert result["file"]["file_type"] == "text"
 
     def test_process_additional_context_executor_context_categories(
         self, flow_instance
@@ -1100,6 +1314,98 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert call_kwargs["flow_id"] == "test-workflow-123"
             assert call_kwargs["flow_type"] == flow_type
             assert "internal_event_client" in call_kwargs
+
+    @pytest.mark.usefixtures("mock_state_graph")
+    def test_build_routers_accepts_mapping_condition_input(
+        self,
+        mock_flow_metadata,
+        user,
+        flow_type: GLReportingEventContext,
+    ):
+        """A condition input may be a mapping ({from: ..., optional: true})."""
+        mapping_input = {
+            "from": "context:inputs.agent_platform_trigger_context.event_type",
+            "optional": True,
+        }
+        config = FlowConfig(
+            version="v1",
+            environment="ambient",
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[
+                {
+                    "from": "agent",
+                    "condition": {
+                        "input": mapping_input,
+                        "routes": {"mention": "end"},
+                    },
+                },
+            ],
+            flow=FlowConfigMetadata(entry_point="agent"),
+        )
+
+        components = {
+            "agent": self.mock_component("agent"),
+            "end": self.mock_component("end"),
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.Router"
+        ) as mock_router_class:
+            mock_router_class.return_value = Mock(spec=Router)
+
+            flow = Flow(
+                workflow_id="test-workflow-123",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+            )
+
+            flow._build_routers(components, Mock(spec=StateGraph))
+
+            assert mock_router_class.call_args[1]["input"] == mapping_input
+
+    @pytest.mark.usefixtures("mock_state_graph")
+    def test_build_routers_rejects_non_string_non_mapping_condition_input(
+        self,
+        mock_flow_metadata,
+        user,
+        flow_type: GLReportingEventContext,
+    ):
+        """Anything that is not a string or a mapping is still rejected."""
+        config = FlowConfig(
+            version="v1",
+            environment="ambient",
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[
+                {
+                    "from": "agent",
+                    "condition": {
+                        "input": ["status"],
+                        "routes": {"Execution": "end"},
+                    },
+                },
+            ],
+            flow=FlowConfigMetadata(entry_point="agent"),
+        )
+
+        components = {
+            "agent": self.mock_component("agent"),
+            "end": self.mock_component("end"),
+        }
+
+        flow = Flow(
+            workflow_id="test-workflow-123",
+            workflow_metadata=mock_flow_metadata,
+            workflow_type=flow_type,
+            user=user,
+            config=config,
+        )
+
+        with pytest.raises(
+            ValueError, match="Router input must be a string or a mapping"
+        ):
+            flow._build_routers(components, Mock(spec=StateGraph))
 
     @pytest.mark.asyncio
     async def test_handle_workflow_failure_appends_error_log(self, flow_instance):
@@ -1228,6 +1534,519 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         state = graph.aupdate_state.call_args[0][1]
         assert state["ui_chat_log"].value[0]["content"] == "Safe message only"
+
+    @pytest.mark.asyncio
+    async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
+        self, flow_instance
+    ):
+        """GraphRecursionError is converted to NotifiableAgentException before propagating."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        notifier.send_event = AsyncMock()
+        flow_instance.checkpoint_notifier = notifier
+
+        compiled_graph = AsyncMock()
+
+        with (
+            patch("duo_workflow_service.agent_platform.v1.flows.base.log_exception"),
+            pytest.raises(TraceableException) as exc_info,
+        ):
+            await flow_instance._handle_compile_and_run_exception(
+                GraphRecursionError("Recursion limit of 300 reached"),
+                compiled_graph,
+                {},
+            )
+
+        wrapped = exc_info.value.original_exception
+        assert isinstance(wrapped, NotifiableAgentException)
+        assert "300" in wrapped.internal_detail
+        assert (
+            wrapped.ui_message
+            == "The workflow reached its maximum step limit and could not complete. "
+            "Please try again with a more focused goal, or break the task into smaller steps."
+        )
+
+    # ---------------------------------------------------------------------------
+    # Envelope version validation tests
+    # ---------------------------------------------------------------------------
+
+    @pytest.fixture(name="versioned_flow_config")
+    def versioned_flow_config_fixture(self):
+        """Flow config with a version_constraint on agent_platform_standard_context."""
+        return FlowConfig(
+            flow=FlowConfigMetadata(
+                entry_point="agent",
+                inputs=[
+                    FlowConfigInput(
+                        category="agent_platform_standard_context",
+                        version_constraint="^1.0.0",
+                        input_schema={
+                            "primary_branch": {"type": "string"},
+                        },
+                    ),
+                ],
+            ),
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "toolset": ["read_file"],
+                },
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+    @pytest.fixture(name="versioned_flow_instance")
+    def versioned_flow_instance_fixture(
+        self,
+        mock_flow_metadata,
+        user,
+        versioned_flow_config,
+        mock_checkpointer,  # pylint: disable=unused-argument
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_state_graph,  # pylint: disable=unused-argument
+        flow_type: GLReportingEventContext,
+    ):
+        """Flow instance using the versioned config."""
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-versioned-workflow",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=versioned_flow_config,
+            )
+            yield flow
+
+    @pytest.fixture(name="higher_constraint_flow_config")
+    def higher_constraint_flow_config_fixture(self):
+        """Flow config with a ^1.1.0 constraint — implicit 1.0.0 envelopes must fail."""
+        return FlowConfig(
+            flow=FlowConfigMetadata(
+                entry_point="agent",
+                inputs=[
+                    FlowConfigInput(
+                        category="agent_platform_standard_context",
+                        version_constraint="^1.1.0",
+                        input_schema={
+                            "primary_branch": {"type": "string"},
+                        },
+                    ),
+                ],
+            ),
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "prompt_id": "test/prompt",
+                    "toolset": ["read_file"],
+                },
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+    @pytest.fixture(name="higher_constraint_flow_instance")
+    def higher_constraint_flow_instance_fixture(
+        self,
+        mock_flow_metadata,
+        user,
+        higher_constraint_flow_config,
+        mock_checkpointer,  # pylint: disable=unused-argument
+        mock_tools_registry,  # pylint: disable=unused-argument
+        mock_state_graph,  # pylint: disable=unused-argument
+        flow_type: GLReportingEventContext,
+    ):
+        """Flow instance with ^1.1.0 version constraint."""
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-higher-constraint-workflow",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=higher_constraint_flow_config,
+            )
+            yield flow
+
+    def test_process_additional_context_version_satisfied(
+        self, versioned_flow_instance
+    ):
+        """Envelope with a version that satisfies the constraint is accepted."""
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "1.1.0"},
+            )
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_process_additional_context_version_not_satisfied_single_envelope(
+        self, versioned_flow_instance
+    ):
+        """A single envelope whose version does NOT satisfy the constraint raises NotifiableAgentException.
+
+        The user-facing ``NotifiableAgentException`` carries a safe ``ui_message`` and
+        chains an ``EnvelopeVersionMismatchException`` as its ``__cause__`` so the server
+        can still map it to a ``FAILED_PRECONDITION`` gRPC status.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "2.0.0"},
+            )
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            versioned_flow_instance._process_additional_context(additional_context)
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+        assert "2.0.0" in str(exc_info.value.__cause__)
+
+    def test_process_additional_context_no_version_field_treated_as_1_0_0(
+        self, versioned_flow_instance
+    ):
+        """Envelope without a version field is treated as 1.0.0 (backwards compat).
+
+        CONTRACT — DO NOT BREAK. Older GitLab instances and Custom Flows send envelopes
+        with no ``version`` field. We must keep treating those as ``1.0.0`` so existing
+        senders continue to work. Changing this behaviour is a backward-incompatible
+        break for any client that predates envelope versioning.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+            )
+        ]
+        # ^1.0.0 constraint should accept implicit 1.0.0
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_process_additional_context_no_constraint_uses_implicit_constraint(
+        self, flow_instance
+    ):
+        """When no version_constraint is declared, implicit ^1.0.0 constraint is used.
+
+        CONTRACT — DO NOT BREAK. Existing Custom Flows were authored before
+        ``version_constraint`` existed and declare none. We must keep applying the
+        implicit ``^1.0.0`` constraint for those flows so they continue to accept
+        ``1.x.x`` envelopes. Changing this default is a backward-incompatible break for
+        every flow that predates envelope versioning.
+        """
+        # flow_instance uses sample_flow_config which has no version_constraint
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+            )
+        ]
+        # No version field → implicit 1.0.0, satisfies ^1.0.0, should not raise.
+        result = flow_instance._process_additional_context(additional_context)
+        assert result["file"]["contents"] == "data"
+
+    def test_process_additional_context_incompatible_envelope_skipped_when_compatible_present(
+        self, versioned_flow_instance
+    ):
+        """When multiple envelopes are present, the highest compatible version wins.
+
+        With constraint ``^1.0.0``, version ``2.0.0`` is incompatible and ``1.1.0``
+        is compatible.  ``resolve_version`` selects ``1.1.0`` as the best match, so
+        the result comes from the ``1.1.0`` envelope (``primary_branch == "main"``).
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "feature"}',
+                metadata={"version": "2.0.0"},
+            ),
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "1.1.0"},
+            ),
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_process_additional_context_all_envelopes_incompatible_raises(
+        self, versioned_flow_instance
+    ):
+        """When all envelopes are incompatible with the constraint, NotifiableAgentException is raised."""
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "2.0.0"},
+            ),
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "3.0.0"},
+            ),
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            versioned_flow_instance._process_additional_context(additional_context)
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+
+    def test_process_additional_context_highest_compatible_version_selected(
+        self, versioned_flow_instance
+    ):
+        """When multiple envelopes all satisfy the constraint, the highest version wins.
+
+        Both ``1.0.0`` and ``1.1.0`` satisfy ``^1.0.0``.  ``resolve_version`` returns
+        ``1.1.0`` as the best match, so the result comes from the ``1.1.0`` envelope.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "old"}',
+                metadata={"version": "1.0.0"},
+            ),
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "new"}',
+                metadata={"version": "1.1.0"},
+            ),
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "new"
+
+    def test_process_additional_context_implicit_version_fails_higher_constraint(
+        self, higher_constraint_flow_instance
+    ):
+        """An envelope without a version field is treated as 1.0.0, which fails ^1.1.0.
+
+        The implicit baseline "1.0.0" must appear in the ``__cause__`` detail so
+        operators can diagnose the mismatch without inspecting the envelope payload.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+            )
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            higher_constraint_flow_instance._process_additional_context(
+                additional_context
+            )
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+        assert "1.0.0" in str(exc_info.value.__cause__)
+
+    @pytest.mark.parametrize(
+        "bad_version",
+        ["not_a_version", "abc.def.ghi", "!!invalid!!"],
+    )
+    def test_process_additional_context_malformed_envelope_version_raises(
+        self, versioned_flow_instance, bad_version
+    ):
+        """A malformed string version field is passed to resolve_version which skips it.
+
+        With no parseable candidates, ``resolve_version`` raises ``ValueError`` and
+        the method surfaces a ``NotifiableAgentException`` chained from
+        ``EnvelopeVersionMismatchException``.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": bad_version},
+            )
+        ]
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            versioned_flow_instance._process_additional_context(additional_context)
+        assert isinstance(exc_info.value.__cause__, EnvelopeVersionMismatchException)
+
+    def test_process_additional_context_non_string_version_treated_as_implicit(
+        self, versioned_flow_instance
+    ):
+        """A non-string JSON version field (e.g. a number) falls back to implicit 1.0.0.
+
+        ``str(1.0)`` produces ``"1.0"`` which semver cannot parse; the fix treats
+        non-string values as absent so they default to ``"1.0.0"`` instead of
+        triggering a spurious version-mismatch error.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                # Integer in metadata — not a string version; should be treated as 1.0.0
+                metadata={"version": 1},
+            )
+        ]
+        result = versioned_flow_instance._process_additional_context(additional_context)
+        assert result["agent_platform_standard_context"]["primary_branch"] == "main"
+
+    def test_resolve_envelope_content_raises_when_no_constraint_and_empty_content(
+        self, flow_instance
+    ):
+        """Envelope with None content raises ValueError in the unconstrained branch."""
+        additional_context = [AdditionalContext(category="file", content=None)]
+        with pytest.raises(
+            ValueError, match="content must be specified for input 'file'"
+        ):
+            flow_instance._process_additional_context(additional_context)
+
+    def test_resolve_envelope_content_raises_when_constraint_and_empty_content(
+        self, versioned_flow_instance
+    ):
+        """Envelope with None content raises ValueError in the versioned branch."""
+        additional_context = [
+            AdditionalContext(category="agent_platform_standard_context", content=None)
+        ]
+        with pytest.raises(
+            ValueError,
+            match="content must be specified for input 'agent_platform_standard_context'",
+        ):
+            versioned_flow_instance._process_additional_context(additional_context)
+
+    # ---------------------------------------------------------------------------
+    # Default-fallback consistency contract
+    # ---------------------------------------------------------------------------
+
+    def test_default_version_satisfies_default_constraint(self):
+        """The default version must satisfy the default constraint.
+
+        CONTRACT — DO NOT BREAK. Unversioned envelopes fall back to
+        ``_ENVELOPE_DEFAULT_VERSION`` and flows without a declared constraint fall back
+        to ``_ENVELOPE_DEFAULT_CONSTRAINT``. Both defaults are applied independently, so
+        if someone bumps the default version (e.g. to ``2.0.0``) without also updating
+        the default constraint, every older Custom Flow relying on the implicit
+        constraint would suddenly reject the implicit envelope version. This test guards
+        that invariant: the default version must always be resolvable against the default
+        constraint.
+        """
+        resolved = resolve_version(
+            [_ENVELOPE_DEFAULT_VERSION], _ENVELOPE_DEFAULT_CONSTRAINT
+        )
+        assert resolved == _ENVELOPE_DEFAULT_VERSION
+
+    # ---------------------------------------------------------------------------
+    # Warning-log tests for default fallbacks
+    # ---------------------------------------------------------------------------
+
+    def test_warning_emitted_when_default_constraint_used(self, flow_instance):
+        """A warning is logged when no version_constraint is declared for an input category.
+
+        ``flow_instance`` uses ``sample_flow_config`` which has no ``version_constraint``
+        on its inputs, so ``_ENVELOPE_DEFAULT_CONSTRAINT`` is substituted and a warning
+        must be emitted.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+                metadata={"version": "1.0.0"},
+            )
+        ]
+        with capture_logs() as cap_logs:
+            flow_instance._process_additional_context(additional_context)
+
+        warning_events = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "version_constraint" in log.get("event", "")
+        ]
+        assert warning_events, (
+            f"Expected a warning about missing version_constraint, got: {cap_logs}"
+        )
+        assert warning_events[0]["category"] == "file"
+        assert "default_constraint" in warning_events[0]
+
+    def test_no_warning_when_explicit_constraint_provided(
+        self, versioned_flow_instance
+    ):
+        """No default-constraint warning is emitted when version_constraint is explicitly set.
+
+        ``versioned_flow_instance`` uses a config with ``version_constraint="^1.0.0"``,
+        so the fallback path must NOT be taken.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="agent_platform_standard_context",
+                content='{"primary_branch": "main"}',
+                metadata={"version": "1.0.0"},
+            )
+        ]
+        with capture_logs() as cap_logs:
+            versioned_flow_instance._process_additional_context(additional_context)
+
+        constraint_warnings = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "version_constraint" in log.get("event", "")
+        ]
+        assert constraint_warnings == [], (
+            f"Unexpected default-constraint warning(s): {constraint_warnings}"
+        )
+
+    def test_warning_emitted_when_default_version_used(self, flow_instance):
+        """A warning is logged when an envelope payload does not declare a version field.
+
+        The envelope has no ``metadata`` (and therefore no ``version``), so
+        ``_ENVELOPE_DEFAULT_VERSION`` is substituted and a warning must be emitted.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+                # No metadata / version field → default version substituted
+            )
+        ]
+        with capture_logs() as cap_logs:
+            flow_instance._process_additional_context(additional_context)
+
+        version_warnings = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "default version" in log.get("event", "")
+        ]
+        assert version_warnings, (
+            f"Expected a warning about missing envelope version, got: {cap_logs}"
+        )
+        assert version_warnings[0]["category"] == "file"
+        assert "default_version" in version_warnings[0]
+
+    def test_no_warning_when_explicit_version_provided(self, flow_instance):
+        """No default-version warning is emitted when the envelope declares an explicit version.
+
+        The envelope carries ``metadata={"version": "1.0.0"}``, so the fallback
+        path must NOT be taken.
+        """
+        additional_context = [
+            AdditionalContext(
+                category="file",
+                content='{"contents": "data", "file_name": "test.txt"}',
+                metadata={"version": "1.0.0"},
+            )
+        ]
+        with capture_logs() as cap_logs:
+            flow_instance._process_additional_context(additional_context)
+
+        version_warnings = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "default version" in log.get("event", "")
+        ]
+        assert version_warnings == [], (
+            f"Unexpected default-version warning(s): {version_warnings}"
+        )
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")

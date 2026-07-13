@@ -1,4 +1,4 @@
-# pylint: disable=super-init-not-called,direct-environment-variable-reference,broad-exception-raised,attribute-defined-outside-init
+# pylint: disable=super-init-not-called,direct-environment-variable-reference,broad-exception-raised,attribute-defined-outside-init,too-many-lines
 
 import asyncio
 import base64
@@ -6,13 +6,18 @@ import functools
 import json
 import os
 import time
+import zlib
 from contextlib import AbstractAsyncContextManager
+from datetime import datetime, timezone
 from typing import (
     Any,
     AsyncIterator,
     Callable,
     Dict,
     Iterator,
+    List,
+    Mapping,
+    NamedTuple,
     NoReturn,
     Optional,
     Sequence,
@@ -22,6 +27,7 @@ from typing import (
 )
 
 import structlog
+import uuid_utils
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.runnables import RunnableConfig
@@ -50,7 +56,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
 from duo_workflow_service.entities import WorkflowStatusEnum
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    InvalidRequestException,
+    NotifiableException,
+)
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.gitlab.gitlab_api import (
     WorkflowConfig,
@@ -80,13 +89,21 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
-from lib.context import current_model_metadata_context, init_llm_operations
+from lib.context import (
+    build_orbit_session_summary_extras,
+    current_model_metadata_context,
+    init_llm_operations,
+    init_orbit_counters,
+    is_orbit_tool,
+)
 from lib.context.tool_executions import get_tool_executions, init_tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
 T = TypeVar("T", bound=callable)  # type: ignore
+
+_logger = structlog.stdlib.get_logger("workflow_checkpointer")
 
 
 def not_implemented_sync_method(func: T) -> T:
@@ -100,6 +117,9 @@ def not_implemented_sync_method(func: T) -> T:
 
 
 PROPERTY_MAX_LENGTH = 1000
+
+# status is required for blob reconstruction
+_ALWAYS_BLOBBED_SCALAR_CHANNELS = frozenset({"status"})
 
 
 def _attribute_dirty(
@@ -115,7 +135,9 @@ def _attribute_dirty(
     return False, None
 
 
-ORBIT_TOOL_IDENTIFIER = "orbit"
+class Delta(NamedTuple):
+    values: dict | list
+    is_append: bool
 
 
 def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
@@ -123,14 +145,197 @@ def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
     channel_values = checkpoint.get("channel_values", {})
     ui_chat_log = channel_values.get("ui_chat_log", [])
     return any(
-        ORBIT_TOOL_IDENTIFIER in (entry.get("tool_info") or {}).get("name", "")
+        is_orbit_tool((entry.get("tool_info") or {}).get("name", ""))
         for entry in ui_chat_log
     )
 
 
-class GitLabWorkflow(
-    BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]
-):  # pylint: disable=too-many-instance-attributes
+def _list_delta(prev: List[Any], current: List[Any]) -> Optional[Delta]:
+    """Compute a delta for a list channel.
+
+    Returns a Delta(values, is_append) or None if unchanged. is_append=True means values is only the newly appended
+    tail; is_append=False means values is the full current list (shrink, reorder, or content change).
+    """
+    if len(current) > len(prev) and current[: len(prev)] == prev:
+        return Delta(current[len(prev) :], True)
+    if current != prev:
+        return Delta(current, False)
+    return None
+
+
+def _dict_of_list_delta(
+    prev: Dict[str, Any], current: Dict[str, Any]
+) -> Optional[Delta]:
+    """Compute a delta for a dict-of-lists channel (e.g. conversation_history).
+
+    Returns a Delta(values, is_append) or None if unchanged. is_append=True means values is a per-key dict of only newly
+    appended items (or changed non-list values); is_append=False means values is the full current dict (a list shrunk or
+    its prefix changed for at least one key — i.e. compaction).
+    """
+    delta: Dict[str, Any] = {}
+    for key, val in current.items():
+        prev_val = prev.get(key)
+        if isinstance(val, list) and isinstance(prev_val, list):
+            list_delta = _list_delta(prev_val, val)
+            if list_delta is None:
+                continue
+            if list_delta.is_append:
+                delta[key] = list_delta.values
+            else:
+                return Delta(current, False)
+        elif val != prev_val:
+            delta[key] = val
+
+    if not delta:
+        return None
+    return Delta(delta, True)
+
+
+def _thread_started_at_from_id(checkpoint_id: str) -> Optional[str]:
+    """ISO8601 UTC start time of a current_thread group, decoded from the group's first checkpoint id and floored to the
+    second.
+
+    ``uuid_utils.UUID.timestamp`` returns Unix milliseconds for v1/v6/v7, matching the value Rails derives via
+    ``Gitlab::Utils.time_from_uuid`` (langgraph emits v6). Rails bounds the partition-scanned blob query with
+    ``created_at >= current_thread_started_at``, so the marker must never be later than the earliest blob's
+    ``created_at`` or that blob is dropped from reconstruction. Flooring to the second keeps the marker at-or-before the
+    sub-second value Rails stores for the same id, and daily partitioning makes the slack irrelevant to pruning. Returns
+    None for non-time-based or malformed ids (uuid_utils raises ValueError for both).
+    """
+    try:
+        timestamp_ms = uuid_utils.UUID(checkpoint_id).timestamp
+    except (ValueError, TypeError):
+        return None
+
+    return datetime.fromtimestamp(timestamp_ms // 1_000, tz=timezone.utc).isoformat()
+
+
+def _serialize_channel_blobs(
+    checkpoint: Checkpoint,
+    new_versions: ChannelVersions,
+    prev_channel_values: Dict[str, Any],
+    *,
+    force_rewrite: bool = False,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Serialize only the channels that changed in this step as blobs.
+
+    Uses new_versions to identify changed channels. Scalar channels are excluded (see inline comment). Each blob carries
+    a step_action field ("conversation" for deltas, "compaction" for full replacements) which is the authoritative
+    append-vs-replace signal for Rails. current_thread in the payload is a grouping hint only — it cannot be used as the
+    sole signal because it resets to 0 on gateway restart, whereas step_action is derived from the actual channel values
+    and remains correct regardless.
+
+    When force_rewrite is True, delta computation is skipped and each blob is serialized as a full replacement with
+    step_action='compaction'. is_compaction in the return is then False — the caller asked for the rewrite and is
+    responsible for bumping current_thread itself.
+
+    Returns (blobs, is_compaction) where is_compaction is True when delta analysis found a shrink or non-prefix change.
+    """
+    channel_values = checkpoint.get("channel_values", {})
+    blobs = []
+    is_compaction = False
+
+    for channel, version in new_versions.items():
+        if channel not in channel_values:
+            _logger.warning(
+                "Channel declared changed in new_versions but absent from channel_values",
+                channel=channel,
+            )
+            continue
+
+        val = channel_values[channel]
+        # Scalars are recoverable from compressed_checkpoint, so exclude them —
+        # except those needed for blob reconstruction.
+        if (
+            not isinstance(val, (list, dict))
+            and channel not in _ALWAYS_BLOBBED_SCALAR_CHANNELS
+        ):
+            continue
+
+        prev = prev_channel_values.get(channel)
+        step_action = "compaction"
+
+        if force_rewrite:
+            pass
+        elif isinstance(val, list) and isinstance(prev, list):
+            delta = _list_delta(prev, val)
+            if delta is None:
+                continue
+            new_val, is_append = delta
+            if is_append:
+                val = new_val
+                step_action = "conversation"
+            else:
+                is_compaction = True
+        elif isinstance(val, dict) and isinstance(prev, dict):
+            dict_delta = _dict_of_list_delta(prev, val)
+            if dict_delta is None:
+                continue
+            new_val, is_append = dict_delta
+            if is_append:
+                val = new_val
+                step_action = "conversation"
+            else:
+                is_compaction = True
+
+        # Encode with CustomEncoder JSON (not the langgraph msgpack serde) so blob
+        # deltas match the header's channel_values representation, which Rails stores
+        # as JSON via compress_checkpoint. That keeps reconstruction (which merges
+        # blobs onto the JSON header) consistent and lets Rails decode without
+        # reimplementing langgraph's msgpack extension types.
+        bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
+        blobs.append(
+            {
+                "channel": channel,
+                "version": str(version),
+                "data": base64.b64encode(zlib.compress(bval)).decode("utf-8"),
+                "write_type": "json",
+                "step_action": step_action,
+            }
+        )
+
+    return blobs, is_compaction
+
+
+def _serialize_all_channels_full(
+    checkpoint: Checkpoint,
+) -> List[Dict[str, Any]]:
+    """Serialize every reconstructable channel as a full ``compaction`` snapshot.
+
+    Emitted at the start of a new current_thread group so the group is self-contained:
+    reconstruction folds these full snapshots plus the group's later ``conversation``
+    deltas, without depending on a previous group or the full-checkpoint header (see
+    https://gitlab.com/gitlab-org/gitlab/-/issues/605653). Channel selection and JSON
+    encoding mirror _serialize_channel_blobs — list/dict channels plus the status
+    scalar; other scalars are intentionally dropped. Versions come from the checkpoint
+    (not new_versions), since unchanged channels must be re-seeded too.
+    """
+    channel_values = checkpoint.get("channel_values", {})
+    channel_versions = checkpoint.get("channel_versions", {})
+    blobs = []
+
+    for channel, val in channel_values.items():
+        if (
+            not isinstance(val, (list, dict))
+            and channel not in _ALWAYS_BLOBBED_SCALAR_CHANNELS
+        ):
+            continue
+
+        bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
+        blobs.append(
+            {
+                "channel": channel,
+                "version": str(channel_versions.get(channel) or ""),
+                "data": base64.b64encode(zlib.compress(bval)).decode("utf-8"),
+                "write_type": "json",
+                "step_action": "compaction",
+            }
+        )
+
+    return blobs
+
+
+class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]):  # pylint: disable=too-many-instance-attributes
     _client: GitlabHttpClient
     _logger: structlog.stdlib.BoundLogger
     _workflow_config: WorkflowConfig
@@ -165,6 +370,10 @@ class GitLabWorkflow(
         self._billing_event_service = billing_event_service
         self._orbit_called = False
         self.serde = CheckpointSerializer()
+        self._prev_channel_values: Dict[str, Any] = {}
+        self._prev_checkpoint_id: Optional[str] = None
+        self._current_thread: int = 0
+        self._current_thread_started_at: Optional[str] = None
 
     @override
     @not_implemented_sync_method
@@ -295,12 +504,15 @@ class GitLabWorkflow(
 
             init_tool_executions()
 
+            init_orbit_counters()
+
             self._flow_start_time = time.time()
 
             config: RunnableConfig = {"configurable": {}}
-            self.initial_status_event, event_property = (
-                await self._get_initial_status_event(config)
-            )
+            (
+                self.initial_status_event,
+                event_property,
+            ) = await self._get_initial_status_event(config)
             await self._update_workflow_status(self.initial_status_event)
 
             if self.initial_status_event == WorkflowStatusEventEnum.START:
@@ -373,7 +585,8 @@ class GitLabWorkflow(
             raise
 
     async def _get_initial_status_event(
-        self, config: RunnableConfig  # pylint: disable=unused-argument
+        self,
+        config: RunnableConfig,  # pylint: disable=unused-argument
     ) -> tuple[WorkflowStatusEventEnum, EventPropertyEnum]:
         """Determine the workflow status event and event property.
 
@@ -477,6 +690,29 @@ class GitLabWorkflow(
         # update status to DROP, track failure event,
         # and return False
         if exc_type:
+            # An InvalidRequestException (e.g. an empty-goal "reconnect"/auto-retry
+            # that reaches a live interrupt with no real user input) must NOT
+            # transition the workflow to FAILED. Skip both _handle_workflow_exception
+            # and _update_workflow_status_safely(DROP) and let the exception propagate,
+            # so the workflow stays resumable at its current status (e.g.
+            # INPUT_REQUIRED) and the server layer maps it to INVALID_ARGUMENT.
+            # See gitlab-org/gitlab#602799.
+            if isinstance(exc_value, InvalidRequestException):
+                # The resume/retry event sent in __aenter__ may have advanced the
+                # Rails workflow state (e.g. input_required → running) before the
+                # graph inspected and rejected the invalid input.  Reconcile Rails
+                # back to whatever the latest checkpoint declares as the true pause
+                # boundary, so the next reconnect sees the correct status and is
+                # classified as RESUME (not RETRY).  See gitlab-org/gitlab#602799.
+                self._logger.info(
+                    "InvalidRequestException at interrupt; leaving workflow status "
+                    "untouched (no DROP transition) so it stays resumable.",
+                    workflow_id=self._workflow_id,
+                )
+                if not self._offline_mode:
+                    await self._reconcile_session_status()
+                return False
+
             stop_exception = str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
 
             if not stop_exception:
@@ -510,7 +746,6 @@ class GitLabWorkflow(
         status = await self._status_handler.get_workflow_status(
             workflow_id=self._workflow_id
         )
-
         await self._track_workflow_completion(status)
         return True
 
@@ -610,6 +845,23 @@ class GitLabWorkflow(
             ),
         )
 
+        # Only fire orbit session summary on terminal statuses. Pause statuses
+        # (INPUT_REQUIRED, PLAN_APPROVAL_REQUIRED) would produce partial summaries
+        # because init_orbit_counters() resets the counters on each resume.
+        if status in ("finished", "stopped"):
+            # label/property are intentionally omitted: they are validator-required
+            # placeholders that will be dropped once the schema is published. See
+            # orbit_dap_session_summary.yml and
+            # https://gitlab.com/gitlab-org/gitlab/-/work_items/596959
+            orbit_extras = build_orbit_session_summary_extras(
+                self._workflow_id, self._workflow_type.value
+            )
+            if orbit_extras is not None:
+                self._track_internal_event(
+                    EventEnum.ORBIT_DAP_SESSION_SUMMARY,
+                    InternalEventAdditionalProperties(**orbit_extras),
+                )
+
     async def _update_workflow_status_safely(
         self, status: WorkflowStatusEventEnum = WorkflowStatusEventEnum.DROP
     ):
@@ -623,6 +875,141 @@ class GitLabWorkflow(
         except Exception as e:
             log_exception(e, extra={"workflow_id": self._workflow_id})
         return False
+
+    async def _fetch_most_recent_checkpoint(self) -> Optional[Dict[str, Any]]:
+        """Fetch the most recent checkpoint dict directly from the Rails API.
+
+        Always goes to the API — does not use the ``latest_checkpoint`` cached in
+        ``_workflow_config``, which is populated at session start and may be stale.
+        Returns the raw checkpoint dict (with ``checkpoint["checkpoint"]`` already
+        decompressed) or ``None`` when no checkpoints exist yet.
+        """
+        endpoint = add_compression_param(
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
+        )
+        with duo_workflow_metrics.time_gitlab_response(
+            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints?per_page=1",
+            method="GET",
+        ):
+            response = await self._client.aget(
+                path=endpoint,
+                object_hook=checkpoint_decoder,
+            )
+
+        if not response.is_success():
+            self._logger.error(
+                "Failed to fetch checkpoints",
+                workflow_id=self._workflow_id,
+                status_code=response.status_code,
+                response_body=response.body,
+            )
+            raise Exception(f"Failed to fetch checkpoints: {response.body}")
+
+        gl_checkpoints = response.body
+        if not gl_checkpoints:
+            return None
+
+        checkpoint = gl_checkpoints[0]
+        if "compressed_checkpoint" in checkpoint:
+            checkpoint["checkpoint"] = uncompress_checkpoint(
+                checkpoint["compressed_checkpoint"]
+            )
+        return checkpoint
+
+    async def _get_latest_checkpoint_status(self) -> Optional[WorkflowStatusEnum]:
+        """Return the workflow status from the most recent checkpoint.
+
+        Primary source: ``_prev_channel_values["status"]``, which is kept current by
+        ``_hydrate_incremental_state`` (session start) and ``aput`` (every write).
+        Only populated when the client supports ``incremental_checkpoints``.
+
+        Fallback: ``_fetch_most_recent_checkpoint`` — fetches fresh from the Rails
+        API, bypassing the stale session-start cache.
+        """
+        checkpoint_status_value: Optional[WorkflowStatusEnum] = (
+            self._prev_channel_values.get("status")
+        )
+        if checkpoint_status_value is not None:
+            return checkpoint_status_value
+
+        checkpoint = await self._fetch_most_recent_checkpoint()
+        if checkpoint is None:
+            return None
+        return checkpoint["checkpoint"].get("channel_values", {}).get("status")
+
+    async def _reconcile_session_status(self) -> None:
+        """Reconcile Rails workflow status against the latest checkpoint.
+
+        After an ``InvalidRequestException`` the session status in Rails may have
+        been advanced (e.g. ``input_required`` → ``running``) by the ``resume``/
+        ``retry`` event sent in ``__aenter__``, while the LangGraph checkpoint still
+        reflects the true pause boundary (e.g. ``INPUT_REQUIRED``).  This method
+        treats the checkpoint as the single source of truth and — when Rails disagrees
+        — drives it back to the status the checkpoint declares.
+
+        The method is intentionally decoupled from any specific component design
+        (e.g. ``HumanInputComponent`` / ``FetchNode``): it does not assume *why* the
+        mismatch occurred, only that the checkpoint is authoritative.
+        """
+        try:
+            checkpoint_status_value = await self._get_latest_checkpoint_status()
+
+            if checkpoint_status_value is None:
+                self._logger.info(
+                    "No checkpoint status available for reconciliation; skipping.",
+                    workflow_id=self._workflow_id,
+                )
+                return
+
+            checkpoint_status_str = WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.get(
+                checkpoint_status_value
+            )
+            if checkpoint_status_str is None:
+                self._logger.info(
+                    "Checkpoint status has no Rails mapping; skipping reconciliation.",
+                    workflow_id=self._workflow_id,
+                    checkpoint_status=checkpoint_status_value,
+                )
+                return
+
+            target_event = CHECKPOINT_STATUS_TO_STATUS_EVENT.get(checkpoint_status_str)
+            if target_event is None:
+                self._logger.info(
+                    "Checkpoint status maps to no Rails status event; skipping reconciliation.",
+                    workflow_id=self._workflow_id,
+                    checkpoint_status_str=checkpoint_status_str,
+                )
+                return
+
+            rails_status = await self._status_handler.get_workflow_status(
+                workflow_id=self._workflow_id
+            )
+
+            if rails_status == checkpoint_status_value:
+                self._logger.info(
+                    "Rails status already matches checkpoint; no reconciliation needed.",
+                    workflow_id=self._workflow_id,
+                    status=rails_status,
+                )
+                return
+
+            self._logger.info(
+                "Reconciling Rails status to match checkpoint.",
+                workflow_id=self._workflow_id,
+                rails_status=rails_status,
+                checkpoint_status=checkpoint_status_value,
+                target_event=target_event,
+            )
+            await self._update_workflow_status_safely(target_event)
+
+        except Exception as e:
+            log_exception(
+                e,
+                extra={
+                    "workflow_id": self._workflow_id,
+                    "context": "Failed to reconcile session status",
+                },
+            )
 
     def _decode_graphql_latest_checkpoint(
         self, checkpoint: GitLabCheckpoint
@@ -642,6 +1029,7 @@ class GitLabWorkflow(
         decoded_metadata = json.loads(
             checkpoint["metadata"], object_hook=checkpoint_decoder
         )
+        self._hydrate_incremental_state(checkpoint, decoded_checkpoint)
         return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
             {
                 "thread_ts": checkpoint["threadTs"],
@@ -650,6 +1038,46 @@ class GitLabWorkflow(
                 "metadata": decoded_metadata,
             }
         )
+
+    def _hydrate_incremental_state(
+        self,
+        gl_checkpoint: Mapping[str, Any],
+        decoded_checkpoint: Mapping[str, Any],
+    ) -> None:
+        """Restore in-memory incremental-checkpoint state from a fetched checkpoint.
+
+        On gateway restart, ``_current_thread`` / ``_current_thread_started_at`` / ``_prev_channel_values`` /
+        ``_prev_checkpoint_id`` reset to their __init__ defaults. Without this, the next aput would either trigger a
+        stale-cache rewrite or emit a current_thread that no longer matches the server's view. Accepts both REST
+        (snake_case) and GraphQL
+        (camelCase) field names. Absent values are tolerated: older Rails versions don't expose current_thread, in
+        which case the in-memory default is kept.
+        """
+        if not self._workflow_config.get("incremental_checkpoints_enabled", False):
+            return
+
+        current_thread = gl_checkpoint.get("current_thread")
+        if current_thread is None:
+            current_thread = gl_checkpoint.get("currentThread")
+        if current_thread is not None:
+            try:
+                self._current_thread = int(current_thread)
+            except (TypeError, ValueError):
+                self._logger.warning(
+                    "Unexpected current_thread value from server; keeping default",
+                    current_thread=current_thread,
+                )
+
+        started_at = gl_checkpoint.get(
+            "current_thread_started_at"
+        ) or gl_checkpoint.get("currentThreadStartedAt")
+        if started_at is not None:
+            # Restore the group's original start time so a post-restart checkpoint doesn't
+            # re-pin the marker to a mid-group time and drop the group's earlier blobs.
+            self._current_thread_started_at = started_at
+
+        self._prev_checkpoint_id = decoded_checkpoint.get("id")
+        self._prev_channel_values = dict(decoded_checkpoint.get("channel_values", {}))
 
     @override
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -694,6 +1122,7 @@ class GitLabWorkflow(
                         checkpoint["compressed_checkpoint"]
                     )
                 # else: checkpoint["checkpoint"] already exists from old instance, use as-is
+                self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
         else:
             # If the latest checkpoint is fetch, we don't need to refetch it on initialization
             if self._workflow_config.get("latest_checkpoint"):
@@ -706,38 +1135,10 @@ class GitLabWorkflow(
                 return None
 
             # If a flow is resumed and the latest checkpoint couldn't be fetched (<18.8 version of GitLab), fetch it
-            endpoint = add_compression_param(
-                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
-            )
-
-            with duo_workflow_metrics.time_gitlab_response(
-                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints?per_page=1",
-                method="GET",
-            ):
-                response = await self._client.aget(
-                    path=endpoint,
-                    object_hook=checkpoint_decoder,
-                )
-
-                if not response.is_success():
-                    self._logger.error(
-                        "Failed to fetch checkpoints",
-                        workflow_id=self._workflow_id,
-                        status_code=response.status_code,
-                        response_body=response.body,
-                    )
-                    raise Exception(f"Failed to fetch checkpoints: {response.body}")
-
-                gl_checkpoints = response.body
-
-            checkpoint = gl_checkpoints[0] if gl_checkpoints else None
+            checkpoint = await self._fetch_most_recent_checkpoint()
 
             if checkpoint:
-                if "compressed_checkpoint" in checkpoint:
-                    checkpoint["checkpoint"] = uncompress_checkpoint(
-                        checkpoint["compressed_checkpoint"]
-                    )
-                # else: checkpoint["checkpoint"] already exists from old instance, use as-is
+                self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
 
         if checkpoint:
             return self._convert_gitlab_checkpoint_to_checkpoint_tuple(checkpoint)
@@ -802,9 +1203,19 @@ class GitLabWorkflow(
         if not self._orbit_called:
             self._orbit_called = _get_orbit_tool_calls(checkpoint)
 
+        incremental_enabled = self._workflow_config.get(
+            "incremental_checkpoints_enabled", False
+        )
+        checkpoint_strategy = "incremental" if incremental_enabled else "full"
+
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
-        endpoint = f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
+        # checkpoint_strategy is a query param (not read by Rails) so it appears in
+        # request logs and is searchable in Kibana for strategy monitoring.
+        endpoint = (
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
+            f"?checkpoint_strategy={checkpoint_strategy}"
+        )
 
         payload: Dict[str, Any] = {
             "thread_ts": checkpoint["id"],
@@ -812,6 +1223,67 @@ class GitLabWorkflow(
             "metadata": metadata,
             "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
+
+        if incremental_enabled:
+            parent_checkpoint_id = configurable.get("checkpoint_id")
+            stale_cache = (
+                self._prev_checkpoint_id is not None
+                and parent_checkpoint_id != self._prev_checkpoint_id
+            )
+            if stale_cache:
+                self._logger.warning(
+                    "Stale incremental checkpoint cache detected; resetting to full values",
+                    expected_prev_checkpoint_id=parent_checkpoint_id,
+                    cached_prev_checkpoint_id=self._prev_checkpoint_id,
+                )
+                self._prev_channel_values = {}
+
+            channel_blobs, is_compaction = _serialize_channel_blobs(
+                checkpoint,
+                new_versions,
+                self._prev_channel_values,
+                force_rewrite=stale_cache,
+            )
+            # A new current_thread group starts on the first checkpoint and whenever
+            # current_thread is bumped; its start time bounds the created_at range of a
+            # later blob query. Carried forward (and restored on restart) otherwise so the
+            # marker stays pinned to the group's first checkpoint.
+            starts_new_thread = (
+                self._current_thread_started_at is None or stale_cache or is_compaction
+            )
+            # A genuine group boundary: the workflow's first checkpoint, a stale-cache
+            # reset, or a compaction. Keyed on _prev_checkpoint_id (not the started_at
+            # marker, which stays None when a checkpoint id isn't time-based) so later
+            # checkpoints in a group are never re-seeded.
+            is_group_start = (
+                self._prev_checkpoint_id is None or stale_cache or is_compaction
+            )
+            if is_group_start:
+                # A group must be self-contained (issue 605653): re-seed EVERY channel
+                # as a full snapshot so this group reconstructs without a prior group or
+                # the checkpoint header. Otherwise keep the per-channel deltas above.
+                channel_blobs = _serialize_all_channels_full(checkpoint)
+            if stale_cache or is_compaction:
+                self._current_thread += 1
+            if starts_new_thread:
+                self._current_thread_started_at = _thread_started_at_from_id(
+                    checkpoint["id"]
+                )
+            self._prev_channel_values = dict(checkpoint.get("channel_values", {}))
+            self._prev_checkpoint_id = checkpoint["id"]
+            payload["channel_blobs"] = channel_blobs
+            payload["current_thread"] = self._current_thread
+            if self._current_thread_started_at is not None:
+                payload["current_thread_started_at"] = self._current_thread_started_at
+            self._logger.info(
+                "Incremental checkpoint sizes",
+                thread_ts=checkpoint["id"],
+                current_thread=self._current_thread,
+                current_thread_started_at=self._current_thread_started_at,
+                compressed_checkpoint_bytes=len(payload["compressed_checkpoint"]),
+                channel_blobs_total_bytes=sum(len(b["data"]) for b in channel_blobs),
+                channel_blob_count=len(channel_blobs),
+            )
 
         if (model_metadata := current_model_metadata_context.get()) is not None:
             payload["model_metadata_json"] = model_metadata.model_dump_json(
@@ -838,6 +1310,7 @@ class GitLabWorkflow(
             "Checkpoint saved",
             thread_ts=checkpoint["id"],
             parent_ts=configurable.get("checkpoint_id"),
+            checkpoint_strategy=checkpoint_strategy,
         )
 
         return {

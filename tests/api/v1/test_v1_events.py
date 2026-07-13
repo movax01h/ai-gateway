@@ -226,7 +226,7 @@ class TestEvents:
         payload.pop("issue_id")
         response = perform_request(mock_client, payload)
 
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
         assert response.json()["detail"][0]["msg"] == "Field required"
 
     @pytest.mark.parametrize(

@@ -219,12 +219,12 @@ async def test_list_work_items_with_filters(
     gql_vars = gitlab_client_mock.graphql.call_args[0][1]
     # Only check variables that are present in both dictionaries
     for key, expected_value in expected_vars.items():
-        assert (
-            key in gql_vars
-        ), f"Expected variable {key} not found in GraphQL variables"
-        assert (
-            gql_vars[key] == expected_value
-        ), f"Expected {key}={expected_value}, got {gql_vars[key]}"
+        assert key in gql_vars, (
+            f"Expected variable {key} not found in GraphQL variables"
+        )
+        assert gql_vars[key] == expected_value, (
+            f"Expected {key}={expected_value}, got {gql_vars[key]}"
+        )
 
 
 @pytest.mark.asyncio

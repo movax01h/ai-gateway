@@ -69,7 +69,7 @@ class HumanApprovalCheckExecutor:
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
                         additional_context=None,
-                        message_id=f"approval-{str(uuid4())}",
+                        message_id=f"approval-{uuid4()!s}",
                     )
                 )
             else:
@@ -83,7 +83,7 @@ class HumanApprovalCheckExecutor:
                         status=ToolStatus.SUCCESS,
                         tool_info=None,
                         additional_context=None,
-                        message_id=f"user-{str(uuid4())}",
+                        message_id=f"user-{uuid4()!s}",
                     )
                 )
 

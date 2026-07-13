@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, AsyncIterator, Tuple
+from typing import Annotated, AsyncIterator, Optional, Tuple
 
 from dependency_injector import providers
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -23,10 +23,12 @@ from ai_gateway.chat.agents import (
     AgentToolAction,
     Message,
     ReActAgentInputs,
+    ReActParserConfig,
     TypeAgentEvent,
 )
 from ai_gateway.chat.agents.react import ReActAgent
 from ai_gateway.chat.executor import GLAgentRemoteExecutor
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
@@ -34,8 +36,8 @@ from lib.context import StarletteUser, current_model_metadata_context, get_curre
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
-    "router",
     "create_event_stream",
+    "router",
 ]
 
 
@@ -92,6 +94,15 @@ def authorize_additional_context(
                         )
 
 
+# Model families that may leak <think>...</think> reasoning into responses
+# is declared via `strip_reasoning` in models.yml. See ReActPlainTextParser.
+def _should_strip_reasoning(model_metadata: Optional[TypeModelMetadata]) -> bool:
+    if not model_metadata:
+        return False
+
+    return bool(model_metadata.llm_definition.strip_reasoning)
+
+
 def get_agent(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
@@ -128,7 +139,9 @@ def get_agent(
             unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
         )
 
-    return ReActAgent(prompt=prompt)
+    strip_reasoning = _should_strip_reasoning(current_model_metadata_context.get())
+    parser_config = ReActParserConfig(strip_reasoning=strip_reasoning)
+    return ReActAgent(prompt=prompt, parser_config=parser_config)
 
 
 def _build_scratchpad_from_request(
@@ -221,15 +234,15 @@ async def chat(
 
     gl_version = request.headers.get(X_GITLAB_VERSION_HEADER, "")
 
-    stream_result: Tuple[ReActAgentInputs, AsyncIterator[TypeAgentEvent]] = (
-        await create_event_stream(
-            current_user=current_user,
-            agent_request=agent_request,
-            agent=agent,
-            gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
-            gl_version=gl_version,
-            agent_scratchpad=scratchpad,
-        )
+    stream_result: Tuple[
+        ReActAgentInputs, AsyncIterator[TypeAgentEvent]
+    ] = await create_event_stream(
+        current_user=current_user,
+        agent_request=agent_request,
+        agent=agent,
+        gl_agent_remote_executor_factory=gl_agent_remote_executor_factory,
+        gl_version=gl_version,
+        agent_scratchpad=scratchpad,
     )
 
     inputs, stream_events = stream_result

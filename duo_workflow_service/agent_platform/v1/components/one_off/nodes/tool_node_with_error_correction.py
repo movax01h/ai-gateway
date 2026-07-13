@@ -1,6 +1,6 @@
 import json
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 import structlog
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -194,12 +194,16 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 response, status = await self._execute_tool(
                     tool=self._toolset[tool_name],
                     tool_call_args=tool_call_args,
+                    tool_call_id=tool_call_id,
                 )
 
             tool = self._toolset.get(tool_name)
             set_hidden_layer_log_context(tool_name, tool_call_args)
             sanitized = self._sanitize_response(
-                response=response, tool_name=tool_name, tool=tool
+                response=response,
+                tool_name=tool_name,
+                tool=tool,
+                tool_call_id=tool_call_id,
             )
             tool_responses.append(
                 ToolMessage(
@@ -389,7 +393,10 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         )
 
     async def _execute_tool(
-        self, tool_call_args: dict[str, Any], tool: BaseTool
+        self,
+        tool_call_args: dict[str, Any],
+        tool: BaseTool,
+        tool_call_id: Optional[str] = None,
     ) -> tuple[str, ToolExecutionStatus]:
         """Execute a tool with error handling and tracking.
 
@@ -412,6 +419,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 tool_call_args=tool_call_args,
                 event=UILogEventsOneOff.ON_TOOL_EXECUTION_SUCCESS,
                 tool_response=tool_call_result,
+                message_id=tool_call_id,
             )
 
             return tool_call_result, ToolExecutionStatus.SUCCESS
@@ -421,7 +429,8 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
-                tool_response=f"{str(e)} {response}" if response else str(e),
+                tool_response=f"{e!s} {response}" if response else str(e),
+                message_id=tool_call_id,
             )
             if isinstance(e, ToolException):
                 err_format = self._tracker.handle_tool_exception(
@@ -447,6 +456,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         response: str | dict | list,
         tool_name: str,
         tool: BaseTool | None = None,
+        tool_call_id: Optional[str] = None,
     ) -> str | dict | list:
         """Sanitize tool response for security."""
         try:
@@ -465,6 +475,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                     tool_call_args={},
                     message=error_message,
                     event=UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED,
+                    message_id=tool_call_id,
                 )
             return error_message
 
@@ -503,11 +514,11 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             if i < len(tool_calls):
                 tool_call = tool_calls[i]
                 error_details.append(
-                    f"Tool call {i+1}: {tool_call['name']}({tool_call.get('args', {})}) "
+                    f"Tool call {i + 1}: {tool_call['name']}({tool_call.get('args', {})}) "
                     f"failed with error: {error}"
                 )
             else:
-                error_details.append(f"Error {i+1}: {error}")
+                error_details.append(f"Error {i + 1}: {error}")
 
         remaining_attempts = self.max_correction_attempts - attempt_count
 

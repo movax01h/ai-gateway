@@ -54,7 +54,7 @@ def create_error_ui_chat_log(error_message: str) -> UiChatLog:
         correlation_id=None,
         tool_info=None,
         additional_context=None,
-        message_id=f"tool-{str(uuid4())}",
+        message_id=f"tool-{uuid4()!s}",
     )
 
 
@@ -68,13 +68,13 @@ def format_error_response(error: SlashCommandError) -> str:
         Formatted error message
     """
     if isinstance(error, SlashCommandConfigError):
-        return f"Configuration error: {str(error)}"
+        return f"Configuration error: {error!s}"
     if isinstance(error, SlashCommandTemplateError):
-        return f"Template error: {str(error)}"
+        return f"Template error: {error!s}"
     if isinstance(error, SlashCommandValidationError):
-        return f"Validation error: {str(error)}"
+        return f"Validation error: {error!s}"
 
-    return f"Error processing slash command: {str(error)}"
+    return f"Error processing slash command: {error!s}"
 
 
 def log_command_error(
@@ -98,4 +98,4 @@ def log_command_error(
         **context,
     }
 
-    log.error(f"Slash command error: {str(error)}", **log_context)
+    log.error(f"Slash command error: {error!s}", **log_context)

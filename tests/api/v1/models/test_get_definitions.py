@@ -39,7 +39,7 @@ def mock_model_config_fixture():
             "model2": ChatLiteLLMDefinition(
                 name="Model 2",
                 gitlab_identifier="model2",
-                provider="Vertex",
+                provider="Gemini Enterprise Agent Platform",
                 max_context_tokens=200000,
                 description="Fast, cost-effective responses.",
                 cost_indicator="$$",
@@ -91,8 +91,12 @@ def mock_model_config_fixture():
 
 
 @pytest.mark.usefixtures("mock_model_config")
-def test_get_models_returns_correct_data(client):
-    response = client.get("/definitions")
+def test_get_models_returns_correct_data_with_flag_enabled(client):
+    with patch(
+        "ai_gateway.api.v1.models.get_definitions.is_feature_enabled",
+        return_value=True,
+    ):
+        response = client.get("/definitions")
 
     assert response.status_code == 200
     data = response.json()
@@ -107,9 +111,9 @@ def test_get_models_returns_correct_data(client):
         "cost_indicator": "$",
     }
     assert data["models"][1] == {
-        "name": "Model 2 - Vertex",
+        "name": "Model 2 - Gemini Enterprise Agent Platform",
         "identifier": "model2",
-        "provider": "Vertex",
+        "provider": "Gemini Enterprise Agent Platform",
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$$",
@@ -124,7 +128,8 @@ def test_get_models_returns_correct_data(client):
         "cost_indicator": None,
     }
 
-    # config1 has multiple default models: a pseudo-model should be created and used as default_model.
+    # config1 has multiple default models and the flag is enabled:
+    # a pseudo-model should be created and used as default_model.
     resp0 = data["unit_primitives"][0]
     pseudo_identifier = "__default__config1"
     expected0 = {
@@ -176,3 +181,49 @@ def test_get_models_returns_correct_data(client):
     # subset match for dict keys/values (tolerates dev_* extras)
     assert expected2.items() <= resp2.items()
     assert set(resp2["unit_primitives"]) == set(expected2["unit_primitives"])
+
+
+@pytest.mark.usefixtures("mock_model_config")
+def test_get_models_returns_correct_data_with_flag_disabled(client):
+    with patch(
+        "ai_gateway.api.v1.models.get_definitions.is_feature_enabled",
+        return_value=False,
+    ):
+        response = client.get("/definitions")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # config1 has multiple default models but the flag is disabled:
+    # no pseudo-model should be created; default_model should point to the first default model.
+    resp0 = data["unit_primitives"][0]
+    pseudo_identifier = "__default__config1"
+    expected0 = {
+        "feature_setting": "config1",
+        "unit_primitives": ["ask_issue", "ask_epic"],
+        "default_model": "model1",
+        "default_models": ["model1", "model2"],
+        "selectable_models": ["model1", "model2"],
+        "beta_models": [],
+    }
+    assert expected0.items() <= resp0.items()
+    assert set(resp0["unit_primitives"]) == set(expected0["unit_primitives"])
+
+    # No pseudo-model should appear in the models list.
+    pseudo_model = next(
+        (m for m in data["models"] if m["identifier"] == pseudo_identifier), None
+    )
+    assert pseudo_model is None
+
+    # config2 has a single default model: behavior is unchanged regardless of the flag.
+    resp1 = data["unit_primitives"][1]
+    expected1 = {
+        "feature_setting": "config2",
+        "unit_primitives": ["duo_chat"],
+        "default_model": "model2",
+        "default_models": ["model2"],
+        "selectable_models": ["model2"],
+        "beta_models": ["model1"],
+    }
+    assert expected1.items() <= resp1.items()
+    assert set(resp1["unit_primitives"]) == set(expected1["unit_primitives"])

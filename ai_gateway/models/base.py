@@ -24,11 +24,11 @@ config = Config()
 
 __all__ = [
     "KindModelProvider",
-    "ModelAPIError",
     "ModelAPICallError",
+    "ModelAPIError",
+    "ModelBase",
     "ModelMetadata",
     "TokensConsumptionMetadata",
-    "ModelBase",
     "grpc_connect_vertex",
     "init_anthropic_client",
     "validate_custom_endpoint",
@@ -84,7 +84,7 @@ class KindModelProvider(StrEnum):
     def from_definition_provider(cls, provider: str) -> "KindModelProvider":
         if provider == "Anthropic":
             return KindModelProvider.ANTHROPIC
-        if provider == "Vertex":
+        if provider == "Gemini Enterprise Agent Platform":
             return KindModelProvider.VERTEX_AI
         if provider == "Fireworks":
             return KindModelProvider.FIREWORKS

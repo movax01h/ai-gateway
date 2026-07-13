@@ -5,288 +5,520 @@ import "google/protobuf/struct.proto";
 option go_package = "gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/clients/gopb";
 option ruby_package = "DuoWorkflowService";
 
+// DuoWorkflow is the gRPC service that orchestrates AI-powered workflow execution
+// for GitLab Duo. It serves all GitLab deployment types (SaaS, self-managed, dedicated,
+// self-hosted) and provides RPCs for running workflows, managing authentication,
+// discovering available tools and flows, and self-hosted billing tracking.
 service DuoWorkflow {
+    // ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow.
     rpc ExecuteWorkflow (stream ClientEvent) returns (stream Action);
+    // GenerateToken issues a short-lived authentication token for a workflow session.
     rpc GenerateToken (GenerateTokenRequest) returns (GenerateTokenResponse);
+    // ListCapabilities returns the capabilities advertised by the server for capability negotiation.
+    rpc ListCapabilities (ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
+    // ListTools returns the set of tools available to the workflow executor.
     rpc ListTools (ListToolsRequest) returns (ListToolsResponse);
+    // ListFlows returns the set of flow configurations available for execution.
     rpc ListFlows (ListFlowsRequest) returns (ListFlowsResponse);
+    // TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+    // cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+    // lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+    // LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+    // TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
     rpc TrackSelfHostedExecuteWorkflow (stream TrackSelfHostedClientEvent) returns (stream TrackSelfHostedAction);
+    // ValidateFlowConfig validates a provided flow configuration against the registered schema.
     rpc ValidateFlowConfig (ValidateFlowConfigRequest) returns (ValidateFlowConfigResponse);
 }
 
+// ClientEvent is a message sent from the client to the server during a workflow session.
 message ClientEvent {
+    // response carries one of the possible client-initiated payloads.
     oneof response {
+        // startRequest initiates a new workflow execution.
         StartWorkflowRequest startRequest = 1;
+        // actionResponse returns the result of an action previously requested by the server.
         ActionResponse actionResponse = 2;
+        // heartbeat signals that the client connection is still alive.
         HeartbeatRequest heartbeat = 3;
+        // stopWorkflow requests graceful termination of the running workflow.
         StopWorkflowRequest stopWorkflow = 4;
     }
 }
 
+// StartWorkflowRequest carries the parameters needed to start a new workflow execution.
 message StartWorkflowRequest {
+    // clientVersion identifies the version of the client initiating the workflow.
     string clientVersion = 1;
+    // workflowID is the unique identifier for this workflow run.
     string workflowID = 2;
-    string workflowDefinition = 3 [deprecated = true]; // Use flowConfigId + flowConfigSchemaVersion + flowVersion instead
+    // workflowDefinition was the original single-string identifier for the workflow type (e.g. "chat",
+    // "software_development"). It has been superseded by the three-field tuple flowConfigId +
+    // flowConfigSchemaVersion + flowVersion, which provides explicit versioning and schema validation.
+    // Deprecated: populate flowConfigId, flowConfigSchemaVersion, and flowVersion instead.
+    string workflowDefinition = 3 [deprecated = true];
+    // goal is the natural-language objective that the workflow should achieve.
     string goal = 4;
+    // workflowMetadata carries arbitrary metadata about the workflow, encoded as a JSON string.
     string workflowMetadata = 5;
+    // clientCapabilities lists the executor capabilities supported by this client.
     repeated string clientCapabilities = 6;
     reserved 7; // Previously used for removed ContextElement field
+    // mcpTools lists the MCP tools available to the workflow from this client.
     repeated McpTool mcpTools = 8;
+    // additional_context provides supplementary context items (e.g. open files, snippets) for the workflow.
     repeated AdditionalContext additional_context = 9 [json_name = "additional_context"];
+    // approval carries the user's approval or rejection decision for a pending action.
     optional Approval approval = 10;
+    // flowConfig is an optional free-form configuration struct passed to the flow at startup.
     optional google.protobuf.Struct flowConfig = 11;
+    // flowConfigSchemaVersion identifies the schema version for flowConfig (e.g. "v1" or "experimental"). Required with flowConfigId.
     optional string flowConfigSchemaVersion = 12; // Platform version: "v1" or "experimental". Required with flowConfigId.
+    // preapproved_tools lists tool names that the user has pre-approved for automatic execution.
     repeated string preapproved_tools = 13 [json_name = "preapproved_tools"];
+    // flowConfigId is the name of the flow to run, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
     optional string flowConfigId = 14;    // Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion.
+    // flowVersion is the semver version of the flow, e.g. "1.0.0". Required when flowConfigId is set.
     optional string flowVersion = 15;     // Semver flow version, e.g. "1.0.0". Required when flowConfigId is set.
+    // streaming enables UI response streaming for this session when set to true.
+    optional bool streaming = 16;
 }
 
+// ActionResponse carries the executor's result for a previously requested action.
 message ActionResponse {
+    // requestID matches the Action.requestID this response corresponds to.
     string requestID = 1;
-    optional string response = 2;
+    reserved 2;
+    reserved "response";
+    // response_type holds the structured response payload returned by the executor.
     oneof response_type {
+        // plainTextResponse carries a plain-text execution result.
         PlainTextResponse plainTextResponse = 3;
+        // httpResponse carries the result of an HTTP request action.
         HttpResponse httpResponse = 4;
     };
 }
 
+// HeartbeatRequest is sent periodically by the client to keep the session alive.
 message HeartbeatRequest {
+    // timestamp is the Unix epoch milliseconds at which the heartbeat was sent.
     int64 timestamp = 1;
 }
 
+// StopWorkflowRequest asks the server to terminate the current workflow run.
 message StopWorkflowRequest {
+    // reason is a human-readable explanation of why the workflow is being stopped.
     string reason = 1;
 }
 
+// PlainTextResponse holds a plain-text result and an optional error from an executor action.
 message PlainTextResponse {
+    // response is the plain-text output produced by the executed action.
     string response = 1;
+    // error describes any error that occurred during execution; empty on success.
     string error = 2;
 }
 
+// HttpResponse holds the result of an HTTP request action performed by the executor.
 message HttpResponse {
+    // headers contains the HTTP response headers returned by the server.
     map<string, string> headers = 1;
+    // statusCode is the HTTP status code of the response.
     int32 statusCode = 2;
+    // body is the raw response body.
     string body = 3;
+    // error describes any transport or execution error; empty on success.
     string error = 4;
 }
 
+// Action is a server-initiated request for the executor to perform a specific operation.
 message Action {
+    // requestID is a unique identifier used to correlate this action with its ActionResponse.
     string requestID = 1;
+    // action holds one of the specific operation payloads the executor must carry out.
     oneof action {
+        // runCommand requests execution of a program with arguments.
         RunCommandAction runCommand = 2;
+        // runHTTPRequest requests an outbound HTTP call.
         RunHTTPRequest runHTTPRequest = 3;
+        // runReadFile requests reading the contents of a file.
         ReadFile runReadFile = 4;
+        // runWriteFile requests writing content to a file.
         WriteFile runWriteFile = 5;
+        // runGitCommand requests execution of a Git command.
         RunGitCommand runGitCommand = 6;
+        // runEditFile requests an in-place string replacement within a file.
         EditFile runEditFile = 7;
+        // newCheckpoint requests the client to save the current workflow state.
         NewCheckpoint newCheckpoint = 8;
+        // listDirectory requests a listing of directory contents.
         ListDirectory listDirectory = 9;
+        // grep requests a pattern search across a directory tree.
         Grep grep = 10;
+        // findFiles requests a search for files matching a name pattern.
         FindFiles findFiles = 11;
+        // runMCPTool requests invocation of an MCP tool by name.
         RunMCPTool runMCPTool = 12;
+        // mkdir requests creation of a directory at the specified path.
         Mkdir mkdir = 13;
+        // runReadFiles requests reading the contents of multiple files.
         ReadFiles runReadFiles = 14;
+        // runShellCommand requests execution of a raw shell command string.
         RunShellCommand runShellCommand = 15;
+        // trackLlmCallForSelfHosted asks the client to record an LLM call for self-hosted billing.
         TrackLlmCallForSelfHosted trackLlmCallForSelfHosted = 16;
     };
 }
 
+// TrackLlmCallForSelfHosted is sent by the self-hosted DWS to Workhorse before each LLM call,
+// as part of the self-hosted billing bridge. Workhorse forwards the event to Cloud DWS, which
+// records a billing entry and returns an allow/deny acknowledgment. The LLM call must not
+// proceed until a successful ActionResponse is received. See TrackSelfHostedExecuteWorkflow.
 message TrackLlmCallForSelfHosted {
+    // workflowID identifies the workflow that initiated the LLM call.
     string workflowID = 1;
+    // featureQualifiedName is the fully-qualified name of the AI feature that made the LLM call.
     string featureQualifiedName = 2;
+    // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 3;
 }
 
+// RunShellCommand requests execution of a raw shell command string.
 message RunShellCommand {
+    // command is the shell command string to execute.
     string command = 1;
+    // timeout is the maximum execution time in milliseconds; absent means no limit.
     optional int64 timeout = 2;
 }
 
+// RunCommandAction requests execution of a program with explicit arguments and flags.
 message RunCommandAction {
     reserved 1, 2;
     reserved "command", "withGitCredentials";
+    // program is the executable to run.
     string program = 3;
+    // arguments is the list of positional arguments passed to the program.
     repeated string arguments = 4;
+    // flags is the list of option flags passed to the program.
     repeated string flags = 5;
+    // timeout is the maximum execution time in milliseconds; absent means no limit.
     optional int64 timeout = 6;
 }
 
+// ReadFile requests reading the contents of a single file from the executor's filesystem.
 message ReadFile {
+    // filepath is the absolute or relative path of the file to read.
     string filepath = 1;
+    // limit is the maximum number of lines to return; absent means read the entire file.
     optional int64 limit = 2;
+    // offset is the line number (1-indexed) at which reading should begin; absent means start from the beginning.
     optional int64 offset = 3;
 }
 
+// ReadFiles requests reading the contents of multiple files in a single operation.
 message ReadFiles {
+    // filepaths is the list of file paths to read.
     repeated string filepaths = 1;
 }
 
+// WriteFile requests writing content to a file, creating or overwriting it.
 message WriteFile {
+    // filepath is the path of the file to write.
     string filepath = 1;
+    // contents is the data to write to the file.
     string contents = 2;
 }
 
+// EditFile requests an in-place string replacement within a file.
 message EditFile {
+    // filepath is the path of the file to edit.
     string filepath = 1;
+    // oldString is the exact string to search for and replace.
     string oldString = 2;
+    // newString is the replacement text.
     string newString = 3;
 }
 
+// RunHTTPRequest requests the executor to make an outbound HTTP call.
 message RunHTTPRequest {
+    // method is the HTTP method to use (e.g. "GET", "POST").
     string method = 1;
+    // path is the URL path (and optional query string) for the request.
     string path = 2;
+    // body is the optional request body; absent for methods that carry no payload.
     optional string body = 3;
 }
 
+// RunGitCommand requests execution of a Git command against a specific repository.
 message RunGitCommand {
+    // command is the Git sub-command to run (e.g. "status", "log").
     string command = 1;
+    // arguments is an optional string of additional arguments for the Git command.
     optional string arguments = 2;
+    // repository_url is the URL of the repository on which to run the command.
     string repository_url = 3 [json_name = "repository_url"];
 }
 
+// GenerateTokenRequest initiates a token generation request for a workflow session.
 message GenerateTokenRequest {
+    // workflowDefinition optionally specifies the workflow definition for which the token is issued.
     optional string workflowDefinition = 1;
 }
 
+// GenerateTokenResponse returns the generated token and its expiry information.
 message GenerateTokenResponse {
+    // token is the generated authentication token.
     string token = 1;
+    // expiresAt is the Unix timestamp (seconds) at which the token expires.
     int64 expiresAt = 2;
+    // server_capabilities lists the capabilities advertised by the server for this session.
     repeated string server_capabilities = 3;
 }
 
+// Capability describes a single server capability advertised for negotiation.
+message Capability {
+    // name is the unique identifier of the capability (e.g. "tool_call_approval").
+    string name = 1;
+    // metadata is an optional JSON-encoded string carrying additional details about the capability.
+    string metadata = 2;
+}
+
+// ListCapabilitiesRequest is an empty request to retrieve the server's advertised capabilities.
+message ListCapabilitiesRequest {
+    // Intentionally empty
+}
+
+// ListCapabilitiesResponse returns the capabilities advertised by the server for this session.
+message ListCapabilitiesResponse {
+    // capabilities lists the capabilities advertised by the server.
+    repeated Capability capabilities = 1;
+}
+
+// ListToolsRequest is an empty request to retrieve the available tool definitions.
 message ListToolsRequest {
     // Intentionally empty
 }
 
+// ListToolsResponse returns the available tools and an optional evaluation dataset.
 message ListToolsResponse {
-  repeated google.protobuf.Struct tools = 1;
-  repeated google.protobuf.Struct eval_dataset = 2 [json_name = "eval_dataset"];
+    // tools is the list of available tool definitions as generic structs.
+    repeated google.protobuf.Struct tools = 1;
+    // eval_dataset is an optional dataset used for evaluating tool usage in testing.
+    repeated google.protobuf.Struct eval_dataset = 2 [json_name = "eval_dataset"];
 }
 
 
+// ListFlowsRequest carries optional filters for querying available flow configurations.
 message ListFlowsRequest {
+    // filters optionally narrows the returned flows by identifier, environment, or version.
     optional ListFlowsRequestFilter filters = 1;
 }
 
+// ListFlowsRequestFilter specifies criteria for filtering the list of flows.
 message ListFlowsRequestFilter {
     reserved 1;
     reserved "name";
+    // flow_identifier filters flows by their unique identifier strings.
     repeated string flow_identifier = 4 [json_name = "flow_identifier"];
+    // environment filters flows to those available in the specified deployment environments.
     repeated string environment = 2;
+    // version filters flows to those matching the specified version strings.
     repeated string version = 3;
 }
 
+// ListFlowsResponse returns the matching flow configurations.
 message ListFlowsResponse {
-  repeated google.protobuf.Struct configs = 1;
+    // configs is the list of flow configuration payloads as generic structs.
+    repeated google.protobuf.Struct configs = 1;
 }
 
+// TokenBreakdown reports token usage statistics for a single agent context window.
+message TokenBreakdown {
+    // total_tokens is the number of tokens consumed in the current context.
+    int32 total_tokens = 1;
+    // max_tokens is the maximum number of tokens allowed in the context window.
+    int32 max_tokens = 2;
+}
+
+// NewCheckpoint captures a snapshot of workflow state at a specific point in execution.
 message NewCheckpoint {
+    // status is the current high-level status of the workflow (e.g. "running", "completed").
     string status = 1;
+    // checkpoint is a serialized representation of the current workflow state.
     string checkpoint = 2;
+    // goal is the natural-language objective that the workflow is working toward.
     string goal = 3;
+    // errors lists any non-fatal errors encountered since the last checkpoint.
     repeated string errors = 4;
+    // agent_context_usage maps each agent name to its current token usage breakdown.
+    map<string, TokenBreakdown> agent_context_usage = 5;
 }
 
+// ListDirectory requests a listing of entries in a directory.
 message ListDirectory {
+    // directory is the path of the directory whose contents should be listed.
     string directory = 1;
 }
 
+// Grep requests a pattern search across files within a directory tree.
 message Grep {
+    // search_directory is the root directory in which to search.
     string search_directory = 1 [json_name = "search_directory"];
+    // pattern is the regular expression or literal string to search for.
     string pattern = 2;
+    // case_insensitive indicates whether the pattern match should ignore letter case.
     bool case_insensitive = 3 [json_name = "case_insensitive"];
 }
 
+// FindFiles requests a search for files whose names match a given pattern.
 message FindFiles {
+    // name_pattern is the glob or wildcard pattern used to match file names.
     string name_pattern = 1 [json_name = "name_pattern"];
 }
 
+// Icon represents a single icon image with its URL and optional display metadata.
 message Icon {
+    // url is the location of the icon image.
     string url = 1;
+    // mime_type is the MIME type of the icon image (e.g. "image/png").
     optional string mime_type = 2;
+    // sizes lists the available size descriptors for the icon (e.g. "32x32").
     repeated string sizes = 3;
+    // theme optionally specifies the visual theme this icon is intended for (e.g. "dark", "light").
     optional string theme = 4;
 }
 
+// ToolAnnotations carries optional hints describing a tool's behavior and safety characteristics.
 message ToolAnnotations {
+    // title is a human-readable display name for the tool.
     optional string title = 1;
+    // read_only_hint indicates the tool does not modify any state when true.
     optional bool read_only_hint = 2;
+    // destructive_hint indicates the tool may irreversibly modify or delete data when true.
     optional bool destructive_hint = 3;
+    // idempotent_hint indicates repeated invocations produce the same result when true.
     optional bool idempotent_hint = 4;
+    // open_world_hint indicates the tool may interact with external, unpredictable systems when true.
     optional bool open_world_hint = 5;
 }
 
+// McpTool describes an MCP tool available for use during workflow execution.
 message McpTool {
+    // name is the unique identifier of the MCP tool.
     string name = 1;
+    // description explains what the tool does, shown to the LLM for tool selection.
     string description = 2;
+    // inputSchema is the JSON Schema string that defines the tool's expected input parameters.
     string inputSchema = 3;
+    // icons optionally provides icon images representing the tool in the UI.
     optional Icons icons = 4;
+    // annotations optionally provides behavioral hints about the tool.
     optional ToolAnnotations annotations = 5;
+    // trusted indicates whether the tool is considered trusted and may be invoked without user confirmation.
     optional bool trusted = 6;
 }
 
+// Icons is a container for a list of Icon images.
 message Icons {
+    // items is the list of icon images.
     repeated Icon items = 1;
 }
 
+// RunMCPTool requests invocation of a named MCP tool with the given arguments.
 message RunMCPTool {
+    // name identifies the MCP tool to invoke.
     string name = 1;
+    // args is a JSON-encoded string of the arguments to pass to the tool.
     string args = 2;
 }
 
+// AdditionalContext provides a single supplementary context item for a workflow.
 message AdditionalContext {
+    // category classifies the type of context (e.g. "file", "snippet", "issue").
     string category = 1;
+    // id is an optional unique identifier for this context item.
     optional string id = 2;
+    // content is the optional text or data payload of this context item.
     optional string content = 3;
+    // metadata is optional JSON-encoded metadata about this context item.
     optional string metadata = 4;
 }
 
+// Approval represents a user's decision on whether to allow a pending action.
 message Approval {
+    // Approved signals that the user has approved the pending action.
     message Approved {
+        // remember_approval indicates whether this approval should be remembered for future identical actions.
         optional bool remember_approval = 1 [json_name = "remember_approval"];
+        // tool_name is the name of the tool that was approved.
         optional string tool_name = 2 [json_name = "tool_name"];
+        // tool_args_json is the JSON-encoded arguments of the tool invocation that was approved.
         optional string tool_args_json = 3 [json_name = "tool_args_json"];
     }
 
+    // Rejected signals that the user has rejected the pending action.
     message Rejected {
+        // message is an optional explanation of why the action was rejected.
         optional string message = 1;
     }
 
+    // user_decision holds the user's approval or rejection outcome.
     oneof user_decision {
+        // approval carries the details of an approved action.
         Approved approval = 1;
+        // rejection carries the details of a rejected action.
         Rejected rejection = 2;
     };
 }
 
+// Mkdir requests creation of a directory at the specified path.
 message Mkdir {
+    // directory_path is the path of the directory to create, including any intermediate directories.
     string directory_path = 1 [json_name = "directory_path"];
 }
 
+// OsInformationContext provides details about the operating system running the executor.
 message OsInformationContext {
+    // platform identifies the OS type (e.g. "linux", "darwin", "windows").
     string platform = 1;
+    // architecture identifies the CPU architecture (e.g. "amd64", "arm64").
     string architecture = 2;
 }
 
+// ShellInformationContext provides details about the shell environment available to the executor.
 message ShellInformationContext {
+    // shell_name is the display name of the shell (e.g. "bash", "zsh").
     string shell_name = 1 [json_name = "shell_name"];
+    // shell_type is the type identifier of the shell (e.g. "posix", "powershell").
     string shell_type = 2 [json_name = "shell_type"];
+    // shell_variant is an optional version or variant string for the shell.
     optional string shell_variant = 3 [json_name = "shell_variant"];
+    // shell_environment is an optional JSON-encoded map of environment variables available to the shell.
     optional string shell_environment = 4 [json_name = "shell_environment"];
+    // ssh_session indicates whether the shell is running inside an SSH session.
     optional bool ssh_session = 5 [json_name = "ssh_session"];
+    // cwd is the current working directory of the shell session.
     optional string cwd = 6;
 }
 
+// TrackSelfHostedClientEvent is a message sent from the client during a self-hosted tracking session.
 message TrackSelfHostedClientEvent {
+    // requestID is the unique identifier for this tracking event request.
     string requestID = 1;
+    // workflowID identifies the workflow associated with this event.
     string workflowID = 2;
+    // featureQualifiedName is the fully-qualified name of the AI feature that triggered the event.
     string featureQualifiedName = 3;
+    // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 4;
 }
 
+// TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event.
 message TrackSelfHostedAction {
+    // requestID matches the TrackSelfHostedClientEvent.requestID this response corresponds to.
     string requestID = 1;
 }
 
+// ValidateFlowConfigRequest carries a flow configuration payload to be validated.
 message ValidateFlowConfigRequest {
     // The flow configuration payload as a JSON/YAML-equivalent struct.
     // Must contain a top-level `version` field identifying the schema
@@ -296,6 +528,7 @@ message ValidateFlowConfigRequest {
     reserved "schema_version";
 }
 
+// ValidateFlowConfigResponse returns the validation outcome for the submitted flow configuration.
 message ValidateFlowConfigResponse {
     // Whether the flow configuration is valid.
     bool valid = 1;

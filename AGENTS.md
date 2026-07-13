@@ -27,18 +27,19 @@ Each layer only uses entities from the layer directly below it (enforced via CI 
 
 ### Key Dependencies
 
-- **FastAPI** (^0.116.0): Web framework for API endpoints
-- **Pydantic** (^2.7.4): Data validation and settings management
-- **LangGraph** (0.4.8): Workflow orchestration for Duo Workflow Service
-- **LangChain** ecosystem: Anthropic (^0.3.17), Community (^0.3.5), Google Vertex AI (^2.0.8), OpenAI (^0.3.30)
-- **LiteLLM** (^1.35.20): Unified interface for multiple LLM providers
-- **Anthropic** (^0.71.0): Claude model integration
-- **Google Cloud AI Platform** (^1.36.4): Vertex AI integration
-- **Tree-sitter** (^0.21.0) + tree-sitter-languages (^1.10.2): Code parsing for suggestions
-- **Transformers** (^4.37.2): Tokenization
-- **gRPC** (^1.68.1): Communication protocol for Duo Workflow Service
-- **Python-GitLab** (^6.0.0): GitLab API client
-- **Prometheus** (^0.22.0): Metrics collection
+- **FastAPI**: Web framework for API endpoints
+- **Pydantic**: Data validation and settings management
+- **LangGraph** + **LangChain** ecosystem (Anthropic, Community, Google Vertex AI, OpenAI): Workflow orchestration and LLM provider integrations
+- **LiteLLM**: Unified interface for multiple LLM providers
+- **Anthropic**: Claude model integration
+- **Google Cloud AI Platform**: Vertex AI integration
+- **Tree-sitter** + tree-sitter-languages: Code parsing for suggestions
+- **Transformers**: Tokenization
+- **gRPC**: Communication protocol for Duo Workflow Service
+- **Python-GitLab**: GitLab API client
+- **Prometheus** (`prometheus-client`, `prometheus-fastapi-instrumentator`): Metrics collection
+
+> See `pyproject.toml` for exact pinned versions (updated frequently via Renovate).
 
 ### Component Interactions
 
@@ -116,30 +117,38 @@ make test-watch
 ### Linting and Formatting
 
 ```shell
-# Run all linters
+# Run all linters (code + docs)
 make lint
 
-# Auto-fix formatting issues
+# Auto-fix formatting issues (codespell, ruff, docformatter)
 make format
 
 # Individual linters
-make flake8           # Style guide enforcement
-make check-black      # Code formatting check
-make check-isort      # Import sorting check
-make check-pylint     # Code analysis
-make check-mypy       # Type checking
-make check-codespell  # Spell checking
+make check-ruff          # Ruff lint + format check (replaces flake8/black/isort)
+make check-pylint        # Code analysis
+make check-mypy          # Type checking
+make check-codespell     # Spell checking
 make check-docformatter  # Docstring formatting
+make check-editorconfig  # Editorconfig conformance
+make check-graphql       # GraphQL schema validation
+make lint-proto          # buf lint for protobuf contracts
 
 # Auto-format code
-make black
-make isort
+make ruff-fix       # ruff check --fix + ruff format
 make docformatter
-make codespell  # Auto-fix spelling
+make codespell      # Auto-fix spelling
 
 # Lint documentation
 make lint-doc  # Runs vale + markdownlint
 ```
+
+Always run these `make` targets rather than invoking `pytest`, `mypy`,
+`ruff`, or `pylint` directly. `make test`, `check-mypy`, `check-ruff`, and
+`check-pylint` install required dependencies first via `install-test-deps`/
+`install-lint-deps`, and `check-mypy` also passes `--exclude` flags (for
+`scripts/vendor/*` and the known-noncompliant files listed under
+`MYPY_LINT_TODO_DIR` in the Makefile) that a bare `mypy` invocation would
+silently skip, causing local results to disagree with CI.
 
 ### Pre-commit Hooks
 
@@ -170,6 +179,21 @@ make gen-proto-node
 make clean-proto
 ```
 
+> **Apple Silicon (arm64) note:** `make gen-proto-ruby` runs `grpc_tools_ruby_protoc`
+> from the `grpc-tools` gem, which ships an **x86_64-only** `protoc`/`grpc_ruby_plugin`.
+> On Apple Silicon you must have Rosetta 2 installed to execute it, otherwise the step
+> fails with `Bad CPU type in executable`. Install it once with:
+>
+> ```shell
+> softwareupdate --install-rosetta --agree-to-license
+> ```
+>
+> The Makefile runs the Ruby generator via `bundle exec` against `clients/ruby/Gemfile`,
+> so it uses the **pinned** `grpc-tools` version (matching CI) rather than any globally
+> installed gem. Don't substitute Homebrew's `protoc` — its protoc version differs and
+> produces a diff (e.g. `::Google::Protobuf` vs `Google::Protobuf`) that breaks the
+> `check-proto-ruby` CI job.
+
 ### Other Utilities
 
 ```shell
@@ -178,29 +202,50 @@ make duo-workflow-docs
 
 # Validate model selection config
 poetry run validate-model-selection-config
+```
 
 ## Code Style
 
 ### Formatting Rules
 
-- **Line length**: 120 characters (enforced by Black and Pylint)
-- **Import sorting**: Use `isort` with Black-compatible profile
-- **Code formatter**: Black (no configuration needed, opinionated)
+- **Line length**: `ruff format` targets 88 characters (default); not hard-enforced as a lint error (`E501` is ignored) — Pylint and docformatter allow up to 120 characters
+- **Import sorting**: Handled by Ruff's `isort`-compatible rule group (`I`), configured in `[tool.ruff.lint.isort]`
+- **Code formatter**: `ruff format` (replaced Black; migration tracked in work item #2237)
 - **Docstrings**: Google-style, formatted with `docformatter` (max 120 chars)
 
 ### Python Conventions
 
+Use type hints (mypy enforced incrementally).
+
 ```python
-# Use type hints (mypy enforced incrementally)
+# Good
 def process_data(data: str, transform: bool = True) -> str:
     return data.upper() if transform else data
 
-# Pydantic models for configuration and validation
+# Bad
+def process_data(data, transform=True):
+    return data.upper() if transform else data
+```
+
+Use Pydantic models for configuration and validation instead of raw
+dicts or ad hoc `os.environ` reads.
+
+```python
+# Good
 class ConfigLogging(BaseModel):
     level: str = "INFO"
     format_json: bool = True
 
-# Dependency injection via containers
+# Bad
+LOGGING_LEVEL = os.environ.get("LOGGING_LEVEL", "INFO")
+LOGGING_FORMAT_JSON = os.environ.get("LOGGING_FORMAT_JSON", "true") == "true"
+```
+
+Wire dependencies through the container with `@inject`/`Provide[...]`
+rather than importing and instantiating them directly.
+
+```python
+# Good
 @inject
 def __init__(
     self,
@@ -208,15 +253,37 @@ def __init__(
 ):
     self._model = model
 
-# Structured logging with context
+# Bad
+def __init__(self):
+    self._model = build_model_from_config(load_config())
+```
+
+Use structured logging with bound context instead of string-formatted
+messages.
+
+```python
+# Good
 self.log = structlog.stdlib.get_logger("component").bind(request_id=request_id)
 self.log.info("Processing request", user_id=user_id)
 
-# Async/await for I/O operations
+# Bad
+logging.info(f"Processing request {request_id} for user {user_id}")
+```
+
+Use async/await for I/O operations; don't block the event loop with
+synchronous clients.
+
+```python
+# Good
 async def fetch_data(self, url: str) -> dict:
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
         return response.json()
+
+# Bad
+def fetch_data(self, url: str) -> dict:
+    response = requests.get(url)
+    return response.json()
 ```
 
 ### Naming Conventions
@@ -230,7 +297,7 @@ async def fetch_data(self, url: str) -> dict:
 
 ### Linting Suppressions
 
-**Avoid inline pylint/mypy disables**. They negate agreed-upon code standards. If absolutely necessary, provide a comment explaining why:
+**Avoid inline pylint/mypy/ruff disables** (`# pylint: disable=...`, `# type: ignore`, `# noqa`). They negate agreed-upon code standards. If absolutely necessary, provide a comment explaining why:
 
 ```python
 # Protobuf generated code can't be parsed by pylint
@@ -241,8 +308,46 @@ from contract.contract_pb2 import Action
 ### Testing Conventions
 
 - Test files mirror source structure: `tests/path/to/test_module.py` for `path/to/module.py`
+- Prefer `@pytest.mark.parametrize` over multiple near-identical test functions that only vary
+  in input/expected values. This convention is used extensively already, but it requires actively
+  noticing and restructuring duplicated tests — no linter flags the alternative, so don't default
+  to a new test function per case.
+
+```python
+# Good
+@pytest.mark.parametrize("value,expected", [("a", "A"), ("b", "B")])
+def test_upper(value, expected):
+    assert value.upper() == expected
+
+# Bad
+def test_upper_a():
+    assert "a".upper() == "A"
+
+def test_upper_b():
+    assert "b".upper() == "B"
+```
+
+- Name fixtures with `@pytest.fixture(name="...")` so call sites reference them as plain values,
+  keeping the defining function's name free to describe its implementation.
+
+```python
+# Good
+@pytest.fixture(name="mock_app_dependencies")
+def mock_app_dependencies_fixture():
+    ...
+
+def test_something(mock_app_dependencies):
+    ...
+
+# Bad
+@pytest.fixture
+def mock_app_dependencies():
+    ...
+```
 
 ## Git Workflow
+
+Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
 
 ### Branch Naming
 
@@ -276,13 +381,21 @@ fix(code-suggestions): handle empty prefix correctly
 docs: update AGENTS.md with architecture details
 ```
 
+MR titles follow the same `<type>(<scope>): <subject>` format, for example
+`fix(auth): resolve JWT signature validation`. MR titles are linted in CI
+(`lint:commit` job runs commitlint against `$CI_MERGE_REQUEST_TITLE`) with the
+same rules as commit messages, including a 100-character header limit.
+
 ### Pre-commit Checklist
 
-Lefthook automatically runs on commit:
+Lefthook automatically runs on commit (skipped on `main`), scoped to staged files:
 
-1. **Python files**: Lints with mypy (filtered), flake8, black, isort, pylint, codespell, docformatter, editorconfig
-1. **Markdown files**: Lints with vale and markdownlint
-1. **All files**: Spell check with codespell, editorconfig validation
+1. **Python files** (`*.py`): `check-mypy` (filtered to mypy-safe files), `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
+1. **GraphQL files** (`*.graphql`): `check-graphql`
+1. **Proto files** (`contract/*.proto`): `lint-proto` (buf lint)
+1. **Markdown files** (`*.md`): vale and markdownlint
+1. **All other files**: `check-codespell`, `check-editorconfig`
+1. **Pre-push**: `lint-commit` validates commit messages with `commitlint` against `main`
 
 **Before committing**:
 
@@ -293,20 +406,6 @@ make format
 # Run linters
 make lint
 ```
-
-### Title Format
-
-Use Conventional Commits format:
-
-```plaintext
-<type>(<scope>): <subject>
-```
-
-Examples:
-
-- `feat(workflows): implement issue-to-MR workflow`
-- `fix(auth): resolve JWT signature validation`
-- `docs: add troubleshooting guide for local setup`
 
 ### MR Template
 
@@ -323,7 +422,9 @@ The default template (`.gitlab/merge_request_templates/Default.md`) includes:
 - Documentation added/updated
 - Executor implementation verified (if applicable)
 
-**Labels**: Auto-applies `~"group::ai framework"`
+**Labels**: Auto-applies `~"group::ai core infra"`. The author must also select exactly one
+type label: `~"type::bug"`, `~"type::feature"`, or `~"type::maintenance"` (the template includes
+commented-out `/label` quick actions for each — uncomment the one that applies).
 
 ### Review Process
 

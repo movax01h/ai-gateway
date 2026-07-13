@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import grpc
 import litellm
 import pytest
+from anthropic import APIStatusError
 from dependency_injector import providers
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -18,23 +19,40 @@ from gitlab_cloud_connector import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
+from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from packaging.version import Version
 
-from ai_gateway.config import Config, ConfigCustomModels, ConfigGoogleCloudPlatform
+from ai_gateway.config import (
+    Config,
+    ConfigCustomModels,
+    ConfigGoogleCloudPlatform,
+    ConfigTLS,
+)
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
-from duo_workflow_service import server as server_module
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from duo_workflow_service.errors.typing import InvalidWorkflowIdException
+from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
+from duo_workflow_service.errors.typing import (
+    EnvelopeVersionMismatchException,
+    InvalidRequestException,
+    InvalidWorkflowIdException,
+)
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
+from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
+    CONTAINER_APPLICATION_PACKAGES,
     DuoWorkflowService,
+    _extract_error_message,
     clean_start_request,
     next_client_event,
     run,
@@ -46,7 +64,9 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.previous_context import GetSessionContext
 from duo_workflow_service.tracking import MonitoringContext
+from duo_workflow_service.workflows.registry import ResolvedFlow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
@@ -70,6 +90,34 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 def setup_event_loop():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+
+@pytest.fixture(name="mock_duo_workflow_service_container", scope="module")
+def mock_duo_workflow_service_container_fixture():
+    """Module-scoped container fixture that wires the DI container once for all tests.
+
+    wire(packages=CONTAINER_APPLICATION_PACKAGES) costs ~220ms per call because it introspects the entire
+    duo_workflow_service package. Scoping this fixture to module means it runs once instead of once per test (~107
+    times), saving ~23s of setup time.
+
+    The mock_usage_quota_service autouse fixture handles per-test override/reset_override, which is cheap (~1ms) and
+    safe to do on a shared wired container.
+    """
+    with (
+        patch("ai_gateway.models.base.PredictionServiceAsyncClient"),
+        patch("ai_gateway.searches.container.discoveryengine.SearchServiceAsyncClient"),
+        patch(
+            "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+            return_value=None,
+        ),
+    ):
+        config = Config(
+            _env_file=None, _env_prefix="AIGW_TEST", mock_model_responses=True
+        )
+        container = ContainerApplication()
+        container.config.from_dict(config.model_dump())
+        container.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+        yield container
 
 
 @pytest.fixture(name="simple_flow_config")
@@ -132,6 +180,14 @@ def create_mock_internal_event_client():
     return mock_client
 
 
+def create_mock_default_config():
+    """Helper function to create a mock default config for tests."""
+    mock_config = MagicMock(spec=Config)
+    mock_config.duo_workflow = MagicMock()
+    mock_config.duo_workflow.tls = ConfigTLS()
+    return mock_config
+
+
 @pytest.fixture(name="servicer")
 def servicer_fixture(auth_user) -> DuoWorkflowService:
     current_user.set(auth_user)
@@ -150,21 +206,37 @@ def mock_context_fixture() -> grpc.ServicerContext:
 
 @pytest.fixture(autouse=True)
 def mock_usage_quota_service(mock_duo_workflow_service_container):
-    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+    """Auto-use fixture to mock UsageQuotaService for each test.
 
-    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    This ensures the @has_sufficient_usage_quota decorator works correctly. The container is already wired by
+    mock_duo_workflow_service_container (which wires the entire duo_workflow_service package), so no additional wire()
+    call is needed here.
     """
 
     service_instance = MagicMock()
     service_instance.execute = AsyncMock()
     service_instance.aclose = AsyncMock()
 
-    mock_duo_workflow_service_container.wire(modules=[server_module])
     mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
 
     yield service_instance
 
     mock_duo_workflow_service_container.usage_quota.service.reset_override()
+
+
+@pytest.fixture(name="use_real_model_path")
+def use_real_model_path_fixture(mock_duo_workflow_service_container):
+    """Override the mock model selector to use the real LiteLLM code path for this test.
+
+    The module-scoped container uses mock_model_responses=True (FakeModel) by default. This fixture temporarily
+    overrides the model selector to 'original' so that mock_acompletion_with_retry can intercept the real LiteLLM call
+    path, enabling LLM operation tracking needed for billing event assertions.
+    """
+    mock_duo_workflow_service_container.pkg_models_v2.container._mock_selector.override(
+        providers.Object("original")
+    )
+    yield
+    mock_duo_workflow_service_container.pkg_models_v2.container._mock_selector.reset_override()
 
 
 @pytest.mark.parametrize(
@@ -176,6 +248,7 @@ def mock_usage_quota_service(mock_duo_workflow_service_container):
 )
 def test_run(custom_models_enabled, vertex_project, should_validate_llm):
     with (
+        patch("duo_workflow_service.server.setup_container"),
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
             "duo_workflow_service.server.setup_error_tracking"
@@ -222,6 +295,7 @@ class TestRunMockUsageQuotaServer:
     @pytest.fixture(name="mock_run_dependencies")
     def mock_run_dependencies_fixture(self):
         with (
+            patch("duo_workflow_service.server.setup_container"),
             patch("duo_workflow_service.server.setup_profiling"),
             patch("duo_workflow_service.server.setup_error_tracking"),
             patch("duo_workflow_service.server.setup_monitoring"),
@@ -454,6 +528,45 @@ async def test_list_tools_excludes_experimental(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._READ_ONLY_GITLAB_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._AGENT_PRIVILEGES")
+@patch("duo_workflow_service.server.convert_to_openai_tool")
+async def test_list_tools_excludes_get_previous_session_context(
+    mock_convert_to_openai_tool,
+    mock_agent_privileges,
+    mock_readonly_tools,
+    mock_default_tools,
+    mock_context,
+    servicer,
+):
+    """get_previous_session_context is deliberately kept below STABLE_VERSION_THRESHOLD, so ListTools (which backs the
+    Direct Access tool-discovery API) must not surface it."""
+
+    def mock_convert_side_effect(tool):
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": f"{tool.name} description",
+            },
+        }
+
+    mock_default_tools.__add__.return_value = []
+    mock_readonly_tools.__add__.return_value = [GetSessionContext]
+    mock_agent_privileges.values.return_value = []
+    mock_convert_to_openai_tool.side_effect = mock_convert_side_effect
+
+    response = await servicer.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+
+    assert isinstance(response, contract_pb2.ListToolsResponse)
+    tool_names = [
+        MessageToDict(tool).get("function", {}).get("name") for tool in response.tools
+    ]
+    assert "get_previous_session_context" not in tool_names
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.flow_registry.list_configs")
 async def test_list_flows(mock_list_configs, mock_context, servicer):
     mock_list_configs.return_value = [
@@ -581,9 +694,27 @@ async def test_list_flows_with_filters(
 
 
 @pytest.mark.asyncio
+async def test_list_capabilities(mock_context, servicer):
+    response = await servicer.ListCapabilities(
+        contract_pb2.ListCapabilitiesRequest(), mock_context
+    )
+
+    assert isinstance(response, contract_pb2.ListCapabilitiesResponse)
+    capabilities = [
+        {"name": capability.name, "metadata": capability.metadata}
+        for capability in response.capabilities
+    ]
+    assert capabilities == [
+        {"name": "tool_call_approval", "metadata": ""},
+        {"name": "tool_call_pattern_approval", "metadata": ""},
+        {"name": "flow_semantic_versioning", "metadata": ""},
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config_values,acompletion_response_fixture",
-    [({"mock_model_responses": False}, "acompletion_stream_response")],
+    "acompletion_response_fixture",
+    ["acompletion_stream_response"],
 )
 @pytest.mark.parametrize("self_hosted_dap_billing_enabled", ["true", "false"])
 @pytest.mark.usefixtures(
@@ -592,6 +723,7 @@ async def test_list_flows_with_filters(
     "mock_gitlab_workflow_aput",
     "mock_get_event",
     "mock_acompletion_with_retry",
+    "use_real_model_path",
 )
 @patch(
     "duo_workflow_service.checkpointer.gitlab_workflow.GitLabStatusUpdater._update_workflow_status_in_remote"
@@ -704,7 +836,7 @@ async def test_execute_workflow_when_no_events_ends(
     mock_context,
     servicer,
 ):
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -733,7 +865,7 @@ async def test_execute_workflow_when_message_too_large_cancels_workflow(
     mock_context,
     servicer,
 ):
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -781,7 +913,7 @@ async def test_execute_workflow_when_nothing_in_outbox(
     mock_workflow.is_done = False
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     def side_effect():
         mock_workflow.is_done = True
@@ -815,7 +947,7 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
     mock_workflow.run = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
     mock_workflow.last_gitlab_status = "running"
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     mock_workflow.get_from_outbox = AsyncMock(
         side_effect=asyncio.CancelledError("Task cancelled")
@@ -846,6 +978,22 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
         assert real_workflow_task.cancelled()
 
         mock_context.set_code.assert_called_once_with(grpc.StatusCode.CANCELLED)
+
+
+def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentException:
+    """Build a NotifiableAgentException chained from EnvelopeVersionMismatchException.
+
+    This mirrors the actual raise path in base.py: the server checks
+    ``workflow.last_error.__cause__`` for EnvelopeVersionMismatchException, not
+    ``workflow.last_error`` itself.
+    """
+    cause = EnvelopeVersionMismatchException(detail)
+    exc = NotifiableAgentException(
+        "Your GitLab instance sent additional context in an incompatible version.",
+        internal_detail=detail,
+    )
+    exc.__cause__ = cause
+    return exc
 
 
 @pytest.mark.asyncio
@@ -924,6 +1072,26 @@ async def test_workflow_is_cancelled_on_parent_task_cancellation(
             grpc.StatusCode.INVALID_ARGUMENT,
             "Invalid workflow ID:",
         ),
+        (
+            _make_notifiable_with_envelope_cause(
+                "Envelope 'agent_platform_standard_context' version '2.0.0' "
+                "does not satisfy the required constraint '^1.0.0'."
+            ),
+            False,
+            None,
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "Envelope 'agent_platform_standard_context' version '2.0.0'",
+        ),
+        (
+            InvalidRequestException(
+                "RESPONSE event must include a non-empty message. "
+                "The workflow remains paused; please provide real user input to continue."
+            ),
+            False,
+            None,
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "RESPONSE event must include a non-empty message.",
+        ),
     ],
 )
 @patch("duo_workflow_service.server.current_monitoring_context")
@@ -953,7 +1121,7 @@ async def test_execute_workflow_status_codes(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     mock_monitoring_context = MagicMock()
     mock_monitoring_context.workflow_stop_reason = stop_reason
@@ -1028,7 +1196,7 @@ async def test_execute_workflow_cancellation_handling(
     mock_workflow.get_from_outbox = AsyncMock(
         side_effect=asyncio.CancelledError(cancel_error_message)
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     result = servicer.ExecuteWorkflow(
         start_request_iterator,
@@ -1104,7 +1272,7 @@ async def test_execute_workflow(
             OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
         ]
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield start_workflow_client_event
@@ -1174,7 +1342,11 @@ async def test_generate_token(
     mock_generate_token_response.assert_called_once_with(
         token="token",
         expiresAt=one_hour_later,
-        server_capabilities=["tool_call_approval", "flow_semantic_versioning"],
+        server_capabilities=[
+            "tool_call_approval",
+            "tool_call_pattern_approval",
+            "flow_semantic_versioning",
+        ],
     )
 
 
@@ -1247,6 +1419,42 @@ async def test_generate_token_propagates_tool_access_policies(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {"gitlab_root_namespace_id": "123"},
+        {},  # no gitlab_root_namespace_id
+        None,  # no extra claims
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_gitlab_root_namespace_id(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    kwargs = mock_token_authority.return_value.encode.call_args.kwargs
+    if claims_extra and "gitlab_root_namespace_id" in claims_extra:
+        assert (
+            kwargs["extra_claims"].get("gitlab_root_namespace_id")
+            == claims_extra["gitlab_root_namespace_id"]
+        )
+    else:
+        assert "gitlab_root_namespace_id" not in kwargs["extra_claims"]
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.TokenAuthority")
 @patch("contract.contract_pb2.GenerateTokenResponse")
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
@@ -1305,7 +1513,11 @@ async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
     mock_generate_token_response.assert_called_once_with(
         token="token",
         expiresAt=one_hour_later,
-        server_capabilities=["tool_call_approval", "flow_semantic_versioning"],
+        server_capabilities=[
+            "tool_call_approval",
+            "tool_call_pattern_approval",
+            "flow_semantic_versioning",
+        ],
     )
 
 
@@ -1331,6 +1543,7 @@ async def test_generate_token_returns_server_capabilities(
     assert response.expiresAt == expires_at_timestamp
     assert response.server_capabilities == [
         "tool_call_approval",
+        "tool_call_pattern_approval",
         "flow_semantic_versioning",
     ]
 
@@ -1424,9 +1637,10 @@ async def test_grpc_server(
     mock_server.wait_for_termination.return_value = None
 
     env = {
+        "DUO_WORKFLOW_AUTH__ENABLED": "true",
         "DUO_WORKFLOW_GRPC_REFLECTION_ENABLED": (
             "true" if reflection_enabled else "false"
-        )
+        ),
     }
 
     with (
@@ -1447,7 +1661,7 @@ async def test_grpc_server(
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
         mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
 
-        mock_config = MagicMock(spec=Config)
+        mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
     mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
@@ -1484,7 +1698,7 @@ async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready
         return instance
 
     with (
-        patch.dict(os.environ, {}),
+        patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"}),
         patch(
             "duo_workflow_service.server.grpc.aio.server",
             return_value=mock_server,
@@ -1502,7 +1716,7 @@ async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready
         mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
         mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
 
-        mock_config = MagicMock(spec=Config)
+        mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
     health_servicer = captured["instance"]
@@ -1578,6 +1792,183 @@ async def test_signal_handler_sets_not_serving_on_shutdown(signal_type):
     )
 
 
+class TestServeTLS:
+    """Tests for TLS/gRPCS support in duo_workflow_service.server.serve()."""
+
+    @staticmethod
+    def _make_tls_config(tls_enabled: bool, cert_file=None, key_file=None):
+        """Return a minimal mock Config with TLS settings for duo_workflow."""
+
+        mock_config = MagicMock(spec=Config)
+        mock_config.duo_workflow = MagicMock()
+        mock_config.duo_workflow.tls = ConfigTLS(
+            enabled=tls_enabled, cert_file=cert_file, key_file=key_file
+        )
+        return mock_config
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+    @patch("duo_workflow_service.server.setup_signal_handlers")
+    @patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+        return_value=True,
+    )
+    async def test_serve_insecure_when_tls_disabled(
+        self, mock_cloud_connector_ready, _
+    ):
+        mock_server = AsyncMock()
+        mock_server.add_secure_port.return_value = None
+        mock_server.start.return_value = None
+        mock_server.wait_for_termination.return_value = None
+
+        mock_config = self._make_tls_config(tls_enabled=False)
+
+        with (
+            patch(
+                "duo_workflow_service.server.grpc.aio.server",
+                return_value=mock_server,
+            ),
+            patch(
+                "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+            ),
+            patch("duo_workflow_service.server.MonitoringInterceptor"),
+            patch(
+                "duo_workflow_service.server.connection_pool"
+            ) as mock_connection_pool,
+        ):
+            mock_connection_pool.__aenter__ = AsyncMock(
+                return_value=mock_connection_pool
+            )
+            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+            await serve(mock_config, 50052)
+
+        mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
+        mock_server.add_secure_port.assert_not_called()
+        mock_cloud_connector_ready.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+    @patch("duo_workflow_service.server.setup_signal_handlers")
+    @patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+        return_value=True,
+    )
+    async def test_serve_secure_when_tls_enabled(
+        self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
+    ):
+        cert_file = tmp_path / "server.crt"
+        key_file = tmp_path / "server.key"
+        cert_file.write_bytes(b"CERT_DATA")
+        key_file.write_bytes(b"KEY_DATA")
+
+        mock_server = AsyncMock()
+        mock_server.add_insecure_port.return_value = None
+        mock_server.add_secure_port.return_value = None
+        mock_server.start.return_value = None
+        mock_server.wait_for_termination.return_value = None
+
+        mock_config = self._make_tls_config(
+            tls_enabled=True,
+            cert_file=str(cert_file),
+            key_file=str(key_file),
+        )
+        mock_credentials = MagicMock()
+
+        with (
+            patch(
+                "duo_workflow_service.server.grpc.aio.server",
+                return_value=mock_server,
+            ),
+            patch(
+                "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+            ),
+            patch(
+                "duo_workflow_service.server.grpc.ssl_server_credentials",
+                return_value=mock_credentials,
+            ),
+            patch("duo_workflow_service.server.MonitoringInterceptor"),
+            patch(
+                "duo_workflow_service.server.connection_pool"
+            ) as mock_connection_pool,
+        ):
+            mock_connection_pool.__aenter__ = AsyncMock(
+                return_value=mock_connection_pool
+            )
+            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+            await serve(mock_config, 50052)
+
+        mock_server.add_secure_port.assert_called_once_with(
+            "[::]:50052", mock_credentials
+        )
+        mock_server.add_insecure_port.assert_not_called()
+        mock_setup_signal_handlers.assert_called_once()
+        mock_cloud_connector_ready.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+    @patch("duo_workflow_service.server.setup_signal_handlers")
+    @patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+        return_value=True,
+    )
+    async def test_serve_tls_enabled_reads_cert_and_key_files(
+        self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
+    ):
+        cert_file = tmp_path / "server.crt"
+        key_file = tmp_path / "server.key"
+        cert_file.write_bytes(b"MY_CERT")
+        key_file.write_bytes(b"MY_KEY")
+
+        mock_server = AsyncMock()
+        mock_server.add_insecure_port.return_value = None
+        mock_server.add_secure_port.return_value = None
+        mock_server.start.return_value = None
+        mock_server.wait_for_termination.return_value = None
+
+        mock_config = self._make_tls_config(
+            tls_enabled=True,
+            cert_file=str(cert_file),
+            key_file=str(key_file),
+        )
+        captured_credentials_args = {}
+
+        def capture_credentials(pairs):
+            captured_credentials_args["pairs"] = pairs
+            return MagicMock()
+
+        with (
+            patch(
+                "duo_workflow_service.server.grpc.aio.server",
+                return_value=mock_server,
+            ),
+            patch(
+                "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
+            ),
+            patch(
+                "duo_workflow_service.server.grpc.ssl_server_credentials",
+                side_effect=capture_credentials,
+            ),
+            patch("duo_workflow_service.server.MonitoringInterceptor"),
+            patch(
+                "duo_workflow_service.server.connection_pool"
+            ) as mock_connection_pool,
+        ):
+            mock_connection_pool.__aenter__ = AsyncMock(
+                return_value=mock_connection_pool
+            )
+            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+            await serve(mock_config, 50052)
+
+        mock_setup_signal_handlers.assert_called_once()
+        mock_cloud_connector_ready.assert_called_once()
+        private_key, certificate_chain = captured_credentials_args["pairs"][0]
+        assert private_key == b"MY_KEY"
+        assert certificate_chain == b"MY_CERT"
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
@@ -1598,7 +1989,7 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     result = servicer.ExecuteWorkflow(
         start_request_iterator,
@@ -1620,6 +2011,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         approval=contract_pb2.Approval(),
         language_server_version=None,
         preapproved_tools=[],
+        streaming=False,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
@@ -1642,7 +2034,7 @@ async def test_execute_workflow_valid_workflow_metadata(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mcp_tools = [
         contract_pb2.McpTool(name="get_issue", description="Tool to get issue")
     ]
@@ -1696,12 +2088,18 @@ async def test_execute_workflow_valid_workflow_metadata(
         approval=approval,
         language_server_version=None,
         preapproved_tools=preapproved_tools,
+        streaming=False,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)
 
 
-def test_clean_start_request():
+@pytest.mark.parametrize(
+    "has_flow_config",
+    [True, False],
+    ids=["with_flow_config", "without_flow_config"],
+)
+def test_clean_start_request(has_flow_config):
     # Create a test request with workflow metadata and additional_context
     start_request = contract_pb2.StartWorkflowRequest(
         workflowID="test-id",
@@ -1716,10 +2114,12 @@ def test_clean_start_request():
             ),
         ],
     )
+    if has_flow_config:
+        start_request.flowConfig.CopyFrom(struct_pb2.Struct())
     client_event = contract_pb2.ClientEvent(startRequest=start_request)
 
     # Call the clean_start_request function
-    cleaned_request = clean_start_request(client_event)
+    cleaned_request, extra = clean_start_request(client_event)
 
     # Verify that the cleaned request is a new object (not the same instance)
     assert cleaned_request is not client_event
@@ -1733,6 +2133,10 @@ def test_clean_start_request():
     assert cleaned_request.startRequest.workflowID == "test-id"
     assert cleaned_request.startRequest.goal == ""
     assert len(cleaned_request.startRequest.additional_context) == 0
+    assert not cleaned_request.startRequest.HasField("flowConfig")
+
+    # Verify hasFlowConfig reflects the original state
+    assert extra["hasFlowConfig"] is has_flow_config
 
 
 @pytest.mark.asyncio
@@ -1800,9 +2204,9 @@ async def test_self_hosted_execute_workflow(
     """Test that TrackSelfHostedExecuteWorkflow echoes back client events with matching requestID."""
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in request_ids:
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -1837,9 +2241,9 @@ async def test_track_self_hosted_execute_workflow_unauthorized(
 
     mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         yield contract_pb2.TrackSelfHostedClientEvent(
             requestID="test-req",
             workflowID="#1337",
@@ -1879,9 +2283,9 @@ async def test_track_self_hosted_execute_workflow_billing_event(
 ):
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         yield contract_pb2.TrackSelfHostedClientEvent(
             requestID="test-req-id",
             workflowID="#1337",
@@ -1954,9 +2358,9 @@ async def test_track_self_hosted_execute_workflow_bills_once_per_workflow_featur
     acknowledged so the call proceeds."""
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in ("req-1", "req-2", "req-3"):
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -1992,9 +2396,9 @@ async def test_track_self_hosted_execute_workflow_bills_per_call_for_other_featu
     """Features not in BILL_ONCE_PER_WORKFLOW_FEATURES still bill per LLM call (regression guard)."""
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in ("req-1", "req-2", "req-3"):
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2041,9 +2445,9 @@ async def test_track_self_hosted_execute_workflow_mixes_bill_once_and_per_call_f
         ("req-6", "sast_fp_detection/v1"),
     ]
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id, feature in events:
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2099,9 +2503,9 @@ async def test_track_self_hosted_execute_workflow_dedups_across_feature_versions
     """
     auth_user.can = MagicMock(return_value=True)
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id, feature in [
             ("req-1", "code_review/v1"),
             ("req-2", "code_review/v2"),
@@ -2148,9 +2552,9 @@ async def test_track_self_hosted_execute_workflow_failure_does_not_consume_once_
         None,
     ]
 
-    async def mock_request_iterator() -> (
-        AsyncIterable[contract_pb2.TrackSelfHostedClientEvent]
-    ):
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
         for request_id in ("req-1", "req-2", "req-3"):
             yield contract_pb2.TrackSelfHostedClientEvent(
                 requestID=request_id,
@@ -2197,9 +2601,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     servicer,
 ):
     # Setup mocks
-    mock_language_server_version.get.return_value.ignore_broken_flow_schema_version.return_value = (
-        ignore_schema_version
-    )
+    mock_language_server_version.get.return_value.ignore_broken_flow_schema_version.return_value = ignore_schema_version
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -2207,7 +2609,7 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -2263,7 +2665,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
 
     # Setup user and context
 
@@ -2408,7 +2810,7 @@ async def test_workflow_definition_mapping(
     mock_workflow.get_from_outbox = AsyncMock(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_gl_event_context_cls.from_workflow_definition.return_value = MagicMock(
         value="test"
     )
@@ -2443,7 +2845,7 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     servicer,
 ):
     """Server resolves flowConfigId + flowConfigSchemaVersion + flowVersion correctly."""
-    mock_resolve_flow.return_value = mock_abstract_workflow_class
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -2479,15 +2881,16 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.resolve_flow")
-async def test_execute_workflow_empty_workflow_id_aborts(
+async def test_execute_workflow_empty_workflow_id_silently_drops(
     mock_resolve_flow,
     mock_context,
     servicer,
 ):
-    """Server aborts with INVALID_ARGUMENT when workflowID is empty.
+    """Empty workflowID is treated as a never-started connection and dropped silently.
 
-    An empty workflowID produces an invalid GraphQL Global ID on the DWS side, causing a 'not a valid Global ID' error.
-    Rejecting it early at the gRPC boundary gives the client a clear, immediate error instead.
+    An empty workflowID indicates the client connected but didn't provide a meaningful request.  We drop it without
+    logging a 'Finished RPC' entry or calling abort() so that these no-op connections don't appear as executed flows in
+    observability tooling.
     """
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
@@ -2505,14 +2908,11 @@ async def test_execute_workflow_empty_workflow_id_aborts(
         internal_event_client=create_mock_internal_event_client(),
     )
 
-    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
-        await anext(result)
+    items = [item async for item in result]
 
+    assert items == []
     mock_resolve_flow.assert_not_called()
-    mock_context.abort.assert_called_once_with(
-        grpc.StatusCode.INVALID_ARGUMENT,
-        "workflowID must not be empty",
-    )
+    mock_context.abort.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2528,7 +2928,7 @@ async def test_execute_workflow_missing_or_empty_workflow_id_never_starts_workfl
     mock_context,
     servicer,
 ):
-    """resolve_flow is never called when workflowID is absent or empty."""
+    """resolve_flow is never called and the connection is dropped silently when workflowID is absent or empty."""
 
     start_request_kwargs: dict = {
         "workflowDefinition": "software_development",
@@ -2548,12 +2948,11 @@ async def test_execute_workflow_missing_or_empty_workflow_id_never_starts_workfl
         internal_event_client=create_mock_internal_event_client(),
     )
 
-    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
-        await anext(result)
+    items = [item async for item in result]
 
+    assert items == []
     mock_resolve_flow.assert_not_called()
-    mock_context.abort.assert_called_once()
-    assert mock_context.abort.call_args[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    mock_context.abort.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2622,6 +3021,43 @@ async def test_execute_workflow_value_error_from_resolve_returns_invalid_argumen
         if c[0][0] == grpc.StatusCode.INVALID_ARGUMENT
     ]
     assert len(abort_calls) > 0, "Expected INVALID_ARGUMENT abort"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_flow_config_validation_error_is_collapsed(
+    mock_resolve_flow,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """FlowConfig Pydantic validation errors are collapsed before being surfaced."""
+    mock_resolve_flow.side_effect = ValueError(
+        "Failed to create flow from FlowConfig protobuf: 1 validation error for "
+        "FlowConfig\nprompts.0.unit_primitives.0\n  Input should be 'duo_chat' "
+        "[type=enum, input_value='unkk', input_type=str]\n"
+        "For further information visit https://errors.pydantic.dev/2.13/v/enum"
+    )
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+    abort_calls = [
+        c
+        for c in mock_context.abort.call_args_list
+        if c[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    ]
+    assert len(abort_calls) > 0, "Expected INVALID_ARGUMENT abort"
+    assert (
+        abort_calls[0][0][1]
+        == "Failed to create flow from FlowConfig protobuf: validation error"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2782,12 +3218,17 @@ async def test_validate_flow_config_unexpected_exception(mock_flow_validator_cls
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.server.current_monitoring_context")
-async def test_monitoring_context_populated_before_empty_workflow_id_abort(
+@patch("duo_workflow_service.interceptors.route.usage_quota.current_monitoring_context")
+async def test_monitoring_context_workflow_never_started_set_for_empty_workflow_id(
     mock_current_monitoring_context,
     mock_context,
     servicer,
 ):
+    """Empty workflowID sets workflow_no_start_reason on the monitoring context.
+
+    The check happens in the usage_quota interceptor before server.py is entered, so no abort is issued and the
+    monitoring context carries the reason.
+    """
     monitoring_context = MonitoringContext()
     mock_current_monitoring_context.get.return_value = monitoring_context
 
@@ -2806,10 +3247,329 @@ async def test_monitoring_context_populated_before_empty_workflow_id_abort(
         internal_event_client=create_mock_internal_event_client(),
     )
 
+    items = [item async for item in result]
+
+    assert items == []
+    mock_context.abort.assert_not_called()
+    assert monitoring_context.workflow_no_start_reason == "EMPTY_START_REQUEST"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.interceptors.route.usage_quota.current_monitoring_context")
+async def test_flow_versioning_identity_not_stamped_on_empty_workflow_id(
+    mock_current_monitoring_context,
+    mock_context,
+    servicer,
+):
+    """Flow versioning identity is stamped only after a flow is resolved.
+
+    A request with an empty workflowID is dropped before server.py runs, so flow_id / flow_version / schema_version must
+    remain unset.
+    """
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="",
+                workflowDefinition="duo_planner/v1",
+                goal="test",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    items = [item async for item in result]
+
+    assert items == []
+    mock_context.abort.assert_not_called()
+    assert monitoring_context.flow_id is None
+    assert monitoring_context.flow_version is None
+    assert monitoring_context.schema_version is None
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.current_monitoring_context")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
+    mock_resolve_flow,
+    mock_current_monitoring_context,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """Identity is not stamped when resolve_flow raises.
+
+    ``set_flow_identity`` runs only after a successful resolution; if ``resolve_flow``
+    raises (e.g. unknown flow), ``context.abort()`` fires first and the flow versioning
+    fields stay unset.
+    """
+    monitoring_context = MonitoringContext()
+    mock_current_monitoring_context.get.return_value = monitoring_context
+    mock_resolve_flow.side_effect = ValueError("Unknown flow: bad/v1")
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
     with pytest.raises((StopAsyncIteration, grpc.RpcError)):
         await anext(result)
 
-    mock_context.abort.assert_called_once_with(
-        grpc.StatusCode.INVALID_ARGUMENT, "workflowID must not be empty"
+    mock_context.abort.assert_called_with(
+        grpc.StatusCode.INVALID_ARGUMENT, "Unknown flow: bad/v1"
     )
-    assert monitoring_context.workflow_definition == "duo_planner/v1"
+    assert monitoring_context.flow_id is None
+    assert monitoring_context.flow_version is None
+    assert monitoring_context.schema_version is None
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        pytest.param(
+            (
+                "Vertex_aiException BadRequestError - b'"
+                '{"type":"error","error":{"type":"invalid_request_error",'
+                '"message":"max_tokens: 99999999 > 128000, which is the maximum'
+                ' allowed number of output tokens for claude-sonnet-4-6"}}'
+                "'"
+            ),
+            "max_tokens: too large",
+            id="parses_body_and_normalizes_max_tokens",
+        ),
+        pytest.param(
+            "Vertex_aiException BadRequestError - b'{not valid json}'",
+            None,  # non-empty fallback; checked separately below
+            id="invalid_json_falls_back_to_non_empty_string",
+        ),
+    ],
+)
+def test_extract_error_message_litellm_bad_request(message, expected):
+    error = LiteLLMBadRequestError(
+        message=message,
+        model="claude-sonnet-4-6",
+        llm_provider="vertex_ai",
+    )
+    result = _extract_error_message(error)
+    if expected is None:
+        assert isinstance(result, str) and result
+    else:
+        assert result == expected
+
+
+@pytest.mark.parametrize(
+    "message,body,status_code,expected",
+    [
+        pytest.param(
+            "ignored",
+            {
+                "type": "error",
+                "error": {"type": "overloaded_error", "message": "Overloaded"},
+            },
+            529,
+            "Overloaded",
+            id="parses_nested_error_message",
+        ),
+        pytest.param(
+            "Overloaded",
+            {"type": "error", "error": "overloaded_error"},
+            529,
+            None,  # falls back to str(error); checked as non-empty string
+            id="non_dict_error_field_falls_back_to_str",
+        ),
+        pytest.param(
+            "ignored",
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "prompt is too long: 205531 tokens > 200000 maximum",
+                },
+            },
+            400,
+            "prompt is too long: <N> tokens > 200000 maximum",
+            id="normalizes_token_count",
+        ),
+    ],
+)
+def test_extract_error_message_anthropic_api_status_error(
+    message, body, status_code, expected
+):
+    mock_response = MagicMock()
+    mock_response.status_code = status_code
+    error = APIStatusError(message, response=mock_response, body=body)
+    result = _extract_error_message(error)
+    if expected is None:
+        assert isinstance(result, str) and result
+    else:
+        assert result == expected
+
+
+def test_extract_error_message_generic_error_falls_back_to_str():
+    error = ValueError("something went wrong")
+    assert _extract_error_message(error) == "something went wrong"
+
+
+@pytest.mark.parametrize(
+    "raw,error_type,status_code,expected",
+    [
+        pytest.param(
+            "prompt is too long: 205531 tokens > 200000 maximum",
+            ModelErrorType.REQUEST_TOO_LARGE,
+            413,
+            "prompt is too long: <N> tokens > 200000 maximum",
+            id="normalizes_token_count",
+        ),
+        pytest.param(
+            "Error code: 200 - {'type': 'error', 'error': {'details': None, "
+            "'type': 'api_error', 'message': 'Internal server error'}, "
+            "'request_id': 'req_011CcLLGhf9uyDMumz3CovMG'}",
+            ModelErrorType.API_ERROR,
+            200,
+            "Internal server error",
+            id="parses_embedded_dict",
+        ),
+        pytest.param(
+            "Error code: 400 - {'type': 'error', 'error': {'message': \"can't process request\"}, "
+            "'request_id': 'req_abc'}",
+            ModelErrorType.API_ERROR,
+            400,
+            "can't process request",
+            id="message_with_single_quote",
+        ),
+        pytest.param(
+            "Error code: 500 - {invalid python dict",
+            ModelErrorType.API_ERROR,
+            500,
+            "Error code: 500 - {invalid python dict",
+            id="invalid_dict_falls_back_to_raw",
+        ),
+        pytest.param(
+            "Error code: 500 - {key: value with no quotes}",
+            ModelErrorType.API_ERROR,
+            500,
+            "Error code: 500 - {key: value with no quotes}",
+            id="unparseable_braces_falls_back_to_raw",
+        ),
+    ],
+)
+def test_extract_error_message_model_error(raw, error_type, status_code, expected):
+    error = ModelError(
+        error_type=error_type,
+        status_code=status_code,
+        message=raw,
+    )
+    assert _extract_error_message(error) == expected
+
+
+def test_extract_error_message_security_exception_returns_generic_message():
+    error = SecurityException("Flow config prompt contains dangerous content.")
+    assert (
+        _extract_error_message(error) == "Flow configuration failed security validation"
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param(
+            "Failed to create flow from FlowConfig protobuf: 1 validation error for "
+            "FlowConfig\nprompts.0.unit_primitives.0\n  Input should be 'duo_chat' "
+            "[type=enum, input_value='read_issue', input_type=str]\n"
+            "For further information visit https://errors.pydantic.dev/2.13/v/enum",
+            id="single_validation_error",
+        ),
+        pytest.param(
+            "Failed to create flow from FlowConfig protobuf: 2 validation errors for "
+            "FlowConfig\nprompts.0.unit_primitives.0\n  Input should be 'duo_chat' "
+            "[type=enum, input_value='read_issue', input_type=str]\n"
+            "prompts.0.unit_primitives.1\n  Input should be 'duo_chat' "
+            "[type=enum, input_value='update_issue', input_type=str]\n"
+            "For further information visit https://errors.pydantic.dev/2.13/v/enum",
+            id="multiple_validation_errors",
+        ),
+    ],
+)
+def test_extract_error_message_flow_config_validation_error(message):
+    error = ValueError(message)
+    assert (
+        _extract_error_message(error)
+        == "Failed to create flow from FlowConfig protobuf: validation error"
+    )
+
+
+def test_extract_error_message_flow_config_non_validation_error_preserved():
+    # A FlowConfig failure that isn't a Pydantic validation error keeps its full message.
+    error = ValueError("Failed to create flow from FlowConfig protobuf: boom")
+    assert (
+        _extract_error_message(error)
+        == "Failed to create flow from FlowConfig protobuf: boom"
+    )
+
+
+def test_extract_error_message_additional_context_schema_error_is_collapsed():
+    # jsonschema.ValidationError str() embeds the full schema and instance; only the
+    # "input '<category>' does not match specified schema" prefix should be surfaced.
+    error = ValueError(
+        "input 'agent_platform_standard_context' does not match specified schema: "
+        "Additional properties are not allowed ('service_account_name' was unexpected)"
+        "\n\nFailed validating 'additionalProperties' in schema:\n"
+        "{'$schema': 'https://json-schema.org/draft/2020-12/schema#', ...}\n\n"
+        "On instance:\n{'service_account_name': 'some-account-name-...'}"
+    )
+    assert (
+        _extract_error_message(error)
+        == "input 'agent_platform_standard_context' does not match specified schema"
+    )
+
+
+def test_extract_error_message_bedrock_api_connection_error_collapses_to_stable_prefix():
+    # Bedrock authorization errors embed a per-request ARN/action/resource in the JSON
+    # payload, causing each occurrence to fragment into its own SLO row.  The function
+    # must strip the variable "BedrockException - {...}" tail so that all Bedrock auth
+    # failures group under the stable "litellm.APIConnectionError" label.
+    bedrock_msg = (
+        "litellm.APIConnectionError: BedrockException - "
+        '{"Message":"User: arn:aws:iam::123456789012:role/MyRole is not authorized to perform: '
+        "bedrock:InvokeModelWithResponseStream on resource "
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0 "
+        'because no resource-based policy allows the bedrock:InvokeModelWithResponseStream action"}'
+    )
+    error = LiteLLMAPIConnectionError(
+        message=bedrock_msg,
+        llm_provider="bedrock",
+        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    )
+    assert _extract_error_message(error) == "litellm.APIConnectionError"
+
+
+def test_extract_error_message_non_bedrock_api_connection_error_is_left_untouched():
+    # Non-Bedrock APIConnectionErrors have no "BedrockException - {...}" payload, so
+    # the function must fall back gracefully and preserve the original message.
+    error = LiteLLMAPIConnectionError(
+        message="litellm.APIConnectionError: Connection refused",
+        llm_provider="openai",
+        model="gpt-4",
+    )
+    result = _extract_error_message(error)
+    assert "Connection refused" in result
+
+
+def test_extract_error_message_api_connection_error_token_normalization_still_applies():
+    # The trailing token-count normalization must still fire for APIConnectionError
+    # messages that contain a token count (edge case: non-Bedrock error with token info).
+    error = LiteLLMAPIConnectionError(
+        message="litellm.APIConnectionError: prompt is too long: 205531 tokens > 200000 maximum",
+        llm_provider="openai",
+        model="gpt-4",
+    )
+    result = _extract_error_message(error)
+    assert "<N> tokens" in result
+    assert "205531" not in result

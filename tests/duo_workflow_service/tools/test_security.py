@@ -1927,8 +1927,8 @@ async def test_link_vulnerability_to_merge_request_unexpected_response_structure
         gitlab_client_mock.apost = AsyncMock(
             return_value={"data": {"unexpectedField": {"someData": "value"}}}
         )
-        gitlab_client_mock._process_http_response = (
-            lambda identifier, response: response
+        gitlab_client_mock._process_http_response = lambda identifier, response: (
+            response
         )
 
         tool = LinkVulnerabilityToMergeRequest(metadata=metadata)

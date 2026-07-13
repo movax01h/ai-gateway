@@ -28,8 +28,7 @@ class TestToolSupersedes:
                         f"supersedes {superseded_class.__name__} (name='{superseded_name}')"
                     )
 
-        assert (
-            not mismatches
-        ), f"Found {len(mismatches)} tool(s) with mismatched names:\n" + "\n".join(
-            f"  - {m}" for m in mismatches
+        assert not mismatches, (
+            f"Found {len(mismatches)} tool(s) with mismatched names:\n"
+            + "\n".join(f"  - {m}" for m in mismatches)
         )

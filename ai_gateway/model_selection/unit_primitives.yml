@@ -11,9 +11,6 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -26,9 +23,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
@@ -40,9 +34,6 @@ configurable_unit_primitives:
     default_models:
       - "codestral_2508_fireworks"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "codestral_2501_fireworks"
       - "codestral_2508_fireworks"
@@ -53,9 +44,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -68,9 +56,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -83,9 +68,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -98,9 +80,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -113,9 +92,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -126,9 +102,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -139,9 +112,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -152,7 +122,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6_vertex"
   - feature_setting: "duo_chat_explain_vulnerability"
@@ -161,8 +130,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -174,9 +141,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
@@ -186,12 +150,10 @@ configurable_unit_primitives:
       - "glab_ask_git_command"
     default_models:
       - "claude_haiku_4_5_20251001"
+      - "claude_haiku_4_5_20251001_bedrock"
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -202,9 +164,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -215,9 +174,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -228,9 +184,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -242,19 +195,19 @@ configurable_unit_primitives:
       - "duo_agent_platform"
     default_models:
       - claude_sonnet_4_6_vertex
-    models_for_size_preference:
+    models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
       large: claude_sonnet_4_6_vertex
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_vertex"
+      - "claude_sonnet_5_bedrock"
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_vertex"
       - "claude_haiku_4_5_20251001_bedrock"
@@ -269,10 +222,9 @@ configurable_unit_primitives:
       - "claude_opus_4_8"
       - "claude_opus_4_8_vertex"
       - "claude_opus_4_8_bedrock"
+      - "claude_fable_5"
       - "gemini_3_5_flash_vertex"
       - "gpt_5"
-      - "gpt_5_codex"
-      - "gpt_5_2_codex"
       - "gpt_5_3_codex"
       - "gpt_5_mini"
       - "gpt_5_2"
@@ -280,34 +232,39 @@ configurable_unit_primitives:
       - "gpt_5_4_mini"
       - "gpt_5_4_nano"
       - "gpt_5_5"
+      - "gpt_5_6_luna"
+      - "gpt_5_6_sol"
+      - "gpt_5_6_terra"
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
+        - "glm_5_2_fireworks"
 
   - feature_setting: "duo_agent_platform_agentic_chat"
     unit_primitives:
       - "duo_agent_platform"
     default_models:
       - "claude_sonnet_4_6_vertex"
-    models_for_size_preference:
+      - "claude_sonnet_4_6"
+    models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
       large: claude_sonnet_4_6_vertex
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
       - "claude_haiku_4_5_20251001_vertex"
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_vertex"
+      - "claude_sonnet_5_bedrock"
       - "claude_opus_4_5_20251101"
       - "claude_opus_4_5_20251101_vertex"
       - "claude_opus_4_6_20260205"
@@ -319,10 +276,9 @@ configurable_unit_primitives:
       - "claude_opus_4_8"
       - "claude_opus_4_8_vertex"
       - "claude_opus_4_8_bedrock"
+      - "claude_fable_5"
       - "gemini_3_5_flash_vertex"
       - "gpt_5"
-      - "gpt_5_codex"
-      - "gpt_5_2_codex"
       - "gpt_5_3_codex"
       - "gpt_5_mini"
       - "gpt_5_2"
@@ -330,12 +286,16 @@ configurable_unit_primitives:
       - "gpt_5_4_mini"
       - "gpt_5_4_nano"
       - "gpt_5_5"
+      - "gpt_5_6_luna"
+      - "gpt_5_6_sol"
+      - "gpt_5_6_terra"
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
         - "glm_5_1_fireworks"
+        - "glm_5_2_fireworks"
 
   - feature_setting: "categorize_question"
     unit_primitives:
@@ -343,9 +303,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -356,9 +313,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -376,9 +330,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -398,15 +349,19 @@ configurable_unit_primitives:
       - "text_embedding_005_vertex"
     selectable_models:
       - "text_embedding_005_vertex"
+  - feature_setting: "feature_discovery_search"
+    unit_primitives:
+      - "feature_discovery_search"
+    default_models:
+      - "gemini_2_5_flash_vertex"
+    selectable_models:
+      - "gemini_2_5_flash_vertex"
   - feature_setting: "recommend_reviewers_post"
     unit_primitives:
       - "duo_agent_platform"
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -417,9 +372,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_vertex"
-      - "claude_sonnet_4_20250514_bedrock"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -430,9 +382,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_5_20250929_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_bedrock"
-      - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_6"
@@ -443,9 +392,6 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_20250514"
-      - "claude_sonnet_4_20250514_bedrock"
-      - "claude_sonnet_4_20250514_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
@@ -470,3 +416,23 @@ configurable_unit_primitives:
       - "claude_haiku_4_5_20251001"
     selectable_models:
       - "claude_haiku_4_5_20251001"
+  - feature_setting: "security_review"
+    unit_primitives: []
+    default_models:
+      - "claude_sonnet_4_6_vertex"
+    selectable_models:
+      - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_4_6_vertex"
+      - "gpt_5_2"
+      - "gpt_5_3_codex"
+  - feature_setting: "resolve_dependency_bump"
+    unit_primitives: []
+    # Only native-provider models are selectable: they honor provider-native web
+    # search, whereas LiteLLM (_vertex/_bedrock) variants discard web_search_options.
+    default_models:
+      - "claude_sonnet_5"
+    selectable_models:
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_5"

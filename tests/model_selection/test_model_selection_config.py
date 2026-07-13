@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines  # large but cohesive test module for model selection config
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
@@ -222,6 +223,8 @@ def test_instance_uses_get_config_for_overrides():
     ModelSelectionConfig._instance = None
     mock_config = MagicMock()
     mock_config.model_selection.default_models = {"test_config": ["gitlab-model-2"]}
+    mock_config.model_selection.model_params = {}
+    mock_config.model_selection.prompt_params = {}
 
     with patch(
         "ai_gateway.model_selection.model_selection_config.get_config",
@@ -232,6 +235,189 @@ def test_instance_uses_get_config_for_overrides():
     assert instance._default_models_override == {"test_config": ["gitlab-model-2"]}
     unit_primitive_map = instance.get_unit_primitive_config_map()
     assert unit_primitive_map["test_config"].default_models == ["gitlab-model-2"]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_merges_params():
+    """Test that model_params_override merges params into the corresponding model definition."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={"gitlab-model-1": {"model": "overridden-model-id"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].params.model == "overridden-model-id"
+    # Other params should remain unchanged
+    assert llm_definitions["gitlab-model-1"].params.custom_llm_provider == "value1"
+    # Unaffected models should retain their original params
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_ignores_unknown_identifiers():
+    """Test that unknown gitlab_identifiers in model_params_override are silently ignored."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={"nonexistent-model": {"model": "some-arn"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    # All models should retain their original params
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_empty_dict_is_noop():
+    """Test that an empty model_params_override leaves all model params unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_none_is_noop():
+    """Test that None model_params_override leaves all model params unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override=None,
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+    assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_merges_prompt_params():
+    """Test that prompt_params_override merges into the corresponding model definition."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={"gitlab-model-1": {"vertex_location": "us-east5"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location == "us-east5"
+    # Unaffected models should retain their original (empty) prompt_params
+    assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
+    # The model params should be untouched by a prompt_params override
+    assert llm_definitions["gitlab-model-1"].params.model == "provider-model-1"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_sets_bedrock_model_id():
+    """Test that a Bedrock inference profile ARN can be set via prompt_params model_id."""
+    ModelSelectionConfig._instance = None
+    arn = "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={"gitlab-model-1": {"model_id": arn}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.model_id == arn
+    assert llm_definitions["gitlab-model-2"].prompt_params.model_id is None
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_ignores_unknown_identifiers():
+    """Test that unknown gitlab_identifiers in prompt_params_override are silently ignored."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={"nonexistent-model": {"vertex_location": "us-east5"}},
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location is None
+    assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_prompt_params_override_none_is_noop():
+    """Test that None prompt_params_override leaves all prompt_params unchanged."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override=None,
+    )
+
+    llm_definitions = config.get_llm_definitions()
+
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location is None
+    assert llm_definitions["gitlab-model-2"].prompt_params.vertex_location is None
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_instance_uses_get_config_for_prompt_params():
+    """Test that ModelSelectionConfig.instance() reads prompt_params from get_config()."""
+    ModelSelectionConfig._instance = None
+    mock_config = MagicMock()
+    mock_config.model_selection.default_models = {}
+    mock_config.model_selection.model_params = {}
+    mock_config.model_selection.prompt_params = {
+        "gitlab-model-1": {"vertex_location": "us-east5"}
+    }
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.get_config",
+        return_value=mock_config,
+    ):
+        instance = ModelSelectionConfig.instance()
+
+    assert instance._prompt_params_override == {
+        "gitlab-model-1": {"vertex_location": "us-east5"}
+    }
+    llm_definitions = instance.get_llm_definitions()
+    assert llm_definitions["gitlab-model-1"].prompt_params.vertex_location == "us-east5"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_instance_uses_get_config_for_model_params():
+    """Test that ModelSelectionConfig.instance() reads model_params from get_config()."""
+    ModelSelectionConfig._instance = None
+    mock_config = MagicMock()
+    mock_config.model_selection.default_models = {}
+    mock_config.model_selection.prompt_params = {}
+    mock_config.model_selection.model_params = {
+        "gitlab-model-1": {
+            "model": "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
+        }
+    }
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.get_config",
+        return_value=mock_config,
+    ):
+        instance = ModelSelectionConfig.instance()
+
+    assert instance._model_params_override == {
+        "gitlab-model-1": {
+            "model": "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
+        }
+    }
+    llm_definitions = instance.get_llm_definitions()
+    assert (
+        llm_definitions["gitlab-model-1"].params.model
+        == "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123"
+    )
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -597,19 +783,19 @@ def test_fireworks_models_have_max_retries_10(selection_config):
     assert len(fireworks_models) > 0, "No Fireworks models found in models.yml"
 
     for identifier, definition in fireworks_models:
-        assert (
-            definition.params.max_retries == 10
-        ), f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
+        assert definition.params.max_retries == 10, (
+            f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
+        )
 
 
 @pytest.mark.usefixtures("mock_fs")
-def test_get_model_for_feature_with_size_preference_config(selection_config):
-    """get_model_for_feature should use default_models when models_for_size_preference is set."""
+def test_get_model_for_feature_with_tags_config(selection_config):
+    """get_model_for_feature should use default_models when models_for_tags is set."""
     models_config = UnitPrimitiveConfig(
         feature_setting="test_config",
         unit_primitives=[],
         default_models=["gitlab-model-2"],
-        models_for_size_preference={
+        models_for_tags={
             "small": "gitlab-model-1",
             "large": "gitlab-model-2",
         },
@@ -624,8 +810,8 @@ def test_get_model_for_feature_with_size_preference_config(selection_config):
         assert result.gitlab_identifier == "gitlab-model-2"
 
 
-def test_validate_with_size_preference_field(selection_config, fs: FakeFilesystem):
-    """Validate() should check model IDs in models_for_size_preference."""
+def test_validate_with_tags_field(selection_config, fs: FakeFilesystem):
+    """Validate() should check model IDs in models_for_tags."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
@@ -663,7 +849,7 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "small-model"
                   large: "large-model"
                 selectable_models:
@@ -676,10 +862,8 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
     selection_config.validate()
 
 
-def test_validate_with_invalid_size_preference_field(
-    selection_config, fs: FakeFilesystem
-):
-    """Validate() should report model IDs in models_for_size_preference that don't exist."""
+def test_validate_with_invalid_tags_field(selection_config, fs: FakeFilesystem):
+    """Validate() should report model IDs in models_for_tags that don't exist."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
@@ -707,7 +891,7 @@ def test_validate_with_invalid_size_preference_field(
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "non-existent-small"
                   large: "large-model"
                 selectable_models:
@@ -725,10 +909,9 @@ def test_validate_with_invalid_size_preference_field(
 
 @pytest.fixture(name="size_preference_model_dir")
 def size_preference_model_dir_fixture(fs: FakeFilesystem):
-    """Shared fixture for size preference validation tests.
+    """Shared fixture for tag-based model routing validation tests.
 
-    Creates a minimal models.yml with small and large models for testing models_for_size_preference validation
-    scenarios.
+    Creates a minimal models.yml with small and large models for testing models_for_tags validation scenarios.
     """
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -762,16 +945,16 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
     return model_selection_dir
 
 
-def test_validate_size_preference_without_selectable_models_passes(
+def test_validate_tags_without_selectable_models_passes(
     selection_config,
     size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
-    """Server-side size routing without selectable_models should pass validation.
+    """Server-side tag routing without selectable_models should pass validation.
 
-    A feature using models_for_size_preference for pure server-side routing has no UI model picker, so requiring
-    default_model to be in selectable_models is incorrect. Validation must only enforce that constraint when
-    selectable_models is non-empty.
+    A feature using models_for_tags for pure server-side routing has no UI model picker, so requiring default_model to
+    be in selectable_models is incorrect. Validation must only enforce that constraint when selectable_models is non-
+    empty.
     """
     # editorconfig-checker-disable
     fs.create_file(
@@ -783,7 +966,7 @@ def test_validate_size_preference_without_selectable_models_passes(
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "small-model"
                   large: "large-model"
             """),
@@ -793,18 +976,18 @@ def test_validate_size_preference_without_selectable_models_passes(
     selection_config.validate()  # must not raise
 
 
-def test_validate_size_preference_models_not_required_in_selectable(
+def test_validate_tags_models_not_required_in_selectable(
     selection_config,
     size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
-    """models_for_size_preference values don't need to appear in selectable_models.
+    """models_for_tags values don't need to appear in selectable_models.
 
-    Size-preference models are resolved server-side; selectable_models is the UI model picker list. They are orthogonal:
-    a model can be used for size routing without being exposed to users as a UI choice, and vice-versa.
+    Tag-mapped models are resolved server-side; selectable_models is the UI model picker list. They are orthogonal: a
+    model can be used for tag routing without being exposed to users as a UI choice, and vice-versa.
     """
     # editorconfig-checker-disable
-    # large-model is selectable; small-model is only used for size routing
+    # large-model is selectable; small-model is only used for tag routing
     fs.create_file(
         size_preference_model_dir / "unit_primitives.yml",
         contents=dedent("""
@@ -814,7 +997,7 @@ def test_validate_size_preference_models_not_required_in_selectable(
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "small-model"
                 selectable_models:
                   - "large-model"

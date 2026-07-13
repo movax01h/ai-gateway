@@ -11,6 +11,7 @@ from .helpers import (
     SAMPLE_CODE_SUGGESTIONS,
     SAMPLE_ISSUES,
     SAMPLE_MRS,
+    SAMPLE_PIPELINE_ANALYTICS_WEEKLY,
     glql_analytics_response,
     glql_response,
     mock_glql_response,
@@ -115,6 +116,92 @@ async def test_column_chart_display_type(
         [
             "The response uses 'display: columnChart' in the GLQL embedded view",
             "The GLQL query uses analytics mode (mode: analytics)",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_bar_chart_display_type(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Should use barChart display type for horizontal bar comparison requests."""
+    mock_glql_response(
+        mock_gitlab_client,
+        glql_analytics_response(SAMPLE_CODE_SUGGESTIONS),
+    )
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Show me a horizontal bar chart of code suggestion acceptance rates by language in the gitlab-org group",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response uses 'display: barChart' in the GLQL embedded view",
+            "The GLQL query uses analytics mode (mode: analytics)",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_line_chart_display_type(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Should use lineChart display type for trends over a single dimension."""
+    mock_glql_response(
+        mock_gitlab_client,
+        glql_analytics_response(SAMPLE_PIPELINE_ANALYTICS_WEEKLY),
+    )
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Show me a line chart of pipeline success rate over time in the gitlab-org group",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response uses 'display: lineChart' in the GLQL embedded view",
+            "The GLQL query uses analytics mode (mode: analytics)",
+            "The GLQL query specifies exactly one dimension",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_stat_display_type(
+    analytics_agent,
+    initial_state,
+    mock_gitlab_client,
+):
+    """Should use stat display type for single-value requests."""
+    mock_glql_response(
+        mock_gitlab_client,
+        glql_analytics_response([{"totalCount": 3680}]),
+    )
+
+    result = await ask_agent(
+        analytics_agent,
+        initial_state,
+        "Show me the total number of code suggestions in the gitlab-org group as a single stat",
+    )
+
+    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    await result.assert_llm_validates(
+        [
+            "The response uses 'display: stat' in the GLQL embedded view",
+            "The GLQL query uses analytics mode (mode: analytics)",
+            "The GLQL query requests a single metric and no dimensions",
         ]
     )
 

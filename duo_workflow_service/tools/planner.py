@@ -12,7 +12,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 
 def format_task_number(task_id: str) -> str:
-    task_num = task_id.split("-")[-1] if "-" in task_id else task_id
+    task_num = task_id.rsplit("-", maxsplit=1)[-1] if "-" in task_id else task_id
     try:
         return str(int(task_num) + 1)
     except (ValueError, TypeError):
@@ -132,7 +132,9 @@ class RemoveTask(PlannerTool):
     args_schema: Type[BaseModel] = RemoveTaskInput
 
     async def _execute(
-        self, task_id: str, description: str  # pylint: disable=unused-argument
+        self,
+        task_id: str,
+        description: str,  # pylint: disable=unused-argument
     ) -> LangGraphCommand:
         steps: List[Task]
 
@@ -200,9 +202,11 @@ class GetPlan(PlannerTool):
 
 class SetTaskStatusInput(BaseModel):
     task_id: str = Field(description="The ID of the task to update")
-    status: str = Field(description="""The status of the task.
+    status: str = Field(
+        description="""The status of the task.
                         The status can be `Not Started`, `In Progress`,
-                        `Completed` or `Cancelled`""")
+                        `Completed` or `Cancelled`"""
+    )
     description: str = Field(description="A description of the task for context")
 
 

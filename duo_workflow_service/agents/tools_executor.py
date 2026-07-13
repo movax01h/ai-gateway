@@ -18,6 +18,7 @@ from ai_gateway.container import ContainerApplication
 from duo_workflow_service.agents.project_utils import resolve_project_name_for_tool
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
+    TIER_ACCESS_DENIED_SUB_TYPE,
     TOOL_RESPONSE_MAX_DISPLAY_MSG,
     DuoWorkflowStateType,
     MessageTypeEnum,
@@ -47,8 +48,6 @@ MALFORMED_TOOL_CALL_ERROR_TEMPLATE = (
 )
 
 TIER_ACCESS_DENIED_LEARN_MORE_URL = "https://docs.gitlab.com/user/duo_agent_platform/"
-
-TIER_ACCESS_DENIED_SUB_TYPE = "tier_access_denied"
 
 _HIDDEN_TOOLS = ["get_plan"]
 
@@ -312,8 +311,6 @@ class ToolsExecutor:
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
         project_name: Optional[str] = None,
-        message_sub_type: Optional[str] = None,
-        required_plan: Optional[str] = None,
     ):
         chat_log = self._create_tool_ui_chat_log(
             tool_call=tool_call,
@@ -321,8 +318,6 @@ class ToolsExecutor:
             error_message=error_message,
             tool_response=tool_response,
             project_name=project_name,
-            message_sub_type=message_sub_type,
-            required_plan=required_plan,
         )
         if chat_log:
             ui_chat_logs.append(chat_log)
@@ -394,7 +389,7 @@ class ToolsExecutor:
         except Exception as error:
             # Convert any unexpected exception to ToolException to avoid blocking workflow
             tool_exception = ToolException(
-                f"Unexpected error executing tool {tool_name}: {str(error)}"
+                f"Unexpected error executing tool {tool_name}: {error!s}"
             )
             tool_exception.__cause__ = error
             return self._handle_tool_error(
@@ -494,9 +489,7 @@ class ToolsExecutor:
         log_exception(error, extra={"context": "Tools executor raised error"})
 
         response = getattr(error, "response", None)
-        tool_response = (
-            f"Tool {tool_name} raised ToolException: {str(error)} {response}"
-        )
+        tool_response = f"Tool {tool_name} raised ToolException: {error!s} {response}"
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,
@@ -538,7 +531,7 @@ class ToolsExecutor:
 
         tool_response = json.dumps(
             {
-                "error": "tier_access_denied",
+                "error": TIER_ACCESS_DENIED_SUB_TYPE,
                 "required_plan": required_plan,
                 "message": tier_message,
                 "link_url": TIER_ACCESS_DENIED_LEARN_MORE_URL,
@@ -560,8 +553,6 @@ class ToolsExecutor:
             ui_chat_logs=chat_logs,
             error_message=tier_message,
             project_name=project_name,
-            message_sub_type=TIER_ACCESS_DENIED_SUB_TYPE,
-            required_plan=required_plan,
         )
 
         return {
@@ -608,8 +599,6 @@ class ToolsExecutor:
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
         project_name: Optional[str] = None,
-        message_sub_type: Optional[str] = None,
-        required_plan: Optional[str] = None,
     ) -> Optional[UiChatLog]:
         tool_name = tool_call["name"]
         tool_args = tool_call.get("args", {})
@@ -630,38 +619,48 @@ class ToolsExecutor:
             tool_args = {**tool_args, "project_name": project_name}
 
         tool_response = redact_secrets_for_ui(tool_response, tool_name=tool_name)
-        chat_log = UiChatLog(
+
+        tool_info: Optional[ToolInfo] = None
+        if tool_name not in _ACTION_HANDLERS:
+            if tool_response is not None:
+                tool_info = ToolInfo(
+                    name=tool_name,
+                    args=tool_args,
+                    tool_response=ToolMessage(
+                        content=tool_response.content[:TOOL_RESPONSE_MAX_DISPLAY_MSG],
+                        name=tool_response.name,
+                        tool_call_id=tool_response.tool_call_id,
+                    ),
+                )
+            else:
+                tool_info = ToolInfo(name=tool_name, args=tool_args)
+            version = self._tool_version(tool_name)
+            if version is not None:
+                tool_info["tool_version"] = version
+
+        return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
-            message_sub_type=message_sub_type or tool_name,
+            message_sub_type=tool_name,
             content=content,
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=status,
             correlation_id=None,
-            tool_info=(
-                (
-                    ToolInfo(
-                        name=tool_name,
-                        args=tool_args,
-                        tool_response=ToolMessage(
-                            content=tool_response.content[
-                                :TOOL_RESPONSE_MAX_DISPLAY_MSG
-                            ],
-                            name=tool_response.name,
-                            tool_call_id=tool_response.tool_call_id,
-                        ),
-                    )
-                    if tool_response is not None
-                    else ToolInfo(name=tool_name, args=tool_args)
-                )
-                if tool_name not in _ACTION_HANDLERS
-                else None
-            ),
+            tool_info=tool_info,
             additional_context=None,
             message_id=tool_call_id,
         )
-        if required_plan is not None:
-            chat_log["required_plan"] = required_plan
-        return chat_log
+
+    def _tool_version(self, tool_name: str) -> Optional[str]:
+        """Return the tool's semantic version (str) when it is in the toolset.
+
+        Threaded onto ``ToolInfo`` so the client can version the tool→component
+        contract for generative UI.
+        """
+        if tool_name in self._toolset:
+            version = getattr(self._toolset[tool_name], "tool_version", None)
+            if version is not None:
+                return str(version)
+        return None
 
     def get_tool_display_message(
         self, tool_name: str, args: Dict[str, Any], tool_response: Any = None

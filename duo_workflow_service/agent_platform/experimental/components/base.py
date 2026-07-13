@@ -15,7 +15,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.events import GLReportingEventContext
 
-__all__ = ["RouterProtocol", "BaseComponent", "EndComponent"]
+__all__ = ["BaseComponent", "EndComponent", "RouterProtocol"]
 
 
 class RouterProtocol(Protocol):
@@ -93,6 +93,7 @@ class EndComponent(BaseComponent):
         graph.add_edge(self.__entry_hook__(), END)
 
     async def _terminate_flow(
-        self, state: FlowState  # pylint: disable=unused-argument
+        self,
+        state: FlowState,  # pylint: disable=unused-argument
     ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}

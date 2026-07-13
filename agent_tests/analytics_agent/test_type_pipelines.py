@@ -146,18 +146,20 @@ async def test_pipeline_requires_project_filter(
     initial_state,
     mock_gitlab_client,
 ):
-    """Should use project filter for pipelines, not group scope."""
+    """Listing individual pipelines (standard mode) must use project, not group, scope."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
 
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Show me failed pipelines in the gitlab-org group",
+        "List the 20 most recent failed pipelines in the gitlab-org group "
+        "with their ref, sha, and duration",
     )
 
     await result.assert_llm_validates(
         [
             "The GLQL query uses project filter, not group filter, "
-            "and/or the response explains that pipelines require a project scope",
+            "and/or the response explains that listing individual pipelines "
+            "requires a project scope (standard mode doesn't support group)",
         ]
     )

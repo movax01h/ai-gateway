@@ -21,12 +21,12 @@ from ai_gateway.models.base_text import (
 from ai_gateway.safety_attributes import SafetyAttributes
 
 __all__ = [
-    "AsyncStream",
     "LLM",
-    "ChatModel",
-    "FakeModel",
-    "FakeCompletionModel",
     "AgenticFakeModel",
+    "AsyncStream",
+    "ChatModel",
+    "FakeCompletionModel",
+    "FakeModel",
 ]
 
 _T = TypeVar("_T")
@@ -145,8 +145,8 @@ class FakeModel(SimpleChatModel):
         return "mock"
 
     @override
-    def bind_tools(
-        self, *args: Any, **kwargs: Any  # pylint: disable=unused-argument
+    def bind_tools(  # pylint: disable=unused-argument
+        self, *args: Any, **kwargs: Any
     ) -> Any:
         return self
 

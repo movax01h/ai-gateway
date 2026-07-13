@@ -1,4 +1,4 @@
-# pylint: disable=file-naming-for-tests,use-dict-literal
+# pylint: disable=file-naming-for-tests
 from typing import Optional, Union
 
 import pytest
@@ -101,7 +101,7 @@ class TestPromptBuilderPrefixBased:
                 "random_text",
                 2048,
                 _TEST_TEMPLATE_1,
-                dict(),
+                {},
                 Prompt(
                     prefix="start\nrandom_text\nend",
                     metadata=MetadataPromptBuilder(
@@ -115,7 +115,7 @@ class TestPromptBuilderPrefixBased:
                 "random_text",
                 5,
                 _TEST_TEMPLATE_1,
-                dict(),
+                {},
                 Prompt(
                     prefix="start\ntext\nend",
                     metadata=MetadataPromptBuilder(
@@ -129,7 +129,7 @@ class TestPromptBuilderPrefixBased:
                 "random_text",
                 2048,
                 _TEST_TEMPLATE_2,
-                dict(lang="python"),
+                {"lang": "python"},
                 Prompt(
                     prefix="start python\nrandom_text\nend",
                     metadata=MetadataPromptBuilder(
@@ -143,7 +143,7 @@ class TestPromptBuilderPrefixBased:
                 "random_text",
                 6,
                 _TEST_TEMPLATE_2,
-                dict(lang="python"),
+                {"lang": "python"},
                 Prompt(
                     prefix="start python\ntext\nend",
                     metadata=MetadataPromptBuilder(

@@ -2,7 +2,7 @@
 name: Model configuration check
 model:
   params:
-    max_tokens: 12
+    max_tokens: 16
 unit_primitive: complete_code
 prompt_template:
   system: |

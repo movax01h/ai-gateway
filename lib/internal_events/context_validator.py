@@ -3,9 +3,9 @@ import structlog
 from lib.internal_events.context import EventContext
 
 __all__ = [
-    "validate_event_context",
     "ALWAYS_EXPECTED_FIELDS",
     "CONTEXTUAL_FIELDS",
+    "validate_event_context",
 ]
 
 log = structlog.stdlib.get_logger("internal_events_context_validator")

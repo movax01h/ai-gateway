@@ -1,6 +1,12 @@
 # Emergency deployment
 
-Use this runbook to push a fix to the GitLab-managed AIGW/DWS fleet faster than the normal canary rollout when responding to a production incident.
+> **Use this only for production or security incidents.**
+>
+> Expedited skips the canary and ships to 100% of traffic at once. If the change is broken, every user is broken. There is no small slice to catch it first. Only take that risk when an incident is already burning.
+>
+> Feature work, even high-priority, goes through the normal canary rollout.
+
+Use this runbook to push a fix to the GitLab-managed AIGW/DWS fleet faster than the normal canary rollout when responding to a production or security incident.
 
 ## Overview
 
@@ -12,7 +18,7 @@ Use this runbook to push a fix to the GitLab-managed AIGW/DWS fleet faster than 
 
 ## When to use this
 
-Reserve `expedited` for genuine emergencies where the canary rollout is too slow — for example, shipping a fix for a breaking production issue. The `legacy` strategy receives the most testing and is the most familiar, so prefer it for routine deploys.
+Use `expedited` **only** when a production or security incident makes the canary rollout too slow. Examples: a breaking production bug, or a security patch that has to reach all traffic immediately. For everything else, including high-priority feature work, use the default `legacy` (canary) strategy.
 
 ## Procedure
 
@@ -36,7 +42,7 @@ This single variable applies to **both staging and production** deploys, because
 
 ### 3. Disable (required cleanup)
 
-After the incident, an Owner/Maintainer **must remove** the `RUNWAY_DEPLOYMENT_STRATEGY` variable. It is sticky — it stays in effect for every default-branch deploy until removed. Removing it returns deploys to the safe defaults: `legacy` for production and `expedited` for staging (staging is `expedited` by default via `.runway/runway-staging.yml`).
+After the incident, an Owner/Maintainer **must remove** the `RUNWAY_DEPLOYMENT_STRATEGY` variable. It is sticky: it stays in effect for every default-branch deploy until removed. Removing it returns deploys to the safe defaults: `legacy` for production and `expedited` for staging (staging is `expedited` by default via `.runway/runway-staging.yml`).
 
 Treat removal as a mandatory incident closeout step.
 

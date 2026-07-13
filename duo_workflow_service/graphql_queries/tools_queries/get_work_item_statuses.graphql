@@ -1,0 +1,14 @@
+query GetWorkItemStatuses($fullPath: ID!) {
+    namespace(fullPath: $fullPath) {
+        lifecycles {
+            nodes {
+                id
+                name
+                statuses {
+                    id
+                    name
+                }
+            }
+        }
+    }
+}

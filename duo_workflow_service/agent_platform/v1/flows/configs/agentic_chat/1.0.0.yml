@@ -1,0 +1,70 @@
+version: "v1"
+environment: chat
+components:
+  - name: "chat_agent"
+    type: AgentComponent
+    prompt_id: "chat_agent_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      # For static system template
+      - from: "context:gitlab_instance_type"
+        as: "gitlab_instance_type"
+      - from: "context:gitlab_instance_url"
+        as: "gitlab_instance_url"
+      - from: "context:gitlab_instance_version"
+        as: "gitlab_instance_version"
+      - from: "dummy"                 # TODO: to be replaced in AIGW prompt
+        as: "model_friendly_name"
+        literal: true
+      # For dynamic system template
+      - from: "dummy"                 # TODO:
+        as: "should_show_current_time"
+        literal: true
+      - from: "dummy"                 # TODO:
+        as: "clarification_question_tool_enabled"
+        literal: true
+      - from: "dummy"                 # TODO:
+        as: "foundational_flow_tool_enabled"
+        literal: true
+      - from: "context:project"       # The project context exists if the workflow is created at project-level.
+        as: "project"
+        optional: true
+      - from: "context:namespace"     # The namespace context exists if the workflow is created at namespace-level.
+        as: "namespace"
+        optional: true
+    toolset: []                       # TODO:
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "user_input"
+    type: HumanInputComponent
+    sends_response_to: "chat_agent"
+    interaction_type: "input"
+    message_template: "no-op"        # No-op. This is used by `on_user_input_prompt` event in `ui_log_events` but it's unnecessary in chat.
+    ui_log_events:
+      - "on_user_response"
+routers:
+  - from: "chat_agent"
+    to: "user_input"
+  - from: "user_input"
+    to: "chat_agent"
+flow:
+  entry_point: "chat_agent"
+  # NOTE: There is a feature called `inputs` to extract additional context and set it to `FlowState.context` at the initial turn, (ref: `Flow._process_additional_context`)
+  # however, it doesn't work for the second and later user message's additional context.
+  # To be followed-up in https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2253.
+prompts:
+  - name: "chat_agent_prompt"
+    prompt_id: "chat_agent_prompt"
+    unit_primitives:
+      - duo_chat
+    prompt_template:
+      system:
+        - |
+          {% include 'chat/agent/partials/system_static/1.0.0.jinja' %}
+        - |
+          {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}
+      user: |
+        {{goal}}

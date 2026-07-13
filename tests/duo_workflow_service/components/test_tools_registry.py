@@ -1,6 +1,4 @@
 # pylint: disable=too-many-lines
-import hashlib
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,8 +22,10 @@ from duo_workflow_service.tools.ascp import (
     ListAscpScans,
 )
 from duo_workflow_service.tools.branch import CreateBranch
-from duo_workflow_service.tools.code_review import (
+from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
+)
+from duo_workflow_service.tools.code_review.post_duo_code_review import (
     PostDuoCodeReview,
 )
 from duo_workflow_service.tools.command import RunCommand, ShellCommand
@@ -37,6 +37,14 @@ from duo_workflow_service.tools.findings.list_security_findings import (
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
 from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
+from duo_workflow_service.tools.mr_discussions import (
+    ListMrDiscussions,
+    ReplyToDiscussion,
+    SetDiscussionResolved,
+)
+from duo_workflow_service.tools.mr_review import SubmitMrReview
+from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
+from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
@@ -85,6 +93,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -101,6 +110,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -120,8 +130,10 @@ _outbox = MagicMock(spec=Outbox)
                 "get_merge_request",
                 "list_merge_request_diffs",
                 "list_all_merge_request_notes",
+                "list_mr_discussions",
                 "get_pipeline_failing_jobs",
                 "get_downstream_pipelines",
+                "get_failing_bridge_jobs",
                 "get_project",
                 "gitlab_group_project_search",
                 "gitlab_issue_search",
@@ -136,6 +148,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
                 "get_epic",
                 "list_epics",
                 "list_issue_notes",
@@ -160,6 +173,7 @@ _outbox = MagicMock(spec=Outbox)
                 "get_work_item",
                 "list_work_items",
                 "get_work_item_notes",
+                "get_work_item_statuses",
                 "extract_lines_from_text",
                 "get_glql_schema",
                 "run_glql_query",
@@ -197,6 +211,7 @@ _outbox = MagicMock(spec=Outbox)
                 "update_merge_request",
                 "get_pipeline_failing_jobs",
                 "get_downstream_pipelines",
+                "get_failing_bridge_jobs",
                 "get_project",
                 "gitlab_group_project_search",
                 "gitlab_issue_search",
@@ -211,6 +226,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
                 "get_epic",
                 "list_epics",
                 "create_epic",
@@ -252,6 +268,7 @@ _outbox = MagicMock(spec=Outbox)
                 "get_work_item",
                 "list_work_items",
                 "get_work_item_notes",
+                "get_work_item_statuses",
                 "post_duo_code_review",
                 "extract_lines_from_text",
                 "get_glql_schema",
@@ -264,7 +281,13 @@ _outbox = MagicMock(spec=Outbox)
                 "get_wiki_page",
                 "gitlab_api_get",
                 "gitlab_graphql",
+                "update_form_fields",
                 "update_form_permissions",
+                "submit_mr_review",
+                "list_mr_discussions",
+                "reply_to_discussion",
+                "set_discussion_resolved",
+                "set_form_permissions",
             },
         ),
         (
@@ -281,6 +304,29 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
+            },
+        ),
+        (
+            ["read_only_files"],
+            {
+                "create_plan",
+                "add_new_task",
+                "remove_task",
+                "update_task_description",
+                "get_plan",
+                "set_task_status",
+                "todo_write",
+                "read_file",
+                "read_files",
+                "list_dir",
+                "find_files",
+                "grep",
+                "extract_lines_from_text",
+                "handover_tool",
+                "request_user_clarification_tool",
+                "clarification_question",
+                "render_ui",
             },
         ),
         (
@@ -305,6 +351,7 @@ _outbox = MagicMock(spec=Outbox)
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "render_ui",
                 "run_tests",
             },
         ),
@@ -315,6 +362,7 @@ _outbox = MagicMock(spec=Outbox)
         "read_only_gitlab_privileges",
         "read_write_gitlab_privileges",
         "use_git_privileges",
+        "read_only_files_privileges",
         "read_write_files_privileges",
     ],
 )
@@ -322,7 +370,6 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=None,
     )
@@ -342,7 +389,6 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             "read_write_files",
         ],
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=None,
     )
@@ -390,6 +436,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_downstream_pipelines": tools.GetDownstreamPipelines(
             metadata=tool_metadata
         ),
+        "get_failing_bridge_jobs": tools.GetFailingBridgeJobs(metadata=tool_metadata),
         "get_project": tools.GetProject(metadata=tool_metadata),
         "gitlab_group_project_search": tools.GroupProjectSearch(metadata=tool_metadata),
         "gitlab_issue_search": tools.IssueSearch(metadata=tool_metadata),
@@ -414,6 +461,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
         "clarification_question": tools.ClarificationQuestionTool(),
+        "render_ui": tools.RenderUiTool(),
         "get_epic": tools.GetEpic(metadata=tool_metadata),
         "list_epics": tools.ListEpics(metadata=tool_metadata),
         "create_epic": tools.CreateEpic(metadata=tool_metadata),
@@ -464,6 +512,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_work_item": tools.GetWorkItem(metadata=tool_metadata),
         "list_work_items": tools.ListWorkItems(metadata=tool_metadata),
         "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
+        "get_work_item_statuses": tools.GetWorkItemStatuses(metadata=tool_metadata),
         "post_duo_code_review": PostDuoCodeReview(metadata=tool_metadata),
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
         "get_glql_schema": tools.GetGlqlSchema(metadata=tool_metadata),
@@ -486,7 +535,13 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "create_branch": CreateBranch(metadata=tool_metadata),
         "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
         "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
+        "update_form_fields": UpdateFormFields(metadata=tool_metadata),
         "update_form_permissions": UpdateFormPermissions(metadata=tool_metadata),
+        "submit_mr_review": SubmitMrReview(metadata=tool_metadata),
+        "list_mr_discussions": ListMrDiscussions(metadata=tool_metadata),
+        "reply_to_discussion": ReplyToDiscussion(metadata=tool_metadata),
+        "set_discussion_resolved": SetDiscussionResolved(metadata=tool_metadata),
+        "set_form_permissions": SetFormPermissions(metadata=tool_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -522,10 +577,47 @@ async def test_registry_configuration(gl_http_client, mcp_tools, project_mock):
         "handover_tool",
         "request_user_clarification_tool",
         "clarification_question",
+        "render_ui",
         "extra_tool",
     }
-    assert registry.approval_required("extra_tool") is True
+    assert not registry.is_preapproved("extra_tool")
     assert registry._mcp_tool_names == ["extra_tool"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config_value, expected",
+    [(["code_review/v1"], ["code_review/v1"]), (None, None)],
+)
+async def test_registry_plumbs_features(
+    gl_http_client, project_mock, config_value, expected
+):
+    """Workflow features flow from workflow_config into tool metadata."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["run_commands"],
+        "gitlab_host": "gitlab.example.com",
+        "features": {
+            "foundational_flows": {
+                "enabled": True,
+                "enabled_flows": config_value,
+            }
+        },
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+
+    assert registry.get("run_command").metadata["features"] == {
+        "foundational_flows": {
+            "enabled": True,
+            "enabled_flows": expected,
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -629,7 +721,6 @@ def test_get_tool(tool_metadata, tool_name, expected_tool, config):
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -653,7 +744,6 @@ def test_get_batch_tools(tool_metadata, requested_tools, expected_tools, config)
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -678,7 +768,6 @@ def test_get_handlers(tool_metadata, requested_tools, expected_tools, config):
     registry = ToolsRegistry(
         enabled_tools=config,
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -691,7 +780,6 @@ def test_preapproved_tools_initialization(tool_metadata):
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "read_only_gitlab"],
         preapproved_tools=["read_write_files"],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -707,6 +795,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "handover_tool",
         "request_user_clarification_tool",
         "clarification_question",
+        "render_ui",
     }
     # Tools from read_write_files privilege should be in preapproved_tools
     read_write_tools = {
@@ -725,26 +814,25 @@ def test_preapproved_tools_initialization(tool_metadata):
     assert registry._preapproved_tool_names == default_tools.union(read_write_tools)
 
 
-def test_approval_required(tool_metadata):
+def test_is_preapproved(tool_metadata):
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "read_only_gitlab"],
         preapproved_tools=[
             "read_write_files"
         ],  # Only read_write_files tools are preapproved
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
     # Tool is in preapproved list
-    assert not registry.approval_required("read_file")  # from read_write_files
-    assert not registry.approval_required("edit_file")  # from read_write_files
+    assert registry.is_preapproved("read_file")  # from read_write_files
+    assert registry.is_preapproved("edit_file")  # from read_write_files
 
     # Tool is not in preapproved list
-    assert registry.approval_required("list_issues")  # from read_only_gitlab
-    assert registry.approval_required("get_issue")  # from read_only_gitlab
+    assert not registry.is_preapproved("list_issues")  # from read_only_gitlab
+    assert not registry.is_preapproved("get_issue")  # from read_only_gitlab
 
     # Tool that doesn't exist in enabled_tools but also not in preapproved list
-    assert registry.approval_required("nonexistent_tool")
+    assert not registry.is_preapproved("nonexistent_tool")
 
 
 def test_approval_required_returns_true_for_enabled_but_not_preapproved_tool(
@@ -754,17 +842,16 @@ def test_approval_required_returns_true_for_enabled_but_not_preapproved_tool(
     registry = ToolsRegistry(
         enabled_tools=["read_only_gitlab", "read_write_gitlab"],
         preapproved_tools=["read_only_gitlab"],  # only read tools pre-approved
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
-    # read_only_gitlab tools should not require approval
-    assert not registry.approval_required("list_issues")
-    assert not registry.approval_required("get_issue")
+    # read_only_gitlab tools should be preapproved
+    assert registry.is_preapproved("list_issues")
+    assert registry.is_preapproved("get_issue")
 
-    # read_write_gitlab tools should require approval (ask)
-    assert registry.approval_required("create_issue")
-    assert registry.approval_required("create_merge_request")
+    # read_write_gitlab tools should not be preapproved
+    assert not registry.is_preapproved("create_issue")
+    assert not registry.is_preapproved("create_merge_request")
 
 
 @pytest.mark.asyncio
@@ -803,10 +890,10 @@ async def test_registry_configuration_with_preapproved_tools(
     expected_preapproved = always_enabled_tools.union(read_write_tools)
 
     assert registry._preapproved_tool_names == expected_preapproved
-    assert registry.approval_required("run_command")
-    assert not registry.approval_required("handover_tool")
-    assert not registry.approval_required("add_new_task")
-    assert not registry.approval_required("edit_file")
+    assert not registry.is_preapproved("run_command")
+    assert registry.is_preapproved("handover_tool")
+    assert registry.is_preapproved("add_new_task")
+    assert registry.is_preapproved("edit_file")
 
 
 @pytest.mark.asyncio
@@ -834,13 +921,13 @@ async def test_registry_configuration_error(
             ["read_write_files", "use_git", "nonexistent_privilege"],
             ["read_files", "create_file_with_contents"],
             ["read_files", "create_file_with_contents", "extra_tool"],
-            set(["read_files", "create_file_with_contents"]),
+            {"read_files", "create_file_with_contents"},
         ),
         (
             ["read_write_files", "use_git", "run_mcp_tools"],
             ["read_files", "create_file_with_contents"],
             ["read_files", "create_file_with_contents", "extra_tool"],
-            set(["read_files", "create_file_with_contents"]),
+            {"read_files", "create_file_with_contents"},
         ),
         (
             ["read_write_files", "use_git"],
@@ -880,7 +967,6 @@ def test_toolset_method(
     registry = ToolsRegistry(
         enabled_tools=privileges,
         preapproved_tools=["read_write_files"],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=mcp_tools,
     )
@@ -911,7 +997,6 @@ def test_toolset_filters_denied_tools(tool_metadata):
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "read_only_gitlab"],
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
         denied_tools=["read_file", "list_issues"],
     )
@@ -927,7 +1012,6 @@ def test_toolset_filters_denied_mcp_tools(tool_metadata, mcp_tools):
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "run_mcp_tools"],
         preapproved_tools=[],
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
         mcp_tools=mcp_tools,
         denied_tools=["extra_tool"],
@@ -979,9 +1063,7 @@ async def test_registry_configuration_jwt_deny_overrides_workflow_config_preappr
     )
 
     # read_file is pre-approved via workflow_config but denied via JWT
-    assert not registry.approval_required(
-        "edit_file"
-    )  # other pre-approved tool unaffected
+    assert registry.is_preapproved("edit_file")  # other pre-approved tool unaffected
     toolset = registry.toolset(["read_file", "edit_file"])
     assert "read_file" not in toolset._all_tools
     assert "edit_file" in toolset._all_tools
@@ -998,7 +1080,6 @@ class TestGenericGitLabAPITools:
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1012,7 +1093,6 @@ class TestGenericGitLabAPITools:
         registry = ToolsRegistry(
             enabled_tools=["read_write_files"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1024,27 +1104,24 @@ class TestGenericGitLabAPITools:
         registry_preapproved = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=["read_only_gitlab"],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
-        assert not registry_preapproved.approval_required("gitlab_api_get")
-        assert not registry_preapproved.approval_required("gitlab_graphql")
+        assert registry_preapproved.is_preapproved("gitlab_api_get")
+        assert registry_preapproved.is_preapproved("gitlab_graphql")
 
         registry_not_preapproved = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
-        assert registry_not_preapproved.approval_required("gitlab_api_get")
-        assert registry_not_preapproved.approval_required("gitlab_graphql")
+        assert not registry_not_preapproved.is_preapproved("gitlab_api_get")
+        assert not registry_not_preapproved.is_preapproved("gitlab_graphql")
 
     def test_generic_tools_can_be_used_in_toolset(self, tool_metadata):
         """Test that generic tools can be requested in a toolset."""
         registry = ToolsRegistry(
             enabled_tools=["read_only_gitlab"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1067,7 +1144,6 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1085,7 +1161,6 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1103,7 +1178,6 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=[],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1129,7 +1203,6 @@ class TestCapabilityDependentTools:
                 ToolsRegistry(
                     enabled_tools=[],
                     preapproved_tools=[],
-                    tool_call_approvals={},
                     tool_metadata=tool_metadata,
                 )
 
@@ -1152,7 +1225,6 @@ class TestCapabilityDependentTools:
                 ToolsRegistry(
                     enabled_tools=[],
                     preapproved_tools=[],
-                    tool_call_approvals={},
                     tool_metadata=tool_metadata,
                 )
 
@@ -1166,7 +1238,6 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=["run_commands"],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
         )
 
@@ -1185,7 +1256,6 @@ class TestCapabilityDependentTools:
         registry = ToolsRegistry(
             enabled_tools=["run_commands"],
             preapproved_tools=[],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
             denied_tools=["run_command"],
         )
@@ -1200,210 +1270,289 @@ class TestCapabilityDependentTools:
 
 
 class TestToolCallApprovals:
-    """Tests for per-tool-call approval functionality."""
+    """Tests for tool call approval delegation to Rails."""
 
-    @staticmethod
-    def _hash_call_args(call_args: dict) -> str:
-        call_args_json = json.dumps(call_args, separators=(",", ":"))
-        return hashlib.sha256(call_args_json.encode()).hexdigest()
+    @pytest.mark.asyncio
+    async def test_preapproved_tools_skip_rails_call(self, tool_metadata):
+        """Preapproved tools are approved locally without calling Rails."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=["read_write_files"],
+            tool_metadata=tool_metadata,
+        )
 
-    def test_tool_call_approvals_basic_match(self, tool_metadata):
-        """Test that tool calls with matching arguments don't require approval."""
-        approved_args = {"path": "/tmp/test.txt"}
-        tool_call_approvals = {
-            "read_file": {"call_args": [self._hash_call_args(approved_args)]},
+        # Preapproved tools should not require approval regardless of args
+        assert not await registry.approval_required("read_file", {"path": "/any/path"})
+        assert not await registry.approval_required("read_file", {})
+
+    @pytest.mark.asyncio
+    async def test_non_preapproved_tool_calls_rails(self, tool_metadata):
+        """Non-preapproved tools delegate approval check to Rails via GraphQL."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
         }
 
         registry = ToolsRegistry(
             enabled_tools=["read_write_files"],
             preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        result = await registry.approval_required(
+            "read_file", {"path": "/tmp/test.txt"}
+        )
+        assert not result  # Rails says approved
+
+        mock_client.graphql.assert_called_once()
+        call_args = mock_client.graphql.call_args
+        assert call_args[0][1]["toolName"] == "read_file"
+        assert (
+            call_args[0][1]["workflowId"]
+            == "gid://gitlab/Ai::DuoWorkflows::Workflow/123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rails_returns_not_approved(self, tool_metadata):
+        """When Rails says not approved, approval is required."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": False}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        result = await registry.approval_required(
+            "read_file", {"path": "/tmp/test.txt"}
+        )
+        assert result  # Not approved → requires approval
+
+    @pytest.mark.asyncio
+    async def test_rails_call_failure_requires_approval(self, tool_metadata):
+        """If the Rails call fails, default to requiring approval."""
+        mock_client = AsyncMock()
+        mock_client.graphql.side_effect = Exception("connection error")
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        result = await registry.approval_required(
+            "read_file", {"path": "/tmp/test.txt"}
+        )
+        assert result  # Failure → requires approval (safe default)
+
+    @pytest.mark.asyncio
+    async def test_no_http_client_requires_approval(self, tool_metadata):
+        """Without an HTTP client, non-preapproved tools require approval."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
             tool_metadata=tool_metadata,
         )
 
-        # Matching arguments should not require approval
-        assert not registry.approval_required("read_file", approved_args)
+        result = await registry.approval_required(
+            "read_file", {"path": "/tmp/test.txt"}
+        )
+        assert result
 
-        # Non-matching arguments should require approval
-        assert registry.approval_required("read_file", {"path": "/tmp/other.txt"})
+    @pytest.mark.asyncio
+    async def test_tool_args_serialized_as_compact_json(self, tool_metadata):
+        """Tool args are serialized as compact JSON when sent to Rails."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
 
-        # Different tool should require approval (not in tool_call_approvals)
-        assert registry.approval_required("edit_file", {"path": "/tmp/test.txt"})
+        registry = ToolsRegistry(
+            enabled_tools=["run_commands"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="456",
+        )
 
-    def test_tool_call_approvals_multiple_approved_combinations(self, tool_metadata):
-        """Test that multiple approved argument combinations work correctly."""
-        approved_args_list = [
-            {"path": "/tmp/test.txt"},
-            {"path": "/tmp/allowed.txt"},
-            {"path": "/home/user/file.txt"},
+        await registry.approval_required(
+            "run_command", {"command": "git checkout main"}
+        )
+
+        call_args = mock_client.graphql.call_args
+        assert call_args[0][1]["toolCallArgs"] == '{"command":"git checkout main"}'
+
+    @pytest.mark.asyncio
+    async def test_non_serializable_args_requires_approval(self, tool_metadata):
+        """Non-JSON-serializable tool args should default to requiring approval."""
+        mock_client = AsyncMock()
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        result = await registry.approval_required(
+            "read_file",
+            {"path": object()},  # not JSON-serializable
+        )
+        assert result
+        mock_client.graphql.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_nodes_requires_approval(self, tool_metadata):
+        """Empty GraphQL nodes response should default to requiring approval."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {"duoWorkflowWorkflows": {"nodes": []}}
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        result = await registry.approval_required(
+            "read_file", {"path": "/tmp/test.txt"}
+        )
+        assert result
+
+    def test_is_preapproved(self, tool_metadata):
+        """Test the sync is_preapproved method."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files", "run_commands"],
+            preapproved_tools=["read_write_files"],
+            tool_metadata=tool_metadata,
+        )
+
+        assert registry.is_preapproved("read_file")
+        assert not registry.is_preapproved("run_command")
+
+    @pytest.mark.asyncio
+    async def test_approved_result_is_cached(self, tool_metadata):
+        """Approved tool calls are cached; subsequent checks skip GraphQL."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        args = {"path": "/tmp/test.txt"}
+        assert not await registry.approval_required("read_file", args)
+        assert not await registry.approval_required("read_file", args)
+
+        mock_client.graphql.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_different_args_not_served_from_cache(self, tool_metadata):
+        """Different tool args are separate cache entries and still call GraphQL."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        await registry.approval_required("read_file", {"path": "/tmp/a.txt"})
+        await registry.approval_required("read_file", {"path": "/tmp/b.txt"})
+
+        assert mock_client.graphql.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_same_args_different_key_order_hits_cache(self, tool_metadata):
+        """Semantically identical args with different key order should hit cache."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        await registry.approval_required(
+            "read_file", {"path": "/tmp/t.txt", "mode": "r"}
+        )
+        await registry.approval_required(
+            "read_file", {"mode": "r", "path": "/tmp/t.txt"}
+        )
+
+        mock_client.graphql.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_not_approved_result_is_not_cached(self, tool_metadata):
+        """Not-approved results must not be cached so new patterns can take effect."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": False}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
+        )
+
+        args = {"path": "/tmp/test.txt"}
+        assert await registry.approval_required("read_file", args)
+        assert await registry.approval_required("read_file", args)
+
+        assert mock_client.graphql.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_error_result_is_not_cached(self, tool_metadata):
+        """GraphQL errors must not be cached so retries can succeed."""
+        mock_client = AsyncMock()
+        mock_client.graphql.side_effect = [
+            Exception("connection error"),
+            {"duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}},
         ]
-        tool_call_approvals = {
-            "read_file": {
-                "call_args": [self._hash_call_args(args) for args in approved_args_list]
-            },
-        }
 
         registry = ToolsRegistry(
             enabled_tools=["read_write_files"],
             preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
             tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="123",
         )
 
-        # All approved combinations should not require approval
-        for approved_args in approved_args_list:
-            assert not registry.approval_required("read_file", approved_args)
+        args = {"path": "/tmp/test.txt"}
+        assert await registry.approval_required("read_file", args)
+        assert not await registry.approval_required("read_file", args)
 
-        # Non-approved path should require approval
-        assert registry.approval_required("read_file", {"path": "/tmp/unapproved.txt"})
-
-    def test_tool_call_approvals_invalid_format_logs_warning_and_requires_approval(
-        self, tool_metadata
-    ):
-        """Test invalid format: a warning is logged and approval is still required."""
-        tool_call_approvals = {
-            "read_file": {"path": "/tmp/test.txt"},
-        }
-
-        registry = ToolsRegistry(
-            enabled_tools=["read_write_files"],
-            preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
-            tool_metadata=tool_metadata,
-        )
-
-        # Invalid format should require approval
-        assert registry.approval_required("read_file", {"path": "/tmp/test.txt"})
-
-    def test_tool_call_approvals_with_preapproved_tools(self, tool_metadata):
-        """Test that preapproved tools always skip approval, regardless of tool_call_approvals."""
-        approved_args = {"path": "/tmp/test.txt"}
-        tool_call_approvals = {
-            "read_file": {"call_args": [self._hash_call_args(approved_args)]},
-        }
-
-        registry = ToolsRegistry(
-            enabled_tools=["read_write_files"],
-            preapproved_tools=[
-                "read_write_files"
-            ],  # All read_write_files tools preapproved
-            tool_call_approvals=tool_call_approvals,
-            tool_metadata=tool_metadata,
-        )
-
-        # Preapproved tools should never require approval, even for non-approved args
-        assert not registry.approval_required("read_file", {"path": "/tmp/test.txt"})
-        assert not registry.approval_required("read_file", {"path": "/tmp/other.txt"})
-        assert not registry.approval_required("read_file", {"path": "/any/path.txt"})
-
-    def test_tool_call_approvals_empty_args(self, tool_metadata):
-        """Test tool call approvals with empty arguments."""
-        tool_call_approvals = {
-            "list_issues": {
-                "call_args": [self._hash_call_args({})]
-            },  # Approve calls with no arguments
-        }
-
-        registry = ToolsRegistry(
-            enabled_tools=["read_only_gitlab"],
-            preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
-            tool_metadata=tool_metadata,
-        )
-
-        # Empty args should match approved empty dict
-        assert not registry.approval_required("list_issues", {})
-        assert not registry.approval_required(
-            "list_issues", None
-        )  # None converts to {}
-
-        # Args with values should require approval
-        assert registry.approval_required("list_issues", {"some_key": "value"})
-
-    def test_tool_call_approvals_complex_arguments(self, tool_metadata):
-        """Test tool call approvals with complex nested arguments."""
-        approved_args = {
-            "title": "Bug report",
-            "description": "Test description",
-            "labels": ["bug", "high-priority"],
-        }
-        tool_call_approvals = {
-            "create_issue": {"call_args": [self._hash_call_args(approved_args)]},
-        }
-
-        registry = ToolsRegistry(
-            enabled_tools=["read_write_gitlab"],
-            preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
-            tool_metadata=tool_metadata,
-        )
-
-        # Exact match should not require approval
-        assert not registry.approval_required("create_issue", approved_args)
-
-        # Different labels should require approval
-        assert registry.approval_required(
-            "create_issue",
-            {
-                "title": "Bug report",
-                "description": "Test description",
-                "labels": ["bug"],  # Different labels
-            },
-        )
-
-        # Different title should require approval
-        assert registry.approval_required(
-            "create_issue",
-            {
-                "title": "Different title",
-                "description": "Test description",
-                "labels": ["bug", "high-priority"],
-            },
-        )
-
-    def test_tool_call_approvals_not_in_approvals_dict(self, tool_metadata):
-        """Test that tools not in tool_call_approvals require approval by default."""
-        approved_args = {"path": "/tmp/test.txt"}
-        tool_call_approvals = {
-            "read_file": {"call_args": [self._hash_call_args(approved_args)]},
-        }
-
-        registry = ToolsRegistry(
-            enabled_tools=["read_write_files"],
-            preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
-            tool_metadata=tool_metadata,
-        )
-
-        # Tools not in tool_call_approvals should require approval
-        assert registry.approval_required("edit_file", {"path": "/tmp/test.txt"})
-        assert registry.approval_required("list_dir", {"path": "/tmp"})
-        assert registry.approval_required("grep", {"pattern": "test"})
-
-    def test_tool_call_approvals_integration_with_toolset(self, tool_metadata):
-        """Test that tool_call_approvals work correctly with toolset method."""
-        read_file_args = {"path": "/tmp/test.txt"}
-        edit_file_args = {"path": "/tmp/edit.txt"}
-        tool_call_approvals = {
-            "read_file": {"call_args": [self._hash_call_args(read_file_args)]},
-            "edit_file": {"call_args": [self._hash_call_args(edit_file_args)]},
-        }
-
-        registry = ToolsRegistry(
-            enabled_tools=["read_write_files"],
-            preapproved_tools=[],
-            tool_call_approvals=tool_call_approvals,
-            tool_metadata=tool_metadata,
-        )
-
-        # Create toolset with tools
-        registry.toolset(["read_file", "edit_file", "list_dir"])
-
-        # Verify that approval checks work through toolset
-        assert not registry.approval_required("read_file", read_file_args)
-        assert registry.approval_required("read_file", {"path": "/tmp/other.txt"})
-        assert not registry.approval_required("edit_file", edit_file_args)
-        assert registry.approval_required("list_dir", {"path": "/tmp"})
+        assert mock_client.graphql.call_count == 2
 
 
 class TestMcpToolApprovals:
@@ -1416,20 +1565,18 @@ class TestMcpToolApprovals:
         registry = ToolsRegistry(
             enabled_tools=["run_mcp_tools"],
             preapproved_tools=["run_mcp_tools"],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
             denied_tools=["create_issue"],  # unrelated deny
         )
 
-        assert not registry.approval_required("extra_tool")
+        assert registry.is_preapproved("extra_tool")
 
     def test_mcp_tool_denied_even_when_preapproved(self, tool_metadata, mcp_tools):
         """Deny should win over MCP pre-approval for the same tool."""
         registry = ToolsRegistry(
             enabled_tools=["run_mcp_tools"],
             preapproved_tools=["run_mcp_tools"],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
             denied_tools=["extra_tool"],
@@ -1450,12 +1597,11 @@ class TestMcpToolApprovals:
         registry = ToolsRegistry(
             enabled_tools=["run_mcp_tools"],
             preapproved_tools=["run_mcp_tools"],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
         )
 
-        assert not registry.approval_required("mcp__context7__get_docs")
+        assert registry.is_preapproved("mcp__context7__get_docs")
 
     def test_mcp_tool_server_prefixed_name_denied(self, tool_metadata):
         """MCP tools using mcp__SERVER__TOOL naming format should be deniable."""
@@ -1468,7 +1614,6 @@ class TestMcpToolApprovals:
         registry = ToolsRegistry(
             enabled_tools=["run_mcp_tools"],
             preapproved_tools=["run_mcp_tools"],
-            tool_call_approvals={},
             tool_metadata=tool_metadata,
             mcp_tools=mcp_tools,
             denied_tools=["mcp__context7__get_docs"],

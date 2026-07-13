@@ -31,16 +31,6 @@ log = structlog.stdlib.get_logger("workflow")
 
 DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 
-# editorconfig-checker-disable
-QUICK_ACTIONS_WARNING = """
-IMPORTANT: Do NOT include GitLab quick actions in the body, title, or description fields. Quick actions
-are lines starting with / (such as /label, /assign, /milestone, /close, /reopen, /approve) and will
-cause HTTP 403 errors with the message "Quick actions cannot be used with AI workflows". If you encounter
-quick actions in a template, remove them and use the dedicated tool parameters instead
-(e.g., use the labels parameter for labels, the assignee_ids parameter for assignments).
-"""
-# editorconfig-checker-enable
-
 # Tools with a version below this threshold are considered experimental
 # and are not exposed via the ListTools API.
 STABLE_VERSION_THRESHOLD = Version("1.0.0")
@@ -246,7 +236,7 @@ class DuoBaseTool(BaseTool):
             # Use the project_id from the URL
             return ProjectURLValidationResult(url_project_id, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return ProjectURLValidationResult(str(project_id), errors)
 
     def _validate_merge_request_url(
@@ -306,7 +296,7 @@ class DuoBaseTool(BaseTool):
                 url_project_id, url_merge_request_iid, errors
             )
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return MergeRequestValidationResult(
                 None if project_id is None else str(project_id),
                 merge_request_iid,
@@ -339,7 +329,7 @@ class DuoBaseTool(BaseTool):
             # Use the IDs from the URL
             return PipelineValidationResult(url_project_id, url_pipeline_iid, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return PipelineValidationResult(
                 None,
                 None,

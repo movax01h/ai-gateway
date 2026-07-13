@@ -1,5 +1,4 @@
 # pylint: disable=file-naming-for-tests
-# flake8: noqa: E122,E261
 import pytest
 
 from ai_gateway.code_suggestions.processing.ops import (
@@ -442,9 +441,10 @@ Cypress.on("before:run", () => { // don't care
             LanguageId.PYTHON,
             PYTHON_SAMPLE_TWO_CLASSES[1:],
             (25, 32),
-            # fmt: off
-            PYTHON_SAMPLE_TWO_CLASSES[1:438], # last line:'     def visit(self, node: Node):'
-"""
+            PYTHON_SAMPLE_TWO_CLASSES[
+                1:438
+            ],  # last line:'     def visit(self, node: Node):'
+            """
         # use self instead of the class name to access the overridden attribute
         if self._TARGET_SYMBOLS and node.type in self._TARGET_SYMBOLS:
             self._visit_node(node)
@@ -452,15 +452,13 @@ Cypress.on("before:run", () => { // don't care
     def _bytes_to_str(self, data: bytes) -> str:
         return data.decode("utf-8", errors="ignore")
 """[:-1],
-            # fmt: on
         ),
         (  # Test context at class within class, cursor within nested the class
             LanguageId.PYTHON,
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:],
             (4, 21),
-            # fmt: off
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:130],
-""": str = "length"
+            """: str = "length"
 
     class Model(BaseModel):
         engine: str
@@ -473,15 +471,13 @@ Cypress.on("before:run", () => { // don't care
     created: int
     choices: list[Choice]
 """[:-1],
-            # fmt: on
         ),
         (  # Test context at class within class, cursor within the 2nd nested class
             LanguageId.PYTHON,
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:],
             (7, 15),
-            # fmt: off
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:191],
-""" str
+            """ str
         name: str
         lang: str
 
@@ -491,22 +487,19 @@ Cypress.on("before:run", () => { // don't care
     created: int
     choices: list[Choice]
 """[:-1],
-            # fmt: on
         ),
         (  # Test context at class within class, cursor within outer class
             LanguageId.PYTHON,
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:],
             (11, 0),
-            # fmt: off
             PYTHON_SAMPLE_CLASS_WITHIN_CLASS[1:233],
-"""
+            """
     id: str
     model: Model
     object: str = "text_completion"
     created: int
     choices: list[Choice]
 """[1:-1],
-            # fmt: on
         ),
         (  # Test context at lexical declaration level
             LanguageId.JS,
@@ -536,7 +529,6 @@ Cypress.on("before:run", () => { // don't care
             JAVASCRIPT_TWO_CLASSES[1:],
             (3, 16),
             JAVASCRIPT_TWO_CLASSES[1:85],
-            # fmt: off
             """
  = species;
   }
@@ -545,21 +537,17 @@ Cypress.on("before:run", () => { // don't care
     console.log(`${this.name} makes a sound`);
   }
 }
-"""[1:-1]
-            # fmt: on
+"""[1:-1],
         ),
         (  # Test context function level
             LanguageId.JS,
-            # fmt: off
             JAVASCRIPT_FUNCTION_SAMPLE[1:],
             (2, 0),
             JAVASCRIPT_FUNCTION_SAMPLE[1:51],
-            "    eval(myeval);\n}"
-            # fmt: on
+            "    eval(myeval);\n}",
         ),
         (  # Test context generator function level
             LanguageId.JS,
-            # fmt: off
             JAVASCRIPT_GENERATOR_FUNCTION_SAMPLE[1:],
             (5, 0),
             JAVASCRIPT_GENERATOR_FUNCTION_SAMPLE[1:127],
@@ -567,24 +555,20 @@ Cypress.on("before:run", () => { // don't care
   yield* animalSounds(name, 'Dog');
   yield `${name} the ${breed} barks`;
 }
-"""[1:-1]
-            # fmt: on
+"""[1:-1],
         ),
         (  # Test context generator function within arrow function
             LanguageId.JS,
-            # fmt: off
             JAVASCRIPT_LEXICAL_WITH_GENERATOR_SAMPLE[1:],
             (6, 0),
             JAVASCRIPT_LEXICAL_WITH_GENERATOR_SAMPLE[1:208],
             """
   yield `${name} the ${breed} barks`;
 };
-"""[1:-1]
-            # fmt: on
+"""[1:-1],
         ),
         (  # Test context function within function, cursor within inner function
             LanguageId.JS,
-            # fmt: off
             JAVASCRIPT_FUNCTION_WITHIN_FUNCTION[1:],
             (4, 0),
             JAVASCRIPT_FUNCTION_WITHIN_FUNCTION[1:104],
@@ -598,12 +582,10 @@ Cypress.on("before:run", () => { // don't care
 
   innerFunction(); // Call the inner function
 }
-"""[1:-1]
-            # fmt: on
+"""[1:-1],
         ),
         (  # Test context function within function, cursor within a generator function
             LanguageId.JS,
-            # fmt: off
             JAVASCRIPT_FUNCTION_WITHIN_FUNCTION[1:],
             (8, 0),
             JAVASCRIPT_FUNCTION_WITHIN_FUNCTION[1:191],
@@ -619,26 +601,22 @@ Cypress.on("before:run", () => { // don't care
             LanguageId.TS,
             TYPESCRIPT_INTERFACE_SAMPLE[1:],
             (3, 0),
-            # fmt: off
             TYPESCRIPT_INTERFACE_SAMPLE[1:61],
-"""
+            """
   age: number;
   sayHello: () => void;
 }
 """[1:-1],
-            # fmt: on
         ),
         (  # TS: Test interface
             LanguageId.TS,
             TYPESCRIPT_CALL_EXPRESSION_SAMPLE[1:],
             (4, 0),
-            # fmt: off
             TYPESCRIPT_CALL_EXPRESSION_SAMPLE[1:115],
-"""
+            """
   return false;
 })
 """[1:-1],
-            # fmt: on
         ),
     ],
 )

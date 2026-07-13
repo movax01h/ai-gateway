@@ -4,6 +4,8 @@ include:
 tests:unit:
   extends: .poetry
   stage: test
+  tags:
+    - saas-linux-large-amd64
   needs:
     - install
   script:
@@ -126,17 +128,29 @@ check-dws-dependencies:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 sanity-tests:
-  # Runs SWE Bench tests on a small set of problems that are consistently resolved by Duo Workflow.
-  <<: *test-base
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}alpine:3.24
+  stage: test
+  needs: []
   allow_failure: true # TODO: to be removed once swe-bench pipelines are stable enough
-  needs:
-    - check-dws-dependencies
   rules:
+    # Manual trigger on any AIGW merge request. Kept manual because the eval
+    # takes ~30 minutes, so authors run it on demand (see MR checklist).
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes: !reference [.duo-workflow-service-dependencies, changes]
+      when: manual
   variables:
-    <<: *test-variables
-    LS_DATASET_SPLIT: "solved_consistently_sm"
+    CEF_SERVICE_URL: "https://cef.runway.gitlab.net"
+    # Polling controls: interval between polls and overall timeout (seconds).
+    CEF_POLL_INTERVAL: "60"
+    CEF_POLL_TIMEOUT: "5400"
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      ./scripts/submit_cef_eval.sh \
+        "master" \
+        "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-$CI_COMMIT_SHA}" \
+        "$CI_PROJECT_PATH" \
+        "AIGW sanity-tests CI: pipeline $CI_PIPELINE_ID"
 
 regression-tests:
   <<: *test-base
@@ -177,7 +191,7 @@ feature-tests:
 
 check-proto-go:
   extends: [.proto-variables]
-  image: golang:${GO_VERSION}-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}golang:${GO_VERSION}-${DEBIAN_VERSION}
   stage: test
   script:
     - apt update
@@ -192,7 +206,7 @@ check-proto-go:
 
 check-proto-python:
   extends: [.proto-variables]
-  image: python:${PYTHON_VERSION}-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:${PYTHON_VERSION}-${DEBIAN_VERSION}
   stage: test
   script:
     - pip install poetry==${POETRY_VERSION}
@@ -207,7 +221,7 @@ check-proto-python:
 
 check-proto-ruby:
   extends: [.proto-variables]
-  image: ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
   stage: test
   script:
     - make gen-proto-ruby
@@ -220,7 +234,7 @@ check-proto-ruby:
 
 check-proto-node:
   extends: [.proto-variables]
-  image: node:18-${DEBIAN_VERSION}
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:18-${DEBIAN_VERSION}
   stage: test
   script:
     - make gen-proto-node

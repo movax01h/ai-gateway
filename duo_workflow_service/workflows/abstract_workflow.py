@@ -17,6 +17,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchain-imports
     BaseCheckpointSaver,
 )
+from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
+    GraphRecursionError,
+)
 from langgraph.types import Command
 from langsmith import traceable, tracing_context
 from pydantic import BaseModel, ConfigDict
@@ -24,6 +27,7 @@ from pydantic import BaseModel, ConfigDict
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -37,12 +41,17 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.checkpointer.node_lifecycle import (
+    NodeEventLog,
+    NodeLifecycleCallbackHandler,
+)
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
 from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
+    InvalidRequestException,
     NamespaceLevelWorkflowNotSupportedException,
     NotifiableException,
 )
@@ -79,12 +88,12 @@ from lib.internal_events import InternalEventAdditionalProperties, InternalEvent
 from lib.internal_events.event_enum import EventEnum
 from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
+from lib.verbose_ai_logs import is_extended_logging_enabled
 
 # Constants
 QUEUE_MAX_SIZE = 1
 STREAMING_QUEUE_MAX_SIZE = 10
 MAX_TOKENS_TO_SAMPLE = 8192
-RECURSION_LIMIT = 300
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 
@@ -138,6 +147,7 @@ class AbstractWorkflow(ABC):
         ],
         language_server_version: Optional[LanguageServerVersion] = None,
         preapproved_tools: Optional[list[str]] = [],
+        streaming: bool = False,  # pylint: disable=unused-argument
         audit_event_enabled: bool = Provide[
             ContainerApplication.audit_event.config.enabled  # type: ignore[attr-defined]
         ],
@@ -179,19 +189,23 @@ class AbstractWorkflow(ABC):
         with duo_workflow_metrics.time_workflow(
             workflow_type=self._workflow_type.value
         ):
-            extended_logging = self._workflow_metadata.get("extended_logging", False)
+            extended_logging = is_extended_logging_enabled()
+            monitoring_context: MonitoringContext = current_monitoring_context.get()
+
             tracing_metadata = {
                 "git_url": self._workflow_metadata.get("git_url", ""),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
                 "workflow_type": self._workflow_type.value,
                 "thread_id": self._workflow_id,
+                # Flow versioning identifiers, populated for registry/inline flows only
+                # (legacy flows leave these unset, so they are omitted).
+                **monitoring_context.flow_versioning_fields(),
             }
 
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
             tracing_enabled = extended_logging and (langsmith_tracing_v2_env != "false")
 
-            monitoring_context: MonitoringContext = current_monitoring_context.get()
             monitoring_context.tracing_enabled = str(tracing_enabled)
             monitoring_context.use_ai_prompt_scanning = is_feature_enabled(
                 FeatureFlag.AI_PROMPT_SCANNING
@@ -339,6 +353,10 @@ class AbstractWorkflow(ABC):
     async def _compile_and_run_graph(self, goal: str) -> str | None:
         audit_collector = await self._init_audit_events(goal)
 
+        # Append-only log of node-lifecycle events for live flow visualization.
+        # Fed by the callback handler below and drained by the checkpoint
+        # notifier when composing checkpoints.
+        node_event_log = NodeEventLog()
         callbacks: list[BaseCallbackHandler] = (
             [
                 AuditEventCallbackHandler(
@@ -348,6 +366,7 @@ class AbstractWorkflow(ABC):
             if audit_collector
             else []
         )
+        callbacks.append(NodeLifecycleCallbackHandler(node_event_log))
         graph_config: RunnableConfig = {
             "recursion_limit": self._recursion_limit(),
             "configurable": {"thread_id": self._workflow_id},
@@ -355,14 +374,18 @@ class AbstractWorkflow(ABC):
         }
         last_state = None
         compiled_graph = None
-        self.checkpoint_notifier = UserInterface(outbox=self._outbox, goal=goal)
+        self.checkpoint_notifier = UserInterface(
+            outbox=self._outbox, goal=goal, node_event_log=node_event_log
+        )
 
         try:
-            self._project, self._namespace, self._workflow_config = (
-                await fetch_workflow_and_container_data(
-                    client=self._http_client,
-                    workflow_id=self._workflow_id,
-                )
+            (
+                self._project,
+                self._namespace,
+                self._workflow_config,
+            ) = await fetch_workflow_and_container_data(
+                client=self._http_client,
+                workflow_id=self._workflow_id,
             )
 
             self._merge_jwt_governance_claims()
@@ -389,6 +412,7 @@ class AbstractWorkflow(ABC):
                 workflow_config=self._workflow_config,
                 gl_http_client=self._http_client,
                 project=self._project,
+                workflow_id=self._workflow_id,
                 mcp_tools=(
                     self._mcp_tools
                     if self._workflow_config.get("mcp_enabled", False)
@@ -462,8 +486,23 @@ class AbstractWorkflow(ABC):
         is_notifiable = isinstance(e, NotifiableException)
         is_notifiable_agent = isinstance(e, NotifiableAgentException)
         is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+        is_invalid_request = isinstance(e, InvalidRequestException)
+
+        if isinstance(e, GraphRecursionError):
+            msg = "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated"
+            self.log.error(msg, recursion_limit=RECURSION_LIMIT)  # fmt: skip
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
+
+        # InvalidRequestException: the input itself was invalid (e.g. an empty goal
+        # on resume).  We must NOT transition the workflow to FAILED — the Rails state
+        # must remain unchanged so the user can correct their input and retry.  We also
+        # must NOT send an error UI event to the client (that would corrupt the chat
+        # log).  The gRPC status is set to INVALID_ARGUMENT by the server layer so the
+        # caller gets a clear signal that the input was wrong.  Skip all side-effects
+        # and terminate.
+        if is_invalid_request:
+            raise TraceableException(e)
 
         # NotifiableException is chat-specific and carries its own UI semantics; the
         # send_event below surfaces str(e) directly so subclass _handle_workflow_failure
@@ -503,16 +542,21 @@ class AbstractWorkflow(ABC):
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=f"error-{str(uuid4())}",
+                    message_id=f"error-{uuid4()!s}",
                 )
             ]
 
-        assert self.checkpoint_notifier is not None
-        await self.checkpoint_notifier.send_event(
-            type="values",
-            state={"status": status, "ui_chat_log": ui_chat_log},
-            stream=self._stream,
-        )
+        if self.checkpoint_notifier:
+            await self.checkpoint_notifier.send_event(
+                type="values",
+                state={"status": status, "ui_chat_log": ui_chat_log},
+                stream=self._stream,
+            )
+        else:
+            self.log.warning(
+                "checkpoint_notifier is None; error status event not sent to client",
+                workflow_id=self._workflow_id,
+            )
 
         raise TraceableException(e)
 
@@ -589,4 +633,4 @@ class TraceableException(Exception):
         super().__init__(str(original_exception))
 
     def __repr__(self):
-        return f"<TraceableException wrapping {repr(self.original_exception)}>"
+        return f"<TraceableException wrapping {self.original_exception!r}>"

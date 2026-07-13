@@ -3,6 +3,8 @@ description: Tracks successful Duo Workflow executions
 internal_events: true
 action: request_duo_workflow_success
 product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: Workflow event type label

@@ -99,7 +99,8 @@ LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER = {
     "vertex-ai/codestral-2508": "codestral_2508_vertex",  # Set from the model provider handler for default case
     "fireworks_ai/codestral-2501": "codestral_2501_fireworks",
     "fireworks_ai/codestral-2508": "codestral_2508_fireworks",
-    "anthropic/claude-sonnet-4-20250514": "claude_sonnet_4_20250514",
+    "anthropic/claude-sonnet-4-20250514": "claude_sonnet_4_5_20250929",
+    "anthropic/claude-sonnet-4-5-20250929": "claude_sonnet_4_5_20250929",
 }
 
 

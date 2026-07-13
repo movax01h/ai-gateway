@@ -1,0 +1,929 @@
+import base64
+import json
+from unittest.mock import AsyncMock, _Call, patch
+
+import pytest
+from langchain_core.tools import ToolException
+
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
+    BuildReviewMergeRequestContext,
+    BuildReviewMergeRequestContextInput,
+)
+
+
+@pytest.fixture(name="mr_data")
+def mr_data_fixture():
+    return {
+        "id": 123,
+        "title": "Implement calculator method",
+        "description": "Add subtract method to calculator",
+        "target_branch": "main",
+        "source_branch": "feature",
+    }
+
+
+@pytest.fixture(name="diffs_data")
+def diffs_data_fixture():
+    return [
+        {
+            "old_path": "calculator.rb",
+            "new_path": "calculator.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -4,7 +4,7 @@ class Calculator\n   end\n \n   def subtract(a, b)\n-    # TODO: Implement\n+    a + b\n   end\n end",
+        },
+        {
+            "old_path": "app.log",
+            "new_path": "app.log",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1,3 +1,3 @@\n-old log\n+new log",
+        },
+        {
+            "old_path": "generated.js",
+            "new_path": "generated.js",
+            "new_file": False,
+            "generated_file": True,
+            "renamed_file": False,
+            "diff": "@@ -1,3 +1,3 @@\n-old\n+new",
+        },
+    ]
+
+
+@pytest.fixture(name="diffs_data_with_renames")
+def diffs_data_with_renames_fixture():
+    return [
+        {
+            "old_path": "todo.rb",
+            "new_path": "calculator.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": True,
+            "diff": "@@ -4,7 +4,7 @@ class Calculator\n   end\n \n   def subtract(a, b)\n-    # TODO: Implement\n+    a + b\n   end\n end",
+        },
+        {
+            "old_path": "app.log",
+            "new_path": "app.log",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1,3 +1,3 @@\n-old log\n+new log",
+        },
+        {
+            "old_path": "generated.js",
+            "new_path": "generated.js",
+            "new_file": False,
+            "generated_file": True,
+            "renamed_file": False,
+            "diff": "@@ -1,3 +1,3 @@\n-old\n+new",
+        },
+        {
+            "old_path": "README.md",
+            "new_path": "Calculator.md",
+            "new_file": False,
+            "generated_file": True,
+            "renamed_file": True,
+            "diff": "",  # This is a renamed file that has no content change
+        },
+    ]
+
+
+@pytest.fixture(name="custom_instructions_yaml")
+def custom_instructions_yaml_fixture():
+    yaml_content = """---
+instructions:
+    - name: Ruby Code Quality
+        fileFilters:
+            - "**/*.rb"
+        instructions: |
+            1. Ensure proper error handling
+            2. Follow Ruby naming conventions
+"""
+    return {"content": base64.b64encode(yaml_content.encode("utf-8")).decode("utf-8")}
+
+
+def test_parse_and_format_diff(metadata):
+    """Test that raw diffs are correctly parsed into structured format."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,3 +1,4 @@ class Calculator
+def add(a, b)
+-  a + b
++  a - b
+end"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    # Check chunk header
+    assert "<chunk_header>@@ -1,3 +1,4 @@ class Calculator</chunk_header>" in result
+
+    # Check context line
+    assert (
+        '<line type="context" old_line="1" new_line="1">def add(a, b)</line>' in result
+    )
+
+    # Check deleted line
+    assert '<line type="deleted" old_line="2" new_line="">  a + b</line>' in result
+
+    # Check added line
+    assert '<line type="added" old_line="" new_line="2">  a - b</line>' in result
+
+    # Check context line
+    assert '<line type="context" old_line="3" new_line="3">end</line>' in result
+
+
+def test_parse_and_format_diff_with_special_characters(metadata):
+    """Test that special XML characters are properly escaped."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,1 +1,1 @@
+-if x < 5 && y > 3:
++if x < 10 && y > 5:"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    # Check that < > & are escaped
+    assert "<" in result
+    assert ">" in result
+    assert "&&" in result
+    assert '<line type="deleted"' in result
+    assert '<line type="added"' in result
+
+
+def test_parse_and_format_diff_with_empty_lines(metadata):
+    """Test that empty lines are properly handled."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,4 +1,4 @@
+class Calculator
+-
++  # New comment
+end"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    # Check that empty lines are included
+    assert (
+        '<line type="context" old_line="1" new_line="1">class Calculator</line>'
+        in result
+    )
+    assert '<line type="deleted" old_line="2" new_line=""></line>' in result
+    assert (
+        '<line type="added" old_line="" new_line="2">  # New comment</line>' in result
+    )
+
+
+def test_parse_and_format_diff_binary_file(metadata):
+    """Test that binary files return empty string."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = "Binary files differ"
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    assert result == ""
+
+
+def test_parse_and_format_diff_no_newline_at_end(metadata):
+    """Test handling of 'No newline at end of file' marker."""
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    raw_diff = """@@ -1,2 +1,2 @@
+line 1
+-line 2
+\\ No newline at end of file
++line 2"""
+
+    result = tool._parse_and_format_diff(raw_diff)
+
+    assert '<line type="context"' in result
+    assert '<line type="deleted"' in result
+    assert '<line type="nonewline"' in result
+    assert "No newline at end of file" in result
+    assert '<line type="added"' in result
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_fetches_all_diff_pages(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+):
+    """Diffs spanning multiple API pages are all included in the review context."""
+    diffs_page_1 = [
+        {
+            "old_path": "file_a.rb",
+            "new_path": "file_a.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1 +1 @@\n-old\n+new",
+        }
+    ]
+    diffs_page_2 = [
+        {
+            "old_path": "file_b.rb",
+            "new_path": "file_b.rb",
+            "new_file": False,
+            "generated_file": False,
+            "renamed_file": False,
+            "diff": "@@ -1 +1 @@\n-old\n+new",
+        }
+    ]
+    file_content = {"content": base64.b64encode(b"content").decode("utf-8")}
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200,
+                body=json.dumps(diffs_page_1),
+                headers={"X-Next-Page": "2"},
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_page_2)),
+            GitLabHttpResponse(status_code=200, body=json.dumps({"instructions": []})),
+            GitLabHttpResponse(status_code=200, body=json.dumps(file_content)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert '<file_diff filename="file_a.rb">' in response
+    assert '<file_diff filename="file_b.rb">' in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_basic_success(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    original_file_content = {
+        "content": base64.b64encode(
+            b"class Calculator\n  def subtract(a, b)\n    # TODO: Implement\n  end\nend"
+        ).decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "Here are the merge request details for you to review:" in response
+    assert "<input>" in response
+    assert "<mr_title>" in response
+    assert "Implement calculator method" in response
+    assert "<mr_description>" in response
+    assert "Add subtract method to calculator" in response
+    assert "<git_diffs>" in response
+
+    # Check new structured diff format
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "<chunk_header>" in response
+    assert '<line type="context"' in response
+    assert '<line type="deleted"' in response
+    assert '<line type="added"' in response
+    assert "</file_diff>" in response
+
+    # Verify excluded files are not present
+    assert "app.log" not in response
+    assert "generated.js" not in response
+
+    assert "<original_files>" in response
+    assert "</input>" in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_with_renames(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data_with_renames,
+):
+    original_file_content = {
+        "content": base64.b64encode(
+            b"class Calculator\n  def subtract(a, b)\n    # TODO: Implement\n  end\nend"
+        ).decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(diffs_data_with_renames)
+            ),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "Here are the merge request details for you to review:" in response
+    assert "<input>" in response
+    assert "<mr_title>" in response
+    assert "Implement calculator method" in response
+    assert "<mr_description>" in response
+    assert "Add subtract method to calculator" in response
+    assert "<git_diffs>" in response
+
+    # Check new structured diff format
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "<chunk_header>" in response
+    assert '<line type="context"' in response
+    assert '<line type="deleted"' in response
+    assert '<line type="added"' in response
+    assert "</file_diff>" in response
+
+    assert "<renamed_files>" in response
+    assert "</renamed_files>" in response
+
+    # Check renamed files
+    assert '<file old_path="README.md" new_path="Calculator.md"></file>' in response
+    assert '<file old_path="todo.rb" new_path="calculator.rb"></file>' in response
+
+    # Verify excluded files are not present
+    assert "app.log" not in response
+    assert "generated.js" not in response
+
+    assert "<original_files>" in response
+    assert "</input>" in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_only_diffs(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=404, body=json.dumps({"message": "404 Not Found"})
+            ),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
+    )
+
+    assert "Here are the merge request details for you to review:" in response
+    assert "<input>" in response
+    assert "<mr_title>" in response
+    assert "Implement calculator method" in response
+    assert "<git_diffs>" in response
+
+    # Check structured format
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "<line type=" in response
+
+    assert "<original_files>" not in response
+    assert "<custom_instructions>" not in response
+    assert gitlab_client_mock.aget.call_count == 3
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_only_diffs_with_custom_instructions(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    custom_instructions_yaml,
+):
+    """Test that custom instructions are included when only_diffs=True."""
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "1. Ensure proper error handling\n2. Follow Ruby naming conventions",
+            }
+        ]
+    }
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+        ]
+    )
+
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id="test%2Fproject", merge_request_iid=123, only_diffs=True
+    )
+
+    # Should include custom instructions
+    assert "<custom_instructions>" in response
+    assert "Ruby Code Quality" in response
+
+    # Should NOT include original files
+    assert "<original_files>" not in response
+
+    # Should include diffs
+    assert '<file_diff filename="calculator.rb">' in response
+
+    # Verify only 3 API calls (MR data, diffs, custom instructions)
+    assert gitlab_client_mock.aget.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_skips_large_files(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    large_file_content = "\n".join([f"line {i}" for i in range(10001)])
+    large_file_encoded = {
+        "content": base64.b64encode(large_file_content.encode("utf-8")).decode("utf-8")
+    }
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(large_file_encoded)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<original_files>" not in response
+    assert '<file_diff filename="calculator.rb">' in response
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_with_custom_instructions(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    custom_instructions_yaml,
+):
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "1. Ensure proper error handling\n2. Follow Ruby naming conventions",
+            }
+        ]
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "custom_instructions" in response
+    assert "Ruby Code Quality" in response
+    assert "Apply these additional review instructions to matching files:" in response
+    assert "According to custom instructions in" in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_with_url(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    original_file_content = {
+        "content": base64.b64encode(b"original content").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/merge_requests/123"
+    )
+
+    assert "Implement calculator method" in response
+    assert "<input>" in response
+    assert "<file_diff filename=" in response
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_no_matching_custom_instructions(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    custom_instructions_yaml,
+):
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "JavaScript Rules",
+                "fileFilters": ["*.js", "**/*.ts"],
+                "instructions": "JavaScript and TypeScript specific rules",
+            }
+        ]
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<custom_instructions>" not in response
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_nested_vs_root_patterns(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    custom_instructions_yaml,
+):
+    nested_diffs_data = [
+        {
+            "diff": "@@ -1,3 +1,4 @@ class Calculator",
+            "new_path": "calculator.rb",
+            "old_path": "calculator.rb",
+            "new_file": False,
+            "generated_file": False,
+        },
+        {
+            "diff": "@@ -1,3 +1,4 @@ module Models",
+            "new_path": "app/models/user.rb",
+            "old_path": "app/models/user.rb",
+            "new_file": False,
+            "generated_file": False,
+        },
+    ]
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Nested Ruby Files Only",
+                "fileFilters": ["**/*.rb"],
+                "instructions": "Rules for nested Ruby files",
+            },
+            {
+                "name": "All Ruby Files",
+                "fileFilters": ["*.rb", "**/*.rb"],
+                "instructions": "Rules for all Ruby files",
+            },
+        ]
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(nested_diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "Nested Ruby Files Only" in response
+    assert "All Ruby Files" in response
+    assert "<custom_instructions>" in response
+
+
+@pytest.mark.parametrize(
+    "input_data,expected_message",
+    [
+        (
+            BuildReviewMergeRequestContextInput(project_id=42, merge_request_iid=123),
+            "Build review context for merge request !123 in project 42",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                project_id=42, merge_request_iid=123, only_diffs=True
+            ),
+            "Build review context for merge request !123 in project 42 (diffs only)",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                url="https://gitlab.com/namespace/project/-/merge_requests/42"
+            ),
+            "Build review context for merge request https://gitlab.com/namespace/project/-/merge_requests/42",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                url="https://gitlab.com/namespace/project/-/merge_requests/42",
+                only_diffs=True,
+            ),
+            "Build review context for merge request https://gitlab.com/namespace/project/-/merge_requests/42 (diffs only)",
+        ),
+        (
+            BuildReviewMergeRequestContextInput(
+                project_id=42, merge_request_iid=123, lightweight=True
+            ),
+            "Build review context for merge request !123 in project 42 (lightweight)",
+        ),
+    ],
+)
+def test_build_review_context_format_display_message(input_data, expected_message):
+    tool = BuildReviewMergeRequestContext(description="Build review context")
+    message = tool.format_display_message(input_data)
+    assert message == expected_message
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_validation_error(gitlab_client_mock, metadata):
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    with pytest.raises(ToolException):
+        await tool._arun()
+    gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_exception(gitlab_client_mock, metadata):
+    error_message = "API error"
+    gitlab_client_mock.aget = AsyncMock(side_effect=Exception(error_message))
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    with pytest.raises(Exception, match=error_message):
+        await tool._arun(project_id="test", merge_request_iid=123)
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_no_files_content(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+):
+    new_files_diffs = [
+        {
+            "old_path": "",
+            "new_path": "new_file.rb",
+            "new_file": True,
+            "generated_file": False,
+            "diff": "@@ -0,0 +1,3 @@\n+class NewFile\n+end",
+        }
+    ]
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(new_files_diffs)),
+            Exception("Custom instructions not found"),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<original_files>" not in response
+    assert '<file_diff filename="new_file.rb">' in response
+    assert '<line type="added"' in response
+
+
+def _aget_path(call: _Call) -> str:
+    """Return the request path of a gitlab_client.aget call (positional or kwarg)."""
+    if call.args:
+        return call.args[0]
+    return call.kwargs.get("path", "")
+
+
+@pytest.mark.asyncio
+@patch("yaml.safe_load")
+async def test_build_review_context_reads_instructions_from_default_branch(
+    mock_yaml_load,
+    gitlab_client_mock,
+    project_mock,
+    metadata,
+    diffs_data,
+    custom_instructions_yaml,
+):
+    """Custom instructions must be read from the project's default branch, not the attacker-controllable MR target
+    branch (security regression for #601482).
+
+    Original file contents stay on the target branch (data under review).
+    """
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "Follow Ruby naming conventions",
+            }
+        ]
+    }
+    mr_data = {
+        "id": 123,
+        "title": "Title",
+        "description": "Description",
+        "target_branch": "not-main",
+        "source_branch": "feature",
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "Ruby Code Quality" in response
+
+    instruction_calls = [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "mr-review-instructions" in _aget_path(call)
+    ]
+    assert len(instruction_calls) == 1
+    # Read from the default branch, NOT the MR target branch ("not-main").
+    assert instruction_calls[0].kwargs["params"] == {"ref": "main"}
+
+    original_file_calls = [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "repository/files" in _aget_path(call)
+        and "mr-review-instructions" not in _aget_path(call)
+    ]
+    assert original_file_calls
+    # Original files are still fetched from the target branch (data under review).
+    assert all(
+        call.kwargs["params"] == {"ref": "not-main"} for call in original_file_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_no_default_branch_skips_instructions(
+    gitlab_client_mock,
+    project_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    """When the project has no resolvable default branch, no instructions file is fetched and custom instructions
+    resolve to empty."""
+    project_mock["default_branch"] = None
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert "<custom_instructions>" not in response
+    # No attempt to fetch the instructions file when default branch is unknown.
+    assert not [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "mr-review-instructions" in _aget_path(call)
+    ]
+
+
+class TestFormatDiffLinks:
+    WEB_URL = "https://gitlab.com/group/project/-/merge_requests/1"
+
+    def test_returns_empty_when_no_web_url(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        result = tool._format_diff_links(
+            {"web_url": "", "diff_refs": {"head_sha": "abc123"}}, {"app.rb": "diff"}
+        )
+        assert result == ""
+
+    def test_returns_empty_when_web_url_missing(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        result = tool._format_diff_links({}, {"app.rb": "diff"})
+        assert result == ""
+
+    def test_returns_empty_when_no_head_sha(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        result = tool._format_diff_links({"web_url": self.WEB_URL}, {"app.rb": "diff"})
+        assert result == ""
+
+    def test_returns_empty_when_diffs_empty(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        result = tool._format_diff_links(
+            {"web_url": self.WEB_URL, "diff_refs": {"head_sha": "abc123"}}, {}
+        )
+        assert result == ""
+
+    def test_single_file_pins_to_head_sha(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        mr_data = {"web_url": self.WEB_URL, "diff_refs": {"head_sha": "abc123def"}}
+        diffs = {"app/models/user.rb": "diff content"}
+
+        result = tool._format_diff_links(mr_data, diffs)
+
+        assert result.startswith("<diff_links>")
+        assert result.endswith("</diff_links>")
+        assert 'path="app/models/user.rb"' in result
+        assert (
+            'url="https://gitlab.com/group/project/-/blob/abc123def/'
+            'app/models/user.rb"' in result
+        )
+        # No anchor-hash replication of monolith internals.
+        assert "diffs#" not in result
+        assert "hash=" not in result
+
+    def test_falls_back_to_top_level_sha(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        mr_data = {"web_url": self.WEB_URL, "sha": "deadbeef"}
+        diffs = {"app.rb": "diff content"}
+
+        result = tool._format_diff_links(mr_data, diffs)
+
+        assert 'url="https://gitlab.com/group/project/-/blob/deadbeef/app.rb"' in result
+
+    def test_head_sha_takes_precedence_over_sha(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        mr_data = {
+            "web_url": self.WEB_URL,
+            "sha": "deadbeef",
+            "diff_refs": {"head_sha": "abc123def"},
+        }
+        diffs = {"app.rb": "diff content"}
+
+        result = tool._format_diff_links(mr_data, diffs)
+
+        assert "/blob/abc123def/" in result
+        assert "deadbeef" not in result
+
+    def test_encodes_special_chars_in_path(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        mr_data = {"web_url": self.WEB_URL, "diff_refs": {"head_sha": "abc123"}}
+        diffs = {"dir/a file.rb": "diff content"}
+
+        result = tool._format_diff_links(mr_data, diffs)
+
+        # Slashes are preserved, spaces are percent-encoded.
+        assert "/blob/abc123/dir/a%20file.rb" in result
+        assert 'path="dir/a file.rb"' in result
+
+    def test_multiple_files(self, metadata):
+        tool = BuildReviewMergeRequestContext(metadata=metadata)
+        mr_data = {"web_url": self.WEB_URL, "diff_refs": {"head_sha": "abc123"}}
+        diffs = {"file_a.py": "diff", "file_b.py": "diff"}
+
+        result = tool._format_diff_links(mr_data, diffs)
+
+        assert result.count("<file ") == 2
+        for path in diffs:
+            assert f'path="{path}"' in result

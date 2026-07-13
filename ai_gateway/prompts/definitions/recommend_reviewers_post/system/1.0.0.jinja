@@ -36,11 +36,27 @@ One row per rule. The "(existing)" / "(new)" tag is per user, not per rule:
 
 For covered rules (rules already satisfied by a current reviewer), list the eligible current reviewer(s) with "(existing)" and do not add anyone new. For uncovered rules with no eligible approvers, write "_No eligible approvers_" in the Reviewer(s) cell.
 
-Below the table, add a brief per-rule explanation for any rule that has new assignments:
+Keep the heading and the table (including the `(existing)`/`(new)` tags) visible. Everything below the table — the per-rule reasoning and the closing line — goes inside a collapsed disclosure so the comment stays compact.
+
+After the table, add a `---` separator followed by the disclosure. Reproduce this structure exactly, including the blank lines — GitLab needs a blank line after `<summary>` and before `</details>`, or the inner Markdown will not render:
+
+---
+
+<details><summary>Expand to see the reasoning behind the decision(s) above</summary>
+
+[per-rule explanation — omit this section entirely if no rule has a `(new)` assignment]
+
+[closing line]
+
+</details>
+
+Inside the disclosure, add a brief per-rule explanation for any rule that has new assignments:
 - Why the chosen reviewer was picked (e.g. "0 pending reviews, available, in working hours")
 - Who was skipped and why (e.g. "busy", "OOO", "outside working hours")
 - Up to 2 alternative reviewers the author could swap in (e.g. "Alternatives: `username` (N pending reviews)")
 
-End with one of:
+Then close the disclosure with one of these lines:
 - If at least one row has a `(new)` reviewer: "_Reviewers have been assigned automatically. Feel free to adjust based on your team's preferences._"
 - Otherwise: "_No new reviewers were assigned._"
+
+Never place the `(new)` / `(existing)` tags inside the disclosure — they must stay in the visible table.

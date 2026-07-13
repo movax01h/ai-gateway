@@ -106,6 +106,19 @@ class SubagentReturnNode:
             "session_id": active_session,
         }
 
+        # Resolved before logging so it can be used as the log entry's message_id.
+        supervisor_history = supervisor_history_key.value_from_state(state) or []
+
+        if not supervisor_history:
+            raise ValueError(
+                f"No conversation history found for supervisor "
+                f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}. "
+                f"Cannot attach delegation result ToolMessage without a preceding "
+                f"delegate_task tool call to respond to."
+            )
+
+        delegate_call_id = self._find_delegate_call_id(supervisor_history)
+
         # Determine status based on whether we got a result
         if final_answer is not None:
             status = DelegationStatus.COMPLETED
@@ -118,6 +131,7 @@ class SubagentReturnNode:
                 tool_info=build_tool_info(
                     delegate_tool_title, delegate_args, tool_response
                 ),
+                message_id=delegate_call_id,
                 subsession_id=self._session_id,
             )
         else:
@@ -133,21 +147,9 @@ class SubagentReturnNode:
                 tool_info=build_tool_info(
                     delegate_tool_title, delegate_args, result_content
                 ),
+                message_id=delegate_call_id,
                 subsession_id=self._session_id,
             )
-
-        # Find the delegate_task tool_call_id from supervisor's conversation history
-        supervisor_history = supervisor_history_key.value_from_state(state) or []
-
-        if not supervisor_history:
-            raise ValueError(
-                f"No conversation history found for supervisor "
-                f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}. "
-                f"Cannot attach delegation result ToolMessage without a preceding "
-                f"delegate_task tool call to respond to."
-            )
-
-        delegate_call_id = self._find_delegate_call_id(supervisor_history)
 
         # Build XML delegation result
         xml_result = self._format_delegation_result(

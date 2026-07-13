@@ -3,6 +3,7 @@
 from .ascp import *
 from .audit_events import *
 from .branch import *
+from .code_review import *
 from .ci_linter import *
 from .clarification_question import *
 from .command import *
@@ -24,6 +25,7 @@ from .pipeline import *
 from .planner import *
 from .previous_context import *
 from .project import *
+from .render_ui import *
 from .repository_files import *
 from .request_user_clarification import *
 from .run_glql_query import *
@@ -35,6 +37,6 @@ from .testing import *
 from .todo_write import *
 from .toolset import *
 from .user import *
-from .vulnerabilities.severity import *
+from .vulnerabilities import *
 from .wiki import *
 from .work_item import *

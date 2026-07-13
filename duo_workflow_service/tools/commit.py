@@ -102,7 +102,7 @@ class CommitBaseTool(DuoBaseTool):
 
             return CommitURLValidationResult(url_project_id, url_commit_sha, errors)
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return CommitURLValidationResult(
                 str(project_id) if project_id is not None else None, commit_sha, errors
             )

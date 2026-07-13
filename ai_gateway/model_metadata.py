@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from typing import Annotated, Any, Dict, Literal, Optional, override
 
+import structlog
 from pydantic import (
     AnyUrl,
     BaseModel,
@@ -11,7 +12,9 @@ from pydantic import (
 )
 
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
-from lib.context import ModelSizeBucket, StarletteUser
+from lib.context import StarletteUser
+
+log = structlog.stdlib.get_logger("model_metadata")
 
 PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
 
@@ -111,11 +114,10 @@ class ModelMetadata(BaseModelMetadata):
 
         if self.api_key:
             params["api_key"] = self.api_key
-        else:
-            # Set a default dummy key to avoid LiteLLM errors
-            # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
-            if params.get("custom_llm_provider", "") == "custom_openai":
-                params["api_key"] = "dummy_key"
+        # Set a default dummy key to avoid LiteLLM errors
+        # See https://gitlab.com/gitlab-org/gitlab/-/issues/520512
+        elif params.get("custom_llm_provider", "") == "custom_openai":
+            params["api_key"] = "dummy_key"
 
         return params
 
@@ -123,32 +125,87 @@ class ModelMetadata(BaseModelMetadata):
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
 
 
-class ModelMetadataBySize(BaseModel):
+class ModelMetadataByTag(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     default: TypeModelMetadata
-    by_size: Dict[Literal["small", "large"], TypeModelMetadata] = Field(
-        default_factory=dict
-    )
+    by_tag: Dict[str, TypeModelMetadata] = Field(default_factory=dict)
 
-    def get(self, model_size: ModelSizeBucket | None = None) -> TypeModelMetadata:
-        if model_size is None:
+    def get(self, model_tags: list[str] | str | None = None) -> TypeModelMetadata:
+        """Return the model metadata matching the requested tags.
+
+        Args:
+            model_tags: One or more tag strings used to select a model. When a list is
+                provided, the first tag that maps to a configured model wins (first-match
+                semantics). If no tag matches, the ``default`` model is returned. When
+                ``None``, the default model is returned.
+
+        Returns:
+            The ``TypeModelMetadata`` for the first matching tag, or ``default`` when no
+            tag matches or ``model_tags`` is ``None``.
+        """
+        if model_tags is None:
             return self.default
-        return self.by_size.get(model_size, self.default)
+        if isinstance(model_tags, str):
+            model_tags = [model_tags]
+        for tag in model_tags:
+            tag_metadata = self.by_tag.get(tag)
+            if tag_metadata is not None:
+                return tag_metadata
+        return self.default
 
     def add_user(self, user: StarletteUser) -> None:
         self.default.add_user(user)
-        for metadata in self.by_size.values():
+        for metadata in self.by_tag.values():
             metadata.add_user(user)
 
 
-def create_model_metadata_by_size(
-    data: dict[str, Any] | None, mock_model_responses: bool = False
-) -> ModelMetadataBySize:
-    """Create a ModelMetadataBySize from request data, enriching with size preferences from YAML config.
+# Backward-compatible alias — prefer ModelMetadataByTag in new code.
+ModelMetadataBySize = ModelMetadataByTag
 
-    If the data contains a `feature_setting`, looks up `models_for_size_preference` in the YAML
-    config and creates ModelMetadata objects for each size bucket.
+
+def build_model_metadata_by_tag(
+    feature_setting: str | None, mock_model_responses: bool = False
+) -> Dict[str, TypeModelMetadata]:
+    """Build the tag -> ModelMetadata map for a feature setting from its ``models_for_tags`` config.
+
+    Returns an empty dict when ``feature_setting`` is ``None`` or has no ``models_for_tags`` entry,
+    in which case tag lookups fall back to the ``default`` model.
+
+    A tag whose configured model cannot be resolved is skipped (and logged) rather than raising, so
+    one bad ``models_for_tags`` entry can never drop the whole model-metadata context — callers still
+    get the default and every other resolvable tag.
+    """
+    by_tag: Dict[str, TypeModelMetadata] = {}
+    if not feature_setting:
+        return by_tag
+
+    configs = ModelSelectionConfig.instance()
+    unit_primitive_config = configs.get_unit_primitive_config_map().get(feature_setting)
+    if unit_primitive_config:
+        for tag, model_id in unit_primitive_config.models_for_tags.items():
+            tag_data: Dict[str, Any] = {"provider": "gitlab", "name": model_id}
+            try:
+                by_tag[tag] = create_model_metadata(tag_data, mock_model_responses)
+            except ValueError as err:
+                log.warning(
+                    "Skipping unresolvable model tag",
+                    feature_setting=feature_setting,
+                    tag=tag,
+                    model_id=model_id,
+                    error=str(err),
+                )
+
+    return by_tag
+
+
+def create_model_metadata_by_tag(
+    data: dict[str, Any] | None, mock_model_responses: bool = False
+) -> ModelMetadataByTag:
+    """Create a ModelMetadataByTag from request data, enriching with tag-based model config from YAML.
+
+    If the data contains a ``feature_setting``, looks up ``models_for_tags`` in the YAML config and
+    creates ``ModelMetadata`` objects for each tag key.
     """
     if not data or "provider" not in data:
         raise ValueError("Argument error: provider must be present.")
@@ -158,21 +215,9 @@ def create_model_metadata_by_size(
 
     default_metadata = create_model_metadata(data, mock_model_responses)
 
-    by_size: Dict[Literal["small", "large"], TypeModelMetadata] = {}
-    if feature_setting:
-        configs = ModelSelectionConfig.instance()
-        unit_primitive_config = configs.get_unit_primitive_config_map().get(
-            feature_setting
-        )
-        if unit_primitive_config:
-            for (
-                size,
-                model_id,
-            ) in unit_primitive_config.models_for_size_preference.items():
-                size_data: Dict[str, Any] = {"provider": "gitlab", "name": model_id}
-                by_size[size] = create_model_metadata(size_data, mock_model_responses)
+    by_tag = build_model_metadata_by_tag(feature_setting, mock_model_responses)
 
-    return ModelMetadataBySize(default=default_metadata, by_size=by_size)
+    return ModelMetadataByTag(default=default_metadata, by_tag=by_tag)
 
 
 def _create_fireworks_metadata(
@@ -391,3 +436,24 @@ def build_default_feature_setting_metadata(
     else:
         gitlab_payload["feature_setting"] = feature_setting
     return _create_gitlab_metadata(gitlab_payload)
+
+
+_COMPLETION_CONTEXT_CAPPED_PROVIDERS = frozenset({"fireworks_ai", "vertex_ai"})
+_COMPLETION_CONTEXT_MAX_PERCENT = 0.3
+
+
+def completion_context_max_percent_for_model_metadata(
+    model_metadata: TypeModelMetadata,
+) -> Optional[float]:
+    """Return the completion context cap (0.3) for Fireworks/Vertex models, otherwise None (use the engine default).
+
+    Bounds the amount of context sent for these models so latency and cost stay in check.
+    """
+    custom_llm_provider = getattr(
+        model_metadata.llm_definition.params, "custom_llm_provider", None
+    )
+
+    if custom_llm_provider in _COMPLETION_CONTEXT_CAPPED_PROVIDERS:
+        return _COMPLETION_CONTEXT_MAX_PERCENT
+
+    return None

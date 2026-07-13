@@ -4,8 +4,6 @@ RUN apt-get update  \
     && apt-get -y --no-install-recommends install  \
         # install any other dependencies you might need
         sudo curl git ca-certificates build-essential libz-dev \
-        # For ruby https://github.com/rbenv/ruby-build/wiki#suggested-build-environment
-        autoconf patch rustc libssl-dev libyaml-dev libreadline6-dev zlib1g-dev libgmp-dev libncurses5-dev libffi-dev libgdbm6 libgdbm-dev libdb-dev uuid-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the locale UTF8
@@ -22,7 +20,7 @@ ENV MISE_CONFIG_DIR="/mise"
 ENV MISE_CACHE_DIR="/mise/cache"
 ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
 ENV PATH="/mise/shims:$PATH"
-RUN curl https://mise.run | sh
+RUN curl https://mise.run | MISE_VERSION=v2026.6.9 sh
 
 COPY .tool-versions /app/.tool-versions
 

@@ -13,16 +13,15 @@ from duo_workflow_service.agent_platform.v1.state import (
     RuntimeIOKey,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from lib.context import ModelSizeBucket
 from lib.events import GLReportingEventContext
 
 __all__ = [
-    "RouterProtocol",
+    "AbortComponent",
     "BaseComponent",
     "EndComponent",
-    "AbortComponent",
-    "MissingInputVariablesError",
     "ExtraInputVariablesError",
+    "MissingInputVariablesError",
+    "RouterProtocol",
 ]
 
 
@@ -58,7 +57,15 @@ class BaseComponent(BaseModel, ABC):
     flow_type: GLReportingEventContext
     user: CloudConnectorUser
     environment: str | None = None
-    model_size_preference: ModelSizeBucket | None = None
+    model_tags: list[str] | str | None = None
+    # Deprecated alias for model_tags, retained for backward compatibility with
+    # Flow Registry v1 configs/clients that still set model_size_preference.
+    # Mapped onto model_tags in build_base_component; excluded from serialization.
+    model_size_preference: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Deprecated: use model_tags instead.",
+    )
     strict_validation: bool = Field(default=False, exclude=True)
 
     @model_validator(mode="before")
@@ -66,6 +73,11 @@ class BaseComponent(BaseModel, ABC):
     def build_base_component(cls, data: dict[str, Any]) -> dict[str, Any]:
         if "inputs" in data:
             data["inputs"] = IOKey.parse_keys(data["inputs"])
+
+        # Backward compatibility: map the deprecated model_size_preference onto
+        # model_tags when the new field isn't provided.
+        if data.get("model_size_preference") is not None and not data.get("model_tags"):
+            data["model_tags"] = data["model_size_preference"]
 
         return data
 
@@ -112,7 +124,8 @@ class EndComponent(BaseComponent):
         graph.add_edge(self.__entry_hook__(), END)
 
     async def _terminate_flow(
-        self, state: FlowState  # pylint: disable=unused-argument
+        self,
+        state: FlowState,  # pylint: disable=unused-argument
     ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}
 
@@ -128,6 +141,7 @@ class AbortComponent(BaseComponent):
         graph.add_edge(self.__entry_hook__(), END)
 
     async def _abort_flow(
-        self, state: FlowState  # pylint: disable=unused-argument
+        self,
+        state: FlowState,  # pylint: disable=unused-argument
     ) -> dict:
         return {FlowStateKeys.STATUS: WorkflowStatusEnum.ERROR.value}

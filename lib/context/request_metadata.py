@@ -15,6 +15,9 @@ log = structlog.stdlib.get_logger("request_metadata")
 
 # Context variables for request metadata
 client_type: ContextVar[Optional[str]] = ContextVar("client_type", default=None)
+gitlab_instance_id: ContextVar[Optional[str]] = ContextVar(
+    "gitlab_instance_id", default=None
+)
 gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
 gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
 language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
@@ -23,7 +26,6 @@ language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVa
 is_gitlab_team_member: ContextVar[Optional[bool]] = ContextVar(
     "is_gitlab_team_member", default=None
 )
-ip_address: ContextVar[Optional[str]] = ContextVar("ip_address", default=None)
 
 # client_capabilities is used to make backwards compatible changes to our
 # communication protocol. This is needed usually when we're adding new

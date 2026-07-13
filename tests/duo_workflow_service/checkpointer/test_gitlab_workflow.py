@@ -1,6 +1,7 @@
 # pylint: disable=comparison-with-callable,import-outside-toplevel,line-too-long,no-else-raise,no-else-return,too-many-lines
 import asyncio
 import json
+import zlib
 from asyncio import CancelledError
 from typing import Any, Optional, Sequence, TypedDict
 from unittest.mock import ANY, AsyncMock, Mock, call, patch
@@ -18,11 +19,18 @@ from langgraph.checkpoint.memory import MemorySaver
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
+    _dict_of_list_delta,
     _get_orbit_tool_calls,
+    _serialize_all_channels_full,
+    _serialize_channel_blobs,
+    _thread_started_at_from_id,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    InvalidRequestException,
+    NotifiableException,
+)
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -139,10 +147,17 @@ def workflow_config_fixture():
         "agent_privileges_names": ["read_repository"],
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
+        "incremental_checkpoints_enabled": False,
         "allow_agent_to_request_user": True,
         "archived": False,
         "stalled": False,
     }
+
+
+@pytest.fixture(name="incremental_enabled")
+def incremental_enabled_fixture(workflow_config):
+    """Enable incremental checkpoints on the workflow_config consumed by the gitlab_workflow fixture."""
+    workflow_config["incremental_checkpoints_enabled"] = True
 
 
 @pytest.fixture(name="gitlab_workflow")
@@ -644,6 +659,350 @@ async def test_workflow_context_manager_resume_interrupted(
     )
 
 
+def _make_workflow_for_reconciliation(
+    http_client,
+    workflow_id,
+    workflow_type,
+    *,
+    checkpoint_status: WorkflowStatusEnum,
+    use_prev_channel_values: bool = True,
+) -> tuple[GitLabWorkflow, AsyncMock]:
+    """Build a GitLabWorkflow wired for reconciliation tests.
+
+    Constructs the workflow with a resumable config and replaces _status_handler with an AsyncMock so tests can assert
+    on update_workflow_status calls.  Returns both the workflow and the mock so callers can configure
+    get_workflow_status.return_value and inspect call_args_list with proper typing.
+
+    Does NOT configure http_client.aget — each test is responsible for setting up the HTTP responses it needs
+    (checkpoint API, Rails status, etc.).
+
+    When use_prev_channel_values=True the checkpoint status is injected into _prev_channel_values
+    (incremental_checkpoints fast path).  Set it to False to leave _prev_channel_values empty, forcing the API fallback
+    path.
+    """
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": WorkflowStatusEnum.INPUT_REQUIRED,
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    status_handler_mock = AsyncMock()
+    gitlab_workflow._status_handler = status_handler_mock
+
+    if use_prev_channel_values:
+        gitlab_workflow._prev_channel_values = {"status": checkpoint_status}
+
+    return gitlab_workflow, status_handler_mock
+
+
+def _make_checkpoint_aget(
+    workflow_id: str, checkpoint_status: WorkflowStatusEnum, rails_status: str
+):
+    """Return an async aget function that serves checkpoint and workflow status responses."""
+    inner = {"id": "cp-1", "channel_values": {"status": checkpoint_status}}
+    compressed = compress_checkpoint(inner)  # type: ignore[arg-type]
+
+    async def mock_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            return GitLabHttpResponse(
+                status_code=200,
+                body=[
+                    {
+                        "thread_ts": "cp-1",
+                        "parent_ts": None,
+                        "compressed_checkpoint": compressed,
+                        "metadata": {},
+                    }
+                ],
+            )
+        if f"/workflows/{workflow_id}" in path:
+            return GitLabHttpResponse(status_code=200, body={"status": rails_status})
+        raise ValueError(f"Unexpected path: {path}")
+
+    return mock_aget
+
+
+@pytest.mark.asyncio
+async def test_bad_request_reconciles_rails_to_checkpoint_status_via_prev_channel_values(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Core bug (gitlab-org/gitlab#602799): after an empty-goal reconnect is rejected, Rails is driven back to
+    INPUT_REQUIRED using the in-memory checkpoint status (_prev_channel_values, incremental_checkpoints-capable client).
+
+    The checkpoint API must NOT be called — the status is read from memory.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=True,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    checkpoint_api_calls = []
+
+    async def tracking_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            checkpoint_api_calls.append(path)
+        raise ValueError(f"Unexpected path: {path}")
+
+    http_client.aget = tracking_aget
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.REQUIRE_INPUT,
+    ]
+    assert not checkpoint_api_calls, (
+        "checkpoint API must not be called when _prev_channel_values is populated"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bad_request_reconciles_rails_to_checkpoint_status_via_api_fallback(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Same reconciliation but via the API fallback path (older client without incremental_checkpoints, so
+    _prev_channel_values is empty).
+
+    The checkpoint API MUST be called to fetch the status.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    checkpoint_api_calls = []
+    real_aget = _make_checkpoint_aget(
+        workflow_id, WorkflowStatusEnum.INPUT_REQUIRED, "running"
+    )
+
+    async def tracking_aget(path, **kwargs):
+        if "checkpoints?per_page=1" in path:
+            checkpoint_api_calls.append(path)
+        return await real_aget(path, **kwargs)
+
+    http_client.aget = tracking_aget
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.REQUIRE_INPUT,
+    ]
+    assert len(checkpoint_api_calls) == 1, (
+        "checkpoint API must be called when _prev_channel_values is empty"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_rails_already_matches(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when Rails already reflects the checkpoint status."""
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = (
+        WorkflowStatusEnum.INPUT_REQUIRED
+    )
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_checkpoint_status_has_no_rails_event(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when the checkpoint status has no corresponding Rails event.
+
+    EXECUTION maps to RUNNING which has no entry in CHECKPOINT_STATUS_TO_STATUS_EVENT.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.EXECUTION,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_reconciliation_survives_checkpoint_api_error(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """A checkpoint API failure during reconciliation must not mask the original exception."""
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock.get_workflow_status.return_value = "running"
+
+    async def failing_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            return GitLabHttpResponse(status_code=500, body={"error": "server error"})
+        raise ValueError(f"Unexpected path: {path}")
+
+    http_client.aget = failing_aget
+
+    # The InvalidRequestException must still propagate despite the API error.
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_no_checkpoints_exist(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when the checkpoint API returns an empty list.
+
+    Covers the ``_fetch_most_recent_checkpoint`` → ``return None`` path
+    and the ``_reconcile_session_status`` early-return when
+    ``_get_latest_checkpoint_status`` returns ``None``.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    async def empty_aget(path, **_kwargs):
+        if "checkpoints?per_page=1" in path:
+            return GitLabHttpResponse(status_code=200, body=[])
+        raise ValueError(f"Unexpected path: {path}")
+
+    http_client.aget = empty_aget
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    # Only the entry RESUME — no reconciliation update because there are no checkpoints.
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_bad_request_skips_reconciliation_when_checkpoint_status_has_no_workflow_mapping(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """No update is sent when the checkpoint status has no WORKFLOW_STATUS_TO_CHECKPOINT_STATUS entry.
+
+    Covers the ``checkpoint_status_str is None`` early-return in
+    ``_reconcile_session_status``.  We inject a raw string value that is
+    not a member of ``WorkflowStatusEnum`` directly into ``_prev_channel_values`` to
+    simulate a future/unknown status that the current mapping does not cover.
+    """
+    gitlab_workflow, status_handler_mock = _make_workflow_for_reconciliation(
+        http_client,
+        workflow_id,
+        workflow_type,
+        checkpoint_status=WorkflowStatusEnum.INPUT_REQUIRED,
+        use_prev_channel_values=False,
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    # Inject an unknown status value that has no entry in WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.
+    gitlab_workflow._prev_channel_values = {"status": "UNKNOWN_FUTURE_STATUS"}
+
+    with pytest.raises(InvalidRequestException):
+        async with gitlab_workflow:
+            raise InvalidRequestException("empty goal")
+
+    # Only the entry RESUME — no reconciliation update because the status is unmapped.
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
 @pytest.mark.asyncio
 async def test_workflow_context_manager_resume_interrupted_approval(
     gitlab_workflow,
@@ -1101,10 +1460,55 @@ async def test_aput(
     assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
     assert post_call_body["thread_ts"] == checkpoint["id"]
     assert post_call_body["parent_ts"] == "parent-checkpoint"
+    assert "channel_blobs" not in post_call_body
 
     assert result == {
         "configurable": {"thread_id": workflow_id, "checkpoint_id": checkpoint["id"]}
     }
+
+
+def _checkpoint_saved_kwargs(logger):
+    for logger_call in logger.info.call_args_list:
+        if logger_call.args and logger_call.args[0] == "Checkpoint saved":
+            return logger_call.kwargs
+    raise AssertionError("'Checkpoint saved' was not logged")
+
+
+@pytest.mark.asyncio
+async def test_aput_logs_full_checkpoint_strategy(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    gitlab_workflow._logger = Mock()
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint_data[0]["checkpoint"], checkpoint_metadata, ChannelVersions()
+    )
+
+    assert _checkpoint_saved_kwargs(gitlab_workflow._logger)["checkpoint_strategy"] == (
+        "full"
+    )
+    assert "?checkpoint_strategy=full" in http_client.apost.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("incremental_enabled")
+async def test_aput_logs_incremental_checkpoint_strategy(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    gitlab_workflow._logger = Mock()
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint_data[0]["checkpoint"], checkpoint_metadata, ChannelVersions()
+    )
+
+    assert _checkpoint_saved_kwargs(gitlab_workflow._logger)["checkpoint_strategy"] == (
+        "incremental"
+    )
+    assert "?checkpoint_strategy=incremental" in http_client.apost.call_args[1]["path"]
 
 
 @pytest.mark.asyncio
@@ -1963,3 +2367,1071 @@ async def test_track_workflow_completion_with_billing_event_includes_tool_names(
             "workflow_id": workflow_id,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_fires_orbit_session_summary(
+    gitlab_workflow,
+    internal_event_client,
+    workflow_id,
+    workflow_type,
+):
+    """Test that orbit_dap_session_summary fires when orbit tools were used."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(3)
+    total_tool_call_count.set(7)
+
+    await gitlab_workflow._track_workflow_completion("finished")
+
+    assert internal_event_client.track_event.call_count == 2
+
+    orbit_calls = [
+        c
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"] == EventEnum.ORBIT_DAP_SESSION_SUMMARY.value
+    ]
+    assert len(orbit_calls) == 1
+    orbit_call = orbit_calls[0]
+
+    additional_props = orbit_call[1]["additional_properties"]
+    assert additional_props.value == workflow_id
+    assert additional_props.extra["workflow_type"] == workflow_type.value
+    assert additional_props.extra["orbit_calls_count"] == 3
+    assert additional_props.extra["non_orbit_tool_calls"] == 4
+    assert additional_props.extra["total_tool_calls"] == 7
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_skips_orbit_summary_when_no_orbit_calls(
+    gitlab_workflow,
+    internal_event_client,
+):
+    """Test that orbit_dap_session_summary does NOT fire when no orbit tools were used."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(0)
+    total_tool_call_count.set(5)
+
+    await gitlab_workflow._track_workflow_completion("finished")
+
+    assert internal_event_client.track_event.call_count == 1
+    call_args = internal_event_client.track_event.call_args
+    assert call_args[1]["event_name"] != EventEnum.ORBIT_DAP_SESSION_SUMMARY.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pause_status",
+    [WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED],
+)
+async def test_track_workflow_completion_skips_orbit_summary_on_pause(
+    gitlab_workflow,
+    internal_event_client,
+    pause_status,
+):
+    """Orbit summary must not fire on pause statuses — counters reset on each resume, so firing here would produce
+    partial summaries instead of one session-level summary."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(2)
+    total_tool_call_count.set(4)
+
+    await gitlab_workflow._track_workflow_completion(pause_status)
+
+    event_names = [
+        c[1]["event_name"] for c in internal_event_client.track_event.call_args_list
+    ]
+    assert EventEnum.ORBIT_DAP_SESSION_SUMMARY.value not in event_names
+
+
+# ---------------------------------------------------------------------------
+# Incremental checkpoint tests (phase 1 shadow writes — gitlab#596714)
+# ---------------------------------------------------------------------------
+
+
+def test_dict_of_list_delta_appends_only():
+    prev = {"a": ["x"], "b": ["y", "z"]}
+    current = {"a": ["x", "x2"], "b": ["y", "z"], "c": ["new"]}
+    delta = _dict_of_list_delta(prev, current)
+    assert delta is not None
+    assert delta.values == {"a": ["x2"], "c": ["new"]}
+    assert delta.is_append is True
+
+
+def test_dict_of_list_delta_shrink_stores_full():
+    prev = {"a": ["x", "y"]}
+    current = {"a": ["x"]}
+    delta = _dict_of_list_delta(prev, current)
+    assert delta is not None
+    assert delta.values == {"a": ["x"]}
+    assert delta.is_append is False
+
+
+def test_dict_of_list_delta_non_list_always_stored():
+    prev = {"a": "old"}
+    current = {"a": "new", "b": 42}
+    delta = _dict_of_list_delta(prev, current)
+    assert delta is not None
+    assert delta.values == {"a": "new", "b": 42}
+    assert delta.is_append is True
+
+
+def test_dict_of_list_delta_unchanged_returns_none():
+    prev = {"a": ["x", "y"]}
+    current = {"a": ["x", "y"]}
+    assert _dict_of_list_delta(prev, current) is None
+
+
+def test_serialize_channel_blobs_only_changed_channels():
+    import base64
+
+    checkpoint = {
+        "id": "ckpt1",
+        "channel_values": {
+            "messages": ["a", "b"],
+            "status": "running",
+        },
+    }
+    new_versions = ChannelVersions({"messages": "2.0"})
+
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
+
+    assert len(blobs) == 1
+    assert blobs[0]["channel"] == "messages"
+    assert blobs[0]["version"] == "2.0"
+    assert blobs[0]["write_type"] == "json"
+    assert base64.b64decode(blobs[0]["data"])
+
+
+def test_serialize_channel_blobs_skips_scalar_channels():
+    checkpoint = {
+        "id": "ckpt1",
+        "channel_values": {
+            "messages": ["a", "b"],
+            "status": "running",
+            "goal": "fix the bug",
+        },
+    }
+    new_versions = ChannelVersions({"messages": "2.0", "status": "1.0", "goal": "1.0"})
+
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
+
+    channels = [b["channel"] for b in blobs]
+    assert "goal" not in channels
+    assert "messages" in channels
+    # status is always blobbed for reconstruction, even though it is a scalar
+    assert "status" in channels
+
+
+def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
+    """Status blobs must carry step_action='compaction' and must not set is_compaction.
+
+    status is a scalar channel so it bypasses the list/dict delta branches entirely. This means it always serialises as
+    a full replacement (step_action='compaction') and a status-only change must not trigger is_compaction=True (which
+    would incorrectly bump current_thread).
+    """
+    checkpoint = {
+        "id": "ckpt1",
+        "channel_values": {
+            "status": "running",
+        },
+    }
+    new_versions = ChannelVersions({"status": "2.0"})
+    prev_channel_values = {"status": "waiting"}
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert len(blobs) == 1
+    status_blob = blobs[0]
+    assert status_blob["channel"] == "status"
+    # Scalar path always produces a full replacement, never a delta
+    assert status_blob["step_action"] == "compaction"
+    # A status-only change must NOT set is_compaction — that would incorrectly bump current_thread
+    assert is_compaction is False
+
+
+def test_serialize_channel_blobs_list_delta():
+    import base64
+
+    checkpoint = {
+        "id": "ckpt2",
+        "channel_values": {"messages": ["a", "b", "c"]},
+    }
+    new_versions = ChannelVersions({"messages": "3.0"})
+    prev_channel_values = {"messages": ["a", "b"]}
+
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, prev_channel_values)
+
+    assert len(blobs) == 1
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    assert val == ["c"]
+
+
+def test_serialize_channel_blobs_skips_unknown_channels():
+    checkpoint = {"id": "ckpt3", "channel_values": {}}
+    new_versions = ChannelVersions({"nonexistent": "1.0"})
+
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
+
+    assert not blobs
+
+
+def test_serialize_channel_blobs_list_unchanged_skips():
+    checkpoint = {
+        "id": "ckpt_unchanged",
+        "channel_values": {"messages": ["a", "b"]},
+    }
+    new_versions = ChannelVersions({"messages": "2.0"})
+    prev_channel_values = {"messages": ["a", "b"]}
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert not blobs
+    assert not is_compaction
+
+
+def test_serialize_channel_blobs_list_shrink_stores_full():
+    import base64
+
+    checkpoint = {
+        "id": "ckpt5",
+        "channel_values": {"messages": ["a"]},
+    }
+    new_versions = ChannelVersions({"messages": "4.0"})
+    prev_channel_values = {"messages": ["a", "b", "c"]}
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert is_compaction
+    assert len(blobs) == 1
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    assert val == ["a"]
+
+
+def test_serialize_channel_blobs_dict_channel_delta():
+    import base64
+
+    checkpoint = {
+        "id": "ckpt4",
+        "channel_values": {
+            "conversation_history": {
+                "planner": ["msg1", "msg2", "msg3"],
+                "executor": ["a"],
+            }
+        },
+    }
+    new_versions = ChannelVersions({"conversation_history": "2.0"})
+    prev_channel_values = {
+        "conversation_history": {
+            "planner": ["msg1", "msg2"],
+            "executor": ["a"],
+        }
+    }
+
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, prev_channel_values)
+
+    assert len(blobs) == 1
+    assert blobs[0]["channel"] == "conversation_history"
+    delta = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    assert delta == {"planner": ["msg3"]}
+
+
+def test_serialize_channel_blobs_dict_unchanged_skips_blob():
+    values = {"conversation_history": {"planner": ["msg1"], "executor": ["a"]}}
+    checkpoint = {"id": "ckpt6", "channel_values": values}
+    new_versions = ChannelVersions({"conversation_history": "2.0"})
+
+    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, dict(values))
+
+    assert not blobs
+
+
+def test_serialize_channel_blobs_compaction_stores_full_value():
+    import base64
+
+    prev_channel_values = {
+        "conversation_history": {"planner": ["msg1", "msg2", "msg3", "msg4", "msg5"]}
+    }
+    checkpoint = {
+        "id": "ckpt7",
+        "channel_values": {"conversation_history": {"planner": ["summary", "msg5"]}},
+    }
+    new_versions = ChannelVersions({"conversation_history": "3.0"})
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert is_compaction
+    assert len(blobs) == 1
+    assert blobs[0]["step_action"] == "compaction"
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    assert val == {"planner": ["summary", "msg5"]}
+
+
+def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
+    prev_channel_values = {"conversation_history": {"planner": ["msg1", "msg2"]}}
+    checkpoint = {
+        "id": "ckpt9",
+        "channel_values": {
+            "conversation_history": {"planner": ["summary_a", "summary_b"]}
+        },
+    }
+    new_versions = ChannelVersions({"conversation_history": "3.0"})
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert is_compaction
+    assert len(blobs) == 1
+    assert blobs[0]["step_action"] == "compaction"
+
+
+def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
+    import base64
+
+    checkpoint = {
+        "id": "ckpt_force",
+        "channel_values": {"messages": ["a", "b", "c"]},
+    }
+    new_versions = ChannelVersions({"messages": "2.0"})
+    prev_channel_values = {"messages": ["a", "b"]}
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint,
+        new_versions,
+        prev_channel_values,
+        force_rewrite=True,
+    )
+
+    assert not is_compaction
+    assert len(blobs) == 1
+    assert blobs[0]["step_action"] == "compaction"
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    assert val == ["a", "b", "c"]
+
+
+def test_serialize_channel_blobs_conversation_sends_delta():
+    import base64
+
+    checkpoint = {
+        "id": "ckpt8",
+        "channel_values": {"messages": ["a", "b", "c"]},
+    }
+    new_versions = ChannelVersions({"messages": "3.0"})
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, {"messages": ["a", "b"]}
+    )
+
+    assert not is_compaction
+    assert len(blobs) == 1
+    assert blobs[0]["step_action"] == "conversation"
+    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    assert val == ["c"]
+
+
+def _v6_uuid_for(unix_seconds: int, sub_second_100ns: int = 0) -> str:
+    """Build a valid UUIDv6 whose embedded timestamp is unix_seconds (+ optional 100ns)."""
+    gregorian_100ns = unix_seconds * 10_000_000 + sub_second_100ns + 0x01B21DD213814000
+    time_high = (gregorian_100ns >> 28) & 0xFFFFFFFF
+    time_mid = (gregorian_100ns >> 12) & 0xFFFF
+    time_low = gregorian_100ns & 0x0FFF
+    return f"{time_high:08x}-{time_mid:04x}-6{time_low:03x}-8000-000000000000"
+
+
+def test_thread_started_at_from_id_decodes_v6():
+    # 1_700_000_000 == 2023-11-14T22:13:20Z
+    assert (
+        _thread_started_at_from_id(_v6_uuid_for(1_700_000_000))
+        == "2023-11-14T22:13:20+00:00"
+    )
+
+
+def test_thread_started_at_from_id_decodes_v7():
+    # 48-bit millisecond timestamp: 1_700_000_000_000 ms
+    value = (1_700_000_000_000 << 80) | (0x7 << 76) | (0x8 << 62)
+    uuid = f"{value:032x}"
+    dashed = f"{uuid[:8]}-{uuid[8:12]}-{uuid[12:16]}-{uuid[16:20]}-{uuid[20:]}"
+    assert _thread_started_at_from_id(dashed) == "2023-11-14T22:13:20+00:00"
+
+
+def test_thread_started_at_from_id_floors_to_second():
+    # Sub-second 100ns component must be dropped so the marker never exceeds the
+    # created_at Rails derives from the same id.
+    assert (
+        _thread_started_at_from_id(
+            _v6_uuid_for(1_700_000_000, sub_second_100ns=9_999_999)
+        )
+        == "2023-11-14T22:13:20+00:00"
+    )
+
+
+def test_thread_started_at_from_id_returns_none_for_non_time_uuid():
+    # Version 4 (random) UUID embeds no timestamp.
+    assert _thread_started_at_from_id("f47ac10b-58cc-4372-a567-0e02b2c3d479") is None
+
+
+def test_thread_started_at_from_id_returns_none_for_malformed():
+    assert _thread_started_at_from_id("not-a-uuid") is None
+
+
+def test_serialize_all_channels_full_reseeds_and_drops_non_status_scalars():
+    """Group-start snapshot: list/dict channels and the status scalar are re-seeded as
+    full 'compaction' blobs (versions from the checkpoint); other scalars are dropped."""
+    import base64
+
+    checkpoint = {
+        "channel_values": {
+            "messages": ["a", "b"],
+            "conversation_history": {"planner": [1, 2]},
+            "status": "Execution",
+            "plan_step": 3,  # non-status scalar -> dropped
+        },
+        "channel_versions": {
+            "messages": "2",
+            "conversation_history": "1",
+            "status": "1",
+            "plan_step": "1",
+        },
+    }
+
+    blobs = _serialize_all_channels_full(checkpoint)
+
+    by_channel = {b["channel"]: b for b in blobs}
+    assert set(by_channel) == {"messages", "conversation_history", "status"}
+    assert all(b["step_action"] == "compaction" for b in blobs)
+    assert by_channel["messages"]["version"] == "2"
+    assert json.loads(
+        zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
+    ) == ["a", "b"]
+
+
+def test_serialize_all_channels_full_version_defaults_to_empty_when_absent():
+    """A channel present in channel_values but missing from channel_versions falls back to an empty version string
+    rather than raising or dropping the channel."""
+    checkpoint = {
+        "channel_values": {"messages": ["a"]},
+        "channel_versions": {},
+    }
+
+    blobs = _serialize_all_channels_full(checkpoint)
+
+    assert len(blobs) == 1
+    assert blobs[0]["channel"] == "messages"
+    assert blobs[0]["version"] == ""
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_sends_full_checkpoint_and_channel_blobs(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Phase 1 (shadow): aput sends the full compressed checkpoint alongside channel_blobs.
+
+    Rails stores both; reads still use the embedded channel_values.
+    """
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["messages"] = ["msg1", "msg2"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.EXECUTION
+    checkpoint["channel_versions"] = {
+        "conversation_history": "1.0",
+        "messages": "2.1",
+        "status": "1.0",
+    }
+
+    new_versions = ChannelVersions({"messages": "2.1"})
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(config, checkpoint, checkpoint_metadata, new_versions)
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    # Full checkpoint must still be present (Phase 1 — backward compatible reads)
+    assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
+
+    # First checkpoint starts a self-contained group (issue 605653): every
+    # reconstructable channel is re-seeded as a full compaction snapshot, not just
+    # the channel in new_versions.
+    blobs = post_call_body["channel_blobs"]
+    by_channel = {b["channel"]: b for b in blobs}
+    assert set(by_channel) == {"conversation_history", "messages", "status"}
+    assert all(b["step_action"] == "compaction" for b in blobs)
+    assert by_channel["messages"]["version"] == "2.1"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_accumulates_list_deltas_across_calls(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Aput tracks previous channel values between calls so each blob contains only the items appended since the
+    previous checkpoint."""
+    import base64
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    checkpoint = checkpoint_data[0]["checkpoint"]
+
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+    # First checkpoint starts a self-contained group, so messages is a full snapshot.
+    body1 = json.loads(http_client.apost.call_args[1]["body"])
+    messages1 = next(b for b in body1["channel_blobs"] if b["channel"] == "messages")
+    val1 = json.loads(zlib.decompress(base64.b64decode(messages1["data"])))
+    assert val1 == ["a", "b"]
+
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c", "d"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-1"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+    # Not a new group: only the appended tail is sent.
+    body2 = json.loads(http_client.apost.call_args[1]["body"])
+    messages2 = next(b for b in body2["channel_blobs"] if b["channel"] == "messages")
+    val2 = json.loads(zlib.decompress(base64.b64decode(messages2["data"])))
+    assert val2 == ["c", "d"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_increments_thread_id_on_compaction(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """thread_id stays 0 for conversation steps and increments to 1 at a compaction."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    # Normal conversation step — thread_id stays 0
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+    assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 0
+
+    # Compaction step: list shrank — thread_id increments to 1
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-1"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+    assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 1
+
+    # Subsequent conversation step — thread_id stays 1
+    checkpoint["id"] = "ckpt-3"
+    checkpoint["channel_values"]["messages"] = ["summary", "new_msg"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-2"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "3.0"}),
+    )
+    assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 1
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_compaction_reseeds_all_channels_as_full_snapshot(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A compaction starts a self-contained group: EVERY channel is re-seeded as a full
+    'compaction' snapshot, even a channel that did not change in the compacting step, so
+    the new group reconstructs without the previous group or the checkpoint header
+    (issue 605653)."""
+    import base64
+
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    # Group 0: both channels seeded.
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0", "conversation_history": "1.0"}),
+    )
+
+    # Compaction: messages shrinks; conversation_history is unchanged this step.
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    checkpoint["channel_versions"] = {"messages": "2.0", "conversation_history": "1.0"}
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-1"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    by_channel = {b["channel"]: b for b in body["channel_blobs"]}
+    # Both channels re-seeded, not just the one that compacted.
+    assert set(by_channel) == {"messages", "conversation_history"}
+    assert all(b["step_action"] == "compaction" for b in body["channel_blobs"])
+    assert json.loads(
+        zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
+    ) == ["summary"]
+    # The unchanged channel carries its full value, not an empty delta.
+    ch_val = json.loads(
+        zlib.decompress(base64.b64decode(by_channel["conversation_history"]["data"]))
+    )
+    assert len(ch_val["planner"]) == 3
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_pins_current_thread_started_at_to_group_start(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """current_thread_started_at pins to the group's first checkpoint and re-pins on compaction."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    id_start = _v6_uuid_for(1_700_000_000)
+    id_mid = _v6_uuid_for(1_700_000_005)
+    id_compaction = _v6_uuid_for(1_700_000_010)
+
+    # First checkpoint of the group — marker takes its start time.
+    checkpoint["id"] = id_start
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_start)
+
+    # Conversation step — marker stays pinned to the first checkpoint, not id_mid.
+    checkpoint["id"] = id_mid
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": id_start}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 0
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_start)
+
+    # Compaction (list shrank) starts a new group — marker re-pins to id_compaction.
+    checkpoint["id"] = id_compaction
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": id_mid}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "3.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(
+        id_compaction
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_repins_current_thread_started_at_on_stale_cache(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A stale cache (skipped parent) re-pins the marker to the stale checkpoint, not the original group start."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    id_start = _v6_uuid_for(1_700_000_000)
+    id_stale = _v6_uuid_for(1_700_000_020)
+
+    checkpoint["id"] = id_start
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    # Wrong parent → stale cache → thread bumps and the marker re-pins to id_stale.
+    checkpoint["id"] = id_stale
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-unknown"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_stale)
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_resets_cache_on_stale_checkpoint_id(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """When parent checkpoint_id doesn't match the cached id, cache is reset and a warning is logged."""
+    import base64
+
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    # First call — seeds the cache with ckpt-1 as prev
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    # Second call — skips ckpt-1 (simulates a missed checkpoint) by passing a wrong parent
+    checkpoint["id"] = "ckpt-3"
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-unknown"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+
+    # Stale cache starts a new self-contained group: the full list is stored for
+    # messages (no delta), not just ["c"].
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    messages = next(b for b in body["channel_blobs"] if b["channel"] == "messages")
+    val = json.loads(zlib.decompress(base64.b64decode(messages["data"])))
+    assert val == ["a", "b", "c"]
+    assert messages["step_action"] == "compaction"
+    # Thread must be bumped so Rails starts reconstruction from this checkpoint
+    assert body["current_thread"] == 1
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_omits_channel_blobs_when_incremental_disabled(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Rails instances that don't declare incremental_checkpoints must not receive channel_blobs."""
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["messages"] = ["msg1", "msg2"]
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions({"messages": "1.0"})
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    assert "compressed_checkpoint" in post_call_body
+    assert "channel_blobs" not in post_call_body
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_current_thread_from_response(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """On resume, current_thread must be restored from the server so subsequent aput emits the same thread."""
+    compressed_checkpoint_data[0]["current_thread"] = 3
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert gitlab_workflow._current_thread == 3
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+    assert "conversation_history" in gitlab_workflow._prev_channel_values
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_current_thread_started_at(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """On resume the marker is restored so a post-restart aput doesn't re-pin it mid-group."""
+    compressed_checkpoint_data[0]["current_thread_started_at"] = (
+        "2026-07-08T10:00:00+00:00"
+    )
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_current_thread_on_latest_fetch_path(
+    _mock_duo_workflow_metrics,
+    http_client,
+    workflow_id,
+    workflow_type,
+    compressed_checkpoint_data,
+):
+    """Hydration must also fire on the latest-fetch path (no checkpoint_id; first_checkpoint set)."""
+    workflow_config = {
+        "first_checkpoint": {},
+        "latest_checkpoint": None,
+        "workflow_status": "created",
+        "agent_privileges_names": ["read_repository"],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": True,
+        "incremental_checkpoints_enabled": True,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    compressed_checkpoint_data[0]["current_thread"] = 7
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": workflow_id}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert "per_page=1" in http_client.aget.call_args[1]["path"]
+    assert gitlab_workflow._current_thread == 7
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+    assert "conversation_history" in gitlab_workflow._prev_channel_values
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydration_tolerates_missing_current_thread(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """Older Rails versions don't return current_thread; hydration must still seed prev_* without raising."""
+    assert "current_thread" not in compressed_checkpoint_data[0]
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    await gitlab_workflow.aget_tuple(config)
+
+    assert gitlab_workflow._current_thread == 0
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """Malformed current_thread values must not raise; default is kept and hydration of other fields continues."""
+    compressed_checkpoint_data[0]["current_thread"] = "not-a-number"
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    await gitlab_workflow.aget_tuple(config)
+
+    assert gitlab_workflow._current_thread == 0
+    assert gitlab_workflow._prev_checkpoint_id == "5678"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_skips_hydration_when_incremental_disabled(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    compressed_checkpoint_data[0]["current_thread"] = 5
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    await gitlab_workflow.aget_tuple(config)
+
+    assert gitlab_workflow._current_thread == 0
+    assert gitlab_workflow._prev_checkpoint_id is None
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+    checkpoint_metadata,
+):
+    """End-to-end: simulate a restart by hydrating then writing — must reuse server thread, no current_thread bump."""
+    import base64
+
+    compressed_checkpoint_data[0]["current_thread"] = 2
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
+    fetched = await gitlab_workflow.aget_tuple(config)
+    assert fetched is not None
+
+    next_checkpoint = {
+        "id": "ckpt-next",
+        "channel_values": dict(fetched.checkpoint["channel_values"]),
+    }
+    next_checkpoint["channel_values"]["messages"] = ["new"]
+
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "5678"}},
+        next_checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 2
+    assert len(body["channel_blobs"]) == 1
+    blob = body["channel_blobs"][0]
+    assert blob["channel"] == "messages"
+    assert blob["step_action"] == "compaction"
+    val = json.loads(zlib.decompress(base64.b64decode(blob["data"])))
+    assert val == ["new"]
+
+
+def test_decode_graphql_latest_checkpoint_hydrates(gitlab_workflow):
+    gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
+    gitlab_workflow._decode_graphql_latest_checkpoint(
+        {
+            "threadTs": "gql-ckpt",
+            "parentTs": None,
+            "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {"x": [1]}}),
+            "metadata": "{}",
+            "currentThread": 4,
+        }
+    )
+
+    assert gitlab_workflow._current_thread == 4
+    assert gitlab_workflow._prev_checkpoint_id == "gql-ckpt"
+    assert gitlab_workflow._prev_channel_values == {"x": [1]}
+
+
+def test_decode_graphql_latest_checkpoint_hydrates_current_thread_started_at(
+    gitlab_workflow,
+):
+    gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
+    gitlab_workflow._decode_graphql_latest_checkpoint(
+        {
+            "threadTs": "gql-ckpt",
+            "parentTs": None,
+            "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {}}),
+            "metadata": "{}",
+            "currentThreadStartedAt": "2026-07-08T10:00:00+00:00",
+        }
+    )
+
+    assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"

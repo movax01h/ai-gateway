@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKeyTemplate,
     NoneIOKey,
     RuntimeIOKey,
+    agent_context_limits_reducer,
     conversation_history_replace_reducer,
     create_nested_dict,
     get_vars_from_state,
@@ -233,6 +234,22 @@ class TestMergeNestedDictReducer:
 
         result = merge_nested_dict_reducer(left, right)
         assert len(result) == 0
+
+
+class TestAgentContextLimitsReducer:
+    """Test agent_context_limits_reducer function."""
+
+    def test_merges_per_agent_updates_and_overwrites(self):
+        """Per-agent updates accumulate across events; same-agent updates overwrite."""
+        result = agent_context_limits_reducer(
+            {"agent": 64000}, {"developer_agent": 200000, "agent": 128000}
+        )
+        assert result == {"agent": 128000, "developer_agent": 200000}
+
+    def test_tolerates_none(self):
+        """None current (first write) and None new (no update) are handled."""
+        assert agent_context_limits_reducer(None, {"agent": 64000}) == {"agent": 64000}
+        assert agent_context_limits_reducer({"agent": 64000}, None) == {"agent": 64000}
 
 
 class TestCreateNestedDict:
@@ -676,6 +693,7 @@ class TestIOKey:
     def test_get_vars_from_state_multiple_keys(self):
         """Test extracting variables from state using multiple IOKeys."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {"main": [HumanMessage(content="Hello")]},
             "ui_chat_log": [],
@@ -697,6 +715,7 @@ class TestIOKey:
     def test_get_vars_from_state_overlapping_keys(self):
         """Test extracting variables with overlapping key names."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -720,6 +739,7 @@ class TestIOKey:
         """Test edge cases for IOKey functionality."""
         # Test with special characters in keys
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -823,6 +843,7 @@ class TestIOKey:
         expected_value,
     ):
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.NOT_STARTED,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1246,6 +1267,7 @@ class TestIOKeyLiteralField:
     def test_iokey_literal_template_variable_from_state(self):
         """Test template_variable_from_state with literal=True returns literal value."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1271,6 +1293,7 @@ class TestIOKeyLiteralField:
         for value in complex_values:
             io_key = IOKey(target=value, literal=True, alias="test_value")
             state: FlowState = {
+                "agent_context_limits": {},
                 "status": WorkflowStatusEnum.PLANNING,
                 "conversation_history": {},
                 "ui_chat_log": [],
@@ -1342,6 +1365,7 @@ class TestIOKeyLiteralField:
         io_key = IOKey(target=target_value, literal=True, alias=alias_value)
 
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1379,6 +1403,7 @@ class TestIOKeyLiteralField:
         io_key = IOKey(target=complex_literal_value, literal=True, alias=alias)
 
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.PLANNING,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1396,6 +1421,7 @@ class TestIntegration:
         """Test a complete workflow of state manipulation."""
         # Create initial state
         initial_state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.NOT_STARTED,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1475,6 +1501,7 @@ class TestIntegration:
         branch name after a successful branch creation.
         """
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1502,6 +1529,7 @@ class TestIntegration:
         """Test that the create_repository_branch structured response schema output can be resolved when branch creation
         fails."""
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1576,6 +1604,7 @@ class TestRuntimeIOKey:
     @pytest.fixture
     def base_state(self) -> FlowState:
         return {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1679,7 +1708,7 @@ class TestRuntimeIOKey:
     def test_io_key_factory_type_alias(self):
         """IOKeyFactory is a callable type alias for (FlowState) -> IOKey."""
         # Verify it can be used as a type annotation
-        factory: IOKeyFactory = lambda state: IOKey(target="status")
+        factory: IOKeyFactory = lambda state: IOKey(target="status")  # noqa: E731
         key = RuntimeIOKey(alias="status", factory=factory)
         assert key.alias == "status"
 
@@ -1690,6 +1719,7 @@ class TestNoneIOKey:
     @pytest.fixture
     def base_state(self) -> FlowState:
         return {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
@@ -1733,6 +1763,7 @@ class TestNoneIOKey:
         """value_from_state returns None even for a minimal state."""
         key = NoneIOKey(alias="session_id")
         empty_state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.NOT_STARTED,
             "conversation_history": {},
             "ui_chat_log": [],

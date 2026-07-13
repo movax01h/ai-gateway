@@ -12,14 +12,20 @@ from typing import (
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
+from duo_workflow_service.agent_platform.constants import (
+    NODE_ROLE_SEPARATOR,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -61,6 +67,7 @@ from duo_workflow_service.conversation.compaction import (
     create_conversation_compactor,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
@@ -75,16 +82,31 @@ class RoutingError(Exception):
 class AgentComponentBase(BaseComponent):
     """Shared base for agent-style components (AgentComponent, SupervisorAgentComponent).
 
-    Holds the common field declarations and class-level metadata shared by all
-    agent variants.  Subclasses must override ``_agent_node_router`` and
-    ``attach`` with their own graph-topology logic.
+    Holds the common field declarations, shared routing methods, and protected
+    graph-wiring helpers used by all agent variants.  Subclasses must override
+    ``_agent_node_router`` and ``attach`` with their own graph-topology logic.
 
     Do NOT use this class directly in flow configs — use AgentComponent instead.
     """
 
+    STREAMING_ENABLED_CONFIG: ClassVar[RunnableConfig] = {}
+    STREAMING_DISABLED_CONFIG: ClassVar[RunnableConfig] = {"tags": [TAG_NOSTREAM]}
+
     _final_answer_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="context",
         subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "final_answer"],
+    )
+
+    _cycle_count_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "cycle_count"],
+        optional=True,
+    )
+
+    _tool_approval_decision_key_template: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[IOKeyTemplate.COMPONENT_NAME_TEMPLATE, "tool_approval_decision"],
+        optional=True,
     )
 
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
@@ -110,6 +132,15 @@ class AgentComponentBase(BaseComponent):
     response_schema_version: Optional[str] = None
     response_schema_tracking: bool = False
     response_schema_tracking_context: dict[str, str] = Field(default_factory=dict)
+    require_tool_approval: bool = False
+    pre_approved_tools: list[str] = Field(default_factory=list)
+    _DEFAULT_SOFT_LIMIT_OFFSET: ClassVar[int] = 20
+    _DEFAULT_MAX_CYCLES: ClassVar[int] = max(
+        1, RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET
+    )
+
+    max_cycles: int = _DEFAULT_MAX_CYCLES
+    max_wrap_up_retries: int = 3
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -124,6 +155,55 @@ class AgentComponentBase(BaseComponent):
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
 
     _response_schema: Optional[Type[BaseAgentOutput]] = PrivateAttr()
+    _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
+    _cycle_count_key: RuntimeIOKey = PrivateAttr()
+
+    @model_validator(mode="after")
+    def initialize_tool_approval_decision_key(self) -> Self:
+        """Initialize the tool approval decision key with a component-scoped default.
+
+        Subclasses (e.g. AgentComponent) may override this key via bind_to_supervisor to use a subsession-scoped key,
+        preventing race conditions when the same subagent runs in multiple subsessions in parallel.
+        """
+        static_key = self._tool_approval_decision_key_template.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        )
+        self._tool_approval_decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: static_key,
+        )
+        return self
+
+    @model_validator(mode="after")
+    def initialize_cycle_count_key(self) -> Self:
+        """Initialize the cycle count key with a component-scoped default.
+
+        Subclasses (e.g. AgentComponent) may override this key via bind_to_supervisor to use a subsession-scoped key,
+        preventing race conditions when the same subagent runs in multiple subsessions in parallel.
+        """
+        static_key = self._cycle_count_key_template.to_iokey(
+            {IOKeyTemplate.COMPONENT_NAME_TEMPLATE: self.name}
+        )
+        self._cycle_count_key = RuntimeIOKey(
+            alias="cycle_count", factory=lambda _: static_key
+        )
+        return self
+
+    @field_validator("max_cycles")
+    @classmethod
+    def validate_max_cycles(cls, v: int) -> int:
+        """Validate that max_cycles is at least 1."""
+        if v < 1:
+            raise ValueError("max_cycles must be at least 1.")
+        return v
+
+    @field_validator("max_wrap_up_retries")
+    @classmethod
+    def validate_max_wrap_up_retries(cls, v: int) -> int:
+        """Validate that max_wrap_up_retries is at least 1."""
+        if v < 1:
+            raise ValueError("max_wrap_up_retries must be at least 1.")
+        return v
 
     @model_validator(mode="after")
     def validate_and_resolve_response_schema(self) -> Self:
@@ -192,6 +272,16 @@ class AgentComponentBase(BaseComponent):
         required -= self._RUNTIME_INJECTED_VARS
         provided = {inp.template_variable_name for inp in self.inputs}
 
+        # Note: Currently `get_required_variables` returns optional variables as well
+        # e.g. `{% if context %}{{ context }}{% endif %}`
+        optional_component_inputs = {
+            inp.template_variable_name for inp in self.inputs if inp.optional
+        }
+        required -= optional_component_inputs
+        # We need to remove optional inputs from provided as well to not trigger
+        # an ExtraInputVariablesError
+        provided -= optional_component_inputs
+
         if missing := required - provided:
             raise MissingInputVariablesError(
                 f"Component '{self.name}' (prompt '{self.prompt_id}'): "
@@ -224,9 +314,23 @@ class AgentComponentBase(BaseComponent):
         )
         return RuntimeIOKey(alias="conversation_history", factory=lambda _: static_key)
 
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return the ``RunnableConfig`` to pass to every ``AgentNode`` ``ainvoke`` call.
+
+        Subclasses must override this method to express their own streaming policy
+        in terms of their own typed ``ui_log_events`` enum.
+
+        Return ``STREAMING_ENABLED_CONFIG`` to allow LLM chunks to stream to the
+        UI, or ``STREAMING_DISABLED_CONFIG`` to suppress them.  The AgentNode LLM
+        call produces tokens that may become either a final answer or mid-loop
+        reasoning — these cannot be distinguished at chunk time, so the decision
+        must be all-or-nothing at the node level.
+        """
+        raise NotImplementedError
+
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
-        model_metadata = get_model_metadata(self.model_size_preference)
+        model_metadata = get_model_metadata(self.model_tags)
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
@@ -243,7 +347,110 @@ class AgentComponentBase(BaseComponent):
         )
 
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
+
+    def _tool_approval_request_router(self, state: FlowState) -> str:
+        """Route from tool approval request node.
+
+        Routes to:
+            - fetch: If approval is required (status=TOOL_CALL_APPROVAL_REQUIRED)
+            - tools: If all tools pre-approved (status=EXECUTION)
+
+        Raises:
+            RoutingError: If status is neither TOOL_CALL_APPROVAL_REQUIRED nor EXECUTION.
+        """
+        status = IOKey(target="status").value_from_state(state)
+
+        if status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED:
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_fetch"
+        if status == WorkflowStatusEnum.EXECUTION:
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
+        raise RoutingError(f"Unexpected approval status: {status}")
+
+    def _tool_approval_fetch_router(self, state: FlowState) -> str:
+        """Route from tool approval fetch node.
+
+        Routes to:
+            - tools: If approval was granted (decision=APPROVE)
+            - agent: If approval was rejected (decision=REJECT or MODIFY)
+        """
+        approval_decision_iokey = self._tool_approval_decision_key.to_iokey(state)
+
+        decision = approval_decision_iokey.value_from_state(state)
+
+        if not decision:
+            raise RoutingError(f"No approval decision found in state for {self.name}")
+
+        if decision == FlowEventType.APPROVE:
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
+        if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
+            return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
+
+        raise RoutingError(f"Unexpected approval decision: {decision}")
+
+    def _attach_tool_approval_nodes(
+        self,
+        graph: StateGraph,
+        conversation_history_key: RuntimeIOKey,
+        ui_log_events: list,
+    ) -> None:
+        """Add tool approval nodes and edges to the graph when ``require_tool_approval`` is True.
+
+        Creates ``ToolApprovalRequestNode`` and ``ToolApprovalFetchNode``, registers
+        them in the graph, and wires their conditional edges using the shared router
+        methods defined on this base class.
+
+        This is a no-op when ``require_tool_approval`` is False, so callers can
+        call it unconditionally.
+
+        Args:
+            graph: The LangGraph ``StateGraph`` being assembled.
+            conversation_history_key: ``RuntimeIOKey`` resolving this component's
+                conversation-history slot at runtime.
+            ui_log_events: Event list passed to ``ToolApprovalRequestNode``'s
+                ``UIHistory``.
+        """
+        if not self.require_tool_approval:
+            return
+
+        node_tool_approval_request = ToolApprovalRequestNode(
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request",
+            conversation_history_key=conversation_history_key,
+            toolset=self.toolset,
+            pre_approved_tools=self.pre_approved_tools,
+            status_key=RuntimeIOKey(
+                alias="status",
+                factory=lambda _: IOKey(target="status"),
+            ),
+            ui_history=UIHistory(
+                events=ui_log_events,
+                writer_class=UILogWriterAgentTools,
+            ),
+        )
+
+        node_tool_approval_fetch = ToolApprovalFetchNode(
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_fetch",
+            conversation_history_key=conversation_history_key,
+            status_key=RuntimeIOKey(
+                alias="status",
+                factory=lambda _: IOKey(target="status"),
+            ),
+            approval_decision_key=self._tool_approval_decision_key,
+        )
+
+        graph.add_node(node_tool_approval_request.name, node_tool_approval_request.run)
+        graph.add_node(node_tool_approval_fetch.name, node_tool_approval_fetch.run)
+
+        # Conditional edge from request: goes to fetch if approval needed, tools if all pre-approved
+        graph.add_conditional_edges(
+            node_tool_approval_request.name,
+            self._tool_approval_request_router,
+        )
+        # Conditional edge from fetch: goes to tools if approved, agent if rejected
+        graph.add_conditional_edges(
+            node_tool_approval_fetch.name,
+            self._tool_approval_fetch_router,
+        )
 
     def _agent_node_router(self, state: FlowState) -> str:
         raise NotImplementedError
@@ -273,16 +480,29 @@ class AgentComponent(AgentComponentBase):
     description: Optional[str] = None
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
-    require_tool_approval: bool = False
-    pre_approved_tools: list[str] = Field(default_factory=list)
 
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
+
+    @override
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return TAG_NOSTREAM config unless both LLM output event types are declared.
+
+        Both ON_AGENT_FINAL_ANSWER and ON_AGENT_REASONING must be present because AgentNode tokens may become either —
+        they are indistinguishable at chunk time.
+        """
+        if (
+            UILogEventsAgent.ON_AGENT_FINAL_ANSWER in self.ui_log_events
+            and UILogEventsAgent.ON_AGENT_REASONING in self.ui_log_events
+        ):
+            return self.STREAMING_ENABLED_CONFIG
+        return self.STREAMING_DISABLED_CONFIG
 
     # Private attributes for key instances with default values.
     # Overridden by bind_to_supervisor when used as a subagent.
     _conversation_history_key: RuntimeIOKey = PrivateAttr()
     _output_key: RuntimeIOKey = PrivateAttr()
     _session_id_key: BaseIOKey = PrivateAttr()
+    _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
     _is_bound_to_supervisor: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
@@ -315,6 +535,8 @@ class AgentComponent(AgentComponentBase):
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
         session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        tool_approval_decision_key: RuntimeIOKey,
+        cycle_count_key: RuntimeIOKey,
     ) -> None:
         """Bind this agent to a supervisor.
 
@@ -340,6 +562,15 @@ class AgentComponent(AgentComponentBase):
                 ``UiChatLog`` entry emitted by this component's nodes so the UI
                 can attribute tool calls and final answers to the correct
                 subsession.  Defaults to ``NoneIOKey()`` (always ``None``).
+            tool_approval_decision_key: ``RuntimeIOKey`` that resolves the
+                subsession-scoped tool approval decision key at runtime.  The
+                tool approval decision is stored under a subsession-scoped key,
+                preventing race conditions when the same subagent runs in
+                multiple subsessions in parallel.
+            cycle_count_key: ``RuntimeIOKey`` that resolves the subsession-scoped
+                cycle count key at runtime. The cycle count key is stored under a
+                subsession-scoped key, preventing race conditions when the same
+                subagent runs in multiple subsessions in parallel.
 
         Raises:
             ValueError: If description is not set when binding to supervisor.
@@ -351,6 +582,8 @@ class AgentComponent(AgentComponentBase):
         self._conversation_history_key = conversation_history_key
         self._output_key = output_key
         self._session_id_key = session_id_key
+        self._tool_approval_decision_key = tool_approval_decision_key
+        self._cycle_count_key = cycle_count_key
         self._is_bound_to_supervisor = True
 
         # Ensure subagent does not read shared `context:goal` directly
@@ -390,72 +623,22 @@ class AgentComponent(AgentComponentBase):
                         f"for component {self.name}"
                     ),
                 )
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self.require_tool_approval:
-            return f"{self.name}#tool_approval_request"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request"
 
-        return f"{self.name}#tools"
-
-    def _tool_approval_request_router(self, state: FlowState) -> str:
-        """Route from tool approval request node.
-
-        Routes to:
-            - fetch: If approval is required (status=TOOL_CALL_APPROVAL_REQUIRED)
-            - tools: If all tools pre-approved (status=EXECUTION)
-        """
-        status_iokey = RuntimeIOKey(
-            alias="status",
-            factory=lambda _: IOKey(target="status"),
-        ).to_iokey(state)
-        status = status_iokey.value_from_state(state)
-
-        needs_approval = status == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
-
-        if needs_approval:
-            target = f"{self.name}#tool_approval_fetch"
-        else:
-            target = f"{self.name}#tools"
-
-        return target
-
-    def _tool_approval_fetch_router(self, state: FlowState) -> str:
-        """Route from tool approval fetch node.
-
-        Routes to:
-            - tools: If approval was granted (decision=APPROVE)
-            - agent: If approval was rejected (decision=REJECT or MODIFY)
-        """
-        approval_decision_iokey = RuntimeIOKey(
-            alias="tool_approval_decision",
-            factory=lambda _: IOKey(
-                target="context",
-                subkeys=[f"{self.name}__tool_approval_decision"],
-                optional=True,
-            ),
-        ).to_iokey(state)
-
-        decision = approval_decision_iokey.value_from_state(state)
-
-        if not decision:
-            raise RoutingError(f"No approval decision found in state for {self.name}")
-
-        if decision == FlowEventType.APPROVE:
-            return f"{self.name}#tools"
-        if decision in [FlowEventType.REJECT, FlowEventType.MODIFY]:
-            return f"{self.name}#agent"
-
-        raise RoutingError(f"Unexpected approval decision: {decision}")
+        return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
     @override
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
     @property
     def outputs(self) -> tuple[IOKey, ...]:
@@ -524,6 +707,8 @@ class AgentComponent(AgentComponentBase):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            invoke_config=self._agent_node_invoke_config(),
+            max_context_tokens=get_model_max_context_token_limit(self.model_tags),
             compactor=(
                 create_conversation_compactor(
                     config=(
@@ -547,6 +732,9 @@ class AgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            max_cycles=self.max_cycles,
+            cycle_count_key=self._cycle_count_key,
+            max_wrap_up_retries=self.max_wrap_up_retries,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
@@ -554,7 +742,7 @@ class AgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             conversation_history_key=self._conversation_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
@@ -567,7 +755,7 @@ class AgentComponent(AgentComponentBase):
             session_id_key=self._session_id_key,
         )
         node_final_response = FinalResponseNode(
-            name=f"{self.name}#final_response",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
             conversation_history_key=self._conversation_history_key,
             output_key=self._output_key,
             ui_history=UIHistory(
@@ -592,57 +780,11 @@ class AgentComponent(AgentComponentBase):
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)
 
-        # Conditionally add tool approval nodes
-        if self.require_tool_approval:
-            node_tool_approval_request = ToolApprovalRequestNode(
-                name=f"{self.name}#tool_approval_request",
-                conversation_history_key=self._conversation_history_key,
-                toolset=self.toolset,
-                pre_approved_tools=self.pre_approved_tools,
-                status_key=RuntimeIOKey(
-                    alias="status",
-                    factory=lambda _: IOKey(target="status"),
-                ),
-                ui_history=UIHistory(
-                    events=self.ui_log_events,
-                    writer_class=UILogWriterAgentTools,
-                ),
-            )
-
-            node_tool_approval_fetch = ToolApprovalFetchNode(
-                name=f"{self.name}#tool_approval_fetch",
-                conversation_history_key=self._conversation_history_key,
-                status_key=RuntimeIOKey(
-                    alias="status",
-                    factory=lambda _: IOKey(target="status"),
-                ),
-                approval_decision_key=RuntimeIOKey(
-                    alias="tool_approval_decision",
-                    factory=lambda _: IOKey(
-                        target="context",
-                        subkeys=[f"{self.name}__tool_approval_decision"],
-                        optional=True,
-                    ),
-                ),
-            )
-
-            # Add approval nodes to graph
-            graph.add_node(
-                node_tool_approval_request.name, node_tool_approval_request.run
-            )
-            graph.add_node(node_tool_approval_fetch.name, node_tool_approval_fetch.run)
-
-            # Add edges for approval flow
-            # Conditional edge from request: goes to fetch if approval needed, tools if all pre-approved
-            graph.add_conditional_edges(
-                node_tool_approval_request.name,
-                self._tool_approval_request_router,
-            )
-            # Conditional edge from fetch: goes to tools if approved, agent if rejected
-            graph.add_conditional_edges(
-                node_tool_approval_fetch.name,
-                self._tool_approval_fetch_router,
-            )
+        self._attach_tool_approval_nodes(
+            graph,
+            conversation_history_key=self._conversation_history_key,
+            ui_log_events=self.ui_log_events,
+        )
 
         graph.add_conditional_edges(
             node_agent.name,

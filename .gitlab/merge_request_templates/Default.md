@@ -29,6 +29,7 @@ Example below:
 
 - [ ] Tests added for new functionality. If not, please raise an issue to follow up.
 - [ ] Documentation added/updated, if needed.
+- [ ] If this change may affect agent quality, consider triggering the manual `sanity-tests` job (SWE-bench eval on CEF) at your discretion. It takes ~30 min and uses significant compute/tokens, and the result is not a pass/fail signal, it requires manual analysis in LangSmith. Not needed for dev tooling, infra, observability, docs, or CI changes.
 - [ ] If this change requires executor implementation: verified that issues/MRs exist for
   the [Node executor](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp) or confirmed that changes are
   backward-compatible and don't break existing executor functionality.

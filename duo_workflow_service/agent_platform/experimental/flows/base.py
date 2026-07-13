@@ -1,13 +1,14 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, Optional, override
+from typing import Any, Dict, NoReturn, Optional, override
 from uuid import uuid4
 
 import jsonschema
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
 
@@ -143,7 +144,7 @@ class Flow(AbstractWorkflow):
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=f"Starting Flow: {goal}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -167,6 +168,7 @@ class Flow(AbstractWorkflow):
                     self._additional_context or []
                 ),
             },
+            agent_context_limits={},
         )
 
     def _process_additional_context(
@@ -237,7 +239,7 @@ class Flow(AbstractWorkflow):
                             message_type=MessageTypeEnum.USER,
                             message_sub_type=None,
                             content=message,
-                            message_id=f"user-{str(uuid4())}",
+                            message_id=f"user-{uuid4()!s}",
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             status=ToolStatus.SUCCESS,
                             correlation_id=None,
@@ -498,6 +500,21 @@ class Flow(AbstractWorkflow):
                         tool_options[tool_name] = options
 
         return tools_registry.toolset(tool_names, tool_options=tool_options)
+
+    @override
+    async def _handle_compile_and_run_exception(
+        self,
+        e: BaseException,
+        compiled_graph: Any,
+        graph_config: Any,
+    ) -> NoReturn:
+        if isinstance(e, GraphRecursionError):
+            e = NotifiableAgentException(
+                "The workflow reached its maximum step limit and could not complete. "
+                "Please try again with a more focused goal, or break the task into smaller steps.",
+                internal_detail=f"GraphRecursionError: recursion limit of {self._recursion_limit()} steps exceeded.",
+            )
+        await super()._handle_compile_and_run_exception(e, compiled_graph, graph_config)
 
     @override
     async def _handle_workflow_failure(

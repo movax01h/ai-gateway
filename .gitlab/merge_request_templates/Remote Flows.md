@@ -20,10 +20,8 @@
   and [Node executor](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp) or confirmed that changes are
   backward-compatible and don't break existing executor functionality.
 
-/label ~"group::agent foundations"
+/label ~"devops::agent foundations"
 /label ~"section::ai"
-/label ~"devops::ai-powered"
-/label ~"Category:Duo Agent Platform"
 
 <!-- Select a type -->
 <!-- /label ~"type::bug" -->

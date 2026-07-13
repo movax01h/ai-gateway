@@ -10,6 +10,7 @@ from grpc.aio import ServicerContext
 from contract import contract_pb2
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.server import DuoWorkflowService
+from duo_workflow_service.tracking import current_monitoring_context
 from lib.context import gitlab_version
 from lib.internal_events.context import EventContext, current_event_context
 from lib.usage_quota import (
@@ -30,18 +31,17 @@ def mock_user_with_skip_usage_cutoff_fixture():
 
 @pytest.fixture(autouse=True, name="mock_usage_quota_service")
 def mock_usage_quota_service_fixture(mock_duo_workflow_service_container):
-    """Auto-use fixture to properly wire DI container and mock UsageQuotaService.
+    """Auto-use fixture to mock UsageQuotaService for each test.
 
-    This ensures the @has_sufficient_usage_quota decorator works correctly.
+    This ensures the @has_sufficient_usage_quota decorator works correctly. The container is already wired by
+    mock_duo_workflow_service_container (which wires the entire duo_workflow_service package at module scope), so no
+    additional wire() call is needed here.
     """
-    from duo_workflow_service import server as server_module
-
     service_instance = MagicMock()
     service_instance.execute = AsyncMock()
     service_instance.aclose = AsyncMock()
 
     mock_duo_workflow_service_container.usage_quota.service.override(service_instance)
-    mock_duo_workflow_service_container.wire(modules=[server_module])
 
     yield service_instance
 
@@ -66,14 +66,15 @@ async def mock_request_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
     """Helper to generate mock request stream."""
     yield contract_pb2.ClientEvent(
         startRequest=contract_pb2.StartWorkflowRequest(
-            workflowDefinition="test_workflow"
+            workflowID="test-workflow-id",
+            workflowDefinition="test_workflow",
         )
     )
 
 
-async def mock_track_self_hosted_request_generator() -> (
-    AsyncIterator[contract_pb2.TrackSelfHostedClientEvent]
-):
+async def mock_track_self_hosted_request_generator() -> AsyncIterator[
+    contract_pb2.TrackSelfHostedClientEvent
+]:
     """Helper to generate mock TrackSelfHostedClientEvent stream."""
     yield contract_pb2.TrackSelfHostedClientEvent(
         requestID="test-request-id",
@@ -120,8 +121,59 @@ async def test_execute_workflow_returns_early_when_stream_closed_before_first_me
     assert results == []
     mock_usage_quota_service.execute.assert_not_called()
     inner.assert_not_called()
-    mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)
-    mock_context.set_details.assert_called_once_with("workflow execution never started")
+    mock_context.set_code.assert_not_called()
+    mock_context.set_details.assert_not_called()
+    assert (
+        current_monitoring_context.get().workflow_no_start_reason == "NO_START_REQUEST"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_workflow_returns_early_when_workflow_id_is_empty(
+    mock_usage_quota_service,
+    duo_service,
+    mock_context,
+) -> None:
+    """Empty workflowID is treated identically to a never-started connection."""
+
+    async def empty_workflow_id_generator() -> AsyncIterator[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="",
+                workflowDefinition="software_development",
+                goal="test",
+            )
+        )
+
+    from duo_workflow_service.interceptors.route.usage_quota import (
+        has_sufficient_usage_quota,
+    )
+
+    inner = MagicMock()
+    inner.__name__ = "ExecuteWorkflow"
+    inner.__qualname__ = "DuoWorkflowServicer.ExecuteWorkflow"
+
+    decorated = has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)(
+        inner
+    )
+
+    results = [
+        item
+        async for item in decorated(
+            duo_service,
+            empty_workflow_id_generator(),
+            mock_context,
+            service=mock_usage_quota_service,
+        )
+    ]
+
+    assert results == []
+    mock_usage_quota_service.execute.assert_not_called()
+    inner.assert_not_called()
+    assert (
+        current_monitoring_context.get().workflow_no_start_reason
+        == "EMPTY_START_REQUEST"
+    )
 
 
 @pytest.mark.asyncio

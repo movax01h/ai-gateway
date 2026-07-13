@@ -16,13 +16,14 @@ from lib.context.llm_operations import (
     token_usage,
 )
 from lib.context.model import (
-    ModelSizeBucket,
     current_model_metadata_context,
     current_model_metadata_with_size_context,
     get_model_metadata,
 )
 from lib.context.orbit import (
-    ORBIT_TOOL_PREFIX,
+    build_orbit_session_summary_extras,
+    init_orbit_counters,
+    is_orbit_tool,
     orbit_tool_call_count,
     total_tool_call_count,
 )
@@ -33,9 +34,9 @@ from lib.context.request_metadata import (
     client_capabilities,
     client_type,
     extract_finish_reason,
+    gitlab_instance_id,
     gitlab_realm,
     gitlab_version,
-    ip_address,
     is_gitlab_team_member,
     language_server_version,
 )
@@ -50,13 +51,13 @@ from lib.context.workflow import (
     set_workflow_id,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     # request_metadata
     "client_capabilities",
     "client_type",
+    "gitlab_instance_id",
     "gitlab_realm",
     "gitlab_version",
-    "ip_address",
     "is_gitlab_team_member",
     "language_server_version",
     "METADATA_LABELS",
@@ -85,11 +86,12 @@ __all__ = [
     "current_model_metadata_with_size_context",
     "current_model_metadata_context",
     "get_model_metadata",
-    "ModelSizeBucket",
     # orbit
-    "ORBIT_TOOL_PREFIX",
+    "is_orbit_tool",
+    "init_orbit_counters",
     "orbit_tool_call_count",
     "total_tool_call_count",
+    "build_orbit_session_summary_extras",
     # workflow
     "get_workflow_id",
     "set_workflow_id",

@@ -5,9 +5,9 @@ from pydantic import BaseModel, Field
 from ai_gateway.chat.agents import Message
 
 __all__ = [
-    "ReActAgentScratchpad",
-    "AgentRequestOptions",
     "AgentRequest",
+    "AgentRequestOptions",
+    "ReActAgentScratchpad",
 ]
 
 

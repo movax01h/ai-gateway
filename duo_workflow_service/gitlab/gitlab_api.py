@@ -1,13 +1,16 @@
-from typing import Optional, Tuple, TypedDict
-
-from packaging.version import InvalidVersion, Version
+from typing import NotRequired, Optional, Tuple, TypedDict
 
 from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.gitlab.queries import fetch_query_for_version
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
-from duo_workflow_service.tracking.errors import log_exception
 from lib.context import gitlab_version
+
+
+def workflow_global_id(workflow_id: str) -> str:
+    """Build a GitLab global ID for a Duo Workflows workflow."""
+    return f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"
 
 
 class Language(TypedDict):
@@ -41,13 +44,22 @@ class Checkpoint(TypedDict, total=False):
     metadata: str
 
 
+class FoundationalFlowsFeature(TypedDict):
+    enabled: bool
+    enabled_flows: Optional[list[str]]
+
+
+class WorkflowFeatures(TypedDict, total=False):
+    foundational_flows: FoundationalFlowsFeature
+
+
 class WorkflowConfig(TypedDict):
     workflow_id: str
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
-    tool_call_approvals: dict
     workflow_status: str
     mcp_enabled: bool
+    incremental_checkpoints_enabled: bool
     allow_agent_to_request_user: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
@@ -55,298 +67,15 @@ class WorkflowConfig(TypedDict):
     prompt_injection_protection_level: PromptInjectionProtectionLevel
     archived: bool
     stalled: bool
-
-
-GITLAB_18_2_QUERY = """
-query($workflowId: AiDuoWorkflowsWorkflowID!) {
-    duoWorkflowWorkflows(workflowId: $workflowId) {
-        nodes {
-            statusName
-            projectId
-            project {
-                id
-                name
-                description
-                httpUrlToRepo
-                languages {
-                    name
-                    share
-                }
-                webUrl
-                statisticsDetailsPaths {
-                    repository
-                }
-            }
-            agentPrivilegesNames
-            preApprovedAgentPrivilegesNames
-            mcpEnabled
-            allowAgentToRequestUser
-            firstCheckpoint {
-                checkpoint
-            }
-        }
-    }
-}
-"""
-
-# This query requires https://gitlab.com/gitlab-org/gitlab/-/merge_requests/196781 that is available in GitLab 18.3+.
-# This query requires https://gitlab.com/gitlab-org/gitlab/-/merge_requests/197587 that is available in GitLab 18.3+.
-GITLAB_18_3_OR_ABOVE_QUERY = """
-query($workflowId: AiDuoWorkflowsWorkflowID!) {
-    duoWorkflowWorkflows(workflowId: $workflowId) {
-        nodes {
-            statusName
-            projectId
-            project {
-                id
-                name
-                description
-                httpUrlToRepo
-                languages {
-                    name
-                    share
-                }
-                webUrl
-                statisticsDetailsPaths {
-                    repository
-                }
-                duoContextExclusionSettings {
-                    exclusionRules
-                }
-            }
-            namespaceId
-            namespace {
-                id
-                name
-                description
-                webUrl
-            }
-            agentPrivilegesNames
-            preApprovedAgentPrivilegesNames
-            mcpEnabled
-            allowAgentToRequestUser
-            firstCheckpoint {
-                checkpoint
-            }
-            archived
-            stalled
-        }
-    }
-}
-"""
-
-# This query adds aiSettings.promptInjectionProtectionLevel available in GitLab 18.8+.
-GITLAB_18_8_OR_ABOVE_QUERY = """
-query($workflowId: AiDuoWorkflowsWorkflowID!) {
-    duoWorkflowWorkflows(workflowId: $workflowId) {
-        nodes {
-            statusName
-            projectId
-            project {
-                id
-                name
-                description
-                httpUrlToRepo
-                languages {
-                    name
-                    share
-                }
-                webUrl
-                statisticsDetailsPaths {
-                    repository
-                }
-                duoContextExclusionSettings {
-                    exclusionRules
-                }
-                namespace {
-                    aiSettings {
-                        promptInjectionProtectionLevel
-                    }
-                }
-            }
-            namespaceId
-            namespace {
-                id
-                name
-                description
-                webUrl
-                aiSettings {
-                    promptInjectionProtectionLevel
-                }
-            }
-            agentPrivilegesNames
-            preApprovedAgentPrivilegesNames
-            mcpEnabled
-            allowAgentToRequestUser
-            latestCheckpoint {
-                threadTs
-                parentTs
-                metadata
-                checkpoint
-            }
-            archived
-            stalled
-        }
-    }
-}
-"""
-
-# This query adds per session tool approvals in GitLab 18.9+.
-GITLAB_18_9_OR_ABOVE_QUERY = """
-query($workflowId: AiDuoWorkflowsWorkflowID!) {
-    duoWorkflowWorkflows(workflowId: $workflowId) {
-        nodes {
-            statusName
-            projectId
-            project {
-                id
-                name
-                description
-                httpUrlToRepo
-                languages {
-                    name
-                    share
-                }
-                webUrl
-                statisticsDetailsPaths {
-                    repository
-                }
-                duoContextExclusionSettings {
-                    exclusionRules
-                }
-                namespace {
-                    aiSettings {
-                        promptInjectionProtectionLevel
-                    }
-                }
-            }
-            namespaceId
-            namespace {
-                id
-                name
-                description
-                webUrl
-                aiSettings {
-                    promptInjectionProtectionLevel
-                }
-            }
-            agentPrivilegesNames
-            preApprovedAgentPrivilegesNames
-            toolCallApprovals
-            mcpEnabled
-            allowAgentToRequestUser
-            latestCheckpoint {
-                threadTs
-                parentTs
-                metadata
-                checkpoint
-            }
-            archived
-            stalled
-        }
-    }
-}
-"""
-
-# This query adds compressedCheckpoint to latestCheckpoint available in GitLab 19.0+.
-# See https://gitlab.com/gitlab-org/gitlab/-/merge_requests/235045
-GITLAB_19_0_OR_ABOVE_QUERY = """
-query($workflowId: AiDuoWorkflowsWorkflowID!) {
-    duoWorkflowWorkflows(workflowId: $workflowId) {
-        nodes {
-            statusName
-            projectId
-            project {
-                id
-                name
-                description
-                httpUrlToRepo
-                languages {
-                    name
-                    share
-                }
-                webUrl
-                statisticsDetailsPaths {
-                    repository
-                }
-                duoContextExclusionSettings {
-                    exclusionRules
-                }
-                namespace {
-                    aiSettings {
-                        promptInjectionProtectionLevel
-                    }
-                }
-            }
-            namespaceId
-            namespace {
-                id
-                name
-                description
-                webUrl
-                aiSettings {
-                    promptInjectionProtectionLevel
-                }
-            }
-            agentPrivilegesNames
-            preApprovedAgentPrivilegesNames
-            toolCallApprovals
-            mcpEnabled
-            allowAgentToRequestUser
-            latestCheckpoint {
-                threadTs
-                parentTs
-                metadata
-                compressedCheckpoint
-            }
-            archived
-            stalled
-        }
-    }
-}
-"""
-
-version_18_2 = Version("18.2.0")
-version_18_3 = Version("18.3.0")
-version_18_8 = Version("18.8.0")
-version_18_9 = Version("18.9.0")
-version_19_0 = Version("19.0.0")
-FALLBACK_VERSION = version_18_2
-
-
-def fetch_workflow_and_container_query():
-    """Select the appropriate GraphQL query based on GitLab version.
-
-    Returns:
-        GraphQL query string compatible with the detected GitLab version.
-    """
-    try:
-        gl_version = Version(gitlab_version.get())  # type: ignore[arg-type]
-    except (InvalidVersion, TypeError) as ex:
-        log_exception(ex)
-        gl_version = FALLBACK_VERSION
-
-    if version_19_0 <= gl_version:
-        return GITLAB_19_0_OR_ABOVE_QUERY
-
-    if version_18_9 <= gl_version:
-        return GITLAB_18_9_OR_ABOVE_QUERY
-
-    if version_18_8 <= gl_version:
-        return GITLAB_18_8_OR_ABOVE_QUERY
-
-    if version_18_3 <= gl_version:
-        return GITLAB_18_3_OR_ABOVE_QUERY
-
-    return GITLAB_18_2_QUERY
+    features: NotRequired[WorkflowFeatures]
 
 
 async def fetch_workflow_and_container_data(
     client: GitlabHttpClient, workflow_id: str
 ) -> Tuple[Project | None, Namespace | None, WorkflowConfig]:
-    query = fetch_workflow_and_container_query()
+    query = fetch_query_for_version(gitlab_version.get())
 
-    variables = {"workflowId": f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"}
+    variables = {"workflowId": workflow_global_id(workflow_id)}
 
     try:
         response = await client.graphql(query, variables)
@@ -424,15 +153,19 @@ async def fetch_workflow_and_container_data(
             f"Failed to extract gitlab host from web_url for workflow {workflow_id}"
         )
 
+    status_check = project_data.get("duoWorkflowStatusCheck") or {}
+
     workflow_config = WorkflowConfig(
         workflow_id=workflow_id,
         agent_privileges_names=workflow.get("agentPrivilegesNames", []),
         pre_approved_agent_privileges_names=workflow.get(
             "preApprovedAgentPrivilegesNames", []
         ),
-        tool_call_approvals=workflow.get("toolCallApprovals", {}),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
+        incremental_checkpoints_enabled=workflow.get(
+            "incrementalCheckpointsEnabled", False
+        ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
@@ -440,6 +173,12 @@ async def fetch_workflow_and_container_data(
         prompt_injection_protection_level=prompt_injection_protection_level,
         archived=workflow.get("archived", None),
         stalled=workflow.get("stalled", None),
+        features={
+            "foundational_flows": {
+                "enabled": status_check.get("foundationalFlowsEnabled", True),
+                "enabled_flows": status_check.get("enabledFoundationalFlows"),
+            }
+        },
     )
 
     return project, namespace, workflow_config
@@ -459,9 +198,9 @@ def extract_default_branch_from_project_repository(workflow: dict) -> Optional[s
 def extract_id_from_global_id(global_id: str):
     extracted_id = 0
     if global_id and isinstance(global_id, str) and "gid://" in global_id:
-        extracted_id = int(global_id.split("/")[-1])
+        extracted_id = int(global_id.rsplit("/", maxsplit=1)[-1])
     elif global_id and isinstance(global_id, str) and global_id.startswith("#"):
-        extracted_id = int(global_id.split("#")[-1])
+        extracted_id = int(global_id.rsplit("#", maxsplit=1)[-1])
     else:
         extracted_id = int(global_id) if global_id else 0
 
@@ -473,9 +212,9 @@ def empty_workflow_config() -> WorkflowConfig:
         "workflow_id": "",
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
-        "tool_call_approvals": {},
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
+        "incremental_checkpoints_enabled": False,
         "first_checkpoint": None,
         "latest_checkpoint": None,
         "workflow_status": "",

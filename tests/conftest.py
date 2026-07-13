@@ -1,12 +1,13 @@
 import os
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional, Union
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
 import litellm
 import pytest
 import structlog
+from dependency_injector import providers
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
@@ -18,6 +19,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
+from transformers import PreTrainedTokenizerFast
 
 from ai_gateway import structured_logging
 from ai_gateway.api.middleware import (
@@ -66,6 +68,9 @@ pytest_plugins = ("pytest_asyncio",)
 # see https://github.com/langchain-ai/langchain/issues/16429#issuecomment-1907051834
 # pylint: disable=direct-environment-variable-reference
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+# HF_HUB_OFFLINE prevents AutoTokenizer.from_pretrained from making network requests
+# to HuggingFace Hub on every test, using only the locally cached tokenizer instead.
+os.environ["HF_HUB_OFFLINE"] = "1"
 # pylint: enable=direct-environment-variable-reference
 
 
@@ -173,6 +178,38 @@ def mock_config_fixture(config_values: dict[str, Any]):
     return Config(_env_file=None, _env_prefix="AIGW_TEST", **config_values)
 
 
+def _apply_mock_tokenizer(container_application: ContainerApplication) -> None:
+    """Override the tokenizer provider with a mock to prevent HuggingFace Hub calls.
+
+    The mock encodes text as Unicode codepoints so decode() round-trips the original content, keeping API-level tests
+    correct while avoiding network I/O.
+    """
+    mock_tokenizer = MagicMock(spec=PreTrainedTokenizerFast)
+    mock_tokenizer.truncation_side = "left"
+
+    def _tokenize(text, max_length=None, truncation=False, **_kwargs):
+        is_batch = not isinstance(text, str)
+        texts = list(text) if is_batch else [text]
+        if max_length and truncation:
+            side = mock_tokenizer.truncation_side
+            if side == "right":
+                texts = [t[:max_length] for t in texts]
+            else:
+                texts = [t[-max_length:] if len(t) > max_length else t for t in texts]
+        ids = [[ord(c) for c in t] for t in texts]
+        return {
+            "input_ids": ids if is_batch else ids[0],
+            "length": [len(i) for i in ids],
+        }
+
+    mock_tokenizer.side_effect = _tokenize
+    mock_tokenizer.decode.side_effect = lambda ids, **_kw: "".join(chr(i) for i in ids)
+
+    container_application.code_suggestions.tokenizer.override(
+        providers.Object(mock_tokenizer)
+    )
+
+
 @pytest.fixture(name="mock_container")
 def mock_container_fixture(
     mock_config: Config,
@@ -182,6 +219,11 @@ def mock_container_fixture(
 ):
     container_application = ContainerApplication()
     container_application.config.from_dict(mock_config.model_dump())
+
+    # Prevent AutoTokenizer.from_pretrained from making HuggingFace Hub network
+    # calls. The tokenizer provider is a Singleton that calls init_tokenizer()
+    # on first access; overriding it with a mock avoids any network I/O.
+    _apply_mock_tokenizer(container_application)
 
     return container_application
 
@@ -385,7 +427,7 @@ def prompt_config_fixture(
     prompt_name: str,
     model_config: ModelConfig,
     unit_primitive: GitLabUnitPrimitive,
-    prompt_template: dict[str, str],
+    prompt_template: dict[str, str | list[str]],
     prompt_params: PromptParams,
 ):
     return PromptConfig(
@@ -477,12 +519,18 @@ def user_is_debug_fixture():
     return False
 
 
+@pytest.fixture(name="jwt_realm")
+def jwt_realm_fixture(request) -> str:
+    return getattr(request, "param", "")
+
+
 @pytest.fixture(name="auth_user")
 def auth_user_fixture(
     user_is_debug: bool,
     scopes: list[str],
     issuer: str,
     claims_extra: dict[str, Any] | None,
+    jwt_realm: str,
 ):
     return CloudConnectorUser(
         authenticated=True,
@@ -492,6 +540,7 @@ def auth_user_fixture(
             gitlab_instance_uid="unique-instance-uid",
             issuer=issuer,
             extra=claims_extra,
+            gitlab_realm=jwt_realm,
         ),
     )
 

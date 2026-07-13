@@ -26,7 +26,6 @@ class BaseAgentOutput(BaseModel):
 
 
 class BaseResponseSchemaRegistry(ABC):
-
     @abstractmethod
     def get(self, schema_id: str, schema_version: str) -> Type[BaseAgentOutput]:
         pass

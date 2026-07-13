@@ -46,9 +46,10 @@ class GetPipelineFailingJobs(DuoBaseTool):
     This tool can be used when you have a pipeline URL.
     Be careful to differentiate between a pipeline_id and a job_id when using this tool
 
-    If this tool returns no failing jobs, always call `get_downstream_pipelines` with the same pipeline URL.
-    Only report no failing jobs after checking the original pipeline and all downstream pipelines.
-    Do not ask the user before checking downstream pipelines.
+    If this tool returns no failing jobs, call `get_failing_bridge_jobs` (preferred) or
+    `get_downstream_pipelines` with the same pipeline URL, then call this tool with each
+    downstream pipeline URL. Only report no failing jobs after checking the original pipeline
+    and all downstream pipelines. Do not ask the user before checking downstream pipelines.
 
     {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
@@ -153,6 +154,11 @@ class GetPipelineFailingJobs(DuoBaseTool):
 
             job_id_elem = etree.SubElement(xml_job, "job_id")
             job_id_elem.text = str(job_id)
+
+            job_url = job.get("web_url")
+            if job_url:
+                job_url_elem = etree.SubElement(xml_job, "job_url")
+                job_url_elem.text = job_url
 
         failed_jobs_str = "Failed Jobs:\n" + etree.tostring(
             xml_root, pretty_print=True, encoding="unicode"
@@ -264,3 +270,103 @@ class GetDownstreamPipelines(DuoBaseTool):
         self, args: GitLabResourceInput, _tool_response: Any = None
     ) -> str:
         return f"Get downstream pipelines for {args.url}"
+
+
+class GetFailingBridgeJobs(DuoBaseTool):
+    name: str = "get_failing_bridge_jobs"
+    description: str = """Get the failed bridge jobs in a pipeline.
+    A bridge job is the upstream job that triggers a downstream (child or multi-project) pipeline.
+    This tool returns ONLY bridges whose own status is `failed`, with the URL of each failed
+    bridge's downstream pipeline. Use this to discover nested failed pipelines without paying
+    the token cost of fetching successful bridges as well.
+
+    Returns a JSON list (capped) of objects with these fields:
+    - id: bridge job ID
+    - name: bridge job name
+    - stage: pipeline stage the bridge belongs to
+    - failure_reason: GitLab's reason string for the failure (may be null)
+    - downstream_pipeline_url: web URL of the downstream pipeline, or null when the bridge did not trigger one (e.g., failed before triggering) or when the downstream is in a different project (multi-project triggers are not followed).
+
+    This tool can be used when you have a pipeline URL.
+
+    To identify a pipeline you must provide:
+    - A GitLab SaaS URL like:
+        - https://gitlab.com/namespace/project/-/pipelines/33
+        - https://gitlab.com/group/subgroup/project/-/pipelines/42
+    - A self-managed GitLab URL like:
+        - https://gitlab.example.com/namespace/project/-/pipelines/33
+        - https://gitlab.example.com/group/subgroup/project/-/pipelines/42
+
+    For example:
+    - Given a pipeline URL https://gitlab.com/namespace/project/-/pipelines/33, the tool call would be:
+        get_failing_bridge_jobs(url="https://gitlab.com/namespace/project/-/pipelines/33")
+    """
+    args_schema: Type[BaseModel] = GitLabResourceInput
+
+    async def _execute(self, url: str) -> str:
+        validation_result = self._validate_pipeline_url(url)
+
+        if validation_result.errors:
+            raise ToolException("; ".join(validation_result.errors))
+
+        project_id = validation_result.project_id
+        pipeline_iid = validation_result.pipeline_iid
+        response = await self.gitlab_client.aget(
+            path=f"/api/v4/projects/{project_id}/pipelines/{pipeline_iid}/bridges",
+        )
+
+        if not response.is_success():
+            error_str = (
+                f"Failed to fetch failing bridge jobs: status_code={response.status_code}, "
+                f"response={response.body}"
+            )
+            raise ToolException(error_str)
+
+        bridges = response.body
+        if not isinstance(bridges, list):
+            raise ToolException(
+                f"Failed to fetch failing bridge jobs for url: {url}: {bridges}"
+            )
+
+        failed_bridges: list[dict] = []
+        for bridge in bridges:
+            if bridge.get("status") != "failed":
+                continue
+
+            downstream_pipeline = bridge.get("downstream_pipeline")
+            downstream_url = None
+            if downstream_pipeline:
+                # Only handle parent/child pipelines for now, and do not return
+                # downstream pipelines across different projects. URLs that fail
+                # validation are treated like cross-project URLs and surface as
+                # `null` rather than aborting the whole tool call.
+                candidate_url = downstream_pipeline.get("web_url")
+                if candidate_url:
+                    downstream_validation_result = self._validate_pipeline_url(
+                        candidate_url
+                    )
+                    if (
+                        not downstream_validation_result.errors
+                        and downstream_validation_result.project_id == project_id
+                    ):
+                        downstream_url = candidate_url
+
+            failed_bridges.append(
+                {
+                    "id": bridge.get("id"),
+                    "name": bridge.get("name"),
+                    "stage": bridge.get("stage"),
+                    "failure_reason": bridge.get("failure_reason"),
+                    "downstream_pipeline_url": downstream_url,
+                }
+            )
+
+        if len(failed_bridges) > MAX_JOBS_RETURNED:
+            failed_bridges = failed_bridges[:MAX_JOBS_RETURNED]
+
+        return json.dumps(failed_bridges)
+
+    def format_display_message(
+        self, args: GitLabResourceInput, _tool_response: Any = None
+    ) -> str:
+        return f"Get failing bridge jobs for {args.url}"

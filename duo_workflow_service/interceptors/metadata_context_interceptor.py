@@ -9,15 +9,16 @@ from gitlab_cloud_connector.auth import X_GITLAB_REALM_HEADER, X_GITLAB_VERSION_
 
 from ai_gateway import Config
 from duo_workflow_service.interceptors import (
+    X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_IS_A_GITLAB_MEMBER,
     X_GITLAB_IS_GITLAB_MEMBER,
 )
 from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
 from lib.context import (
     client_type,
+    gitlab_instance_id,
     gitlab_realm,
     gitlab_version,
-    ip_address,
     is_gitlab_team_member,
 )
 from lib.context import language_server_version as language_server_version_context
@@ -38,7 +39,12 @@ from lib.prompts.caching import (
     X_GITLAB_MODEL_PROMPT_CACHE_ENABLED,
     set_prompt_caching_enabled_to_current_request,
 )
-from lib.verbose_ai_logs import VERBOSE_AI_LOGS_HEADER, current_verbose_ai_logs_context
+from lib.verbose_ai_logs import (
+    VERBOSE_AI_LOGS_HEADER,
+    X_GITLAB_EXTENDED_LOGGING_HEADER,
+    current_verbose_ai_logs_context,
+    extended_logging_context,
+)
 
 log = structlog.stdlib.get_logger("metadata_context_interceptor")
 
@@ -60,7 +66,6 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
     """
 
     X_GITLAB_CLIENT_TYPE_HEADER = "x-gitlab-client-type"
-    X_GITLAB_CLIENT_IP_HEADER = "x-gitlab-client-ip"
     X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
 
     def __init__(self, config: Config):
@@ -86,13 +91,13 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         if value := metadata.get(X_GITLAB_REALM_HEADER.lower()):
             gitlab_realm.set(value)
 
+        # GitLab instance ID
+        if value := metadata.get(X_GITLAB_INSTANCE_ID_HEADER.lower()):
+            gitlab_instance_id.set(value)
+
         # GitLab version
         if value := metadata.get(X_GITLAB_VERSION_HEADER.lower()):
             gitlab_version.set(value)
-
-        # Client IP (end-user's IP, forwarded by Rails)
-        if value := metadata.get(self.X_GITLAB_CLIENT_IP_HEADER):
-            ip_address.set(value)
 
         # GitLab team member
         team_member_value: str | None = metadata.get(
@@ -113,6 +118,11 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         is_enabled = metadata.get(VERBOSE_AI_LOGS_HEADER) == "true"
         current_verbose_ai_logs_context.set(is_enabled)
 
+        # Per-user/namespace extended logging (injected by Rails at /ws pre-auth time)
+        extended_logging_context.set(
+            metadata.get(X_GITLAB_EXTENDED_LOGGING_HEADER) == "true"
+        )
+
         # Prompt caching (always called)
         set_prompt_caching_enabled_to_current_request(
             metadata.get(X_GITLAB_MODEL_PROMPT_CACHE_ENABLED.lower())
@@ -126,7 +136,7 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
 
         # MCP server tools
         enabled_tools = metadata.get(X_GITLAB_ENABLED_MCP_SERVER_TOOLS, "").split(",")
-        enabled_tools = set(tool.strip() for tool in enabled_tools if tool.strip())
+        enabled_tools = {tool.strip() for tool in enabled_tools if tool.strip()}
         set_enabled_mcp_server_tools(enabled_tools)
 
         # LangSmith headers for distributed tracing

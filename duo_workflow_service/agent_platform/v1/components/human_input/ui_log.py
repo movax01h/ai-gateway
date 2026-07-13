@@ -12,8 +12,8 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
 from duo_workflow_service.entities import MessageTypeEnum, UiChatLog
 
 __all__ = [
-    "UILogEventsHumanInput",
     "AgentLogWriter",
+    "UILogEventsHumanInput",
     "UserLogWriter",
     "agent_log_writer_class",
     "user_log_writer_class",
@@ -67,7 +67,7 @@ class AgentLogWriter(BaseUILogWriter[UILogEventsHumanInput]):
             message_type=MessageTypeEnum.REQUEST,
             message_sub_type=request_type,
             content=content,
-            message_id=f"request-{str(uuid4())}",
+            message_id=f"request-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=None,
             correlation_id=correlation_id,
@@ -119,7 +119,7 @@ class UserLogWriter(BaseUILogWriter[UILogEventsHumanInput]):
             message_type=MessageTypeEnum.USER,
             message_sub_type=None,
             content=content,
-            message_id=f"user-{str(uuid4())}",
+            message_id=f"user-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=None,
             correlation_id=correlation_id,

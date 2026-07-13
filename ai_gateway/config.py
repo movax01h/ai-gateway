@@ -1,34 +1,38 @@
 import os
-from typing import Annotated, Literal, Optional, Set, TypedDict
+from typing import Annotated, Literal, Optional, Set, Tuple, TypedDict, Union
 from urllib.parse import urlparse
 
+import httpx
 import litellm
 from dotenv import find_dotenv
-from pydantic import BaseModel, Field, Json, RootModel
+from pydantic import BaseModel, Field, Json, RootModel, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = [
-    "get_config",
-    "ConfigBedrockGuardrail",
     "Config",
-    "ConfigLogging",
-    "ConfigFastApi",
+    "ConfigAuditEvent",
     "ConfigAuth",
-    "ConfigProcessLevelFeatureFlags",
+    "ConfigBedrockGuardrail",
+    "ConfigCachingProxy",
+    "ConfigCustomModels",
+    "ConfigCustomersDot",
+    "ConfigDuoChat",
+    "ConfigDuoWorkflow",
+    "ConfigFastApi",
     "ConfigGoogleCloudProfiler",
-    "ConfigSnowplow",
     "ConfigInstrumentator",
-    "ConfigVertexTextModel",
+    "ConfigLogging",
+    "ConfigMockUsageQuotaServer",
+    "ConfigModelKeys",
     "ConfigModelLimits",
     "ConfigModelSelection",
-    "ConfigCustomModels",
-    "ConfigDuoChat",
-    "ConfigModelKeys",
-    "ConfigCustomersDot",
-    "ConfigAuditEvent",
-    "ConfigCachingProxy",
-    "ConfigDuoWorkflow",
-    "ConfigMockUsageQuotaServer",
+    "ConfigMtls",
+    "ConfigProcessLevelFeatureFlags",
+    "ConfigProxyEndpoints",
+    "ConfigSnowplow",
+    "ConfigTLS",
+    "ConfigVertexTextModel",
+    "get_config",
 ]
 
 ENV_PREFIX = "AIGW"
@@ -47,6 +51,85 @@ class ConfigSelfSignedJwt(BaseModel):
     validation_key: str = ""
 
 
+class ConfigTLS(BaseModel):
+    """TLS configuration for enabling HTTPS / gRPCS."""
+
+    enabled: bool = False
+    cert_file: Optional[str] = None
+    key_file: Optional[str] = None
+    ssl_ciphers: str = "TLSv1"
+
+    @model_validator(mode="after")
+    def validate_when_enabled(self) -> "ConfigTLS":
+        if not self.enabled:
+            return self
+        if not (self.cert_file and self.key_file):
+            raise ValueError(
+                "cert_file and key_file must both be set when TLS is enabled"
+            )
+        if not os.path.isfile(self.cert_file):
+            raise ValueError(f"cert_file does not point to a file: {self.cert_file}")
+        if not os.path.isfile(self.key_file):
+            raise ValueError(f"key_file does not point to a file: {self.key_file}")
+        return self
+
+
+class ConfigMtls(BaseModel):
+    """Client-certificate (mutual TLS) auth for upstream model endpoints.
+
+    Applies to any endpoint LiteLLM reaches through the OpenAI/Azure SDK client
+    (self-hosted OpenAI-compatible proxies, Azure OpenAI, custom models). LiteLLM
+    exposes no per-request hook for a client certificate on that path, so the cert
+    is installed process-wide via litellm.client_session / litellm.aclient_session
+    in setup_litellm.
+
+    `verify` / `ca_bundle` control server-certificate trust and are independent of
+    the client certificate: httpx does not read SSL_CERT_FILE / REQUESTS_CA_BUNDLE,
+    so a corporate CA must be supplied explicitly via `ca_bundle`.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable client-certificate (mTLS) auth for upstream model endpoints.",
+    )
+    cert_file: Optional[str] = Field(
+        default=None,
+        description="Path to the client certificate PEM (cert only, or combined cert+key).",
+    )
+    key_file: Optional[str] = Field(
+        default=None,
+        description="Path to the client private key, if not bundled into cert_file.",
+    )
+    key_password: Optional[SecretStr] = Field(
+        default=None,
+        description="Password for an encrypted client private key.",
+    )
+    verify: bool = Field(
+        default=True,
+        description="Verify the upstream server certificate.",
+    )
+    ca_bundle: Optional[str] = Field(
+        default=None,
+        description="CA bundle to verify the upstream server certificate (e.g. a corporate CA).",
+    )
+
+    @model_validator(mode="after")
+    def validate_when_enabled(self) -> "ConfigMtls":
+        if not self.enabled:
+            return self
+        if not self.cert_file:
+            raise ValueError("cert_file must be set when mTLS is enabled")
+        if not os.path.isfile(self.cert_file):
+            raise ValueError(f"cert_file does not point to a file: {self.cert_file}")
+        if self.key_file and not os.path.isfile(self.key_file):
+            raise ValueError(f"key_file does not point to a file: {self.key_file}")
+        if self.key_password and not self.key_file:
+            raise ValueError("key_file must be set when key_password is provided")
+        if self.ca_bundle and not os.path.isfile(self.ca_bundle):
+            raise ValueError(f"ca_bundle does not point to a file: {self.ca_bundle}")
+        return self
+
+
 class ConfigFastApi(BaseModel):
     api_host: str = "0.0.0.0"
     api_port: int = 5000
@@ -57,6 +140,7 @@ class ConfigFastApi(BaseModel):
     openapi_url: Optional[str] = None
     redoc_url: Optional[str] = None
     reload: bool = False
+    tls: ConfigTLS = Field(default_factory=ConfigTLS)
 
 
 class ConfigAuth(BaseModel):
@@ -122,6 +206,17 @@ class ConfigCustomModels(BaseModel):
 
 class ConfigDuoChat(BaseModel):
     max_tokens: Optional[int] = None
+    model_request_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Default timeout in seconds for a single chat model request on the "
+            "AI Gateway -> model leg. Applies to every chat model unless a "
+            "per-model timeout is set in MODEL_SPECIFICATIONS. Increase this for "
+            "long-running agentic prompts against slower self-hosted models. "
+            "Set via AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT."
+        ),
+    )
 
 
 class ConfigAbuseDetection(BaseModel):
@@ -252,12 +347,81 @@ class ConfigModelSelection(BaseModel):
             'Example: \'{"duo_chat": ["claude_sonnet_4_5_20250929_vertex"]}\''
         ),
     )
+    model_params: dict[str, dict] = Field(
+        default_factory=dict,
+        description=(
+            "JSON object whose keys are gitlab_identifier values from models.yml, "
+            "and whose values are param dicts to be merged into the corresponding model's params. "
+            'Example: \'{"claude_sonnet_4_20250514_bedrock": '
+            '{"model_id": "arn:aws:bedrock:us-east-2:681816819199:application-inference-profile/oitsuvtb0pij"}}\''
+        ),
+    )
+    prompt_params: dict[str, dict] = Field(
+        default_factory=dict,
+        description=(
+            "JSON object whose keys are gitlab_identifier values from models.yml, "
+            "and whose values are prompt_param dicts to be merged into the corresponding "
+            "model's prompt_params. Use this for params that must be passed at model "
+            "invocation rather than initialization. "
+            'Example: \'{"claude_sonnet_4_5_20250929_vertex": {"vertex_location": "us-east5"}}\''
+        ),
+    )
 
 
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
     fireworks_score_threshold: dict[str, float] = {}
+
+
+class ConfigProxyEndpoints(BaseModel):
+    """Configuration for allowing proxy endpoints per realm (allowlist model).
+
+    Each realm is controlled by a single environment variable accepting a
+    comma-separated list of IDs:
+
+    - Absent or empty string → all instances/namespaces are allowed (no restriction).
+    - ``"id1,id2"`` → only those instance UIDs (self-managed) or root namespace IDs (SaaS) are allowed.
+
+    Environment variables::
+
+        # Allow only specific self-managed instance UIDs
+        AIGW_PROXY_ENDPOINTS__SELF_MANAGED_ENABLED="uid-a,uid-b"
+
+        # Allow only specific SaaS root namespace IDs
+        AIGW_PROXY_ENDPOINTS__SAAS_ENABLED="12345,67890"
+    """
+
+    self_managed_enabled: str = Field(
+        default="",
+        description=(
+            "Controls which self-managed instances have proxy endpoints enabled. "
+            "Comma-separated instance UIDs allow only those instances; "
+            "empty string (default) allows all."
+        ),
+    )
+    saas_enabled: str = Field(
+        default="",
+        description=(
+            "Controls which SaaS namespaces have proxy endpoints enabled. "
+            "Comma-separated root namespace IDs allow only those namespaces; "
+            "empty string (default) allows all."
+        ),
+    )
+
+    def self_managed_enabled_ids(self) -> list[str]:
+        """Return the parsed allowlist of self-managed instance UIDs.
+
+        Returns an empty list when the value is absent or empty (meaning all allowed).
+        """
+        return [v.strip() for v in self.self_managed_enabled.split(",") if v.strip()]
+
+    def saas_enabled_ids(self) -> list[str]:
+        """Return the parsed allowlist of SaaS root namespace IDs.
+
+        Returns an empty list when the value is absent or empty (meaning all allowed).
+        """
+        return [v.strip() for v in self.saas_enabled.split(",") if v.strip()]
 
 
 class ModelLimits(TypedDict, total=False):
@@ -298,6 +462,7 @@ class ConfigDuoWorkflow(BaseSettings):
         description="Enable routing requests through caching proxy for load testing",
     )
     caching_proxy: ConfigCachingProxy = Field(default_factory=ConfigCachingProxy)
+    tls: ConfigTLS = Field(default_factory=ConfigTLS)
 
     def caching_proxy_url(self) -> str | None:
         if self.use_caching_proxy:
@@ -372,6 +537,7 @@ class Config(BaseSettings):
     custom_models: Annotated[
         ConfigCustomModels, Field(default_factory=ConfigCustomModels)
     ]
+    mtls: Annotated[ConfigMtls, Field(default_factory=ConfigMtls)]
     duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)]
     model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)]
     vertex_text_model: Annotated[
@@ -399,6 +565,9 @@ class Config(BaseSettings):
     duo_workflow: Annotated[ConfigDuoWorkflow, Field(default_factory=ConfigDuoWorkflow)]
     mock_usage_quota_server: Annotated[
         ConfigMockUsageQuotaServer, Field(default_factory=ConfigMockUsageQuotaServer)
+    ]
+    proxy_endpoints: Annotated[
+        ConfigProxyEndpoints, Field(default_factory=ConfigProxyEndpoints)
     ]
 
     def __init__(self, *args, **kwargs):
@@ -445,3 +614,47 @@ def setup_litellm(config: Config):
     # pylint: disable=direct-environment-variable-reference
     litellm.vertex_location = os.getenv("VERTEXAI_LOCATION") or "global"
     # pylint: enable=direct-environment-variable-reference
+
+    _setup_litellm_mtls(config.mtls)
+
+
+def _setup_litellm_mtls(mtls: ConfigMtls) -> None:
+    """Install a client certificate for mutual TLS with upstream model endpoints.
+
+    litellm.client_session / litellm.aclient_session is the only hook LiteLLM
+    consults when building the OpenAI/Azure SDK client, which is the path used for
+    self-hosted OpenAI-compatible and Azure endpoints. Setting them process-wide is
+    harmless for other endpoints: a client certificate is only sent when the server
+    requests one during the TLS handshake.
+    """
+    if not mtls.enabled:
+        return
+
+    # cert_file presence is guaranteed by ConfigMtls.validate_when_enabled.
+    assert mtls.cert_file is not None
+
+    # httpx `cert`: single PEM, (cert, key), or (cert, key, password).
+    # key_password without key_file is rejected by ConfigMtls.validate_when_enabled.
+    cert: Union[str, Tuple[str, str], Tuple[str, str, str]]
+    if mtls.key_file and mtls.key_password:
+        cert = (mtls.cert_file, mtls.key_file, mtls.key_password.get_secret_value())
+    elif mtls.key_file:
+        cert = (mtls.cert_file, mtls.key_file)
+    else:
+        cert = mtls.cert_file
+
+    # httpx `verify` (server trust): explicit CA bundle > disabled > certifi default.
+    verify: Union[bool, str]
+    if not mtls.verify:
+        verify = False
+    elif mtls.ca_bundle:
+        verify = mtls.ca_bundle
+    else:
+        verify = True
+
+    # Installed once at startup and reused for the process lifetime; cleaned up on
+    # process exit. setup_litellm is not re-invoked at runtime, so any previous
+    # sessions are intentionally not closed here — they may still be serving
+    # in-flight requests, and AsyncClient.aclose() cannot be awaited from here.
+    litellm.client_session = httpx.Client(cert=cert, verify=verify)
+    litellm.aclient_session = httpx.AsyncClient(cert=cert, verify=verify)

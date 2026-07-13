@@ -1,0 +1,30 @@
+Examine the information below and set the decision field to one of `no_action_needed`,
+`create_fix_on_existing_mr`, or `create_fix_on_new_mr`. Also populate `reasoning` with a 1-2 sentence
+justification — this is what the user sees, especially when the decision is `no_action_needed` and the
+flow ends.
+
+{% if merge_request_url %}
+A merge request is associated with this pipeline:
+<merge_request_url>{{merge_request_url}}</merge_request_url>
+
+The merge request diff lists all files that are currently changed in the merge request. You can find the list
+of files in the context results below under any diff or file listing information.
+{% else %}
+No merge request URL was provided for this pipeline.
+{% endif %}
+
+The pipeline context results (including the merge request diff file listing if available) are provided below:
+<context>
+  {{fix_pipeline_context_results}}
+</context>
+
+The execution step's summary — which must include the list of files it changed — is below:
+<execution_results>
+  {{execution_results}}
+</execution_results>
+
+The actual unified diff produced by the execution step (the output of `git diff --no-color` after execution)
+is below. If this is empty, the execution step made no changes to the working tree:
+<execution_diff>
+{{execution_diff}}
+</execution_diff>

@@ -1,18 +1,12 @@
-# pylint: disable=unused-variable
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from duo_workflow_service.errors.typing import InvalidWorkflowIdException
 from duo_workflow_service.gitlab.gitlab_api import (
-    GITLAB_18_2_QUERY,
-    GITLAB_18_3_OR_ABOVE_QUERY,
-    GITLAB_18_8_OR_ABOVE_QUERY,
-    GITLAB_19_0_OR_ABOVE_QUERY,
     extract_default_branch_from_project_repository,
     extract_id_from_global_id,
     fetch_workflow_and_container_data,
-    fetch_workflow_and_container_query,
 )
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 
@@ -95,6 +89,7 @@ async def test_fetch_workflow_and_container_data_success():
                     "agentPrivilegesNames": ["read_repository", "write_repository"],
                     "preApprovedAgentPrivilegesNames": ["read_repository"],
                     "mcpEnabled": True,
+                    "incrementalCheckpointsEnabled": True,
                     "allowAgentToRequestUser": True,
                     "latestCheckpoint": {"checkpoint": "{}"},
                 }
@@ -137,6 +132,7 @@ async def test_fetch_workflow_and_container_data_success():
     assert workflow_config["pre_approved_agent_privileges_names"] == ["read_repository"]
     assert workflow_config["workflow_status"] == "created"
     assert workflow_config["mcp_enabled"] is True
+    assert workflow_config["incremental_checkpoints_enabled"] is True
     assert workflow_config["allow_agent_to_request_user"] is True
     assert workflow_config["latest_checkpoint"] == {"checkpoint": "{}"}
 
@@ -233,6 +229,9 @@ async def test_fetch_workflow_and_container_data_with_empty_languages():
     assert project["id"] == 456
     assert project["languages"] == []
     assert namespace is None
+    # incrementalCheckpointsEnabled is absent from the response (as with GitLab
+    # < 19.2 query variants); it must default to False.
+    assert workflow_config["incremental_checkpoints_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -274,7 +273,7 @@ async def test_fetch_workflow_and_container_data_with_missing_languages():
     }
 
     workflow_id = "789"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, _namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -292,7 +291,7 @@ async def test_fetch_workflow_and_project_data_with_missing_repository(
     gitlab_client.graphql.return_value = workflow_and_project_data
 
     workflow_id = "1"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -330,7 +329,7 @@ async def test_fetch_namespace_level_workflow():
     }
 
     workflow_id = "111"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -386,7 +385,7 @@ async def test_fetch_workflow_and_container_data_with_exclusion_rules():
     }
 
     workflow_id = "123"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, _namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
@@ -430,12 +429,98 @@ async def test_fetch_workflow_and_container_data_without_exclusion_rules():
     }
 
     workflow_id = "123"
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    project, _namespace, _workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, workflow_id
     )
 
     # Verify that exclusion rules default to empty list
     assert project["exclusion_rules"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_with_flow_enablement():
+    """Test that duoWorkflowStatusCheck values are read into the workflow config."""
+    gitlab_client = AsyncMock()
+
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                        "duoWorkflowStatusCheck": {
+                            "foundationalFlowsEnabled": False,
+                            "enabledFoundationalFlows": ["code_review/v1"],
+                        },
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["features"]["foundational_flows"] == {
+        "enabled": False,
+        "enabled_flows": ["code_review/v1"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_and_container_data_without_flow_enablement():
+    """Test that flow enablement defaults to True when duoWorkflowStatusCheck is absent."""
+    gitlab_client = AsyncMock()
+
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                        "languages": [{"name": "Python", "share": 100.0}],
+                    },
+                    "namespaceId": None,
+                    "namespace": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["features"]["foundational_flows"] == {
+        "enabled": True,
+        "enabled_flows": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -473,7 +558,7 @@ async def test_fetch_workflow_with_prompt_injection_protection_level_from_namesp
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 
@@ -517,7 +602,7 @@ async def test_fetch_workflow_with_prompt_injection_protection_level_from_projec
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 
@@ -617,7 +702,7 @@ async def test_fetch_workflow_protection_level_defaults_to_log_only():
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 
@@ -625,57 +710,6 @@ async def test_fetch_workflow_protection_level_defaults_to_log_only():
         workflow_config["prompt_injection_protection_level"]
         == PromptInjectionProtectionLevel.LOG_ONLY
     )
-
-
-class TestQueryVersionSelection:
-    """Test fetch_workflow_and_container_query returns correct query per GitLab version."""
-
-    def test_query_selection_gitlab_below_18_8(self):
-        """GitLab < 18.8 returns GITLAB_18_3_OR_ABOVE_QUERY (no aiSettings)."""
-        with patch(
-            "duo_workflow_service.gitlab.gitlab_api.gitlab_version"
-        ) as mock_version:
-            mock_version.get.return_value = "18.7.0"
-
-            result = fetch_workflow_and_container_query()
-
-            assert result == GITLAB_18_3_OR_ABOVE_QUERY
-            assert "aiSettings" not in result
-
-    def test_query_selection_gitlab_18_8_or_above(self):
-        """GitLab >= 18.8 returns GITLAB_18_8_OR_ABOVE_QUERY (with aiSettings)."""
-        with patch(
-            "duo_workflow_service.gitlab.gitlab_api.gitlab_version"
-        ) as mock_version:
-            mock_version.get.return_value = "18.8.0"
-
-            result = fetch_workflow_and_container_query()
-
-            assert result == GITLAB_18_8_OR_ABOVE_QUERY
-            assert "aiSettings" in result
-
-    def test_query_selection_gitlab_19_0_or_above(self):
-        """GitLab >= 19.0 returns GITLAB_19_0_OR_ABOVE_QUERY (with compressedCheckpoint)."""
-        with patch(
-            "duo_workflow_service.gitlab.gitlab_api.gitlab_version"
-        ) as mock_version:
-            mock_version.get.return_value = "19.0.0"
-
-            result = fetch_workflow_and_container_query()
-
-            assert result == GITLAB_19_0_OR_ABOVE_QUERY
-            assert "compressedCheckpoint" in result
-
-    def test_query_selection_gitlab_below_18_3(self):
-        """GitLab < 18.3 returns GITLAB_18_2_QUERY."""
-        with patch(
-            "duo_workflow_service.gitlab.gitlab_api.gitlab_version"
-        ) as mock_version:
-            mock_version.get.return_value = "18.2.0"
-
-            result = fetch_workflow_and_container_query()
-
-            assert result == GITLAB_18_2_QUERY
 
 
 @pytest.mark.asyncio
@@ -855,7 +889,7 @@ async def test_protection_level_defaults_to_log_only_when_ai_settings_missing():
         }
     }
 
-    project, namespace, workflow_config = await fetch_workflow_and_container_data(
+    _project, _namespace, workflow_config = await fetch_workflow_and_container_data(
         gitlab_client, "123"
     )
 

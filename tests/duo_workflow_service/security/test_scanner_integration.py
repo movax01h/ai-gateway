@@ -373,14 +373,13 @@ class TestUseAiPromptScanningFlag:
                 # Neither fire-and-forget nor blocking scan should be called
                 mock_fire_and_forget.assert_not_called()
                 mock_blocking_scan.assert_not_called()
-            else:
-                # One of the scan methods should be called based on protection level
-                if protection_level == PromptInjectionProtectionLevel.LOG_ONLY:
-                    mock_fire_and_forget.assert_called_once()
-                    mock_blocking_scan.assert_not_called()
-                elif protection_level == PromptInjectionProtectionLevel.INTERRUPT:
-                    mock_fire_and_forget.assert_not_called()
-                    mock_blocking_scan.assert_called_once()
+            # One of the scan methods should be called based on protection level
+            elif protection_level == PromptInjectionProtectionLevel.LOG_ONLY:
+                mock_fire_and_forget.assert_called_once()
+                mock_blocking_scan.assert_not_called()
+            elif protection_level == PromptInjectionProtectionLevel.INTERRUPT:
+                mock_fire_and_forget.assert_not_called()
+                mock_blocking_scan.assert_called_once()
 
     def test_trusted_tools_skip_scanning_regardless_of_flag(self):
         """Test that TRUSTED_INTERNAL tools skip HiddenLayer scanning even when flag is enabled."""

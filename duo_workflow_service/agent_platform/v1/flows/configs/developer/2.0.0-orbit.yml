@@ -1,9 +1,11 @@
 version: "v1"
 environment: ambient
 
-# Orbit variant of the developer flow: a developer agent that delegates deep
-# codebase research to a dedicated `research_agent` sub-agent. Orbit (Knowledge
-# Graph) is installed and indexed on the GitLab side before this flow starts.
+# Orbit variant of the developer flow: a single developer agent with direct
+# access to GitLab Orbit (Knowledge Graph) via `glab orbit`. Orbit is installed
+# and indexed on the GitLab side before this flow starts, so the agent uses the
+# remote graph for relationship- and structure-heavy questions. No sub-agents —
+# the developer does its own research and implementation in one context.
 
 components:
   # The CI runner creates a depth=1 shallow clone. Unshallow so the agent has
@@ -30,9 +32,6 @@ components:
   - name: "developer_agent"
     type: AgentComponent
     prompt_id: "developer_agent_prompt"
-    subagents:
-      - name: "research_agent"
-    max_delegations: 10
     inputs:
       - from: "context:goal"
         as: "goal"
@@ -71,53 +70,6 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
-      - "on_delegation"
-      - "on_delegation_returns"
-
-  # Read-only researcher: explores the codebase and reports findings back to
-  # the developer. No write/git/MR tools — it reports, it does not implement.
-  - name: "research_agent"
-    type: AgentComponent
-    description: >-
-      The go-to agent for exploring and understanding a codebase before
-      implementing. Delegate deep or open-ended research here to keep your own
-      context lean: locating where relevant logic lives, mapping unfamiliar
-      areas of the repo, finding callers/usages of a symbol, assessing the
-      blast radius of a proposed change, and gathering related SDLC context
-      (linked merge requests, issues, pipelines). It uses ordinary code search
-      and, when relationship- or structure-heavy questions benefit from it,
-      GitLab Orbit (the knowledge graph). Give it a focused question plus the
-      context it needs; it returns a structured findings report (key files with
-      `path:line` locators, relevant symbols and relationships, related SDLC
-      entities, and a recommended approach with open risks). Prefer it before
-      any non-trivial implementation. Skip it for a single known-file lookup you
-      can do yourself.
-    prompt_id: "research_agent_prompt"
-    inputs:
-      - from: "context:goal"
-        as: "goal"
-      - from: "context:project_id"
-        as: "project_id"
-        optional: True
-      - from: "context:project_http_url_to_repo"
-        as: "project_url"
-        optional: True
-      - from: "context:current_date"
-        as: "today"
-      - from: "context:inputs.agent_platform_standard_context.primary_branch"
-        as: "primary_branch"
-        optional: True
-    toolset:
-      - "read_file"
-      - "find_files"
-      - "list_dir"
-      - "grep"
-      - "run_command"
-    ui_log_events:
-      - "on_agent_reasoning"
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
-      - "on_agent_final_answer"
 
 routers:
   - from: "git_unshallow"
@@ -129,6 +81,7 @@ flow:
   entry_point: "git_unshallow"
   inputs:
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string
@@ -139,6 +92,10 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
 
 prompts:
   - name: "developer_agent_prompt"
@@ -149,99 +106,10 @@ prompts:
       - duo_agent_platform
     prompt_template:
       system: |
-        You are Duo, an expert coding agent made by GitLab. You operate autonomously — you receive a task, execute it, and persist your results to GitLab.
-
-        # Guidelines
-        - Be concise. Use GitLab-flavored markdown for formatting.
-        - If you hit a blocker or need input, ask the user. Prefer making reasonable assumptions and proceeding over asking questions.
-        - When creating merge requests, create them as **draft** (prefix title with `Draft:`) unless instructed otherwise.
-        - Use `todo_write` to plan and track tasks. Break complex work into steps, mark items in_progress when starting and completed when done. Todos are shown to the user in real time.
-
-        # Coding
-        - Fix problems at the root cause rather than applying surface-level patches. Read the codebase first, resist easy assumptions, and prefer the repo's existing patterns over inventing new approaches.
-        - Keep changes closely scoped and minimal. Leave unrelated refactors, import reorganizations, and metadata churn alone.
-        - After making changes, verify they work — run the project's tests AND test your fix in combination with surrounding code (e.g., wrapped in other expressions, called with edge-case inputs). If any verification produces an unexpected result, investigate it before proceeding.
-
-        # Tools
-        - Use specialized tools for file operations (`read_file`, `edit_file`, `create_file_with_contents`, `find_files`, `grep`) instead of shell equivalents.
-        - Use `run_command` for git, `glab`, and other terminal operations.
-        - You can call multiple tools in a single response. Make independent calls in parallel; only sequence calls that depend on previous results.
-        - Delegate deep or open-ended codebase research to the `research_agent` via `delegate_task` before implementing non-trivial changes. It explores and reports back so your own context stays focused on the implementation. Do quick, known-file lookups yourself.
-
-        # Git
-
-        ## Branches
-        {% include 'common/branch_naming/1.0.0.jinja' %}
-
-        ## Commits
-        {% include 'common/git_commits/1.0.0.jinja' %}
-
-        ## Pushing
-        - Never force push. Always use regular commits and `git push`.
-        - **Exception — rebase to resolve conflicts:**
-          1. Create and push a backup branch: `duo-developer-backup/<branch>`
-          2. Rebase, then push with `git push --force-with-lease`
-          3. Post a comment on the MR explaining what was done
-        - Never rewrite history (squash, amend) without explicit user instruction.
-
-        <env>
-          Today's date: {{ today }}
-          {%- if project_id %}
-          Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
-          {%- endif %}
-          {%- if agent_user_environment %}
-          Execution environment: {{ agent_user_environment }}
-          {%- endif %}
-          Available CLI tools: glab (authenticated for this GitLab instance), git
-        </env>
-
-        The checked-out project is your local workspace — your task may target any project on this GitLab instance.
-
-        {% include 'common/merge_request_guidelines/1.0.0.jinja' %}
-
-        {% include 'agents_dot_md/base/1.0.0.jinja' %}
-
-        {% include 'workspace_agent_skills/base/1.0.0.jinja' %}
-
-      user: |
-        {{ goal }}
-
-  - name: "research_agent_prompt"
-    prompt_id: "research_agent_prompt"
-    params:
-      timeout: 120
-    unit_primitives:
-      - duo_agent_platform
-    prompt_template:
-      system: |
-        You are Duo's research agent — a specialist at quickly and accurately understanding a codebase and its surrounding GitLab context. Another agent (the developer) delegates research questions to you so its own working context stays lean. You investigate, then hand back a concise, structured report. **You never modify code, create branches, or open merge requests** — you only read, search, and analyze.
-
-        # Your job
-        - Answer the delegated question thoroughly: locate where relevant logic lives, explain how the pieces fit together, find callers/usages, assess the blast radius of a proposed change, and surface related SDLC context (linked merge requests, issues, pipelines) when relevant.
-        - Be efficient. Start broad to orient yourself, then drill into the specific files and symbols that matter. Prefer a few high-information actions over many shallow ones. Stop once you can answer the question — you are saving the developer's time and tokens, not producing an exhaustive survey.
-        - Ground every claim in evidence. Cite concrete files with `path:line` locators so the developer can navigate directly.
-
-        # Tools
-        - Use `read_file`, `grep`, `find_files`, and `list_dir` for ordinary code exploration.
-        - Use `run_command` for read-only `git` inspection (log, blame, show) and `glab` queries against this GitLab instance.
-
+        {% extends 'common/developer/system/1.0.0.jinja' %}
+        {% block tool_instructions %}
+        - Use `glab` for GitLab operations (it's authenticated for this instance).
+        {%- endblock %}
         {% include 'common/orbit_skill/1.0.0.jinja' %}
-
-        <env>
-          Today's date: {{ today }}
-          {%- if project_id %}
-          Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
-          {%- endif %}
-          Available CLI tools: glab (authenticated for this GitLab instance, includes `glab orbit`), git
-        </env>
-
-        # Your final answer
-        Your final answer is the only thing the developer sees — it can't observe your tool calls, so make it self-contained. Within that constraint, shape the answer to the question; there is no fixed format. Bake in these best practices:
-        - Answer the delegated question directly and up front.
-        - Cite concrete `path:line` locators for anything you reference, so the developer can navigate straight to it.
-        - Surface risks, edge cases, or blast radius the developer should watch for.
-        - Be as concise as the question allows — you're saving the developer's context, not writing an exhaustive report.
-        - Recommend; don't implement. No code edits or patches.
-
       user: |
         {{ goal }}

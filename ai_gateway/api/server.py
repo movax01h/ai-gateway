@@ -25,6 +25,7 @@ from ai_gateway.api.middleware import (
     AccessLogMiddleware,
     DistributedTraceMiddleware,
     FeatureFlagMiddleware,
+    HostHeaderValidationMiddleware,
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
@@ -69,6 +70,7 @@ CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.monitoring",
     "ai_gateway.async_dependency_resolver",
     "ai_gateway.api.middleware.route.usage_quota",
+    "ai_gateway.api.v1.proxy.request",
 ]
 
 ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
@@ -138,6 +140,7 @@ def create_fast_api_server(config: Config):
         swagger_ui_parameters={"defaultModelsExpandDepth": -1},
         lifespan=lifespan,
         middleware=[
+            Middleware(HostHeaderValidationMiddleware),
             Middleware(
                 RawContextMiddleware,
                 plugins=(EnabledInstanceVerboseAiLogsHeaderPlugin(),),
@@ -234,12 +237,12 @@ async def validation_exception_handler(
     if can_log_request_data():
         context["exception_message"] = str(exc)
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": str(exc.errors())},
         )
 
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content={"detail": "Validation error"},
     )
 

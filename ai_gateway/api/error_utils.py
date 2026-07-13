@@ -12,7 +12,7 @@ def capture_validation_errors():
                 return await f(*args, **kwargs)
             except ValidationError as ex:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail=str(ex.errors()),
                 )
 

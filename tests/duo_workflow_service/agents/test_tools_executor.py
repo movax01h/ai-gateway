@@ -17,6 +17,7 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import ToolException
 from langgraph.graph import StateGraph
 from langgraph.types import Command
+from packaging.version import Version
 from pydantic import BaseModel, Field, ValidationError
 
 from contract import contract_pb2
@@ -1951,8 +1952,6 @@ async def test_handle_tier_access_denied(all_tools, toolset, workflow_state, flo
     )
     assert tool_log["status"] == ToolStatus.FAILURE
     assert "Ultimate" in tool_log["content"]
-    assert tool_log["message_sub_type"] == "tier_access_denied"
-    assert tool_log["required_plan"] == "ultimate"
 
 
 @pytest.mark.asyncio
@@ -2068,3 +2067,69 @@ async def test_tool_executions_skipped_when_not_initialized(
 
     await tools_executor.run(workflow_state)
     assert tool_executions.get() is None
+
+
+def _executor_with_toolset(toolset):
+    return ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=toolset,
+        workflow_id="123",
+        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+    )
+
+
+def test_tool_version_returns_str_when_tool_in_toolset():
+    tool = mock_tool(name="test_tool")
+    tool.tool_version = Version("2.3.4")
+    toolset = MagicMock(spec=Toolset)
+    toolset.__contains__ = MagicMock(return_value=True)
+    toolset.__getitem__ = MagicMock(return_value=tool)
+
+    assert _executor_with_toolset(toolset)._tool_version("test_tool") == "2.3.4"
+
+
+def test_tool_version_none_when_tool_absent():
+    toolset = MagicMock(spec=Toolset)
+    toolset.__contains__ = MagicMock(return_value=False)
+
+    assert _executor_with_toolset(toolset)._tool_version("missing") is None
+
+
+def test_tool_version_none_when_tool_has_no_version():
+    # In the toolset but the tool exposes no tool_version.
+    tool = mock_tool(name="test_tool")
+    tool.tool_version = None
+    toolset = MagicMock(spec=Toolset)
+    toolset.__contains__ = MagicMock(return_value=True)
+    toolset.__getitem__ = MagicMock(return_value=tool)
+
+    assert _executor_with_toolset(toolset)._tool_version("test_tool") is None
+
+
+@pytest.mark.usefixtures("mock_datetime")
+def test_create_tool_ui_chat_log_threads_tool_version():
+    """The tool's semantic version is stamped onto tool_info so the client can version the tool→component contract for
+    generative UI."""
+    tool = mock_tool(name="test_tool")
+    tool.tool_version = Version("2.3.4")
+    toolset = MagicMock(spec=Toolset)
+    toolset.__contains__ = MagicMock(return_value=True)
+    toolset.__getitem__ = MagicMock(return_value=tool)
+
+    log = _executor_with_toolset(toolset)._create_tool_ui_chat_log(
+        {"name": "test_tool", "args": {}, "id": "c1"},
+    )
+
+    assert log["tool_info"]["tool_version"] == "2.3.4"
+
+
+@pytest.mark.usefixtures("mock_datetime")
+def test_create_tool_ui_chat_log_omits_version_when_tool_absent():
+    toolset = MagicMock(spec=Toolset)
+    toolset.__contains__ = MagicMock(return_value=False)
+
+    log = _executor_with_toolset(toolset)._create_tool_ui_chat_log(
+        {"name": "unknown_tool", "args": {}, "id": "c1"},
+    )
+
+    assert "tool_version" not in log["tool_info"]

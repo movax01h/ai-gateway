@@ -18,10 +18,12 @@ from duo_workflow_service.flow_request import (
     LegacyWorkflowRequest,
     RegistryFlowRequest,
 )
+from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
     CHAT_AGENT_COMPONENT_ENVIRONMENT,
+    ResolvedFlow,
     _load_flow_from_registry,
     list_configs,
     resolve_flow,
@@ -136,7 +138,7 @@ def test_registry_resolve():
     # Test that resolved class is a subclass of AbstractWorkflow
     resolved_class = resolve_flow(
         LegacyWorkflowRequest(workflow_definition="software_development")
-    )
+    ).factory
     assert issubclass(resolved_class, AbstractWorkflow)
     assert resolved_class == Workflow
 
@@ -161,7 +163,7 @@ def test_registry_flow_versions_return_correct_classes(version):
 
     result = resolve_flow(
         InlineFlowRequest(config_struct=struct, schema_version=version)
-    )
+    ).factory
     # Should return a partial function
     assert isinstance(result, partial)
 
@@ -229,7 +231,7 @@ def test_resolve_flow_with_flow_config(
             InlineFlowRequest(
                 config_struct=mocks["struct"], schema_version="experimental"
             )
-        )
+        ).factory
 
         assert isinstance(result, partial)
         assert result.func == mocks["flow_cls"]
@@ -272,7 +274,7 @@ def test_resolve_flow_with_chat_flow_config_success(config_params):
     ):
         result = resolve_flow(
             InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
-        )
+        ).factory
 
         assert isinstance(result, partial)
         assert result.func == chat.Workflow
@@ -281,6 +283,7 @@ def test_resolve_flow_with_chat_flow_config_success(config_params):
             "tools_override": ["tool1", "tool2"],
             "system_template_override": None,
             "agent_name_override": None,  # Default component has no name
+            "component_inputs_config": None,
         }
         assert result.keywords == expected_kwargs
 
@@ -315,7 +318,7 @@ def test_resolve_flow_with_chat_flow_config_extracts_agent_name():
     ):
         result = resolve_flow(
             InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
-        )
+        ).factory
 
         assert isinstance(result, partial)
         assert result.func == chat.Workflow
@@ -325,8 +328,51 @@ def test_resolve_flow_with_chat_flow_config_extracts_agent_name():
             "tools_override": ["tool1", "tool2"],
             "system_template_override": None,
             "agent_name_override": "348/0",
+            "component_inputs_config": None,
         }
         assert result.keywords == expected_kwargs
+
+
+def test_resolve_flow_with_chat_flow_config_forwards_component_inputs():
+    """Test that component inputs config is forwarded to chat.Workflow."""
+    component_inputs = [
+        {"from": "context:goal", "as": "goal"},
+        {
+            "from": "context:inputs.orbit_context.orbit_enabled",
+            "as": "orbit_enabled",
+            "optional": True,
+        },
+    ]
+    components = [
+        {
+            "type": "AgentComponent",
+            "toolset": ["tool1"],
+            "inputs": component_inputs,
+        }
+    ]
+    mocks = build_chat_flow_config(components=components)
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=mocks["expected_dict"],
+        ),
+    ):
+        result = resolve_flow(
+            InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
+        ).factory
+
+    assert result.keywords["component_inputs_config"] == component_inputs
 
 
 @pytest.mark.parametrize(
@@ -435,7 +481,7 @@ def test_routers_and_flow_required_for_chat_optional_for_chat_partial():
             InlineFlowRequest(
                 config_struct=chat_partial_config["struct"], schema_version="v1"
             )
-        )
+        ).factory
         assert isinstance(result, partial)
 
     # Test 2: chat environment with missing routers and flow should fail
@@ -564,6 +610,7 @@ class TestLoadFlowFromRegistry:
         mock_config.environment = "ambient"
         mock_config.components = []
         mock_config.prompts = None
+        mock_config.resolved_version = "2.0.0"
         mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
 
         with patch(
@@ -574,4 +621,128 @@ class TestLoadFlowFromRegistry:
                 _load_flow_from_registry("developer", "v1", "2.0.0")
                 mock_config_cls.from_yaml_config.assert_called_once_with(
                     "developer", "2.0.0"
+                )
+
+    def test_returns_resolved_version_from_config(self):
+        """The loaded flow's identity is surfaced: resolved semver plus flow_id/schema_version."""
+        mock_config_cls = Mock()
+        mock_config = Mock()
+        mock_config.environment = "ambient"
+        mock_config.components = []
+        mock_config.prompts = None
+        mock_config.resolved_version = "2.1.0"
+        mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
+
+        with patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {"v1": (mock_config_cls, Mock(), Mock())},
+        ):
+            with patch("duo_workflow_service.workflows.registry.flow_factory"):
+                resolved = _load_flow_from_registry("developer", "v1", "^2.0.0")
+
+        assert resolved.flow_id == "developer"
+        assert resolved.schema_version == "v1"
+        assert resolved.flow_version == "2.1.0"
+
+
+class TestResolveFlowTrackingFields:
+    """resolve_flow surfaces the identity of what was *resolved* for tracing."""
+
+    def test_registry_flow_tracks_resolved_version(self):
+        mock_config_cls = Mock()
+        mock_config = Mock()
+        mock_config.environment = "ambient"
+        mock_config.components = []
+        mock_config.prompts = None
+        mock_config.resolved_version = "2.1.0"
+        mock_config_cls.from_yaml_config = Mock(return_value=mock_config)
+
+        with patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {"v1": (mock_config_cls, Mock(), Mock())},
+        ):
+            with patch("duo_workflow_service.workflows.registry.flow_factory"):
+                resolved = resolve_flow(
+                    RegistryFlowRequest(
+                        config_id="developer", schema_version="v1", version="^2.0.0"
+                    )
+                )
+
+        assert isinstance(resolved, ResolvedFlow)
+        assert resolved.tracking_fields() == {
+            "flow_id": "developer",
+            "schema_version": "v1",
+            "flow_version": "2.1.0",
+        }
+
+    def test_inline_flow_tracks_only_schema_version(self, simple_flow_config):  # pylint: disable=redefined-outer-name
+        mocks = simple_flow_config
+
+        with (
+            patch(
+                "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+                {
+                    "experimental": (
+                        mocks["flow_config_cls"],
+                        mocks["partial_flow_config_cls"],
+                        mocks["flow_cls"],
+                    )
+                },
+            ),
+            patch(
+                "duo_workflow_service.workflows.registry.MessageToDict",
+                return_value=mocks["expected_dict"],
+            ),
+        ):
+            resolved = resolve_flow(
+                InlineFlowRequest(
+                    config_struct=mocks["struct"], schema_version="experimental"
+                )
+            )
+
+        assert resolved.tracking_fields() == {"schema_version": "experimental"}
+
+    def test_legacy_flow_tracks_nothing(self):
+        resolved = resolve_flow(
+            LegacyWorkflowRequest(workflow_definition="software_development")
+        )
+        assert resolved.tracking_fields() == {}
+
+    def test_unknown_legacy_flow_falls_back_to_software_development(self):
+        """An unrecognized legacy definition falls back to the default workflow and tracks nothing."""
+        resolved = resolve_flow(
+            LegacyWorkflowRequest(workflow_definition="not_a_known_workflow")
+        )
+        assert resolved.factory == Workflow
+        assert resolved.tracking_fields() == {}
+
+    def test_inline_flow_security_exception_is_propagated(self, simple_flow_config):  # pylint: disable=redefined-outer-name
+        """SecurityException raised inside _load_flow_from_inline_config must propagate, not be wrapped."""
+        mocks = simple_flow_config
+
+        with (
+            patch(
+                "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+                {
+                    "experimental": (
+                        mocks["flow_config_cls"],
+                        mocks["partial_flow_config_cls"],
+                        mocks["flow_cls"],
+                    )
+                },
+            ),
+            patch(
+                "duo_workflow_service.workflows.registry.MessageToDict",
+                return_value=mocks["expected_dict"],
+            ),
+            patch(
+                "duo_workflow_service.workflows.registry.flow_factory",
+                side_effect=SecurityException("dangerous content"),
+            ),
+        ):
+            with pytest.raises(SecurityException):
+                resolve_flow(
+                    InlineFlowRequest(
+                        config_struct=mocks["struct"], schema_version="experimental"
+                    )
                 )

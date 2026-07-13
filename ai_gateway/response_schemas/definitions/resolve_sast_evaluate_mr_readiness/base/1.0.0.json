@@ -1,0 +1,19 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "resolve_sast_evaluate_mr_readiness_response",
+    "description": "Response schema for the SAST vulnerability resolution agent that evaluates merge request readiness and reports benchmark metrics.",
+    "type": "object",
+    "properties": {
+        "merge_request_url": {
+            "type": "string",
+            "description": "The merge request URL extracted from the git operations result, or constructed from the repository URL and workflow ID when not found.",
+            "examples": ["https://gitlab.com/org/project/-/merge_requests/123"]
+        },
+        "readiness_detection_score": {
+            "type": "string",
+            "description": "The fix readiness score as a decimal value represented as a string, between \"0.0\" and \"1.0\".",
+            "examples": ["0.75"]
+        }
+    },
+    "required": ["merge_request_url", "readiness_detection_score"]
+}

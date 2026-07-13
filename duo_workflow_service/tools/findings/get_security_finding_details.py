@@ -5,7 +5,7 @@ from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from duo_workflow_service.tools.findings.queries.security_findings import (
+from duo_workflow_service.tools.findings.queries import (
     GET_SECURITY_FINDING_DETAILS_QUERY,
 )
 from duo_workflow_service.tools.tier_access_checker import (
@@ -66,7 +66,7 @@ class GetSecurityFindingDetails(DuoBaseTool):
             raise
         except Exception as e:
             raise ToolException(
-                f"An unexpected error occurred while fetching the security finding: {str(e)}"
+                f"An unexpected error occurred while fetching the security finding: {e!s}"
             )
 
     async def _fetch_finding_from_pipeline(

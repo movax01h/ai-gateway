@@ -55,7 +55,7 @@ from lib.context import client_capabilities, gitlab_version
 from lib.events import GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
 
-__all__ = ["DryRunFlowValidator", "VALIDATION_FLOW_TYPE", "VALIDATION_USER"]
+__all__ = ["VALIDATION_FLOW_TYPE", "VALIDATION_USER", "DryRunFlowValidator"]
 
 _VALIDATION_WORKFLOW_ID = "_validation_"
 VALIDATION_FLOW_TYPE = GLReportingEventContext(
@@ -174,7 +174,6 @@ def _make_validation_tools_registry() -> ToolsRegistry:
         return ToolsRegistry(
             enabled_tools=all_privileges,
             preapproved_tools=all_privileges,
-            tool_call_approvals={},
             tool_metadata=stub_metadata,
             mcp_tools=[],
         )

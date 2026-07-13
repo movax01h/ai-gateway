@@ -7,7 +7,6 @@ from langchain_core.tools import ToolException
 from packaging.version import Version
 from pydantic import BaseModel, Field, field_validator
 
-from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
@@ -59,13 +58,13 @@ class FpDetectionStatus(StrEnum):
 
 
 __all__ = [
-    "ListVulnerabilities",
+    "ConfirmVulnerability",
+    "CreateVulnerabilityIssue",
     "DismissVulnerability",
     "LinkVulnerabilityToIssue",
     "LinkVulnerabilityToMergeRequest",
-    "ConfirmVulnerability",
+    "ListVulnerabilities",
     "RevertToDetectedVulnerability",
-    "CreateVulnerabilityIssue",
 ]
 
 
@@ -425,7 +424,6 @@ class CreateVulnerabilityIssue(DuoBaseTool):
         )
     """
     args_schema: Type[BaseModel] = CreateVulnerabilityIssueInput
-    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, **kwargs: Any) -> str:
         project_full_path = kwargs.pop("project_full_path")

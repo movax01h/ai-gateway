@@ -124,7 +124,8 @@ def test_truncate_string_reverse_no_truncation_needed():
 def test_truncate_tool_response_with_custom_config():
     """Test truncation with custom config (1MB/800KB)."""
     custom_config = TruncationConfig(
-        max_bytes=1 * 1024 * 1024, truncated_size=800 * 1024  # 1 MiB  # 800 KiB
+        max_bytes=1 * 1024 * 1024,
+        truncated_size=800 * 1024,  # 1 MiB  # 800 KiB
     )
 
     # Response that would be truncated with default config but not with custom

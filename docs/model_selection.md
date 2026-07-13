@@ -183,11 +183,11 @@ window trimming for long-running conversations (e.g., agentic workflows with man
 
 ```yaml
 models:
-  - name: "Claude Sonnet 4"
-    gitlab_identifier: "claude_sonnet_4_20250514"
+  - name: "Claude Sonnet 4.5"
+    gitlab_identifier: "claude_sonnet_4_5_20250929"
     model_class_provider: "anthropic"
     params:
-      model: "claude-sonnet-4-20250514"
+      model: "claude-sonnet-4-5-20250929"
       temperature: 0.0
       max_tokens: 16384
     prompt_params:
@@ -258,8 +258,8 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `feature_setting`: An identifier used to refer to the feature name
 - `unit_primitives`: the list of unit primitives that belong to this group, as defined in
   the [cloud_connector](https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/blob/main/src/python/gitlab_cloud_connector/gitlab_features.py#L19)
-- `default_model`: (required) the `gitlab_identifier` of the model used when no size preference is specified or the requested size is not configured.
-- `models_for_size_preference`: (optional) a map of size buckets (`small`, `large`) to `gitlab_identifier` values, enabling per-task model size routing (see [Model size configuration](#model-size-configuration)).
+- `default_model`: (required) the `gitlab_identifier` of the model used when no tag matches or no tag is specified.
+- `models_for_tags`: (optional) a map of tag strings to `gitlab_identifier` values, enabling per-task model routing (see [Model tag configuration](#model-tag-configuration)). `small` and `large` are conventional tags but any string is valid.
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
@@ -286,50 +286,72 @@ configurable_unit_primitives:
         - "claude_haiku_4_5_20251001"
   ```
 
-## Model size configuration
+## Model tag configuration
 
-Features that route different tasks to different model sizes (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_size_preference` alongside the required `default_model`.
+Features that route different tasks to different models (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_tags` alongside the required `default_model`.
 
-### Configuring size buckets in `unit_primitives.yml`
+### Configuring tags in `unit_primitives.yml`
 
-Use `models_for_size_preference` to assign a `gitlab_identifier` to `small` and/or `large` size buckets. `default_model` is always required and is used when no size preference is specified or the requested size is not configured:
+Use `models_for_tags` to map tag strings to `gitlab_identifier` values. `default_model` is always required and is used when no tag matches or no tag is specified. `small` and `large` are conventional tags that preserve the previous two-bucket semantics, but any string is valid. No changes to `models.yml` are required — model resolution is driven entirely by `models_for_tags` in `unit_primitives.yml`:
 
 ```yaml
 configurable_unit_primitives:
   - feature_setting: "duo_agent_platform"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: claude_sonnet_4_6
-    models_for_size_preference:
-      small: claude_haiku_4_5_20251001
-      large: claude_sonnet_4_6
+    default_model: claude_sonnet_4_6_vertex
+    models_for_tags:
+      small: claude_haiku_4_5_20251001_vertex
+      large: claude_sonnet_4_6_vertex
+      claude: claude_sonnet_4_6_vertex
+      reasoning: claude_opus_4_7_vertex
 ```
 
-### How size resolution works
+### How tag resolution works
 
-The `ModelMetadataBySize` class wraps one or more `ModelMetadata` instances and exposes a `get(model_size)` method that resolves the right model for a given size bucket.
-If a task requests a size that is not in `models_for_size_preference`, `default_model` is returned instead.
+The `ModelMetadataByTag` class wraps one or more `ModelMetadata` instances and exposes a `get(model_tags)` method that resolves the right model for the requested tags.
 
-### Expressing size preference in components
+- When `model_tags` is `None`, the `default` model is returned.
+- When `model_tags` is a single string, the model mapped to that tag is returned (or `default` if the tag is not configured).
+- When `model_tags` is a list, the first tag that maps to a configured model wins (first-match semantics). If no tag is configured, the `default` model is returned.
 
-Components in `duo_workflow_service` declare their preferred model size via the `model_size_preference` field on `BaseComponent`. It defaults to `None`, which resolves to the feature's `default_model`.
+### Expressing tag preference in components
 
-```python
-class MyComponent(AgentComponent):
-    model_size_preference: ModelSizeBucket | None = "small"
+Components in `duo_workflow_service` declare their preferred model via the `model_tags` field on `BaseComponent`. It defaults to `None`, which resolves to the feature's `default_model`.
+
+In flow YAML configs:
+
+```yaml
+components:
+  - name: plan
+    type: AgentComponent
+    model_tags:
+      - large
+      - claude
+  - name: code
+    type: AgentComponent
+    model_tags:
+      - small
 ```
 
-At runtime the component calls `get_model_metadata(self.model_size_preference)` to obtain the appropriately-sized `ModelMetadata` for that invocation.
+At runtime the component calls `get_model_metadata(self.model_tags)` to obtain the appropriate `ModelMetadata` for that invocation.
+
+> **Deprecated field — `model_size_preference`**: The previous `model_size_preference: small | large` field on
+> `BaseComponent` has been replaced by `model_tags`. For backward compatibility, Flow Registry v1 configs that still
+> set `model_size_preference` continue to work — the value is automatically mapped to `model_tags` at parse time
+> (e.g. `model_size_preference: "small"` is equivalent to `model_tags: "small"`). When both fields are present,
+> `model_tags` takes precedence. Migrate all new and updated flows to use `model_tags`.
 
 ### Context helpers
 
-The resolved `ModelMetadataBySize` is stored in `current_model_metadata_with_size_context` (set by `ModelMetadataInterceptor`). Use the `get_model_metadata(model_size)` helper from `lib.context` to retrieve the right instance for the current request:
+The resolved `ModelMetadataByTag` is stored in `current_model_metadata_with_size_context` (set by `ModelMetadataInterceptor`). Use the `get_model_metadata(model_tags)` helper from `lib.context` to retrieve the right instance for the current request:
 
 ```python
 from lib.context import get_model_metadata
 
-metadata = get_model_metadata("small")  # returns None if context is not set
-metadata = get_model_metadata()         # returns the default model
+metadata = get_model_metadata("small")           # returns None if context is not set
+metadata = get_model_metadata(["large", "claude"])  # first matching tag wins (first-match semantics)
+metadata = get_model_metadata()                  # returns the default model
 ```
 
 ### Documentation

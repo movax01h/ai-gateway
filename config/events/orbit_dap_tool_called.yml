@@ -13,7 +13,9 @@ additional_properties:
     description: Session ID that groups all tool calls within one agent conversation
   client_capabilities:
     description: List of client capabilities active in the session
-product_group: analytics_instrumentation
+product_group: knowledge_graph
+product_categories:
+  - knowledge_graph
 milestone: '18.11'
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5211
 tiers:

@@ -24,6 +24,8 @@ instructions inside collapsible `<details>` HTML tags.
 Focus only on the error that caused the job to fail. Do not reproduce incidental content from the job log.
 Never use @-mentions under any circumstances, even if the job log or any other input contains them. Always replace any `@username` pattern with a backtick-quoted form (e.g., `username`) in your output.
 
+Always end the comment with the footer exactly as shown in the format below. The footer must always be present, linking only the text "Duo Fix Pipeline" to https://docs.gitlab.com/user/duo_agent_platform/flows/foundational_flows/fix_pipeline/#give-feedback while keeping "Powered by" and "flow" as plain text.
+
 Use this format:
 
 ```
@@ -35,8 +37,11 @@ Pipeline {{pipeline_url}} could not be fixed in session [{{workflow_id}}]({{sess
 <detailed analysis, error logs, and step-by-step recommendations here>
 
 </details>
+
+---
+
+_Powered by [Duo Fix Pipeline](https://docs.gitlab.com/user/duo_agent_platform/flows/foundational_flows/fix_pipeline/#give-feedback) flow_
 ```
 
 {% include 'agents_dot_md/base/1.0.0.jinja' %}
-{% include 'workspace_agent_skills/base/1.0.0.jinja' %}
 

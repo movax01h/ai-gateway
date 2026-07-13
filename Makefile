@@ -8,6 +8,8 @@ SCRIPTS_DIR := ${ROOT_DIR}/scripts
 TESTS_DIR := ${ROOT_DIR}/tests
 INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 
+PYTEST_SLOWEST_TESTS_COUNT ?= 10
+
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${DUO_WORKFLOW_SERVICE_DIR} \
 	${LIB_DIR} \
@@ -74,7 +76,7 @@ gen-proto-python: install-test-deps
 .PHONY: gen-proto-ruby
 gen-proto-ruby:
 	(cd clients/ruby; bundle install)
-	grpc_tools_ruby_protoc -I contract --ruby_out=clients/ruby/lib/proto --grpc_out=clients/ruby/lib/proto contract/contract.proto
+	BUNDLE_GEMFILE=clients/ruby/Gemfile bundle exec grpc_tools_ruby_protoc -I contract --ruby_out=clients/ruby/lib/proto --grpc_out=clients/ruby/lib/proto contract/contract.proto
 	sed -i.bak "s/require 'contract_pb'/require_relative 'contract_pb'/" clients/ruby/lib/proto/contract_services_pb.rb
 	rm clients/ruby/lib/proto/contract_services_pb.rb.bak
 
@@ -121,6 +123,11 @@ bin/protoc: tmp/protoc-${PROTOC_VERSION}/bin/protoc
 	cp tmp/protoc-${PROTOC_VERSION}/bin/protoc bin/protoc
 
 
+.PHONY: lint-proto
+lint-proto:
+	@echo "Running buf lint check..."
+	@buf lint contract/
+
 .PHONY: clean-proto
 clean-proto:
 	@echo "Cleaning protoc installation and generated files..."
@@ -138,7 +145,7 @@ test-local:
 
 .PHONY: lint-local
 lint-local:
-	$(COMPOSE) run -v "$(ROOT_DIR):/app" api bash -c 'poetry install --with lint && poetry run flake8 ai_gateway'
+	$(COMPOSE) run -v "$(ROOT_DIR):/app" api bash -c 'poetry install --with lint && poetry run ruff check ai_gateway'
 
 .PHONY: clean
 clean:
@@ -147,22 +154,22 @@ clean:
 .PHONY: install-lint-deps
 install-lint-deps:
 	@echo "Installing lint dependencies..."
-	@poetry install --with lint,test # Install all relevant dependencies so pylint has access to them
+	@test "$$CI" = "true" -a -d .venv || poetry install --with lint,test # Install all relevant dependencies so pylint has access to them
 
 .PHONY: codespell
 codespell: install-lint-deps
 	@echo "Running codespell fix..."
 	@poetry run codespell -w
 
-.PHONY: black
-black: install-lint-deps
-	@echo "Running black format..."
-	@poetry run black ${LINT_WORKING_DIR}
+.PHONY: ruff-format
+ruff-format: install-lint-deps
+	@echo "Running ruff format..."
+	@poetry run ruff format ${LINT_WORKING_DIR}
 
-.PHONY: isort
-isort: install-lint-deps
-	@echo "Running isort format..."
-	@poetry run isort ${LINT_WORKING_DIR}
+.PHONY: ruff-fix
+ruff-fix: install-lint-deps
+	@echo "Running ruff check --fix..."
+	@poetry run ruff check --fix ${LINT_WORKING_DIR}
 
 .PHONY: docformatter
 docformatter: install-lint-deps
@@ -171,23 +178,23 @@ docformatter: install-lint-deps
 
 .PHONY: check-model-selection
 check-model-selection:
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run validate-model-selection-config
 
 .PHONY: check-pricing-multipliers
 check-pricing-multipliers:
 	@echo "Verifying pricing multipliers sync with CustomersDot..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run verify-pricing-multipliers
 
 .PHONY: format
-format: codespell black isort docformatter
+format: codespell ruff-format ruff-fix docformatter
 
 .PHONY: lint
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: flake8 check-black check-isort check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql
+lint-code: check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql lint-proto
 
 .PHONY: lint-commit
 lint-commit:
@@ -195,25 +202,16 @@ lint-commit:
 	@git fetch origin main 2>/dev/null || true
 	@npx commitlint --from=$$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse --verify --quiet origin/main || git rev-parse --verify --quiet main) --git-log-args='--first-parent --no-merges' --help-url
 
-.PHONY: flake8
-flake8: install-lint-deps
-	@echo "Running flake8..."
-	@poetry run flake8 ${LINT_WORKING_DIR}
-
-.PHONY: check-black
-check-black: install-lint-deps
-	@echo "Running black check..."
-	@poetry run black --check ${LINT_WORKING_DIR}
-
-.PHONY: check-isort
-check-isort: install-lint-deps
-	@echo "Running isort check..."
-	@poetry run isort --check-only ${LINT_WORKING_DIR}
+.PHONY: check-ruff
+check-ruff: install-lint-deps
+	@echo "Running ruff linter and formatter check..."
+	@poetry run ruff format --check ${LINT_WORKING_DIR}
+	@poetry run ruff check ${LINT_WORKING_DIR}
 
 .PHONY: check-pylint
 check-pylint: install-lint-deps
-	@echo "Running pylint check..."
-	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor
+	@echo "Running custom pylint checkers (W5001-W5003, W9002, W9003)..."
+	@poetry run pylint ${LINT_WORKING_DIR} --ignore=vendor --disable=all --enable=W5001,W5002,W5003,W9002,W9003
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps
@@ -248,12 +246,12 @@ check-graphql:
 .PHONY: install-test-deps
 install-test-deps:
 	@echo "Installing test dependencies..."
-	@poetry install --with test
+	@test "$$CI" = "true" -a -d .venv || poetry install --with test
 
 .PHONY: test
 test: install-test-deps
 	@echo "Running tests..."
-	@poetry run pytest -n auto
+	@poetry run pytest -n auto --durations=${PYTEST_SLOWEST_TESTS_COUNT}
 
 .PHONY: test-watch
 test-watch: install-test-deps
@@ -263,12 +261,12 @@ test-watch: install-test-deps
 .PHONY: test-coverage
 test-coverage: install-test-deps
 	@echo "Running tests with coverage..."
-	@poetry run pytest --cov --cov-report term --cov-report html -n auto
+	@poetry run pytest --cov --cov-report term --cov-report html -n auto --durations=${PYTEST_SLOWEST_TESTS_COUNT}
 
 .PHONY: test-coverage-ci
 test-coverage-ci: install-test-deps
 	@echo "Running tests with coverage on CI..."
-	@poetry run pytest --cov --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto
+	@poetry run pytest --cov --cov-report term --cov-report xml:.test-reports/coverage.xml --junitxml=".test-reports/tests.xml" -n auto --durations=${PYTEST_SLOWEST_TESTS_COUNT}
 
 UNDERCOVERAGE_COMPARE_BRANCH ?= origin/main
 UNDERCOVERAGE_DIFF_RANGE_NOTATION ?= ...

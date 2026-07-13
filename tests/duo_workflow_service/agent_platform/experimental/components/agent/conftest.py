@@ -131,6 +131,8 @@ def flow_state_with_history_fixture(base_flow_state, component_name):
         "total_tokens": 150,
     }
     mock_message.type = "ai"
+    mock_message.tool_calls = []
+    mock_message.invalid_tool_calls = []
     state["conversation_history"] = {component_name: [mock_message]}
     return state
 

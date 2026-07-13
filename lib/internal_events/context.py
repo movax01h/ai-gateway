@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "EventContext",
+    "InternalEventAdditionalProperties",
     "current_event_context",
     "tracked_internal_events",
-    "InternalEventAdditionalProperties",
 ]
 
 

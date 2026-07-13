@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from ai_gateway.models.base import ModelBase
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 
-__all__ = ["ChatModelBase", "Role", "Message"]
+__all__ = ["ChatModelBase", "Message", "Role"]
 
 
 class Role(StrEnum):

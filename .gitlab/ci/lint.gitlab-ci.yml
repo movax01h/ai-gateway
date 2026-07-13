@@ -4,6 +4,7 @@ lint:
   needs:
     - install
   script:
+    - BUF_VERSION=$(grep '^buf ' .tool-versions | awk '{print $2}') && curl -sSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m)" -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf && sha256sum /usr/local/bin/buf
     - make lint-code
     - poetry lock --no-cache
     - git diff --exit-code
@@ -14,6 +15,26 @@ lint:
       BOLD=$(printf '\e[1m')
       RESET=$(printf '\e[0m')
       echo "${MAGENTA}Run ${BOLD}make format${RESET}${MAGENTA} to fix formatting issues.${RESET}"
+
+# Fast-feedback ruff job: runs in a couple of seconds and emits a GitLab Code
+# Quality report so violations annotate the MR diff inline. The full `lint` job
+# above still runs ruff via `make lint-code` for local/CI parity; this job just
+# fails fast and surfaces findings in the UI.
+lint:ruff:
+  extends: .poetry
+  stage: test
+  needs:
+    - install
+  variables:
+    RUFF_PATHS: "ai_gateway duo_workflow_service lib lints scripts tests integration_tests"
+  script:
+    - poetry run ruff check --output-format=gitlab --output-file=gl-code-quality-report.json ${RUFF_PATHS} || true
+    - poetry run ruff check ${RUFF_PATHS}
+    - poetry run ruff format --check ${RUFF_PATHS}
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
 
 lint:model_config_files:
   stage: test
@@ -54,7 +75,7 @@ lint:doc:
 
 lint:commit:
   stage: test
-  image: registry.hub.docker.com/library/node:alpine
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:alpine
   needs: []
   variables:
     GIT_DEPTH: 0

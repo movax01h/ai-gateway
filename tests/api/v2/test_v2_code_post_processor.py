@@ -88,7 +88,7 @@ class TestCreatePostProcessorForModel:
         # Test Anthropic
         result = _create_post_processor_for_model(
             model_provider=KindModelProvider.ANTHROPIC,
-            model_name="claude-sonnet-4-20250514",
+            model_name="claude-sonnet-4-5-20250929",
             config=mock_config,
         )
         assert result is None

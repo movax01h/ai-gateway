@@ -29,7 +29,6 @@ def tools_registry_with_all_privileges_fixture(tool_metadata):
     return ToolsRegistry(
         enabled_tools=list(_AGENT_PRIVILEGES.keys()),
         preapproved_tools=list(_AGENT_PRIVILEGES.keys()),
-        tool_call_approvals={},
         tool_metadata=tool_metadata,
     )
 
@@ -269,9 +268,9 @@ async def test_translation_tools(
         if tools_registry_with_all_privileges.get(tool_name) is None:
             missing_tools.append(tool_name)
 
-    assert (
-        not missing_tools
-    ), f"The following tools are missing from the tools registry: {missing_tools}"
+    assert not missing_tools, (
+        f"The following tools are missing from the tools registry: {missing_tools}"
+    )
 
 
 @patch("duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.TikTokenCounter")

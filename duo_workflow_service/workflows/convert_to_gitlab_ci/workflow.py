@@ -9,6 +9,7 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agents import HandoverAgent, RunToolNode, ToolsExecutor
 from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsRegistry
@@ -23,10 +24,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
 from duo_workflow_service.tracking import log_exception
-from duo_workflow_service.workflows.abstract_workflow import (
-    RECURSION_LIMIT,
-    AbstractWorkflow,
-)
+from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000
@@ -41,7 +39,7 @@ class Routes(StrEnum):
     COMMIT_CHANGES = "commit_changes"
 
 
-def _router(state: WorkflowState) -> str:
+def _router(state: WorkflowState) -> str:  # noqa: PLR0911  # state-machine router
     if state["status"] == WorkflowStatusEnum.CANCELLED:
         return Routes.END
 
@@ -97,7 +95,7 @@ def _git_output(command_output: list[str], state: WorkflowState):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"{command_output[-1]}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -158,7 +156,7 @@ class Workflow(AbstractWorkflow):
                         message_type=MessageTypeEnum.TOOL,
                         message_sub_type=None,
                         content="File too large, skipping.",
-                        message_id=f"tool-{str(uuid4())}",
+                        message_id=f"tool-{uuid4()!s}",
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         status=ToolStatus.FAILURE,
                         correlation_id=None,
@@ -176,7 +174,7 @@ class Workflow(AbstractWorkflow):
                     message_type=MessageTypeEnum.TOOL,
                     message_sub_type=None,
                     content="Loaded Jenkins file",
-                    message_id=f"tool-{str(uuid4())}",
+                    message_id=f"tool-{uuid4()!s}",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     status=ToolStatus.SUCCESS,
                     correlation_id=None,
@@ -331,7 +329,7 @@ class Workflow(AbstractWorkflow):
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=None,
             content=f"Starting Jenkinsfile translation workflow from file: {target_file}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,

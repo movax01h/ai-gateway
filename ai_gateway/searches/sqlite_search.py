@@ -14,7 +14,6 @@ log = structlog.stdlib.get_logger("chat")
 
 
 class SqliteSearch(Searcher):
-
     def __init__(self, *_args, **_kwargs):
         self.db_path = os.path.join("tmp", "docs.db")
 

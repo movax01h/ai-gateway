@@ -284,6 +284,90 @@ class TestRouter:
         to_component_1.__entry_hook__.assert_called_once()
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
 
+    def test_router_route_with_optional_mapping_input_missing_key_returns_default_route(
+        self,
+    ):
+        """A mapping-form optional input on an absent state key falls to default_route."""
+        from_component = self.create_mock_component("from")
+        mention_component = self.create_mock_component("respond")
+        default_component = self.create_mock_component("default")
+        state = {"context": {"inputs": {}}}
+
+        router = Router(
+            input={
+                "from": "context:inputs.agent_platform_trigger_context.event_type",
+                "optional": True,
+            },
+            from_component=from_component,
+            to_component={
+                "mention": mention_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        result = router.route(state)
+
+        assert result == "default_entry_hook"
+        default_component.__entry_hook__.assert_called_once()
+
+    def test_router_route_with_optional_mapping_input_present_key_routes(self):
+        """The same mapping-form input routes normally when the key is present."""
+        from_component = self.create_mock_component("from")
+        mention_component = self.create_mock_component("respond")
+        default_component = self.create_mock_component("default")
+        state = {
+            "context": {
+                "inputs": {"agent_platform_trigger_context": {"event_type": "mention"}}
+            }
+        }
+
+        router = Router(
+            input={
+                "from": "context:inputs.agent_platform_trigger_context.event_type",
+                "optional": True,
+            },
+            from_component=from_component,
+            to_component={
+                "mention": mention_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        result = router.route(state)
+
+        assert result == "respond_entry_hook"
+        mention_component.__entry_hook__.assert_called_once()
+
+    def test_router_route_with_empty_string_input_takes_explicit_empty_route(self):
+        """Router selects the explicit "" branch when a nested input resolves to "".
+
+        This is the mechanism the fix_pipeline_next flow uses to skip the
+        fetch_mr_diffs step when a pipeline has no associated merge request: the
+        merge_request envelope is present but ``url`` is an empty string, so the
+        router routes straight to the next component instead of running the step
+        that would fail tool validation.
+        """
+        from_component = self.create_mock_component("fetch_failing_bridge_jobs")
+        skip_component = self.create_mock_component("fix_pipeline_next_context")
+        run_component = self.create_mock_component("fetch_mr_diffs")
+
+        router = Router(
+            input="context:inputs.merge_request.url",
+            from_component=from_component,
+            to_component={
+                "": skip_component,
+                BaseRouter.DEFAULT_ROUTE: run_component,
+            },
+        )
+
+        no_mr_state = {"context": {"inputs": {"merge_request": {"url": ""}}}}
+
+        result = router.route(no_mr_state)
+
+        assert result == "fix_pipeline_next_context_entry_hook"
+        skip_component.__entry_hook__.assert_called_once()
+        run_component.__entry_hook__.assert_not_called()
+
     def test_router_allowed_input_targets(self):
         """Test that Router has correct allowed input targets."""
         assert Router._allowed_input_targets == ("context", "status")

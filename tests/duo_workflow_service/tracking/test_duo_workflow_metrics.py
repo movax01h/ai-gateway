@@ -37,6 +37,12 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "agent_platform_flow_route_decision_counter",
             "compaction_execution_counter",
             "compaction_llm_duration",
+            "audit_events_captured_counter",
+            "audit_events_sent_counter",
+            "audit_events_dropped_counter",
+            "audit_events_batch_size",
+            "audit_events_payload_bytes",
+            "audit_events_auto_flush_skipped_counter",
         ]:
             mock_histogram = MagicMock()
             setattr(self.metrics, metric_name, mock_histogram)
@@ -72,9 +78,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.tool_call_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.tool_call_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_tool_call(tool_name="test_tool", flow_type="test_flow"):
             pass
@@ -95,9 +101,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.compute_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.compute_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_compute(operation_type="test_operation"):
             pass
@@ -112,9 +118,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.gitlab_response_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.gitlab_response_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_gitlab_response(endpoint="test_endpoint", method="GET"):
             pass
@@ -129,9 +135,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.network_latency.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.network_latency.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_network_latency(source="service", destination="gitlab"):
             pass
@@ -146,9 +152,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.workflow_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.workflow_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_workflow(workflow_type="test_workflow"):
             pass
@@ -455,9 +461,9 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         labels_result_mock = MagicMock()
         labels_result_mock.observe = observe_mock
 
-        cast(MagicMock, self.metrics.compaction_llm_duration.labels).return_value = (
-            labels_result_mock
-        )
+        cast(
+            MagicMock, self.metrics.compaction_llm_duration.labels
+        ).return_value = labels_result_mock
 
         with self.metrics.time_compaction_llm(
             flow_type="developer", agent_name="planner"
@@ -478,6 +484,78 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         observe_mock.assert_called_once()
         args, _ = observe_mock.call_args
         self.assertGreaterEqual(args[0], 0)
+
+    def test_count_audit_events_captured(self):
+        self._assert_counter_called(
+            "audit_events_captured_counter",
+            "count_audit_events_captured",
+            {"event_type": "ai_tool_invoked"},
+            event_type="ai_tool_invoked",
+        )
+
+    def test_count_audit_events_sent_per_event(self):
+        for result, amount in [
+            ("success", 5),
+            ("http_error", 3),
+            ("exception", 2),
+        ]:
+            with self.subTest(result=result):
+                labels_mock = cast(
+                    MagicMock, self.metrics.audit_events_sent_counter.labels
+                )
+                labels_mock.reset_mock()
+                labels_result_mock = MagicMock()
+                labels_mock.return_value = labels_result_mock
+
+                self.metrics.count_audit_events_sent(result=result, amount=amount)
+
+                labels_mock.assert_called_once_with(result=result)
+                labels_result_mock.inc.assert_called_once_with(amount)
+
+    def test_count_audit_events_dropped_per_event(self):
+        for reason, amount in [
+            ("retries_exhausted", 4),
+            ("version_unsupported", 7),
+            ("http_error", 2),
+        ]:
+            with self.subTest(reason=reason):
+                labels_mock = cast(
+                    MagicMock, self.metrics.audit_events_dropped_counter.labels
+                )
+                labels_mock.reset_mock()
+                labels_result_mock = MagicMock()
+                labels_mock.return_value = labels_result_mock
+
+                self.metrics.count_audit_events_dropped(reason=reason, amount=amount)
+
+                labels_mock.assert_called_once_with(reason=reason)
+                labels_result_mock.inc.assert_called_once_with(amount)
+
+    def test_count_audit_events_auto_flush_skipped(self):
+        inc_mock = MagicMock()
+        cast(
+            MagicMock, self.metrics.audit_events_auto_flush_skipped_counter
+        ).inc = inc_mock
+
+        self.metrics.count_audit_events_auto_flush_skipped()
+
+        inc_mock.assert_called_once_with()
+
+    def test_observe_audit_events_batch_size(self):
+        observe_mock = MagicMock()
+        cast(MagicMock, self.metrics.audit_events_batch_size).observe = observe_mock
+
+        self.metrics.observe_audit_events_batch_size(42)
+
+        observe_mock.assert_called_once_with(42)
+
+    def test_observe_audit_events_payload_bytes(self):
+        observe_mock = MagicMock()
+        cast(MagicMock, self.metrics.audit_events_payload_bytes).observe = observe_mock
+
+        self.metrics.observe_audit_events_payload_bytes(1024)
+
+        observe_mock.assert_called_once_with(1024)
 
 
 if __name__ == "__main__":

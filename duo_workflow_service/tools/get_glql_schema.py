@@ -202,6 +202,7 @@ _SCHEMAS = {
     },
     "Pipeline": {
         "scope": ["project"],
+        "supported_modes": ["standard", "analytics"],
         "filters": [
             {"name": "project", "operators": ["="]},
             {"name": "author", "operators": ["="]},
@@ -274,6 +275,50 @@ _SCHEMAS = {
             "user",
         ],
         "sort_fields": [],
+        "analytics": {
+            "scope": ["project", "group"],
+            "filters": [
+                {
+                    "name": "status",
+                    "operators": ["=", "in"],
+                    "values": ["success", "failed", "canceled", "skipped"],
+                },
+                {"name": "ref", "operators": ["=", "in"]},
+                {"name": "source", "operators": ["=", "in"]},
+                {"name": "started", "operators": ["=", ">", "<", ">=", "<="]},
+                {"name": "finished", "operators": ["=", ">", "<", ">=", "<="]},
+            ],
+            "dimensions": [
+                "ref",
+                "source",
+                "status",
+                "started",
+                "finished",
+                "project",
+            ],
+            "metrics": [
+                "totalCount",
+                "successRate",
+                "failureRate",
+                "canceledRate",
+                "skippedRate",
+                "durationQuantile",
+            ],
+            "sort_fields": [
+                "ref",
+                "source",
+                "status",
+                "started",
+                "finished",
+                "project",
+                "totalCount",
+                "successRate",
+                "failureRate",
+                "canceledRate",
+                "skippedRate",
+                "durationQuantile",
+            ],
+        },
     },
     "Job": {
         "scope": ["project"],
@@ -398,7 +443,7 @@ _SCHEMAS = {
             "filters": [
                 {"name": "language", "operators": ["=", "in"]},
                 {"name": "ideName", "operators": ["=", "in"]},
-                {"name": "timestamp", "operators": [">", "<", ">=", "<="]},
+                {"name": "timestamp", "operators": ["=", ">", "<", ">=", "<="]},
                 {
                     "name": "user",
                     "operators": ["=", "in"],

@@ -17,6 +17,17 @@ workflow_start_time: ContextVar[Optional[float]] = ContextVar(
 
 log = structlog.stdlib.get_logger("monitoring")
 
+AUDIT_EVENTS_BATCH_SIZE_BUCKETS = [1, 5, 10, 25, 50, 100, 200, 500]
+AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS = [
+    512,
+    1_024,
+    4_096,
+    16_384,
+    65_536,
+    262_144,
+    1_048_576,
+]
+
 WORKFLOW_TIME_SCALE_BUCKETS = [
     0.1,
     0.5,
@@ -46,7 +57,7 @@ class SessionTypeEnum(StrEnum):
     RETRY = "retry"
 
 
-class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
+class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     def __init__(self, registry=REGISTRY):
         self.workflow_duration = Histogram(
             "duo_workflow_total_seconds",
@@ -190,6 +201,50 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
             ["workflow_type"] + METADATA_LABELS,
             registry=registry,
             buckets=FIRST_RESPONSE_SCALE_BUCKETS,
+        )
+
+        self.audit_events_captured_counter = Counter(
+            "duo_workflow_audit_events_captured_total",
+            "Count of audit events captured by the collector",
+            ["event_type"],
+            registry=registry,
+        )
+
+        self.audit_events_sent_counter = Counter(
+            "duo_workflow_audit_events_sent_total",
+            "Count of audit events sent to GitLab",
+            ["result"],
+            registry=registry,
+        )
+
+        self.audit_events_dropped_counter = Counter(
+            "duo_workflow_audit_events_dropped_total",
+            "Count of audit events dropped before delivery",
+            ["reason"],
+            registry=registry,
+        )
+
+        self.audit_events_batch_size = Histogram(
+            "duo_workflow_audit_events_batch_size",
+            "Number of events per audit event batch POST",
+            [],
+            registry=registry,
+            buckets=AUDIT_EVENTS_BATCH_SIZE_BUCKETS,
+        )
+
+        self.audit_events_payload_bytes = Histogram(
+            "duo_workflow_audit_events_payload_bytes",
+            "Size in bytes of the serialized audit event batch payload",
+            [],
+            registry=registry,
+            buckets=AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS,
+        )
+
+        self.audit_events_auto_flush_skipped_counter = Counter(
+            "duo_workflow_audit_events_auto_flush_skipped_total",
+            "Count of buffer-full auto-flush attempts skipped because no event loop was running",
+            [],
+            registry=registry,
         )
 
     def count_checkpoints(
@@ -380,6 +435,57 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes
                 workflow_type=workflow_type
             ).observe(duration)
         )
+
+    def count_audit_events_captured(self, event_type: str = "unknown") -> None:
+        """Increment the audit events captured counter.
+
+        Args:
+            event_type: Type of the captured audit event.
+        """
+        self.audit_events_captured_counter.labels(event_type=event_type).inc()
+
+    def count_audit_events_sent(self, result: str = "unknown", amount: int = 1) -> None:
+        """Increment the audit events sent counter.
+
+        Args:
+            result: Outcome label for the send attempt. Expected values: ``"success"``,
+                ``"http_error"``, ``"exception"``.
+            amount: Number of individual events in the batch.
+        """
+        self.audit_events_sent_counter.labels(result=result).inc(amount)
+
+    def count_audit_events_dropped(
+        self, reason: str = "unknown", amount: int = 1
+    ) -> None:
+        """Increment the audit events dropped counter.
+
+        Args:
+            reason: Why the events were dropped before delivery. Expected values:
+                ``"http_error"`` (non-retryable HTTP status), ``"retries_exhausted"``,
+                ``"version_unsupported"``.
+            amount: Number of individual events dropped.
+        """
+        self.audit_events_dropped_counter.labels(reason=reason).inc(amount)
+
+    def count_audit_events_auto_flush_skipped(self) -> None:
+        """Increment the counter of buffer-full auto-flush attempts skipped because no event loop was running."""
+        self.audit_events_auto_flush_skipped_counter.inc()
+
+    def observe_audit_events_batch_size(self, size: int) -> None:
+        """Record the number of events in an audit event batch POST.
+
+        Args:
+            size: Number of events in the batch.
+        """
+        self.audit_events_batch_size.observe(size)
+
+    def observe_audit_events_payload_bytes(self, num_bytes: int) -> None:
+        """Record the size of a serialized audit event batch payload.
+
+        Args:
+            num_bytes: Payload size in bytes (UTF-8 encoded JSON).
+        """
+        self.audit_events_payload_bytes.observe(num_bytes)
 
     def record_time_to_first_response(
         self,

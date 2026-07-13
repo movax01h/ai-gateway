@@ -44,6 +44,7 @@ flow:
   entry_point: "resolve_dep_bump_pipeline_fix"
   inputs:
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string
@@ -54,3 +55,7 @@ flow:
         session_owner_id:
           type: string
           description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true

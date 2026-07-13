@@ -16,6 +16,18 @@ from duo_workflow_service.gitlab.executor_http_client import (
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
+@pytest.fixture(autouse=True)
+def mock_tenacity_sleep():
+    """Patch asyncio.sleep to return immediately for retry wait tests.
+
+    Retry tests use wait_exponential(min=1s). Tenacity's async sleep path calls asyncio.sleep() via a lazy import inside
+    _portable_async_sleep, so patching asyncio.sleep directly is the correct interception point. This drops each retry-
+    triggering test from ~1s to <5ms without affecting retry logic correctness.
+    """
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
+        yield
+
+
 @pytest.fixture(name="mock_execute_action")
 def mock_execute_action_fixture():
     return AsyncMock()
@@ -167,7 +179,7 @@ async def test_executor_gitlab_http_client(
         assert actual_body in (
             None,
             "",
-        ), f"Expected body to be None or empty string, got: {repr(actual_body)}"
+        ), f"Expected body to be None or empty string, got: {actual_body!r}"
     else:
         assert actual_body == body
 

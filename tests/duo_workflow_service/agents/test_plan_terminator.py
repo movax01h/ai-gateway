@@ -150,7 +150,7 @@ class TestPlanTerminatorAgent:
         result = await plan_terminator.run(workflow_state)
 
         expected: Dict[str, Any] = {"plan": {"steps": []}}
-        assert (
-            result == expected
-        ), f"Expected plan with empty steps for case: {description}"
+        assert result == expected, (
+            f"Expected plan with empty steps for case: {description}"
+        )
         assert "ui_chat_log" not in result

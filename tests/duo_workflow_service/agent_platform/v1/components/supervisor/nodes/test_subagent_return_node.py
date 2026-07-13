@@ -344,6 +344,7 @@ class TestSubagentReturnNodeUILog:
         supervisor_history_runtime_key,
         final_answer_runtime_key,
         supervisor_state_with_completed_subsession,
+        delegate_tool_call_id,
         ui_history,
     ):
         """SubagentReturnNode calls ui_history.log.success and includes pop_state_updates in result."""
@@ -367,6 +368,7 @@ class TestSubagentReturnNodeUILog:
         assert call_kwargs["event"] == UILogEventsSupervisor.ON_DELEGATION_RETURNS
         assert call_kwargs["message_sub_type"] == SubagentReturnNode.MESSAGE_SUB_TYPE
         assert call_kwargs["tool_info"] is not None
+        assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_log_entry"]
 
@@ -382,6 +384,7 @@ class TestSubagentReturnNodeUILog:
         final_answer_runtime_key,
         base_flow_state,
         delegate_tool_call,
+        delegate_tool_call_id,
         ui_history,
     ):
         """SubagentReturnNode calls ui_history.log.error and includes pop_state_updates in result on failure."""
@@ -417,5 +420,6 @@ class TestSubagentReturnNodeUILog:
         assert call_kwargs["event"] == UILogEventsSupervisor.ON_DELEGATION_RETURNS
         assert call_kwargs["message_sub_type"] == SubagentReturnNode.MESSAGE_SUB_TYPE
         assert call_kwargs["tool_info"] is not None
+        assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_error_entry"]

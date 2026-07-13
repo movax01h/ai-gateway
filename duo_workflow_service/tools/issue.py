@@ -8,7 +8,6 @@ from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUr
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
-    QUICK_ACTIONS_WARNING,
     DuoBaseTool,
 )
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
@@ -92,7 +91,7 @@ class IssueBaseTool(DuoBaseTool):
             # Use the IDs from the URL
             return url_project_id, url_issue_iid, errors
         except GitLabUrlParseError as e:
-            errors.append(f"Failed to parse URL: {str(e)}")
+            errors.append(f"Failed to parse URL: {e!s}")
             return project_id, issue_iid, errors
 
 
@@ -131,8 +130,6 @@ If a label does not already exist, this creates a new project label and assigns 
 class CreateIssue(IssueBaseTool):
     name: str = "create_issue"
     description: str = f"""Create a new issue in a GitLab project.
-
-{QUICK_ACTIONS_WARNING}
 
 {PROJECT_IDENTIFICATION_DESCRIPTION}
 
@@ -399,8 +396,6 @@ class UpdateIssue(IssueBaseTool):
     name: str = "update_issue"
     description: str = f"""Update an existing issue in a GitLab project.
 
-    {QUICK_ACTIONS_WARNING}
-
     {ISSUE_IDENTIFICATION_DESCRIPTION}
 
     For example:
@@ -464,8 +459,6 @@ class CreateIssueNoteInput(IssueResourceInput):
 class CreateIssueNote(IssueBaseTool):
     name: str = "create_issue_note"
     description: str = f"""Create a new note (comment) on a GitLab issue.
-
-{QUICK_ACTIONS_WARNING}
 
 {ISSUE_IDENTIFICATION_DESCRIPTION}
 

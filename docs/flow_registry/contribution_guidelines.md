@@ -50,6 +50,95 @@ For detailed version information, see the [versions documentation](index.md#vers
 - NOT suitable for external feature development
 - Can be used to validate designs before implementing in stable version
 
+## Envelope versioning
+
+Additional context envelopes (e.g. `agent_platform_standard_context`) carry a `version` field in their `metadata` that allows flows to
+declare the minimum envelope version they require. This section describes the policy for bumping envelope versions and
+the rules flow authors must follow when adding or changing envelope fields.
+
+For a conceptual overview and usage examples, see [Envelope versioning](index.md#envelope-versioning) in the developer
+guide.
+
+### Versioning policy
+
+Envelope versions follow **semantic versioning** (`MAJOR.MINOR.PATCH`):
+
+| Change type | Version bump | Example |
+|-------------|-------------|---------|
+| Field added | **Minor** (backwards-compatible) | `1.0.0` → `1.1.0` |
+| Field removed or renamed | **Major** (breaking) | `1.x.x` → `2.0.0` |
+| Field type changed incompatibly | **Major** (breaking) | `1.x.x` → `2.0.0` |
+| Bug fix with no change to the field set | **Patch** | `1.0.0` → `1.0.1` |
+
+Envelopes validate with **`additionalProperties: true`**, so flows that have not yet declared a new field in their
+`input_schema` simply ignore it. This makes **adding** a field a backwards-compatible minor bump.
+
+**Removing or renaming** a required field is still a **breaking change** — any flow that declares the field as
+required will fail validation when the field is absent. Use a major version bump in that case.
+
+### Rules for flow authors
+
+**Adding** a field to an existing envelope is backwards-compatible: existing flows ignore the new field. You only need
+a new flow version if you want to *use* the new field (declare it in `input_schema` and update `version_constraint`).
+
+**Removing or renaming** a required field is a **breaking change**. Handle it as a new major version:
+
+1. **Coordinate a new major envelope version** (e.g. `2.0.0`) with the GitLab monolith team. The monolith must keep
+   sending the previous major (`1.x.x`) alongside the new `2.0.0` envelope, so flows that have not been updated keep
+   working.
+1. **Create a new flow version** (e.g. `2.0.0.yml`) that declares the updated field set in `input_schema` and pins the
+   new major:
+
+   ```yaml
+   flow:
+     inputs:
+       - category: agent_platform_standard_context
+         version_constraint: "^2.0.0"   # selects the new major envelope
+         input_schema:
+           existing_field:
+             type: string
+           new_field:
+             type: integer
+             description: Added in 2.0.0
+   ```
+
+1. **Leave existing flow versions on `^1.0.0`.** They continue to select the `1.x.x` envelope the monolith still sends,
+   so legacy GitLab instances are unaffected.
+
+### Rules for envelope senders (GitLab Monolith)
+
+When the GitLab monolith changes an envelope's fields:
+
+- **Adding a field** — use a **minor** bump (e.g. `1.0.0` → `1.1.0`). Existing flows ignore the new field because
+  envelopes validate with `additionalProperties: true`.
+- **Removing or renaming a required field** — use a **major** bump (e.g. `1.x.x` → `2.0.0`). Continue sending the
+  previous major (`1.x.x`) alongside the new `2.0.0` envelope so flows still pinned to `^1.0.0` keep working.
+- **Only use patch bumps for changes that do not alter the field set** (e.g. a value-level bug fix).
+- **Coordinate with DWS flow authors** so the monolith release that sends a new major ships before or alongside the
+  new flow version that requires it.
+
+### Backwards compatibility guarantees
+
+- Envelopes **without** a `version` field are treated as `"1.0.0"` by DWS. This covers all GitLab instances that
+  predate the versioning scheme.
+- Flows **without** a `version_constraint` use an implicit `^1.0.0` constraint, accepting any `1.x.x` envelope.
+- A `^1.x.x` constraint accepts any `1.x.x` envelope and ignores `2.x.x` (breaking) envelopes.
+
+### Error handling
+
+DWS scans through all available envelopes for a given category and selects the highest version that satisfies the
+flow's declared constraint. Envelopes with incompatible versions are silently ignored. An error is only raised when
+**none** of the available envelopes satisfy the constraint.
+
+When no envelope satisfies the flow's declared constraint, DWS:
+
+1. Returns a `FAILED_PRECONDITION` gRPC status to the caller.
+1. Surfaces a human-readable message in the UI chat log instructing the user to upgrade their GitLab instance.
+1. Logs the internal detail (category, received versions, required constraint) for observability.
+
+This means the error is **actionable**: the user knows exactly what to do (upgrade GitLab) rather than seeing a
+generic internal error.
+
 ## Core Architecture
 
 ### State Management

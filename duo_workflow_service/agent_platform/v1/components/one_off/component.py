@@ -3,12 +3,14 @@ from typing import Any, ClassVar, Optional, Self, Union, override
 
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import HumanMessage
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
 from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -48,6 +50,7 @@ from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
+from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.tools import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
@@ -147,14 +150,14 @@ class OneOffComponent(BaseComponent):
 
     @override
     def __entry_hook__(self) -> str:
-        return f"{self.name}#llm"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}llm"
 
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable
         tool_choice = "auto"
 
-        model_metadata = get_model_metadata(self.model_size_preference)
+        model_metadata = get_model_metadata(self.model_tags)
 
         prompt = self.prompt_registry.get_on_behalf(
             self.user,
@@ -189,6 +192,9 @@ class OneOffComponent(BaseComponent):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
+            invoke_config={"tags": [TAG_NOSTREAM]},
+            max_context_tokens=get_model_max_context_token_limit(self.model_tags),
             compactor=(
                 create_conversation_compactor(
                     config=(
@@ -214,7 +220,7 @@ class OneOffComponent(BaseComponent):
             internal_event_client=self.internal_event_client,
         )
         tool_node = ToolNodeWithErrorCorrection(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             component_name=self.name,
             toolset=self.toolset,
             max_correction_attempts=self.max_correction_attempts,
@@ -243,14 +249,15 @@ class OneOffComponent(BaseComponent):
         graph.add_node(self.__entry_hook__(), agent_node.run)
 
         # Node 2: Tool execution with error correction
-        graph.add_node(f"{self.name}#tools", tool_node.run)
+        graph.add_node(f"{self.name}{NODE_ROLE_SEPARATOR}tools", tool_node.run)
 
         # Connect LLM node to tools node
-        graph.add_edge(self.__entry_hook__(), f"{self.name}#tools")
+        graph.add_edge(self.__entry_hook__(), f"{self.name}{NODE_ROLE_SEPARATOR}tools")
 
         # Connect tools node with conditional routing for error correction
         graph.add_conditional_edges(
-            f"{self.name}#tools", partial(self._tools_router, router)
+            f"{self.name}{NODE_ROLE_SEPARATOR}tools",
+            partial(self._tools_router, router),
         )
 
     def _tools_router(self, outgoing_router: RouterProtocol, state: FlowState) -> str:

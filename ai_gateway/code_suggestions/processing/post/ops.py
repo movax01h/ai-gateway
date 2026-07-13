@@ -15,12 +15,12 @@ from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
 __all__ = [
     "clean_model_reflection",
-    "trim_by_min_allowed_context",
     "fix_end_block_errors",
     "fix_end_block_errors_legacy",
-    "strip_code_block_markdown",
     "prepend_new_line",
     "strip_asterisks",
+    "strip_code_block_markdown",
+    "trim_by_min_allowed_context",
 ]
 
 log = structlog.stdlib.get_logger("codesuggestions")
@@ -245,8 +245,10 @@ async def fix_end_block_errors(
         )
         before_errors = list(
             filter(
-                lambda e: find_cursor_position(code_sample_before_suggestion, e.start)
-                < len(code_sample_before_suggestion),
+                lambda e: (
+                    find_cursor_position(code_sample_before_suggestion, e.start)
+                    < len(code_sample_before_suggestion)
+                ),
                 parser_before_suggestion.errors(),
             )
         )
@@ -265,10 +267,10 @@ async def fix_end_block_errors(
             )
             after_errors = list(
                 filter(
-                    lambda e: find_cursor_position(
-                        code_sample_after_suggestion, e.start
-                    )
-                    < len(prefix),
+                    lambda e: (
+                        find_cursor_position(code_sample_after_suggestion, e.start)
+                        < len(prefix)
+                    ),
                     parser_after_suggestion.errors(),
                 )
             )

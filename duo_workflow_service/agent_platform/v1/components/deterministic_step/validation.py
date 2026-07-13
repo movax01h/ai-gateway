@@ -2,7 +2,7 @@
 
 from typing import Any, TypeGuard
 
-from langchain_core.tools import BaseTool
+from langchain_core.tools import ArgsSchema, BaseTool
 from pydantic import BaseModel
 
 
@@ -85,7 +85,7 @@ def select_validated_tool(
         candidate = superseded_tool_instance
 
     # No tool in the supersession chain matched — raise the last error
-    raise ValueError(f"Tool '{tool_name}' {str(current_error)}") from current_error
+    raise ValueError(f"Tool '{tool_name}' {current_error!s}") from current_error
 
 
 def validate_against_schema(
@@ -121,7 +121,7 @@ def validate_against_schema(
 
 
 def _has_args_schema(
-    args_schema: type[BaseModel] | dict[str, Any] | None,
+    args_schema: ArgsSchema | None,
 ) -> TypeGuard[type[BaseModel]]:
     """Type guard to check if args_schema is a valid Pydantic BaseModel class.
 

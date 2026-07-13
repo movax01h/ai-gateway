@@ -24,66 +24,116 @@ import { Struct } from "./google/protobuf/struct";
 
 export const protobufPackage = "";
 
+/** ClientEvent is a message sent from the client to the server during a workflow session. */
 export interface ClientEvent {
-  startRequest?: StartWorkflowRequest | undefined;
-  actionResponse?: ActionResponse | undefined;
-  heartbeat?: HeartbeatRequest | undefined;
+  /** startRequest initiates a new workflow execution. */
+  startRequest?:
+    | StartWorkflowRequest
+    | undefined;
+  /** actionResponse returns the result of an action previously requested by the server. */
+  actionResponse?:
+    | ActionResponse
+    | undefined;
+  /** heartbeat signals that the client connection is still alive. */
+  heartbeat?:
+    | HeartbeatRequest
+    | undefined;
+  /** stopWorkflow requests graceful termination of the running workflow. */
   stopWorkflow?: StopWorkflowRequest | undefined;
 }
 
+/** StartWorkflowRequest carries the parameters needed to start a new workflow execution. */
 export interface StartWorkflowRequest {
+  /** clientVersion identifies the version of the client initiating the workflow. */
   clientVersion: string;
+  /** workflowID is the unique identifier for this workflow run. */
   workflowID: string;
   /**
-   * Use flowConfigId + flowConfigSchemaVersion + flowVersion instead
+   * workflowDefinition was the original single-string identifier for the workflow type (e.g. "chat",
+   * "software_development"). It has been superseded by the three-field tuple flowConfigId +
+   * flowConfigSchemaVersion + flowVersion, which provides explicit versioning and schema validation.
+   * Deprecated: populate flowConfigId, flowConfigSchemaVersion, and flowVersion instead.
    *
    * @deprecated
    */
   workflowDefinition: string;
+  /** goal is the natural-language objective that the workflow should achieve. */
   goal: string;
+  /** workflowMetadata carries arbitrary metadata about the workflow, encoded as a JSON string. */
   workflowMetadata: string;
+  /** clientCapabilities lists the executor capabilities supported by this client. */
   clientCapabilities: string[];
+  /** mcpTools lists the MCP tools available to the workflow from this client. */
   mcpTools: McpTool[];
+  /** additional_context provides supplementary context items (e.g. open files, snippets) for the workflow. */
   additional_context: AdditionalContext[];
-  approval?: Approval | undefined;
+  /** approval carries the user's approval or rejection decision for a pending action. */
+  approval?:
+    | Approval
+    | undefined;
+  /** flowConfig is an optional free-form configuration struct passed to the flow at startup. */
   flowConfig?:
     | { [key: string]: any }
     | undefined;
-  /** Platform version: "v1" or "experimental". Required with flowConfigId. */
-  flowConfigSchemaVersion?: string | undefined;
+  /** flowConfigSchemaVersion identifies the schema version for flowConfig (e.g. "v1" or "experimental"). Required with flowConfigId. */
+  flowConfigSchemaVersion?:
+    | string
+    | undefined;
+  /** preapproved_tools lists tool names that the user has pre-approved for automatic execution. */
   preapproved_tools: string[];
-  /** Flow name, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion. */
+  /** flowConfigId is the name of the flow to run, e.g. "developer". Requires flowConfigSchemaVersion and flowVersion. */
   flowConfigId?:
     | string
     | undefined;
-  /** Semver flow version, e.g. "1.0.0". Required when flowConfigId is set. */
-  flowVersion?: string | undefined;
+  /** flowVersion is the semver version of the flow, e.g. "1.0.0". Required when flowConfigId is set. */
+  flowVersion?:
+    | string
+    | undefined;
+  /** streaming enables UI response streaming for this session when set to true. */
+  streaming?: boolean | undefined;
 }
 
+/** ActionResponse carries the executor's result for a previously requested action. */
 export interface ActionResponse {
+  /** requestID matches the Action.requestID this response corresponds to. */
   requestID: string;
-  response?: string | undefined;
-  plainTextResponse?: PlainTextResponse | undefined;
+  /** plainTextResponse carries a plain-text execution result. */
+  plainTextResponse?:
+    | PlainTextResponse
+    | undefined;
+  /** httpResponse carries the result of an HTTP request action. */
   httpResponse?: HttpResponse | undefined;
 }
 
+/** HeartbeatRequest is sent periodically by the client to keep the session alive. */
 export interface HeartbeatRequest {
+  /** timestamp is the Unix epoch milliseconds at which the heartbeat was sent. */
   timestamp: number;
 }
 
+/** StopWorkflowRequest asks the server to terminate the current workflow run. */
 export interface StopWorkflowRequest {
+  /** reason is a human-readable explanation of why the workflow is being stopped. */
   reason: string;
 }
 
+/** PlainTextResponse holds a plain-text result and an optional error from an executor action. */
 export interface PlainTextResponse {
+  /** response is the plain-text output produced by the executed action. */
   response: string;
+  /** error describes any error that occurred during execution; empty on success. */
   error: string;
 }
 
+/** HttpResponse holds the result of an HTTP request action performed by the executor. */
 export interface HttpResponse {
+  /** headers contains the HTTP response headers returned by the server. */
   headers: { [key: string]: string };
+  /** statusCode is the HTTP status code of the response. */
   statusCode: number;
+  /** body is the raw response body. */
   body: string;
+  /** error describes any transport or execution error; empty on success. */
   error: string;
 }
 
@@ -92,214 +142,451 @@ export interface HttpResponse_HeadersEntry {
   value: string;
 }
 
+/** Action is a server-initiated request for the executor to perform a specific operation. */
 export interface Action {
+  /** requestID is a unique identifier used to correlate this action with its ActionResponse. */
   requestID: string;
-  runCommand?: RunCommandAction | undefined;
-  runHTTPRequest?: RunHTTPRequest | undefined;
-  runReadFile?: ReadFile | undefined;
-  runWriteFile?: WriteFile | undefined;
-  runGitCommand?: RunGitCommand | undefined;
-  runEditFile?: EditFile | undefined;
-  newCheckpoint?: NewCheckpoint | undefined;
-  listDirectory?: ListDirectory | undefined;
-  grep?: Grep | undefined;
-  findFiles?: FindFiles | undefined;
-  runMCPTool?: RunMCPTool | undefined;
-  mkdir?: Mkdir | undefined;
-  runReadFiles?: ReadFiles | undefined;
-  runShellCommand?: RunShellCommand | undefined;
+  /** runCommand requests execution of a program with arguments. */
+  runCommand?:
+    | RunCommandAction
+    | undefined;
+  /** runHTTPRequest requests an outbound HTTP call. */
+  runHTTPRequest?:
+    | RunHTTPRequest
+    | undefined;
+  /** runReadFile requests reading the contents of a file. */
+  runReadFile?:
+    | ReadFile
+    | undefined;
+  /** runWriteFile requests writing content to a file. */
+  runWriteFile?:
+    | WriteFile
+    | undefined;
+  /** runGitCommand requests execution of a Git command. */
+  runGitCommand?:
+    | RunGitCommand
+    | undefined;
+  /** runEditFile requests an in-place string replacement within a file. */
+  runEditFile?:
+    | EditFile
+    | undefined;
+  /** newCheckpoint requests the client to save the current workflow state. */
+  newCheckpoint?:
+    | NewCheckpoint
+    | undefined;
+  /** listDirectory requests a listing of directory contents. */
+  listDirectory?:
+    | ListDirectory
+    | undefined;
+  /** grep requests a pattern search across a directory tree. */
+  grep?:
+    | Grep
+    | undefined;
+  /** findFiles requests a search for files matching a name pattern. */
+  findFiles?:
+    | FindFiles
+    | undefined;
+  /** runMCPTool requests invocation of an MCP tool by name. */
+  runMCPTool?:
+    | RunMCPTool
+    | undefined;
+  /** mkdir requests creation of a directory at the specified path. */
+  mkdir?:
+    | Mkdir
+    | undefined;
+  /** runReadFiles requests reading the contents of multiple files. */
+  runReadFiles?:
+    | ReadFiles
+    | undefined;
+  /** runShellCommand requests execution of a raw shell command string. */
+  runShellCommand?:
+    | RunShellCommand
+    | undefined;
+  /** trackLlmCallForSelfHosted asks the client to record an LLM call for self-hosted billing. */
   trackLlmCallForSelfHosted?: TrackLlmCallForSelfHosted | undefined;
 }
 
+/**
+ * TrackLlmCallForSelfHosted is sent by the self-hosted DWS to Workhorse before each LLM call,
+ * as part of the self-hosted billing bridge. Workhorse forwards the event to Cloud DWS, which
+ * records a billing entry and returns an allow/deny acknowledgment. The LLM call must not
+ * proceed until a successful ActionResponse is received. See TrackSelfHostedExecuteWorkflow.
+ */
 export interface TrackLlmCallForSelfHosted {
+  /** workflowID identifies the workflow that initiated the LLM call. */
   workflowID: string;
+  /** featureQualifiedName is the fully-qualified name of the AI feature that made the LLM call. */
   featureQualifiedName: string;
+  /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
 }
 
+/** RunShellCommand requests execution of a raw shell command string. */
 export interface RunShellCommand {
+  /** command is the shell command string to execute. */
   command: string;
+  /** timeout is the maximum execution time in milliseconds; absent means no limit. */
   timeout?: number | undefined;
 }
 
+/** RunCommandAction requests execution of a program with explicit arguments and flags. */
 export interface RunCommandAction {
+  /** program is the executable to run. */
   program: string;
+  /** arguments is the list of positional arguments passed to the program. */
   arguments: string[];
+  /** flags is the list of option flags passed to the program. */
   flags: string[];
+  /** timeout is the maximum execution time in milliseconds; absent means no limit. */
   timeout?: number | undefined;
 }
 
+/** ReadFile requests reading the contents of a single file from the executor's filesystem. */
 export interface ReadFile {
+  /** filepath is the absolute or relative path of the file to read. */
   filepath: string;
-  limit?: number | undefined;
+  /** limit is the maximum number of lines to return; absent means read the entire file. */
+  limit?:
+    | number
+    | undefined;
+  /** offset is the line number (1-indexed) at which reading should begin; absent means start from the beginning. */
   offset?: number | undefined;
 }
 
+/** ReadFiles requests reading the contents of multiple files in a single operation. */
 export interface ReadFiles {
+  /** filepaths is the list of file paths to read. */
   filepaths: string[];
 }
 
+/** WriteFile requests writing content to a file, creating or overwriting it. */
 export interface WriteFile {
+  /** filepath is the path of the file to write. */
   filepath: string;
+  /** contents is the data to write to the file. */
   contents: string;
 }
 
+/** EditFile requests an in-place string replacement within a file. */
 export interface EditFile {
+  /** filepath is the path of the file to edit. */
   filepath: string;
+  /** oldString is the exact string to search for and replace. */
   oldString: string;
+  /** newString is the replacement text. */
   newString: string;
 }
 
+/** RunHTTPRequest requests the executor to make an outbound HTTP call. */
 export interface RunHTTPRequest {
+  /** method is the HTTP method to use (e.g. "GET", "POST"). */
   method: string;
+  /** path is the URL path (and optional query string) for the request. */
   path: string;
+  /** body is the optional request body; absent for methods that carry no payload. */
   body?: string | undefined;
 }
 
+/** RunGitCommand requests execution of a Git command against a specific repository. */
 export interface RunGitCommand {
+  /** command is the Git sub-command to run (e.g. "status", "log"). */
   command: string;
-  arguments?: string | undefined;
+  /** arguments is an optional string of additional arguments for the Git command. */
+  arguments?:
+    | string
+    | undefined;
+  /** repository_url is the URL of the repository on which to run the command. */
   repository_url: string;
 }
 
+/** GenerateTokenRequest initiates a token generation request for a workflow session. */
 export interface GenerateTokenRequest {
+  /** workflowDefinition optionally specifies the workflow definition for which the token is issued. */
   workflowDefinition?: string | undefined;
 }
 
+/** GenerateTokenResponse returns the generated token and its expiry information. */
 export interface GenerateTokenResponse {
+  /** token is the generated authentication token. */
   token: string;
+  /** expiresAt is the Unix timestamp (seconds) at which the token expires. */
   expiresAt: number;
+  /** server_capabilities lists the capabilities advertised by the server for this session. */
   server_capabilities: string[];
 }
 
-/** Intentionally empty */
+/** Capability describes a single server capability advertised for negotiation. */
+export interface Capability {
+  /** name is the unique identifier of the capability (e.g. "tool_call_approval"). */
+  name: string;
+  /** metadata is an optional JSON-encoded string carrying additional details about the capability. */
+  metadata: string;
+}
+
+/** ListCapabilitiesRequest is an empty request to retrieve the server's advertised capabilities. */
+export interface ListCapabilitiesRequest {
+}
+
+/** ListCapabilitiesResponse returns the capabilities advertised by the server for this session. */
+export interface ListCapabilitiesResponse {
+  /** capabilities lists the capabilities advertised by the server. */
+  capabilities: Capability[];
+}
+
+/** ListToolsRequest is an empty request to retrieve the available tool definitions. */
 export interface ListToolsRequest {
 }
 
+/** ListToolsResponse returns the available tools and an optional evaluation dataset. */
 export interface ListToolsResponse {
+  /** tools is the list of available tool definitions as generic structs. */
   tools: { [key: string]: any }[];
+  /** eval_dataset is an optional dataset used for evaluating tool usage in testing. */
   eval_dataset: { [key: string]: any }[];
 }
 
+/** ListFlowsRequest carries optional filters for querying available flow configurations. */
 export interface ListFlowsRequest {
+  /** filters optionally narrows the returned flows by identifier, environment, or version. */
   filters?: ListFlowsRequestFilter | undefined;
 }
 
+/** ListFlowsRequestFilter specifies criteria for filtering the list of flows. */
 export interface ListFlowsRequestFilter {
+  /** flow_identifier filters flows by their unique identifier strings. */
   flow_identifier: string[];
+  /** environment filters flows to those available in the specified deployment environments. */
   environment: string[];
+  /** version filters flows to those matching the specified version strings. */
   version: string[];
 }
 
+/** ListFlowsResponse returns the matching flow configurations. */
 export interface ListFlowsResponse {
+  /** configs is the list of flow configuration payloads as generic structs. */
   configs: { [key: string]: any }[];
 }
 
-export interface NewCheckpoint {
-  status: string;
-  checkpoint: string;
-  goal: string;
-  errors: string[];
+/** TokenBreakdown reports token usage statistics for a single agent context window. */
+export interface TokenBreakdown {
+  /** total_tokens is the number of tokens consumed in the current context. */
+  total_tokens: number;
+  /** max_tokens is the maximum number of tokens allowed in the context window. */
+  max_tokens: number;
 }
 
+/** NewCheckpoint captures a snapshot of workflow state at a specific point in execution. */
+export interface NewCheckpoint {
+  /** status is the current high-level status of the workflow (e.g. "running", "completed"). */
+  status: string;
+  /** checkpoint is a serialized representation of the current workflow state. */
+  checkpoint: string;
+  /** goal is the natural-language objective that the workflow is working toward. */
+  goal: string;
+  /** errors lists any non-fatal errors encountered since the last checkpoint. */
+  errors: string[];
+  /** agent_context_usage maps each agent name to its current token usage breakdown. */
+  agent_context_usage: { [key: string]: TokenBreakdown };
+}
+
+export interface NewCheckpoint_AgentContextUsageEntry {
+  key: string;
+  value: TokenBreakdown | undefined;
+}
+
+/** ListDirectory requests a listing of entries in a directory. */
 export interface ListDirectory {
+  /** directory is the path of the directory whose contents should be listed. */
   directory: string;
 }
 
+/** Grep requests a pattern search across files within a directory tree. */
 export interface Grep {
+  /** search_directory is the root directory in which to search. */
   search_directory: string;
+  /** pattern is the regular expression or literal string to search for. */
   pattern: string;
+  /** case_insensitive indicates whether the pattern match should ignore letter case. */
   case_insensitive: boolean;
 }
 
+/** FindFiles requests a search for files whose names match a given pattern. */
 export interface FindFiles {
+  /** name_pattern is the glob or wildcard pattern used to match file names. */
   name_pattern: string;
 }
 
+/** Icon represents a single icon image with its URL and optional display metadata. */
 export interface Icon {
+  /** url is the location of the icon image. */
   url: string;
-  mime_type?: string | undefined;
+  /** mime_type is the MIME type of the icon image (e.g. "image/png"). */
+  mime_type?:
+    | string
+    | undefined;
+  /** sizes lists the available size descriptors for the icon (e.g. "32x32"). */
   sizes: string[];
+  /** theme optionally specifies the visual theme this icon is intended for (e.g. "dark", "light"). */
   theme?: string | undefined;
 }
 
+/** ToolAnnotations carries optional hints describing a tool's behavior and safety characteristics. */
 export interface ToolAnnotations {
-  title?: string | undefined;
-  read_only_hint?: boolean | undefined;
-  destructive_hint?: boolean | undefined;
-  idempotent_hint?: boolean | undefined;
+  /** title is a human-readable display name for the tool. */
+  title?:
+    | string
+    | undefined;
+  /** read_only_hint indicates the tool does not modify any state when true. */
+  read_only_hint?:
+    | boolean
+    | undefined;
+  /** destructive_hint indicates the tool may irreversibly modify or delete data when true. */
+  destructive_hint?:
+    | boolean
+    | undefined;
+  /** idempotent_hint indicates repeated invocations produce the same result when true. */
+  idempotent_hint?:
+    | boolean
+    | undefined;
+  /** open_world_hint indicates the tool may interact with external, unpredictable systems when true. */
   open_world_hint?: boolean | undefined;
 }
 
+/** McpTool describes an MCP tool available for use during workflow execution. */
 export interface McpTool {
+  /** name is the unique identifier of the MCP tool. */
   name: string;
+  /** description explains what the tool does, shown to the LLM for tool selection. */
   description: string;
+  /** inputSchema is the JSON Schema string that defines the tool's expected input parameters. */
   inputSchema: string;
-  icons?: Icons | undefined;
-  annotations?: ToolAnnotations | undefined;
+  /** icons optionally provides icon images representing the tool in the UI. */
+  icons?:
+    | Icons
+    | undefined;
+  /** annotations optionally provides behavioral hints about the tool. */
+  annotations?:
+    | ToolAnnotations
+    | undefined;
+  /** trusted indicates whether the tool is considered trusted and may be invoked without user confirmation. */
   trusted?: boolean | undefined;
 }
 
+/** Icons is a container for a list of Icon images. */
 export interface Icons {
+  /** items is the list of icon images. */
   items: Icon[];
 }
 
+/** RunMCPTool requests invocation of a named MCP tool with the given arguments. */
 export interface RunMCPTool {
+  /** name identifies the MCP tool to invoke. */
   name: string;
+  /** args is a JSON-encoded string of the arguments to pass to the tool. */
   args: string;
 }
 
+/** AdditionalContext provides a single supplementary context item for a workflow. */
 export interface AdditionalContext {
+  /** category classifies the type of context (e.g. "file", "snippet", "issue"). */
   category: string;
-  id?: string | undefined;
-  content?: string | undefined;
+  /** id is an optional unique identifier for this context item. */
+  id?:
+    | string
+    | undefined;
+  /** content is the optional text or data payload of this context item. */
+  content?:
+    | string
+    | undefined;
+  /** metadata is optional JSON-encoded metadata about this context item. */
   metadata?: string | undefined;
 }
 
+/** Approval represents a user's decision on whether to allow a pending action. */
 export interface Approval {
-  approval?: Approval_Approved | undefined;
+  /** approval carries the details of an approved action. */
+  approval?:
+    | Approval_Approved
+    | undefined;
+  /** rejection carries the details of a rejected action. */
   rejection?: Approval_Rejected | undefined;
 }
 
+/** Approved signals that the user has approved the pending action. */
 export interface Approval_Approved {
-  remember_approval?: boolean | undefined;
-  tool_name?: string | undefined;
+  /** remember_approval indicates whether this approval should be remembered for future identical actions. */
+  remember_approval?:
+    | boolean
+    | undefined;
+  /** tool_name is the name of the tool that was approved. */
+  tool_name?:
+    | string
+    | undefined;
+  /** tool_args_json is the JSON-encoded arguments of the tool invocation that was approved. */
   tool_args_json?: string | undefined;
 }
 
+/** Rejected signals that the user has rejected the pending action. */
 export interface Approval_Rejected {
+  /** message is an optional explanation of why the action was rejected. */
   message?: string | undefined;
 }
 
+/** Mkdir requests creation of a directory at the specified path. */
 export interface Mkdir {
+  /** directory_path is the path of the directory to create, including any intermediate directories. */
   directory_path: string;
 }
 
+/** OsInformationContext provides details about the operating system running the executor. */
 export interface OsInformationContext {
+  /** platform identifies the OS type (e.g. "linux", "darwin", "windows"). */
   platform: string;
+  /** architecture identifies the CPU architecture (e.g. "amd64", "arm64"). */
   architecture: string;
 }
 
+/** ShellInformationContext provides details about the shell environment available to the executor. */
 export interface ShellInformationContext {
+  /** shell_name is the display name of the shell (e.g. "bash", "zsh"). */
   shell_name: string;
+  /** shell_type is the type identifier of the shell (e.g. "posix", "powershell"). */
   shell_type: string;
-  shell_variant?: string | undefined;
-  shell_environment?: string | undefined;
-  ssh_session?: boolean | undefined;
+  /** shell_variant is an optional version or variant string for the shell. */
+  shell_variant?:
+    | string
+    | undefined;
+  /** shell_environment is an optional JSON-encoded map of environment variables available to the shell. */
+  shell_environment?:
+    | string
+    | undefined;
+  /** ssh_session indicates whether the shell is running inside an SSH session. */
+  ssh_session?:
+    | boolean
+    | undefined;
+  /** cwd is the current working directory of the shell session. */
   cwd?: string | undefined;
 }
 
+/** TrackSelfHostedClientEvent is a message sent from the client during a self-hosted tracking session. */
 export interface TrackSelfHostedClientEvent {
+  /** requestID is the unique identifier for this tracking event request. */
   requestID: string;
+  /** workflowID identifies the workflow associated with this event. */
   workflowID: string;
+  /** featureQualifiedName is the fully-qualified name of the AI feature that triggered the event. */
   featureQualifiedName: string;
+  /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
 }
 
+/** TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event. */
 export interface TrackSelfHostedAction {
+  /** requestID matches the TrackSelfHostedClientEvent.requestID this response corresponds to. */
   requestID: string;
 }
 
+/** ValidateFlowConfigRequest carries a flow configuration payload to be validated. */
 export interface ValidateFlowConfigRequest {
   /**
    * The flow configuration payload as a JSON/YAML-equivalent struct.
@@ -309,6 +596,7 @@ export interface ValidateFlowConfigRequest {
   flow_config: { [key: string]: any } | undefined;
 }
 
+/** ValidateFlowConfigResponse returns the validation outcome for the submitted flow configuration. */
 export interface ValidateFlowConfigResponse {
   /** Whether the flow configuration is valid. */
   valid: boolean;
@@ -448,6 +736,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     preapproved_tools: [],
     flowConfigId: undefined,
     flowVersion: undefined,
+    streaming: undefined,
   };
 }
 
@@ -494,6 +783,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.flowVersion !== undefined) {
       writer.uint32(122).string(message.flowVersion);
+    }
+    if (message.streaming !== undefined) {
+      writer.uint32(128).bool(message.streaming);
     }
     return writer;
   },
@@ -617,6 +909,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.flowVersion = reader.string();
           continue;
         }
+        case 16: {
+          if (tag !== 128) {
+            break;
+          }
+
+          message.streaming = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -650,6 +950,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         : [],
       flowConfigId: isSet(object.flowConfigId) ? globalThis.String(object.flowConfigId) : undefined,
       flowVersion: isSet(object.flowVersion) ? globalThis.String(object.flowVersion) : undefined,
+      streaming: isSet(object.streaming) ? globalThis.Boolean(object.streaming) : undefined,
     };
   },
 
@@ -697,6 +998,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.flowVersion !== undefined) {
       obj.flowVersion = message.flowVersion;
     }
+    if (message.streaming !== undefined) {
+      obj.streaming = message.streaming;
+    }
     return obj;
   },
 
@@ -721,21 +1025,19 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.preapproved_tools = object.preapproved_tools?.map((e) => e) || [];
     message.flowConfigId = object.flowConfigId ?? undefined;
     message.flowVersion = object.flowVersion ?? undefined;
+    message.streaming = object.streaming ?? undefined;
     return message;
   },
 };
 
 function createBaseActionResponse(): ActionResponse {
-  return { requestID: "", response: undefined, plainTextResponse: undefined, httpResponse: undefined };
+  return { requestID: "", plainTextResponse: undefined, httpResponse: undefined };
 }
 
 export const ActionResponse: MessageFns<ActionResponse> = {
   encode(message: ActionResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.requestID !== "") {
       writer.uint32(10).string(message.requestID);
-    }
-    if (message.response !== undefined) {
-      writer.uint32(18).string(message.response);
     }
     if (message.plainTextResponse !== undefined) {
       PlainTextResponse.encode(message.plainTextResponse, writer.uint32(26).fork()).join();
@@ -759,14 +1061,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
           }
 
           message.requestID = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.response = reader.string();
           continue;
         }
         case 3: {
@@ -797,7 +1091,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
   fromJSON(object: any): ActionResponse {
     return {
       requestID: isSet(object.requestID) ? globalThis.String(object.requestID) : "",
-      response: isSet(object.response) ? globalThis.String(object.response) : undefined,
       plainTextResponse: isSet(object.plainTextResponse)
         ? PlainTextResponse.fromJSON(object.plainTextResponse)
         : undefined,
@@ -809,9 +1102,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     const obj: any = {};
     if (message.requestID !== "") {
       obj.requestID = message.requestID;
-    }
-    if (message.response !== undefined) {
-      obj.response = message.response;
     }
     if (message.plainTextResponse !== undefined) {
       obj.plainTextResponse = PlainTextResponse.toJSON(message.plainTextResponse);
@@ -828,7 +1118,6 @@ export const ActionResponse: MessageFns<ActionResponse> = {
   fromPartial<I extends Exact<DeepPartial<ActionResponse>, I>>(object: I): ActionResponse {
     const message = createBaseActionResponse();
     message.requestID = object.requestID ?? "";
-    message.response = object.response ?? undefined;
     message.plainTextResponse = (object.plainTextResponse !== undefined && object.plainTextResponse !== null)
       ? PlainTextResponse.fromPartial(object.plainTextResponse)
       : undefined;
@@ -2520,6 +2809,187 @@ export const GenerateTokenResponse: MessageFns<GenerateTokenResponse> = {
   },
 };
 
+function createBaseCapability(): Capability {
+  return { name: "", metadata: "" };
+}
+
+export const Capability: MessageFns<Capability> = {
+  encode(message: Capability, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.metadata !== "") {
+      writer.uint32(18).string(message.metadata);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Capability {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCapability();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.metadata = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Capability {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      metadata: isSet(object.metadata) ? globalThis.String(object.metadata) : "",
+    };
+  },
+
+  toJSON(message: Capability): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.metadata !== "") {
+      obj.metadata = message.metadata;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Capability>, I>>(base?: I): Capability {
+    return Capability.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Capability>, I>>(object: I): Capability {
+    const message = createBaseCapability();
+    message.name = object.name ?? "";
+    message.metadata = object.metadata ?? "";
+    return message;
+  },
+};
+
+function createBaseListCapabilitiesRequest(): ListCapabilitiesRequest {
+  return {};
+}
+
+export const ListCapabilitiesRequest: MessageFns<ListCapabilitiesRequest> = {
+  encode(_: ListCapabilitiesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListCapabilitiesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListCapabilitiesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListCapabilitiesRequest {
+    return {};
+  },
+
+  toJSON(_: ListCapabilitiesRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListCapabilitiesRequest>, I>>(base?: I): ListCapabilitiesRequest {
+    return ListCapabilitiesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListCapabilitiesRequest>, I>>(_: I): ListCapabilitiesRequest {
+    const message = createBaseListCapabilitiesRequest();
+    return message;
+  },
+};
+
+function createBaseListCapabilitiesResponse(): ListCapabilitiesResponse {
+  return { capabilities: [] };
+}
+
+export const ListCapabilitiesResponse: MessageFns<ListCapabilitiesResponse> = {
+  encode(message: ListCapabilitiesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.capabilities) {
+      Capability.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListCapabilitiesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListCapabilitiesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.capabilities.push(Capability.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListCapabilitiesResponse {
+    return {
+      capabilities: globalThis.Array.isArray(object?.capabilities)
+        ? object.capabilities.map((e: any) => Capability.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ListCapabilitiesResponse): unknown {
+    const obj: any = {};
+    if (message.capabilities?.length) {
+      obj.capabilities = message.capabilities.map((e) => Capability.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListCapabilitiesResponse>, I>>(base?: I): ListCapabilitiesResponse {
+    return ListCapabilitiesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListCapabilitiesResponse>, I>>(object: I): ListCapabilitiesResponse {
+    const message = createBaseListCapabilitiesResponse();
+    message.capabilities = object.capabilities?.map((e) => Capability.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseListToolsRequest(): ListToolsRequest {
   return {};
 }
@@ -2853,8 +3323,84 @@ export const ListFlowsResponse: MessageFns<ListFlowsResponse> = {
   },
 };
 
+function createBaseTokenBreakdown(): TokenBreakdown {
+  return { total_tokens: 0, max_tokens: 0 };
+}
+
+export const TokenBreakdown: MessageFns<TokenBreakdown> = {
+  encode(message: TokenBreakdown, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.total_tokens !== 0) {
+      writer.uint32(8).int32(message.total_tokens);
+    }
+    if (message.max_tokens !== 0) {
+      writer.uint32(16).int32(message.max_tokens);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): TokenBreakdown {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTokenBreakdown();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.total_tokens = reader.int32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.max_tokens = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TokenBreakdown {
+    return {
+      total_tokens: isSet(object.total_tokens) ? globalThis.Number(object.total_tokens) : 0,
+      max_tokens: isSet(object.max_tokens) ? globalThis.Number(object.max_tokens) : 0,
+    };
+  },
+
+  toJSON(message: TokenBreakdown): unknown {
+    const obj: any = {};
+    if (message.total_tokens !== 0) {
+      obj.total_tokens = Math.round(message.total_tokens);
+    }
+    if (message.max_tokens !== 0) {
+      obj.max_tokens = Math.round(message.max_tokens);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TokenBreakdown>, I>>(base?: I): TokenBreakdown {
+    return TokenBreakdown.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TokenBreakdown>, I>>(object: I): TokenBreakdown {
+    const message = createBaseTokenBreakdown();
+    message.total_tokens = object.total_tokens ?? 0;
+    message.max_tokens = object.max_tokens ?? 0;
+    return message;
+  },
+};
+
 function createBaseNewCheckpoint(): NewCheckpoint {
-  return { status: "", checkpoint: "", goal: "", errors: [] };
+  return { status: "", checkpoint: "", goal: "", errors: [], agent_context_usage: {} };
 }
 
 export const NewCheckpoint: MessageFns<NewCheckpoint> = {
@@ -2871,6 +3417,9 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     for (const v of message.errors) {
       writer.uint32(34).string(v!);
     }
+    Object.entries(message.agent_context_usage).forEach(([key, value]) => {
+      NewCheckpoint_AgentContextUsageEntry.encode({ key: key as any, value }, writer.uint32(42).fork()).join();
+    });
     return writer;
   },
 
@@ -2913,6 +3462,17 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
           message.errors.push(reader.string());
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          const entry5 = NewCheckpoint_AgentContextUsageEntry.decode(reader, reader.uint32());
+          if (entry5.value !== undefined) {
+            message.agent_context_usage[entry5.key] = entry5.value;
+          }
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2928,6 +3488,12 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
       checkpoint: isSet(object.checkpoint) ? globalThis.String(object.checkpoint) : "",
       goal: isSet(object.goal) ? globalThis.String(object.goal) : "",
       errors: globalThis.Array.isArray(object?.errors) ? object.errors.map((e: any) => globalThis.String(e)) : [],
+      agent_context_usage: isObject(object.agent_context_usage)
+        ? Object.entries(object.agent_context_usage).reduce<{ [key: string]: TokenBreakdown }>((acc, [key, value]) => {
+          acc[key] = TokenBreakdown.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2945,6 +3511,15 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     if (message.errors?.length) {
       obj.errors = message.errors;
     }
+    if (message.agent_context_usage) {
+      const entries = Object.entries(message.agent_context_usage);
+      if (entries.length > 0) {
+        obj.agent_context_usage = {};
+        entries.forEach(([k, v]) => {
+          obj.agent_context_usage[k] = TokenBreakdown.toJSON(v);
+        });
+      }
+    }
     return obj;
   },
 
@@ -2957,6 +3532,96 @@ export const NewCheckpoint: MessageFns<NewCheckpoint> = {
     message.checkpoint = object.checkpoint ?? "";
     message.goal = object.goal ?? "";
     message.errors = object.errors?.map((e) => e) || [];
+    message.agent_context_usage = Object.entries(object.agent_context_usage ?? {}).reduce<
+      { [key: string]: TokenBreakdown }
+    >((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = TokenBreakdown.fromPartial(value);
+      }
+      return acc;
+    }, {});
+    return message;
+  },
+};
+
+function createBaseNewCheckpoint_AgentContextUsageEntry(): NewCheckpoint_AgentContextUsageEntry {
+  return { key: "", value: undefined };
+}
+
+export const NewCheckpoint_AgentContextUsageEntry: MessageFns<NewCheckpoint_AgentContextUsageEntry> = {
+  encode(message: NewCheckpoint_AgentContextUsageEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      TokenBreakdown.encode(message.value, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): NewCheckpoint_AgentContextUsageEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNewCheckpoint_AgentContextUsageEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = TokenBreakdown.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NewCheckpoint_AgentContextUsageEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? TokenBreakdown.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: NewCheckpoint_AgentContextUsageEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = TokenBreakdown.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<NewCheckpoint_AgentContextUsageEntry>, I>>(
+    base?: I,
+  ): NewCheckpoint_AgentContextUsageEntry {
+    return NewCheckpoint_AgentContextUsageEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<NewCheckpoint_AgentContextUsageEntry>, I>>(
+    object: I,
+  ): NewCheckpoint_AgentContextUsageEntry {
+    const message = createBaseNewCheckpoint_AgentContextUsageEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TokenBreakdown.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };
@@ -4604,8 +5269,15 @@ export const ValidateFlowConfigResponse: MessageFns<ValidateFlowConfigResponse> 
   },
 };
 
+/**
+ * DuoWorkflow is the gRPC service that orchestrates AI-powered workflow execution
+ * for GitLab Duo. It serves all GitLab deployment types (SaaS, self-managed, dedicated,
+ * self-hosted) and provides RPCs for running workflows, managing authentication,
+ * discovering available tools and flows, and self-hosted billing tracking.
+ */
 export type DuoWorkflowService = typeof DuoWorkflowService;
 export const DuoWorkflowService = {
+  /** ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow. */
   executeWorkflow: {
     path: "/DuoWorkflow/ExecuteWorkflow",
     requestStream: true,
@@ -4615,6 +5287,7 @@ export const DuoWorkflowService = {
     responseSerialize: (value: Action): Buffer => Buffer.from(Action.encode(value).finish()),
     responseDeserialize: (value: Buffer): Action => Action.decode(value),
   },
+  /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken: {
     path: "/DuoWorkflow/GenerateToken",
     requestStream: false,
@@ -4625,6 +5298,19 @@ export const DuoWorkflowService = {
       Buffer.from(GenerateTokenResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): GenerateTokenResponse => GenerateTokenResponse.decode(value),
   },
+  /** ListCapabilities returns the capabilities advertised by the server for capability negotiation. */
+  listCapabilities: {
+    path: "/DuoWorkflow/ListCapabilities",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ListCapabilitiesRequest): Buffer =>
+      Buffer.from(ListCapabilitiesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListCapabilitiesRequest => ListCapabilitiesRequest.decode(value),
+    responseSerialize: (value: ListCapabilitiesResponse): Buffer =>
+      Buffer.from(ListCapabilitiesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListCapabilitiesResponse => ListCapabilitiesResponse.decode(value),
+  },
+  /** ListTools returns the set of tools available to the workflow executor. */
   listTools: {
     path: "/DuoWorkflow/ListTools",
     requestStream: false,
@@ -4634,6 +5320,7 @@ export const DuoWorkflowService = {
     responseSerialize: (value: ListToolsResponse): Buffer => Buffer.from(ListToolsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListToolsResponse => ListToolsResponse.decode(value),
   },
+  /** ListFlows returns the set of flow configurations available for execution. */
   listFlows: {
     path: "/DuoWorkflow/ListFlows",
     requestStream: false,
@@ -4643,6 +5330,13 @@ export const DuoWorkflowService = {
     responseSerialize: (value: ListFlowsResponse): Buffer => Buffer.from(ListFlowsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListFlowsResponse => ListFlowsResponse.decode(value),
   },
+  /**
+   * TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+   * cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+   * lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+   * LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+   * TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+   */
   trackSelfHostedExecuteWorkflow: {
     path: "/DuoWorkflow/TrackSelfHostedExecuteWorkflow",
     requestStream: true,
@@ -4654,6 +5348,7 @@ export const DuoWorkflowService = {
       Buffer.from(TrackSelfHostedAction.encode(value).finish()),
     responseDeserialize: (value: Buffer): TrackSelfHostedAction => TrackSelfHostedAction.decode(value),
   },
+  /** ValidateFlowConfig validates a provided flow configuration against the registered schema. */
   validateFlowConfig: {
     path: "/DuoWorkflow/ValidateFlowConfig",
     requestStream: false,
@@ -4668,18 +5363,34 @@ export const DuoWorkflowService = {
 } as const;
 
 export interface DuoWorkflowServer extends UntypedServiceImplementation {
+  /** ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow. */
   executeWorkflow: handleBidiStreamingCall<ClientEvent, Action>;
+  /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken: handleUnaryCall<GenerateTokenRequest, GenerateTokenResponse>;
+  /** ListCapabilities returns the capabilities advertised by the server for capability negotiation. */
+  listCapabilities: handleUnaryCall<ListCapabilitiesRequest, ListCapabilitiesResponse>;
+  /** ListTools returns the set of tools available to the workflow executor. */
   listTools: handleUnaryCall<ListToolsRequest, ListToolsResponse>;
+  /** ListFlows returns the set of flow configurations available for execution. */
   listFlows: handleUnaryCall<ListFlowsRequest, ListFlowsResponse>;
+  /**
+   * TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+   * cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+   * lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+   * LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+   * TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+   */
   trackSelfHostedExecuteWorkflow: handleBidiStreamingCall<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  /** ValidateFlowConfig validates a provided flow configuration against the registered schema. */
   validateFlowConfig: handleUnaryCall<ValidateFlowConfigRequest, ValidateFlowConfigResponse>;
 }
 
 export interface DuoWorkflowClient extends Client {
+  /** ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow. */
   executeWorkflow(): ClientDuplexStream<ClientEvent, Action>;
   executeWorkflow(options: Partial<CallOptions>): ClientDuplexStream<ClientEvent, Action>;
   executeWorkflow(metadata: Metadata, options?: Partial<CallOptions>): ClientDuplexStream<ClientEvent, Action>;
+  /** GenerateToken issues a short-lived authentication token for a workflow session. */
   generateToken(
     request: GenerateTokenRequest,
     callback: (error: ServiceError | null, response: GenerateTokenResponse) => void,
@@ -4695,6 +5406,23 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GenerateTokenResponse) => void,
   ): ClientUnaryCall;
+  /** ListCapabilities returns the capabilities advertised by the server for capability negotiation. */
+  listCapabilities(
+    request: ListCapabilitiesRequest,
+    callback: (error: ServiceError | null, response: ListCapabilitiesResponse) => void,
+  ): ClientUnaryCall;
+  listCapabilities(
+    request: ListCapabilitiesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListCapabilitiesResponse) => void,
+  ): ClientUnaryCall;
+  listCapabilities(
+    request: ListCapabilitiesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListCapabilitiesResponse) => void,
+  ): ClientUnaryCall;
+  /** ListTools returns the set of tools available to the workflow executor. */
   listTools(
     request: ListToolsRequest,
     callback: (error: ServiceError | null, response: ListToolsResponse) => void,
@@ -4710,6 +5438,7 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListToolsResponse) => void,
   ): ClientUnaryCall;
+  /** ListFlows returns the set of flow configurations available for execution. */
   listFlows(
     request: ListFlowsRequest,
     callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
@@ -4725,6 +5454,13 @@ export interface DuoWorkflowClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListFlowsResponse) => void,
   ): ClientUnaryCall;
+  /**
+   * TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+   * cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+   * lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+   * LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+   * TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+   */
   trackSelfHostedExecuteWorkflow(): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
   trackSelfHostedExecuteWorkflow(
     options: Partial<CallOptions>,
@@ -4733,6 +5469,7 @@ export interface DuoWorkflowClient extends Client {
     metadata: Metadata,
     options?: Partial<CallOptions>,
   ): ClientDuplexStream<TrackSelfHostedClientEvent, TrackSelfHostedAction>;
+  /** ValidateFlowConfig validates a provided flow configuration against the registered schema. */
   validateFlowConfig(
     request: ValidateFlowConfigRequest,
     callback: (error: ServiceError | null, response: ValidateFlowConfigResponse) => void,

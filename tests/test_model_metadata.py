@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import patch
 
@@ -10,11 +11,12 @@ from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     FireworksModelMetadata,
     ModelMetadata,
-    ModelMetadataBySize,
+    ModelMetadataByTag,
     build_default_code_completions_metadata,
     build_default_feature_setting_metadata,
+    completion_context_max_percent_for_model_metadata,
     create_model_metadata,
-    create_model_metadata_by_size,
+    create_model_metadata_by_tag,
 )
 from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
 from ai_gateway.model_selection.model_selection_config import (
@@ -671,7 +673,7 @@ class TestFriendlyName:
             assert result.friendly_name == "GitLab Identifier Model"
 
 
-class TestCreateModelMetadataBySize:
+class TestCreateModelMetadataByTag:
     @pytest.fixture(autouse=True)
     def setup_config(self, gitlab_model1, gitlab_model2):
         mock_models = {
@@ -683,15 +685,25 @@ class TestCreateModelMetadataBySize:
                 feature_setting="duo_chat",
                 unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
                 default_models=["gitlab_model1"],
-                models_for_size_preference={
+                models_for_tags={
                     "small": "gitlab_model2",
                     "large": "gitlab_model1",
+                    "claude": "gitlab_model1",
                 },
             ),
             "no_size_feature": UnitPrimitiveConfig(
                 feature_setting="no_size_feature",
                 unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
                 default_models=["gitlab_model1"],
+            ),
+            "partial_tags_feature": UnitPrimitiveConfig(
+                feature_setting="partial_tags_feature",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                default_models=["gitlab_model1"],
+                models_for_tags={
+                    "small": "gitlab_model2",
+                    "large": "model_that_does_not_exist",
+                },
             ),
         }
         with patch.multiple(
@@ -701,37 +713,132 @@ class TestCreateModelMetadataBySize:
         ):
             yield
 
-    def test_with_feature_setting_builds_by_size(self, gitlab_model1, gitlab_model2):
+    def test_with_feature_setting_builds_by_tag(self, gitlab_model1, gitlab_model2):
         data = {"provider": "gitlab", "feature_setting": "duo_chat"}
 
-        result = create_model_metadata_by_size(data)
+        result = create_model_metadata_by_tag(data)
 
-        assert isinstance(result, ModelMetadataBySize)
+        assert isinstance(result, ModelMetadataByTag)
         assert result.default.llm_definition == gitlab_model1
-        assert result.by_size["small"].llm_definition == gitlab_model2
-        assert result.by_size["large"].llm_definition == gitlab_model1
+        assert result.by_tag["small"].llm_definition == gitlab_model2
+        assert result.by_tag["large"].llm_definition == gitlab_model1
+        assert result.by_tag["claude"].llm_definition == gitlab_model1
 
     def test_without_size_preference_config(self, gitlab_model1):
         data = {"provider": "gitlab", "feature_setting": "no_size_feature"}
 
-        result = create_model_metadata_by_size(data)
+        result = create_model_metadata_by_tag(data)
 
-        assert isinstance(result, ModelMetadataBySize)
+        assert isinstance(result, ModelMetadataByTag)
         assert result.default.llm_definition == gitlab_model1
-        assert result.by_size == {}
+        assert result.by_tag == {}
 
     def test_without_feature_setting(self, gitlab_model1):
         data = {"provider": "gitlab", "name": "gitlab_model1"}
 
-        result = create_model_metadata_by_size(data)
+        result = create_model_metadata_by_tag(data)
 
-        assert isinstance(result, ModelMetadataBySize)
+        assert isinstance(result, ModelMetadataByTag)
         assert result.default.llm_definition == gitlab_model1
-        assert result.by_size == {}
+        assert result.by_tag == {}
 
     def test_invalid_data_raises(self):
         with pytest.raises(ValueError, match="provider must be present"):
-            create_model_metadata_by_size(None)
+            create_model_metadata_by_tag(None)
+
+    def test_unresolvable_tag_is_skipped_not_raised(self, gitlab_model1, gitlab_model2):
+        # An unresolvable models_for_tags entry must not drop the whole context:
+        # the default and every resolvable tag still come through.
+        data = {"provider": "gitlab", "feature_setting": "partial_tags_feature"}
+
+        result = create_model_metadata_by_tag(data)
+
+        assert result.default.llm_definition == gitlab_model1
+        assert result.by_tag["small"].llm_definition == gitlab_model2
+        assert "large" not in result.by_tag
+
+
+class TestModelMetadataByTagGet:
+    """Tests for ModelMetadataByTag.get() tag-based resolution."""
+
+    @pytest.fixture
+    def small_metadata(self, gitlab_model2):
+        return ModelMetadata(
+            llm_definition=gitlab_model2,
+            name="gitlab_model2",
+            provider="gitlab",
+        )
+
+    @pytest.fixture
+    def large_metadata(self, gitlab_model1):
+        return ModelMetadata(
+            llm_definition=gitlab_model1,
+            name="gitlab_model1",
+            provider="gitlab",
+        )
+
+    @pytest.fixture
+    def by_tag_metadata(self, small_metadata, large_metadata):
+        return ModelMetadataByTag(
+            default=large_metadata,
+            by_tag={
+                "small": small_metadata,
+                "large": large_metadata,
+                "claude": large_metadata,
+            },
+        )
+
+    def test_get_none_returns_default(self, by_tag_metadata, large_metadata):
+        assert by_tag_metadata.get(None) is large_metadata
+
+    def test_get_no_args_returns_default(self, by_tag_metadata, large_metadata):
+        assert by_tag_metadata.get() is large_metadata
+
+    def test_get_small_tag(self, by_tag_metadata, small_metadata):
+        assert by_tag_metadata.get("small") is small_metadata
+
+    def test_get_large_tag(self, by_tag_metadata, large_metadata):
+        assert by_tag_metadata.get("large") is large_metadata
+
+    def test_get_claude_tag(self, by_tag_metadata, large_metadata):
+        assert by_tag_metadata.get("claude") is large_metadata
+
+    def test_get_unknown_tag_falls_back_to_default(
+        self, by_tag_metadata, large_metadata
+    ):
+        assert by_tag_metadata.get("unknown_tag") is large_metadata
+
+    def test_get_list_returns_first_matching_tag(self, by_tag_metadata, large_metadata):
+        # First-match semantics: the first tag that maps to a configured model wins.
+        assert by_tag_metadata.get(["large", "claude"]) is large_metadata
+
+    def test_get_list_first_configured_tag_wins_even_if_tags_differ(
+        self, by_tag_metadata, small_metadata
+    ):
+        # "small" is the first configured tag, so it wins regardless of later tags
+        # mapping to a different model.
+        assert by_tag_metadata.get(["small", "large"]) is small_metadata
+
+    def test_get_list_falls_back_to_default_when_no_match(
+        self, by_tag_metadata, large_metadata
+    ):
+        assert (
+            by_tag_metadata.get(["nonexistent", "also_nonexistent"]) is large_metadata
+        )
+
+    def test_get_list_skips_unconfigured_tags(self, by_tag_metadata, small_metadata):
+        # Unconfigured tags are skipped; the first configured tag wins.
+        assert by_tag_metadata.get(["nonexistent", "small"]) is small_metadata
+
+    def test_add_user_propagates_to_all_tag_metadata(
+        self, by_tag_metadata, small_metadata, large_metadata
+    ):
+        """add_user must propagate to default and every by_tag entry."""
+        user = mock.MagicMock()
+        by_tag_metadata.add_user(user)
+        assert by_tag_metadata.default._user is user
+        for tag_meta in by_tag_metadata.by_tag.values():
+            assert tag_meta._user is user
 
 
 class TestBuildDefaultCodeCompletionsMetadata:
@@ -1021,3 +1128,25 @@ class TestBuildDefaultFeatureSettingMetadata:
                 model_keys={},
                 fireworks_api_base_url="unused",
             )
+
+
+class TestCompletionContextMaxPercentForModelMetadata:
+    @staticmethod
+    def _model_metadata(custom_llm_provider):
+        params = SimpleNamespace(custom_llm_provider=custom_llm_provider)
+        return SimpleNamespace(llm_definition=SimpleNamespace(params=params))
+
+    def test_fireworks_caps_context_at_v2_value(self):
+        metadata = self._model_metadata("fireworks_ai")
+
+        assert completion_context_max_percent_for_model_metadata(metadata) == 0.3
+
+    def test_vertex_caps_context_at_v2_value(self):
+        metadata = self._model_metadata("vertex_ai")
+
+        assert completion_context_max_percent_for_model_metadata(metadata) == 0.3
+
+    def test_other_provider_uses_engine_default(self):
+        metadata = self._model_metadata("anthropic")
+
+        assert completion_context_max_percent_for_model_metadata(metadata) is None

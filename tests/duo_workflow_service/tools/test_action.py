@@ -240,7 +240,7 @@ async def test_execute_action_missing_structured_response(metadata):
     client_event = contract_pb2.ClientEvent()
 
     # Set up an ActionResponse with no response_type set (neither plainTextResponse nor httpResponse)
-    client_event.actionResponse.response = "some legacy response"
+    client_event.actionResponse.requestID = "some-request-id"
     # Don't set either plainTextResponse or httpResponse, so WhichOneof("response_type") returns None
 
     metadata["outbox"].put_action_and_wait_for_response = AsyncMock(

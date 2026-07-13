@@ -120,6 +120,7 @@ class TestFinalResponseNode:
 
         # Create state
         state: FlowState = {
+            "agent_context_limits": {},
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {component_name: [mock_ai_message]},
             "ui_chat_log": [],

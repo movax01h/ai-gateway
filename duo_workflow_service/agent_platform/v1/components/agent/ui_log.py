@@ -51,6 +51,11 @@ class UILogWriterAgentTools(BaseUILogWriter):
     ``**kwargs``.  This keeps the writer compatible with session-aware components
     that resolve the subsession ID dynamically at runtime.
 
+    Callers may also pass ``message_id`` via ``**kwargs`` to ``_log_success`` /
+    ``_log_error`` (e.g. the originating tool call's ``id``) so that a PENDING
+    entry streamed earlier for the same tool call can be replaced in place by
+    the final SUCCESS/FAILURE entry. When omitted, a random UUID is generated.
+
     Args:
         log_callback: Callback function that receives log entries.
         component_name: Optional human-readable name of the component that owns
@@ -90,7 +95,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             ),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
-            message_id=f"tool-{str(uuid4())}",
+            message_id=kwargs.get("message_id") or f"tool-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -105,7 +110,8 @@ class UILogWriterAgentTools(BaseUILogWriter):
     ) -> UiChatLog:
         if not message:
             message = f"An error occurred when executing the tool: {
-                self._format_message(tool, tool_call_args, kwargs.get('tool_response'))}"
+                self._format_message(tool, tool_call_args, kwargs.get('tool_response'))
+            }"
 
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
@@ -116,7 +122,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("additional_context", []),
             message_sub_type=tool.name,
-            message_id=f"tool-{str(uuid4())}",
+            message_id=kwargs.get("message_id") or f"tool-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -142,12 +148,12 @@ class UILogWriterAgentTools(BaseUILogWriter):
             message_type=MessageTypeEnum.AGENT,
             content=message,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            status=None,
+            status=ToolStatus.SUCCESS,
             correlation_id=kwargs.get("correlation_id"),
             tool_info=None,
             additional_context=kwargs.get("context_elements", []),
             message_sub_type="reasoning",
-            message_id=f"agent-{str(uuid4())}",
+            message_id=f"agent-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -157,7 +163,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
         tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
     ) -> str:
         if not hasattr(tool, "format_display_message"):
-            args_str = ", ".join(f"{k}={str(v)}" for k, v in tool_call_args.items())
+            args_str = ", ".join(f"{k}={v!s}" for k, v in tool_call_args.items())
             return f"Using {tool.name}: {args_str}"
 
         try:
@@ -167,7 +173,9 @@ class UILogWriterAgentTools(BaseUILogWriter):
                 return tool.format_display_message(parsed, tool_response)
         except Exception:
             return DuoBaseTool.format_display_message(
-                tool, tool_call_args, tool_response  # type: ignore[arg-type]
+                tool,  # type: ignore[arg-type]
+                tool_call_args,
+                tool_response,
             )  # type: ignore[return-value]
 
         return tool.format_display_message(tool_call_args, tool_response)

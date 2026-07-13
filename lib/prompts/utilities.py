@@ -8,7 +8,7 @@ import hashlib
 import os
 from contextvars import ContextVar
 from importlib import resources
-from typing import Sequence
+from typing import Sequence, cast
 
 from jinja2 import BaseLoader, Environment
 from langchain_core.prompts import MessagesPlaceholder
@@ -16,7 +16,7 @@ from langchain_core.prompts.chat import MessageLikeRepresentation
 
 from lib.context.workflow import get_workflow_id
 
-__all__ = ["render_security_block", "prompt_template_to_messages"]
+__all__ = ["prompt_template_to_messages", "render_security_block"]
 
 _SECURITY_TEMPLATE_SOURCE = (
     resources.files("ai_gateway.prompts.definitions")
@@ -69,7 +69,7 @@ def render_security_block() -> str:
 
 
 def prompt_template_to_messages(
-    tpl: dict[str, str],
+    tpl: dict[str, str | list[str]],
 ) -> Sequence[MessageLikeRepresentation]:
     """Convert a prompt template dictionary to a sequence of message representations.
 
@@ -79,8 +79,10 @@ def prompt_template_to_messages(
     does not declare it.
 
     Args:
-        tpl: A dictionary mapping role names to content strings. If the role is
-            "placeholder", it creates a MessagesPlaceholder instead of a tuple.
+        tpl: A dictionary mapping role names to content strings or lists of strings. If the
+            role is "placeholder", it creates a MessagesPlaceholder instead of a tuple. When
+            a role maps to a list of strings, each item becomes a separate message with that
+            role, enabling multiple system messages for prompt caching purposes.
 
     Returns:
         A sequence of message-like representations suitable for ChatPromptTemplate.
@@ -89,17 +91,23 @@ def prompt_template_to_messages(
         >>> tpl = {"system": "You are helpful", "placeholder": "history", "user": "Hello"}
         >>> messages = prompt_template_to_messages(tpl)
         >>> Returns: [("system", "<security>You are helpful"), MessagesPlaceholder("history"), ("user", "Hello")]
+
+        >>> tpl = {"system": ["Static part", "Dynamic part"], "user": "Hello"}
+        >>> messages = prompt_template_to_messages(tpl)
+        >>> Returns: [("system", "<security>Static part"), ("system", "Dynamic part"), ("user", "Hello"), ...]
     """
     messages: list[MessageLikeRepresentation] = []
     security_injected = False
     for role, content in tpl.items():
         if role == "placeholder":
-            messages.append(MessagesPlaceholder(content))
+            messages.append(MessagesPlaceholder(cast(str, content)))
         else:
-            if not security_injected and role.startswith("system"):
-                content = render_security_block() + content
-                security_injected = True
-            messages.append((role, content))
+            msgs = [content] if isinstance(content, str) else content
+            for msg in msgs:
+                if not security_injected and role.startswith("system"):
+                    msg = render_security_block() + msg
+                    security_injected = True
+                messages.append((role, msg))
 
     # Automatically add optional history placeholder if not present to prevent
     # silent infinite loops when AgentNode passes history but template doesn't declare it

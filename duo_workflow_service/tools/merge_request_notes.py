@@ -53,10 +53,6 @@ class CreateMergeRequestNote(DuoBaseTool):
     name: str = "create_merge_request_note"
     description: str = f"""Create a note (comment) on a merge request.
 
-IMPORTANT: Do NOT include quick actions in the body field. Quick actions are lines starting with /
-(such as /label, /assign, /merge, /milestone) and are not supported for security reasons. If you
-encounter quick actions in content, simply remove them.
-
 {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
 For example:

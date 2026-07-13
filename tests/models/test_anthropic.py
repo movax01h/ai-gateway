@@ -12,9 +12,6 @@ from anthropic import (
 )
 from anthropic.types import (
     Completion,
-)
-from anthropic.types import Message as AMessage
-from anthropic.types import (
     MessageDeltaUsage,
     RawContentBlockDeltaEvent,
     RawContentBlockStartEvent,
@@ -27,6 +24,7 @@ from anthropic.types import (
     Usage,
     raw_message_delta_event,
 )
+from anthropic.types import Message as AMessage
 
 from ai_gateway.models import (
     AnthropicAPIConnectionError,

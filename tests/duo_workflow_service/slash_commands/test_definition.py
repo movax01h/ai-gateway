@@ -15,7 +15,6 @@ def mock_dir_fixture():
 
 
 class TestSlashCommandDefinition:
-
     def test_initialization_and_validation(self):
         data = {
             "name": "explain",

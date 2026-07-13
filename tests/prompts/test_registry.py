@@ -1461,7 +1461,6 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
 
 
 class TestGetRequiredVariables:
-
     _PROMPT_BASE_DIR = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
     )
@@ -1477,7 +1476,7 @@ class TestGetRequiredVariables:
                 "name: Test prompt",
                 "unit_primitive: duo_chat",
                 "prompt_template:",
-                f"  system: {repr(template)}",
+                f"  system: {template!r}",
                 "",
             ]
         )
@@ -1603,6 +1602,82 @@ class TestGetRequiredVariables:
                 "unknown_step", "1.0.0", is_graph_node=False
             )
 
+    def test_list_system_extracts_variables_from_all_items(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables from every item in a list-valued system field are collected."""
+        path = self._PROMPT_BASE_DIR / "test/list_system" / "base" / "1.0.0.yml"
+        fs.create_file(
+            path,
+            contents="\n".join(
+                [
+                    "---",
+                    "name: List system prompt",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  system:",
+                    "    - 'Static: {{ static_var }}'",
+                    "    - 'Dynamic: {{ dynamic_var }}'",
+                    "",
+                ]
+            ),
+        )
+        result = registry.get_required_variables(
+            "test/list_system", prompt_version="^1.0.0"
+        )
+        assert result == {"static_var", "dynamic_var"}
+
+    def test_list_system_with_no_variables_returns_empty_set(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """A list-valued system field with no Jinja2 variables returns an empty set."""
+        path = self._PROMPT_BASE_DIR / "test/list_no_vars" / "base" / "1.0.0.yml"
+        fs.create_file(
+            path,
+            contents="\n".join(
+                [
+                    "---",
+                    "name: List no vars",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  system:",
+                    "    - 'Static content only'",
+                    "    - 'More static content'",
+                    "",
+                ]
+            ),
+        )
+        result = registry.get_required_variables(
+            "test/list_no_vars", prompt_version="^1.0.0"
+        )
+        assert result == set()
+
+    def test_mixed_string_and_list_fields_extract_all_variables(
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
+    ):
+        """Variables from both str and list[str] fields are combined in the result."""
+        path = self._PROMPT_BASE_DIR / "test/mixed_fields" / "base" / "1.0.0.yml"
+        fs.create_file(
+            path,
+            contents="\n".join(
+                [
+                    "---",
+                    "name: Mixed fields prompt",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  system:",
+                    "    - 'Part1: {{ sys_var }}'",
+                    "    - 'Part2: {{ sys_var2 }}'",
+                    "  user: 'Hello {{ user_var }}'",
+                    "",
+                ]
+            ),
+        )
+        result = registry.get_required_variables(
+            "test/mixed_fields", prompt_version="^1.0.0"
+        )
+        assert result == {"sys_var", "sys_var2", "user_var"}
+
 
 # Prompt IDs that are exclusively invoked as DAP graph nodes (is_graph_node=True).
 # is_graph_node=True bypasses feature_setting_for_prompt_id entirely and provides
@@ -1616,27 +1691,25 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "code_review_prescan",
         "commit_changes",
         "conversation_compaction",
+        "conversation_compaction_manual",
         "convert_ci_push_changes",
         "convert_to_gl_ci",
         "ensure_clean_git_state",
         "explore_directories_for_prescan",
         "fix_pipeline_add_comment",
-        "fix_pipeline_comment_link",
+        "fix_pipeline_checkout_existing_branch",
+        "fix_pipeline_code_suggestions",
         "fix_pipeline_context",
-        "fix_pipeline_create_plan",
-        "fix_pipeline_decide_approach",
-        "fix_pipeline_decide_comment",
+        "fix_pipeline_create_new_mr",
+        "fix_pipeline_decide_fix",
         "fix_pipeline_execution",
         "fix_pipeline_next_add_comment",
         "fix_pipeline_next_checkout_existing_branch",
         "fix_pipeline_next_code_suggestions",
-        "fix_pipeline_next_commit",
         "fix_pipeline_next_context",
         "fix_pipeline_next_create_new_mr",
         "fix_pipeline_next_decide_fix",
         "fix_pipeline_next_execution",
-        "fix_pipeline_push_changes",
-        "fix_pipeline_summarize_changes",
         "gitlab_duo_mention_agent_prompt",
         "project_activity_create_summary_issue",
         "project_activity_fetch_issues_closed",
@@ -1661,6 +1734,11 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "secret_vulnerability_lines_agent_prompt",
         "secret_vulnerability_report_agent_prompt",
         "secret_vulnerability_source_file_agent_prompt",
+        "security_review",
+        "security_review_build_context",
+        "security_review_prescan",
+        "security_review_respond",
+        "security_review_validate",
         "validate_sast_fix_has_changes",
         "validate_sast_vulnerability_agent_prompt",
     }
@@ -1704,7 +1782,7 @@ class TestDuoAgentPlatformPromptRegistration:
         """Return all prompt IDs whose base definition declares unit_primitive=duo_agent_platform."""
         prompt_ids = []
         for path in sorted(self._definitions_dir.glob("**")):
-            yml_files = sorted(list(path.glob("*.yml")))
+            yml_files = sorted(path.glob("*.yml"))
             if not yml_files:
                 continue
             prompt_id_with_family = path.relative_to(self._definitions_dir)

@@ -1,8 +1,10 @@
 # pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-lines,too-many-statements
+import ast
 import asyncio
 import functools
 import json
 import os
+import re
 import signal
 from itertools import chain
 from typing import AsyncIterable, AsyncIterator, Optional, cast, override
@@ -10,6 +12,7 @@ from typing import AsyncIterable, AsyncIterator, Optional, cast, override
 import aiohttp
 import grpc
 import structlog
+from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -23,6 +26,8 @@ from google.protobuf.struct_pb2 import Struct
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
+from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
@@ -32,7 +37,12 @@ from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.components import tools_registry
-from duo_workflow_service.errors.typing import InvalidWorkflowIdException
+from duo_workflow_service.errors.error_handler import ModelError
+from duo_workflow_service.errors.typing import (
+    EnvelopeVersionMismatchException,
+    InvalidRequestException,
+    InvalidWorkflowIdException,
+)
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import normalize_flow_request
 from duo_workflow_service.gitlab.connection_pool import connection_pool
@@ -61,11 +71,17 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
+from duo_workflow_service.interceptors.request_metadata_log_interceptor import (
+    RequestMetadataLogInterceptor,
+)
 from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
-from duo_workflow_service.server_capabilities import get_dws_capabilities
+from duo_workflow_service.server_capabilities import (
+    get_dws_capabilities,
+    get_dws_capabilities_with_metadata,
+)
 from duo_workflow_service.server_helpers import (
     build_logging_context,
     clean_start_request,
@@ -82,7 +98,7 @@ from duo_workflow_service.tracking import MonitoringContext, current_monitoring_
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
-from duo_workflow_service.workflows.registry import FlowFactory, resolve_flow
+from duo_workflow_service.workflows.registry import ResolvedFlow, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
@@ -107,7 +123,11 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
 
-_PROPAGATED_EXTRA_CLAIMS = {SKIP_USAGE_CUTOFF_CLAIM, "tool_access_policies"}
+_PROPAGATED_EXTRA_CLAIMS = {
+    SKIP_USAGE_CUTOFF_CLAIM,
+    "tool_access_policies",
+    "gitlab_root_namespace_id",
+}
 
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
@@ -147,6 +167,91 @@ CUSTOMERSDOT_URL: str | None = (
 )
 
 
+def _extract_error_message(error: BaseException) -> str:
+    """Extract a clean, normalized error message from a workflow error.
+
+    Parses structured error bodies from LiteLLM and Anthropic exceptions to surface only the human-readable message.
+    Also normalizes dynamic token counts (e.g. '205531 tokens') to '<N> tokens' for consistent log grouping.
+    """
+    if isinstance(error, LiteLLMBadRequestError):
+        raw = (error.message or "").removeprefix("litellm.BadRequestError: ")
+        # Find the JSON bytes repr anywhere in the string, e.g.:
+        # "Vertex_aiException BadRequestError - b'{...}'"
+        match = re.search(r"b'(\{.*\})'|b\"(\{.*\})\"", raw)
+        if match:
+            raw = match.group(1) or match.group(2)
+        try:
+            body = json.loads(raw)
+            message = body.get("error", {}).get("message") or raw
+        except (json.JSONDecodeError, AttributeError):
+            message = raw or str(error)
+    elif isinstance(error, LiteLLMAPIConnectionError):
+        # Strip the variable BedrockException payload so that per-request ARN/action/resource
+        # values don't fragment SLO grouping.  str(error) looks like:
+        #   "litellm.APIConnectionError: litellm.APIConnectionError: BedrockException - {"Message":"User: <ARN>..."}"
+        # We keep only the stable "litellm.APIConnectionError" prefix so the caller assembles:
+        #   "workflow execution failure: APIConnectionError: litellm.APIConnectionError"
+        # For non-Bedrock errors the regex won't match and we fall back to str(error).
+        raw = str(error)
+        stripped = re.sub(r": BedrockException - \{.*\}$", "", raw, flags=re.DOTALL)
+        if stripped != raw:
+            # Remove the outer "litellm.APIConnectionError: " wrapper added by LiteLLM
+            message = re.sub(r"^litellm\.APIConnectionError: ", "", stripped)
+        else:
+            message = raw
+    elif isinstance(error, APIStatusError):
+        body = error.body
+        error_field = body.get("error") if isinstance(body, dict) else None
+        message = (
+            error_field.get("message") if isinstance(error_field, dict) else None
+        ) or str(error)
+    elif isinstance(error, SecurityException):
+        message = "Flow configuration failed security validation"
+    elif re.match(
+        r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
+        str(error),
+    ):
+        # FlowConfig parsing wraps a Pydantic ValidationError, embedding the full
+        # field-by-field breakdown (e.g. "2 validation errors for FlowConfig\n
+        # prompts.0.unit_primitives.0\n..."). Collapse it to a generic message so we
+        # don't surface the enum list / internals. The count varies ("1 validation
+        # error" / "N validation errors"), which is why the pattern matches both.
+        message = "Failed to create flow from FlowConfig protobuf: validation error"
+    elif schema_match := re.match(
+        r"input '.*?' does not match specified schema", str(error)
+    ):
+        # Additional-context validation wraps a jsonschema.ValidationError, whose str()
+        # dumps the full schema and offending instance (e.g. "... does not match
+        # specified schema: ...\n\nFailed validating ...\n\nOn instance: {...}").
+        # Keep only the "input '<category>' does not match specified schema" prefix so
+        # we don't surface the schema/instance internals to the client.
+        message = schema_match.group()
+    elif isinstance(error, ModelError):
+        raw = error.message
+        # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
+        # "Error code: 400 - {'type': 'error', 'error': {'message': '...'}, ...}"
+        # Extract the inner error.message using ast.literal_eval for robustness.
+        dict_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        message = raw
+        if dict_match:
+            try:
+                body = ast.literal_eval(dict_match.group())
+                error_field = body.get("error") if isinstance(body, dict) else None
+                message = (
+                    error_field.get("message")
+                    if isinstance(error_field, dict)
+                    else None
+                ) or raw
+            except (ValueError, SyntaxError):
+                pass
+    else:
+        message = str(error)
+
+    message = re.sub(r"\b\d+\b(?= tokens)", "<N>", message)
+    message = re.sub(r"(max_tokens:).*", r"\1 too large", message)
+    return message
+
+
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # Set to 10 seconds to provide a reasonable balance between:
     # - Giving tasks enough time to properly clean up resources
@@ -156,7 +261,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     @override
     @has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)
     @inject
-    async def ExecuteWorkflow(
+    async def ExecuteWorkflow(  # noqa: PLR0912, PLR0915  # top-level gRPC handler
         self,
         request_iterator: AsyncIterable[contract_pb2.ClientEvent],
         context: grpc.ServicerContext,
@@ -210,18 +315,16 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
 
         workflow_id = start_req.workflowID
-        if not workflow_id:
-            await context.abort(
-                grpc.StatusCode.INVALID_ARGUMENT,
-                "workflowID must not be empty",
-            )
-
         set_workflow_id(workflow_id)
 
+        cleaned_request, request_extra = clean_start_request(start_workflow_request)
         log.info(
             "Starting workflow %s",
-            clean_start_request(start_workflow_request),
-            extra=build_logging_context(workflow_id, workflow_definition),
+            cleaned_request,
+            extra={
+                **build_logging_context(workflow_id, workflow_definition),
+                **request_extra,
+            },
         )
 
         flow_config = start_req.flowConfig
@@ -266,7 +369,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             mcp_tools = list(start_req.mcpTools)
 
         try:
-            workflow_class: FlowFactory = resolve_flow(flow_request)
+            resolved_flow: ResolvedFlow = resolve_flow(flow_request)
         except SecurityException as e:
             log.error(
                 "Flow config security validation failed",
@@ -275,8 +378,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 error=str(e),
             )
             await context.abort(
-                grpc.StatusCode.CANCELLED,
-                f"Flow configuration failed security validation: {str(e)}",
+                grpc.StatusCode.INVALID_ARGUMENT, _extract_error_message(e)
             )
         except ValueError as e:
             log.error(
@@ -285,9 +387,13 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 workflow_definition=workflow_definition,
                 error=str(e),
             )
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, _extract_error_message(e)
+            )
 
-        workflow: AbstractWorkflow = workflow_class(
+        monitoring_context.set_flow_identity(**resolved_flow.tracking_fields())
+
+        workflow: AbstractWorkflow = resolved_flow.factory(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
             workflow_type=gl_event_context,
@@ -299,6 +405,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             preapproved_tools=list(
                 start_workflow_request.startRequest.preapproved_tools
             ),
+            streaming=start_workflow_request.startRequest.streaming,
         )
 
         workflow_task = asyncio.create_task(workflow.run(goal))
@@ -401,10 +508,27 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ):
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(f"Invalid workflow ID: {workflow.last_error}")
+            elif workflow.last_error and isinstance(
+                getattr(workflow.last_error, "__cause__", None),
+                EnvelopeVersionMismatchException,
+            ):
+                context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                context.set_details(str(workflow.last_error.__cause__))
+            elif workflow.last_error and isinstance(
+                workflow.last_error, InvalidRequestException
+            ):
+                # The request contained invalid input (e.g. an empty goal on resume).
+                # The workflow state remains unchanged in Rails; we return
+                # INVALID_ARGUMENT so the caller gets a clear signal that the input
+                # itself was wrong, not the system state.
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(str(workflow.last_error))
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(
-                    f"workflow execution failure: {type(workflow.last_error).__name__}: {workflow.last_error}"
+                    "workflow execution failure: "
+                    f"{type(workflow.last_error).__name__}: "
+                    f"{_extract_error_message(workflow.last_error)}"
                 )
             else:
                 log.warning(
@@ -525,6 +649,25 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 request_id=item.requestID,
                 action_class=item.WhichOneof("action"),
             )
+
+    @override
+    async def ListCapabilities(
+        self,
+        request: contract_pb2.ListCapabilitiesRequest,
+        context: grpc.ServicerContext,
+    ) -> contract_pb2.ListCapabilitiesResponse:
+        log.info("Listing DWS server capabilities")
+
+        capabilities = get_dws_capabilities_with_metadata()
+
+        return contract_pb2.ListCapabilitiesResponse(
+            capabilities=[
+                contract_pb2.Capability(
+                    name=capability.name, metadata=capability.metadata
+                )
+                for capability in capabilities
+            ]
+        )
 
     @override
     async def ListTools(
@@ -895,6 +1038,7 @@ async def serve(config: Config, port: int) -> None:
             interceptors=[
                 MetadataContextInterceptor(config),
                 CorrelationIdInterceptor(),
+                RequestMetadataLogInterceptor(),
                 AuthenticationInterceptor(reflection_enabled=reflection_enabled),
                 FeatureFlagInterceptor(),
                 InternalEventsInterceptor(),
@@ -909,7 +1053,22 @@ async def serve(config: Config, port: int) -> None:
         health_servicer = health.aio.HealthServicer()
         await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
         health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-        server.add_insecure_port(f"[::]:{port}")
+
+        duo_workflow_config = config.duo_workflow
+        if duo_workflow_config.tls.enabled:
+            cert_file = duo_workflow_config.tls.cert_file or ""
+            key_file = duo_workflow_config.tls.key_file or ""
+            with open(cert_file, "rb") as f:
+                certificate_chain = f.read()
+            with open(key_file, "rb") as f:
+                private_key = f.read()
+            server_credentials = grpc.ssl_server_credentials(
+                [(private_key, certificate_chain)]
+            )
+            server.add_secure_port(f"[::]:{port}", server_credentials)
+            log.info("TLS enabled: gRPC server will use secure port (gRPCS)")
+        else:
+            server.add_insecure_port(f"[::]:{port}")
         if reflection_enabled:
             service_names = (
                 contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,

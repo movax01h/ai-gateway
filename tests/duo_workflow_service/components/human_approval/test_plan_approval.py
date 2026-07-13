@@ -99,7 +99,6 @@ class TestPlanApprovalComponent:
             ),
             patch.dict(os.environ, {"WORKFLOW_INTERRUPT": "True"}),
         ):
-
             graph, mock_entry_node, mock_continuation_node, mock_termination_node = (
                 set_up_graph(node_return_value, component)
             )

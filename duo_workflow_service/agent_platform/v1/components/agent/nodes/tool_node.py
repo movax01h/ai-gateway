@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Optional
 
 import structlog
@@ -5,6 +6,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -23,6 +25,11 @@ from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import (
+    is_orbit_tool,
+    orbit_tool_call_count,
+    total_tool_call_count,
+)
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events.event_enum import EventEnum
 
@@ -103,38 +110,30 @@ class ToolNode:
 
         last_message = conversation_history[-1]
         tool_calls = getattr(last_message, "tool_calls", [])
-        tools_responses = []
 
+        # Counters are incremented here, in the parent task's context, because
+        # asyncio.gather runs each coroutine as a Task with its own context copy:
+        # ContextVar writes inside a task never propagate back to the caller.
         for tool_call in tool_calls:
-            tool_name = tool_call["name"]
-            tool_call_args = tool_call.get("args", {})
-            tool_call_id = tool_call.get("id")
+            if tool_call["name"] in self._toolset:
+                total_tool_call_count.set(total_tool_call_count.get() + 1)
+                if is_orbit_tool(tool_call["name"]):
+                    orbit_tool_call_count.set(orbit_tool_call_count.get() + 1)
 
-            if tool_name not in self._toolset:
-                response = f"Tool {tool_name} not found"
-            else:
-                response = await self._execute_tool(
-                    tool=self._toolset[tool_name],
-                    tool_call_args=tool_call_args,
-                    session_id=session_id,
-                )
+        tools_responses = await self._execute_tool_calls(tool_calls, session_id)
 
-            if not isinstance(response, (str, list, dict)):
-                raise ValueError(
-                    f"Invalid response type for tool {tool_name}: {response}"
-                )
-
-            tool = self._toolset.get(tool_name)
-            set_hidden_layer_log_context(tool_name, tool_call_args)
-            sanitized = self._sanitize_response(
-                response=response, tool_name=tool_name, tool=tool, session_id=session_id
-            )
-            tools_responses.append(
-                ToolMessage(
-                    content=sanitized,  # type: ignore[arg-type]
-                    tool_call_id=tool_call_id,
-                )
-            )
+        # If any todo_write call was made, write its args to state so downstream
+        # components can read the task list.
+        # Component name is derived from the node name (format: "<component>#<role>").
+        context_updates: dict = {}
+        component_name = self.name.split(NODE_ROLE_SEPARATOR)[0]
+        for tool_call in tool_calls:
+            if tool_call["name"] == "todo_write":
+                context_updates = {
+                    "context": {
+                        component_name: {"last_todo_write": tool_call.get("args", {})}
+                    }
+                }
 
         # Append tool responses to existing history for replace-based reducer.
         # The reducer will replace this component's conversation history with
@@ -142,12 +141,79 @@ class ToolNode:
         return {
             **self._ui_history.pop_state_updates(),
             **history_iokey.to_nested_dict(conversation_history + tools_responses),
+            **context_updates,
         }
+
+    async def _execute_tool_calls(
+        self, tool_calls: list[dict], session_id: Optional[str]
+    ) -> list[ToolMessage]:
+        """Run tool_calls concurrently, preserving order and cancellation safety.
+
+        Uses return_exceptions=True so a failing tool doesn't cancel its siblings, matching the old sequential loop's
+        resilience; all other failures are logged and the first is re-raised. If the outer task is cancelled mid-gather
+        (e.g. the gRPC client stream closes), the inner tasks are cancelled and awaited before re-raising, so none are
+        left running when the event loop shuts down — this is what caused the "Event loop is closed" production
+        incident.
+        """
+        tasks = [
+            asyncio.create_task(self._execute_one(tc, session_id)) for tc in tool_calls
+        ]
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+        errors = [result for result in results if isinstance(result, BaseException)]
+        for error in errors[1:]:
+            self._logger.error(f"Concurrent tool call failed: {error!r}")
+        if errors:
+            raise errors[0]
+
+        # All BaseException entries were raised above, so every remaining item is a ToolMessage.
+        return list(results)  # type: ignore[arg-type]
+
+    async def _execute_one(
+        self, tool_call: dict, session_id: Optional[str]
+    ) -> ToolMessage:
+        tool_name = tool_call["name"]
+        tool_call_args = tool_call.get("args", {})
+        tool_call_id = tool_call.get("id")
+
+        if tool_name not in self._toolset:
+            response: str | list | dict = f"Tool {tool_name} not found"
+        else:
+            response = await self._execute_tool(
+                tool=self._toolset[tool_name],
+                tool_call_args=tool_call_args,
+                tool_call_id=tool_call_id,
+                session_id=session_id,
+            )
+
+        if not isinstance(response, (str, list, dict)):
+            raise ValueError(f"Invalid response type for tool {tool_name}: {response}")
+
+        tool = self._toolset.get(tool_name)
+        sanitized = self._sanitize_response(
+            response=response,
+            tool_name=tool_name,
+            tool_call_args=tool_call_args,
+            tool=tool,
+            tool_call_id=tool_call_id,
+            session_id=session_id,
+        )
+        return ToolMessage(
+            content=sanitized,  # type: ignore[arg-type]
+            tool_call_id=tool_call_id,
+        )
 
     async def _execute_tool(
         self,
         tool_call_args: dict[str, Any],
         tool: BaseTool,
+        tool_call_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> str:
         try:
@@ -161,11 +227,18 @@ class ToolNode:
                 tool_name=tool.name,
             )
 
+            if is_orbit_tool(tool.name):
+                self._tracker.track_internal_event(
+                    event_name=EventEnum.ORBIT_DAP_TOOL_CALLED,
+                    tool_name=tool.name,
+                )
+
             self._ui_history.log.success(
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
                 tool_response=tool_call_result,
+                message_id=tool_call_id,
                 subsession_id=session_id,
             )
 
@@ -176,7 +249,8 @@ class ToolNode:
                 tool=tool,
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
-                tool_response=f"{str(e)} {response}" if response else str(e),
+                tool_response=f"{e!s} {response}" if response else str(e),
+                message_id=tool_call_id,
                 subsession_id=session_id,
             )
 
@@ -193,15 +267,28 @@ class ToolNode:
                     tool_name=tool.name, error=e
                 )
 
+            if is_orbit_tool(tool.name):
+                self._tracker.track_internal_event(
+                    event_name=EventEnum.ORBIT_DAP_TOOL_FAILED,
+                    tool_name=tool.name,
+                    extra={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
+                )
+
             return err_format
 
     def _sanitize_response(
         self,
         response: str | dict | list,
         tool_name: str,
+        tool_call_args: dict[str, Any],
         tool: BaseTool | None = None,
+        tool_call_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> str | dict | list:
+        set_hidden_layer_log_context(tool_name, tool_call_args)
         try:
             trust_level = getattr(tool, "trust_level", None)
             return apply_security_scanning(
@@ -218,6 +305,7 @@ class ToolNode:
                     tool_call_args={},
                     message=error_message,
                     event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                    message_id=tool_call_id,
                     subsession_id=session_id,
                 )
             return error_message

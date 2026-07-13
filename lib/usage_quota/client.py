@@ -98,9 +98,9 @@ def _apply_jitter(ttl: int) -> float:
 class UsageQuotaClient:
     """Client for checking usage quota availability via CustomersDot API.
 
-    This client implements a fail-open strategy: if the CustomersDot API
-    is unavailable or returns an error, quota checks will pass to avoid
-    blocking legitimate users.
+    This client raises typed exceptions when the CustomersDot API is unavailable
+    or returns an unexpected error, allowing callers to apply the quota failure
+    policy consistently.
 
     Results are cached in-memory using Cache-Control max-age from CustomersDot
     responses, with a fallback TTL when the header is absent.
@@ -149,13 +149,14 @@ class UsageQuotaClient:
         """
         if self._http_client is None:
             async with self._client_lock:
-                self._http_client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(self.request_timeout),
-                    limits=httpx.Limits(
-                        max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
-                        max_connections=MAX_CONNECTIONS,
-                    ),
-                )
+                if self._http_client is None:
+                    self._http_client = httpx.AsyncClient(
+                        timeout=httpx.Timeout(self.request_timeout),
+                        limits=httpx.Limits(
+                            max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
+                            max_connections=MAX_CONNECTIONS,
+                        ),
+                    )
                 log.debug(
                     "Created persistent HTTP client",
                     client_id=id(self._http_client),
@@ -180,13 +181,9 @@ class UsageQuotaClient:
             False if consumer quota exhausted (402 response)
 
         Raises:
-            UsageQuotaTimeoutError: Request timed out (fail-open in middleware)
-            UsageQuotaHTTPError: Unexpected HTTP error from CustomersDot (fail-open in middleware)
-            UsageQuotaConnectionError: Connection to CustomersDot failed (fail-open in middleware)
-
-        Note:
-            Callers should implement fail-open error handling to avoid blocking
-            legitimate users when CustomersDot is unavailable.
+            UsageQuotaTimeoutError: Request timed out
+            UsageQuotaHTTPError: Unexpected HTTP error from CustomersDot
+            UsageQuotaConnectionError: Connection to CustomersDot failed
         """
         if not self.enabled:
             log.debug("Usage quota is disabled")
@@ -256,8 +253,8 @@ class UsageQuotaClient:
             #     returned when the entitlement check fails.
             # - OK (200):
             #     returned when the customer has sufficient credits and the entitlement check passes.
-            # For all other HTTP status codes, we allow the request to proceed,
-            # but we currently mark them as fail-open.
+            # All other HTTP status codes raise UsageQuotaHTTPError for callers
+            # to apply the quota failure policy.
 
             status = response.status_code
             max_age = _parse_max_age(response.headers)

@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
 
@@ -33,6 +34,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 
@@ -269,7 +271,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
 
         input = kwargs.get("input")
-        if expected_type == dict:
+        if expected_type is dict:
             assert isinstance(input, expected_type)
             assert input["context"]["goal"] == goal
             assert input["context"]["project_id"] == project["id"]
@@ -822,26 +824,28 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         with pytest.raises(ValueError, match="Invalid JSON in input item.*"):
             flow_instance._process_additional_context(additional_context)
 
-    def test_process_additional_context_schema_validation_error(
+    def test_process_additional_context_extra_property_is_tolerated(
         self,
         flow_instance,
     ):
-        """Test _process_additional_context raises error when JSON doesn't match schema."""
+        """Test _process_additional_context ignores unknown properties instead of raising.
+
+        Adding a new field to an envelope (e.g. service_account_name) must not break custom flows that have not yet
+        declared the field in their input_schema.
+        """
         additional_context = [
             AdditionalContext(
                 category="file",
-                content='{"file_type": "file.txt"}',
+                content='{"contents": "hello", "file_name": "test.txt", "file_type": "text"}',
             )
         ]
 
-        with pytest.raises(
-            ValueError,
-            match=(
-                r".*input 'file' does not match specified schema: "
-                r"Additional properties are not allowed \('file_type' was unexpected\).*"
-            ),
-        ):
-            flow_instance._process_additional_context(additional_context)
+        result = flow_instance._process_additional_context(additional_context)
+
+        # The extra field is accepted; the declared fields are present
+        assert result["file"]["contents"] == "hello"
+        assert result["file"]["file_name"] == "test.txt"
+        assert result["file"]["file_type"] == "text"
 
     def test_process_additional_context_agent_skills_routing(self, flow_instance):
         """Test that user_rule with agent-skills-instructions id routes to workspace_agent_skills."""
@@ -1059,3 +1063,36 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         state = graph.aupdate_state.call_args[0][1]
         assert state["ui_chat_log"].value[0]["content"] == "Safe message only"
+
+    @pytest.mark.asyncio
+    async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
+        self, flow_instance
+    ):
+        """GraphRecursionError is converted to NotifiableAgentException before propagating."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        notifier.send_event = AsyncMock()
+        flow_instance.checkpoint_notifier = notifier
+
+        compiled_graph = AsyncMock()
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            ),
+            pytest.raises(TraceableException) as exc_info,
+        ):
+            await flow_instance._handle_compile_and_run_exception(
+                GraphRecursionError("Recursion limit of 300 reached"),
+                compiled_graph,
+                {},
+            )
+
+        wrapped = exc_info.value.original_exception
+        assert isinstance(wrapped, NotifiableAgentException)
+        assert "300" in wrapped.internal_detail
+        assert (
+            wrapped.ui_message
+            == "The workflow reached its maximum step limit and could not complete. "
+            "Please try again with a more focused goal, or break the task into smaller steps."
+        )

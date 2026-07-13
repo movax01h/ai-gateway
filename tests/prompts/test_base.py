@@ -62,6 +62,7 @@ from ai_gateway.prompts.base import (
     jinja_env,
     parse_json,
 )
+from ai_gateway.prompts.bind_tools_cache import NoOpBindToolsCache
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
@@ -1036,6 +1037,115 @@ configurable_unit_primitives:
         assert kwargs["tool_choice"] == tool_choice
 
     @pytest.mark.parametrize(
+        ("model_metadata_identifier", "config_model_name", "expected_model_id_suffix"),
+        [
+            # Custom model: identifier present → use the model name derived from it
+            ("bedrock/claude-sonnet-4-6", None, "claude-sonnet-4-6"),
+            # Custom model with plain identifier (no provider prefix)
+            ("my-custom-model", None, "my-custom-model"),
+            # Standard model: no metadata identifier → fall back to config.model.params.model
+            (None, "claude-3-haiku", "claude-3-haiku"),
+            # Both present: metadata identifier takes precedence
+            ("bedrock/claude-sonnet-4-6", "claude-3-haiku", "claude-sonnet-4-6"),
+        ],
+    )
+    def test_bind_tools_cache_model_id_uses_metadata_identifier(
+        self,
+        model_provider: ModelClassProvider,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+        llm_definition: Any,
+        model_metadata_identifier: str | None,
+        config_model_name: str | None,
+        expected_model_id_suffix: str,
+    ):
+        """bind_tools_cache receives the real model identifier, not 'litellm:None'.
+
+        For custom models, config.model.params.model is None; the actual model identifier arrives via
+        model_metadata.identifier.  The cache key must reflect the real model so that per-model caching and logging are
+        correct.
+        """
+        # Build a ModelMetadata whose identifier may or may not be set
+        custom_model_metadata = ModelMetadata(
+            provider="litellm",
+            name="custom",
+            identifier=model_metadata_identifier,
+            llm_definition=llm_definition,
+        )
+
+        # Build a PromptConfig whose model param may or may not have a model name
+        config = PromptConfig(
+            name="test_prompt",
+            model=ModelConfig(params=ChatLiteLLMParams(model=config_model_name)),
+            unit_primitive=GitLabUnitPrimitive.COMPLETE_CODE,
+            prompt_template={"system": "Hi", "user": "{{content}}"},
+        )
+
+        mock_cache = mock.MagicMock(spec=NoOpBindToolsCache)
+        mock_cache.get_or_bind.return_value = model
+
+        mock_tool = mock.Mock(spec=BaseTool)
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+
+        Prompt(
+            model_provider=model_provider,
+            model_factory=model_factory,
+            config=config,
+            model_metadata=custom_model_metadata,
+            tools=[mock_tool],
+            bind_tools_cache=mock_cache,
+        )
+
+        mock_cache.get_or_bind.assert_called_once()
+        call_kwargs = mock_cache.get_or_bind.call_args
+        actual_model_id = call_kwargs.kwargs["model_id"]
+        assert actual_model_id == f"{model_provider}:{expected_model_id_suffix}", (
+            f"Expected model_id '{model_provider}:{expected_model_id_suffix}', "
+            f"got '{actual_model_id}'"
+        )
+
+    def test_bind_tools_cache_model_id_falls_back_when_no_model_metadata(
+        self,
+        model_provider: ModelClassProvider,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+    ):
+        """When model_metadata is None, the cache key falls back to config.model.params.model.
+
+        This exercises the ``else None`` branch of the conditional expression
+        ``model_metadata.to_params().get("model") if model_metadata else None``.
+        """
+        config = PromptConfig(
+            name="test_prompt",
+            model=ModelConfig(params=ChatLiteLLMParams(model="claude-3-haiku")),
+            unit_primitive=GitLabUnitPrimitive.COMPLETE_CODE,
+            prompt_template={"system": "Hi", "user": "{{content}}"},
+        )
+
+        mock_cache = mock.MagicMock(spec=NoOpBindToolsCache)
+        mock_cache.get_or_bind.return_value = model
+
+        mock_tool = mock.Mock(spec=BaseTool)
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool description"
+
+        Prompt(
+            model_provider=model_provider,
+            model_factory=model_factory,
+            config=config,
+            model_metadata=None,
+            tools=[mock_tool],
+            bind_tools_cache=mock_cache,
+        )
+
+        mock_cache.get_or_bind.assert_called_once()
+        actual_model_id = mock_cache.get_or_bind.call_args.kwargs["model_id"]
+        assert actual_model_id == f"{model_provider}:claude-3-haiku", (
+            f"Expected model_id '{model_provider}:claude-3-haiku', got '{actual_model_id}'"
+        )
+
+    @pytest.mark.parametrize(
         (
             "model_provider",
             "model_params",
@@ -1046,7 +1156,7 @@ configurable_unit_primitives:
             (
                 ModelClassProvider.LITE_LLM,
                 ChatLiteLLMParams(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-4-5-20250929",
                     custom_llm_provider="anthropic",
                 ),
                 PromptParams(
@@ -2007,7 +2117,7 @@ class TestContextManagementTokenReduction:
     def model_params_fixture(self):
         return ChatLiteLLMParams(
             custom_llm_provider="anthropic",
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=100,
         )
 
@@ -2115,9 +2225,9 @@ class TestContextManagementTokenReduction:
         tokens_without_cm = response_without_cm.usage_metadata.get("input_tokens", 0)
 
         assert tokens_without_cm > 0, "Baseline should have recorded input tokens"
-        assert (
-            tokens_with_cm > 0
-        ), "Context management run should have recorded input tokens"
+        assert tokens_with_cm > 0, (
+            "Context management run should have recorded input tokens"
+        )
         assert tokens_with_cm < tokens_without_cm, (
             f"Context management should reduce input tokens: "
             f"with_cm={tokens_with_cm}, without_cm={tokens_without_cm}"
@@ -2261,7 +2371,7 @@ class TestBuildModelExtraHeaders:
                 custom_models_extra_headers=env_headers,
             )
 
-        warning_logs = [l for l in cap_logs if l.get("log_level") == "warning"]
+        warning_logs = [log for log in cap_logs if log.get("log_level") == "warning"]
         assert len(warning_logs) == 1
         assert "overriding" in warning_logs[0]["event"].lower()
         assert warning_logs[0]["overridden_keys"] == ["x-shared"]

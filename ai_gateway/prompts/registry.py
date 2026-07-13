@@ -30,117 +30,117 @@ log = structlog.stdlib.get_logger("prompts")
 
 LEGACY_MODEL_MAPPING = {
     "chat/agent": {
-        "1.0.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
     },
     "chat/build_reader": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/commit_reader": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/documentation_search": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/epic_reader": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/explain_code": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/explain_vulnerability": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/fix_code": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/issue_reader": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/merge_request_reader": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/react": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.0.2-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.0.2-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/refactor_code": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/summarize_comments": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/troubleshoot_job": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1-alpha": "claude_sonnet_4_20250514",
-        "1.0.2": "claude_sonnet_4_20250514",
-        "1.1.0-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1-alpha": "claude_sonnet_4_5_20250929",
+        "1.0.2": "claude_sonnet_4_5_20250929",
+        "1.1.0-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/write_tests": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.1.0-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.1.0-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
     },
     "chat/work_item_reader": {
-        "1.0.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
     },
     "code_suggestions/generations": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.0.2": "claude_sonnet_4_20250514",
-        "1.1.0-dev": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.0.2": "claude_sonnet_4_5_20250929",
+        "1.1.0-dev": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
         "1.2.0-dev": "gemini_2_5_flash_vertex",
         "1.2.0": "claude_sonnet_4_6_vertex",
-        "2.0.0": "claude_sonnet_4_20250514_vertex",
-        "2.0.1": "claude_sonnet_4_20250514_vertex",
-        "2.0.2-dev": "claude_sonnet_4_20250514_vertex",
-        "2.0.2": "claude_sonnet_4_20250514_vertex",
-        "2.0.3": "claude_sonnet_4_20250514",
-        "3.0.2-dev": "claude_sonnet_4_20250514",
+        "2.0.0": "claude_sonnet_4_5_20250929_vertex",
+        "2.0.1": "claude_sonnet_4_5_20250929_vertex",
+        "2.0.2-dev": "claude_sonnet_4_5_20250929_vertex",
+        "2.0.2": "claude_sonnet_4_5_20250929_vertex",
+        "2.0.3": "claude_sonnet_4_5_20250929",
+        "3.0.2-dev": "claude_sonnet_4_5_20250929",
     },
     "generate_commit_message": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
-        "1.2.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
+        "1.2.0": "claude_sonnet_4_5_20250929",
     },
     "glab_ask_git_command": {
         "1.0.0": "claude_haiku_4_5_20251001",
@@ -152,31 +152,31 @@ LEGACY_MODEL_MAPPING = {
         "1.0.2": "gemini_2_5_flash_vertex",
     },
     "resolve_vulnerability": {
-        "0.0.1-dev": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.0.1": "claude_sonnet_4_20250514",
-        "1.0.2": "claude_sonnet_4_20250514",
+        "0.0.1-dev": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.0.1": "claude_sonnet_4_5_20250929",
+        "1.0.2": "claude_sonnet_4_5_20250929",
     },
     "review_merge_request": {
-        "0.9.0": "claude_sonnet_4_20250514",
-        "1.0.0": "claude_sonnet_4_20250514",
-        "1.1.0": "claude_sonnet_4_20250514",
-        "1.2.0": "claude_sonnet_4_20250514",
-        "1.3.0": "claude_sonnet_4_20250514",
+        "0.9.0": "claude_sonnet_4_5_20250929",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "1.1.0": "claude_sonnet_4_5_20250929",
+        "1.2.0": "claude_sonnet_4_5_20250929",
+        "1.3.0": "claude_sonnet_4_5_20250929",
     },
     "summarize_new_merge_request": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "2.0.0": "claude_sonnet_4_20250514",
-        "2.0.1": "claude_sonnet_4_20250514",
-        "2.0.2-dev": "claude_sonnet_4_20250514",
-        "2.0.2": "claude_sonnet_4_20250514",
-        "2.1.0-dev": "claude_sonnet_4_20250514",
-        "2.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "2.0.0": "claude_sonnet_4_5_20250929",
+        "2.0.1": "claude_sonnet_4_5_20250929",
+        "2.0.2-dev": "claude_sonnet_4_5_20250929",
+        "2.0.2": "claude_sonnet_4_5_20250929",
+        "2.1.0-dev": "claude_sonnet_4_5_20250929",
+        "2.1.0": "claude_sonnet_4_5_20250929",
     },
     "summarize_review": {
-        "1.0.0": "claude_sonnet_4_20250514",
-        "2.0.0": "claude_sonnet_4_20250514",
-        "2.1.0": "claude_sonnet_4_20250514",
+        "1.0.0": "claude_sonnet_4_5_20250929",
+        "2.0.0": "claude_sonnet_4_5_20250929",
+        "2.1.0": "claude_sonnet_4_5_20250929",
     },
 }
 
@@ -349,7 +349,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         try:
             if not model_metadata:
                 model_metadata = self._default_model_metadata(
-                    prompt_id, prompt_version, is_graph_node  # type: ignore[arg-type]
+                    prompt_id,
+                    prompt_version,  # type: ignore[arg-type]
+                    is_graph_node,
                 )
 
             family = model_metadata.llm_definition.family if model_metadata else []
@@ -456,9 +458,12 @@ class LocalPromptRegistry(BasePromptRegistry):
             ) from e
 
         variables: set[str] = set()
-        for template_str in config.prompt_template.values():
-            if template_str:
-                variables.update(self._collect_jinja2_variables(template_str))
+        for template_msg in config.prompt_template.values():
+            items = [template_msg] if isinstance(template_msg, str) else template_msg
+
+            for item in items:
+                if item:
+                    variables.update(self._collect_jinja2_variables(item))
         return variables
 
     def _build_prompt(

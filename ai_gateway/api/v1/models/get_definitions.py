@@ -1,5 +1,3 @@
-from typing import Literal
-
 from fastapi import APIRouter, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel
@@ -7,6 +5,7 @@ from starlette.responses import JSONResponse
 
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 router = APIRouter()
 
@@ -32,7 +31,10 @@ class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
     default_model: str  # deprecated, maintained for backward compatibility
     default_models: list[str]
-    models_for_size_preference: dict[Literal["small", "large"], str]
+    models_for_tags: dict[str, str]
+    models_for_size_preference: dict[
+        str, str
+    ]  # deprecated alias for models_for_tags, maintained for backward compatibility
     selectable_models: list[str]
     beta_models: list[str]
     dev: DevConfig | None
@@ -57,11 +59,15 @@ async def get_models():
     # Maps pseudo-model identifier to _GetModelResponseModel.
     pseudo_models: dict[str, _GetModelResponseModel] = {}
 
+    multi_default_models_enabled = is_feature_enabled(
+        FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS
+    )
+
     for primitive in selection_config.get_unit_primitive_config():
         values = primitive.model_dump()
         default_models = values["default_models"]
 
-        if len(default_models) > 1:
+        if len(default_models) > 1 and multi_default_models_enabled:
             # When there are multiple default models (load balancing across providers),
             # create a pseudo-model using the first model's name without a provider suffix.
             # This pseudo-model is used as the displayed default in the UI.
@@ -92,6 +98,10 @@ async def get_models():
             ]
         else:
             values["default_model"] = default_models[0]
+
+        # Expose models_for_size_preference as a deprecated alias for models_for_tags
+        # so existing consumers are not broken by the rename.
+        values["models_for_size_preference"] = values["models_for_tags"]
 
         unit_primitives.append(_GetModelResponseUnitPrimitive(**values))
 

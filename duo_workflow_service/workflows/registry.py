@@ -1,4 +1,5 @@
 import inspect
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import (
@@ -78,6 +79,35 @@ _WORKFLOWS_LOOKUP = {
 CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
 
 FlowFactory: TypeAlias = Callable[..., AbstractWorkflow]
+
+
+@dataclass(frozen=True)
+class ResolvedFlow:
+    """The outcome of resolving a :class:`FlowRequest`: how to build the flow, plus its identity.
+
+    ``factory`` builds the workflow instance. The identity fields describe what was *actually
+    resolved* (e.g. the concrete semver for a constraint request) and are the source of truth
+    for tracing. Each request type populates only the fields it carries; the rest stay unset.
+    """
+
+    factory: FlowFactory
+    flow_id: Optional[str] = None
+    schema_version: Optional[str] = None
+    flow_version: Optional[str] = None
+
+    def tracking_fields(self) -> dict[str, str]:
+        """Return the populated identity fields for monitoring/LangSmith, omitting None or empty values.
+
+        Empty values are dropped (not just ``None``) to stay consistent with
+        ``MonitoringContext.set_flow_identity``, which only stores truthy values.
+        """
+        fields = {
+            "flow_id": self.flow_id,
+            "schema_version": self.schema_version,
+            "flow_version": self.flow_version,
+        }
+        return {key: value for key, value in fields.items() if value}
+
 
 _FLOW_BY_VERSIONS: Dict[
     str,
@@ -209,6 +239,9 @@ def _validate_flow_config_prompts(
             if role not in prompt_text_roles:
                 continue
 
+            if isinstance(text, list):
+                text = "\n".join(text)
+
             if text and isinstance(text, str):
                 try:
                     # Validate using PromptSecurity with validate_only=True.
@@ -279,6 +312,7 @@ def flow_factory(
     args = {
         "tools_override": agent_component["toolset"],
         "agent_name_override": agent_name,
+        "component_inputs_config": agent_component.get("inputs"),
     }
 
     if prompt_template_override := (config.prompts[0] if config.prompts else None):
@@ -320,13 +354,17 @@ def _load_flow_from_registry(
     config_id: str,
     schema_version: str,
     version: str,
-) -> FlowFactory:
+) -> ResolvedFlow:
     """Load and instantiate a flow from a YAML config file.
 
     Args:
         config_id: Flow name (e.g. "developer").
         schema_version: Platform version — "v1" or "experimental".
-        version: Semver flow version (e.g. "1.0.0").
+        version: Semver flow version *constraint* (e.g. "1.0.0", "^2.0.0").
+
+    Returns:
+        The resolved flow, with ``flow_version`` set to the concrete semver the
+        constraint resolved to (e.g. "2.1.0").
 
     Raises:
         ValueError: If schema_version is unsupported or the flow cannot be loaded.
@@ -345,7 +383,12 @@ def _load_flow_from_registry(
 
     try:
         config = flow_config_cls.from_yaml_config(config_id, version)
-        return flow_factory(flow_cls, config)
+        return ResolvedFlow(
+            factory=flow_factory(flow_cls, config),
+            flow_id=config_id,
+            schema_version=schema_version,
+            flow_version=config.resolved_version,
+        )
     except FileNotFoundError as e:
         raise ValueError(
             f"Unknown flow: {config_id}/{schema_version} (version {version} not found)"
@@ -379,12 +422,14 @@ def _load_flow_from_inline_config(
             flow_config_cls=flow_config_cls,
         )
         return flow_factory(flow_cls, config)
+    except SecurityException:
+        raise
     except Exception as e:
         raise ValueError(f"Failed to create flow from FlowConfig protobuf: {e}") from e
 
 
-def resolve_flow(flow_request: FlowRequest) -> FlowFactory:
-    """Resolve a validated FlowRequest to a callable that creates workflow instances.
+def resolve_flow(flow_request: FlowRequest) -> ResolvedFlow:
+    """Resolve a validated FlowRequest to a runnable flow plus its tracking identity.
 
     All input validation has already been performed by ``normalize_flow_request``.
     This function only handles resolution — it does not validate field combinations.
@@ -397,16 +442,22 @@ def resolve_flow(flow_request: FlowRequest) -> FlowFactory:
         )
 
     if isinstance(flow_request, InlineFlowRequest):
-        return _load_flow_from_inline_config(
+        factory = _load_flow_from_inline_config(
             flow_request.config_struct,
             flow_request.schema_version,
+        )
+        return ResolvedFlow(
+            factory=factory,
+            schema_version=flow_request.schema_version,
         )
 
     if isinstance(flow_request, LegacyWorkflowRequest):
         if flow_request.workflow_definition in _WORKFLOWS_LOOKUP:
-            return _WORKFLOWS_LOOKUP[flow_request.workflow_definition]
+            return ResolvedFlow(
+                factory=_WORKFLOWS_LOOKUP[flow_request.workflow_definition]
+            )
         # Backward compatibility for old GitLab instances with no workflow definition.
-        return software_development.Workflow
+        return ResolvedFlow(factory=software_development.Workflow)
 
     raise ValueError(f"Unknown flow request type: {type(flow_request)}")
 

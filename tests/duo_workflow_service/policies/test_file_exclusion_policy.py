@@ -1,4 +1,4 @@
-# pylint: disable=implicit-str-concat,too-many-public-methods,use-implicit-booleaness-not-comparison
+# pylint: disable=too-many-public-methods,use-implicit-booleaness-not-comparison
 """Tests for FileExclusionPolicy class."""
 
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -401,7 +401,7 @@ class TestFileExclusionPolicy:
         blocked_files = ["secrets/api_key.txt", "app.log", "temp.tmp"]
 
         result = FileExclusionPolicy.format_user_exclusion_message(blocked_files)
-        expected = " - files excluded:\n" "secrets/api_key.txt\n" "app.log\n" "temp.tmp"
+        expected = " - files excluded:\nsecrets/api_key.txt\napp.log\ntemp.tmp"
         assert result == expected
 
     def test_format_user_exclusion_message_single_file(self):
@@ -409,7 +409,7 @@ class TestFileExclusionPolicy:
         blocked_files = ["secrets/api_key.txt"]
 
         result = FileExclusionPolicy.format_user_exclusion_message(blocked_files)
-        expected = " - files excluded:\n" "secrets/api_key.txt"
+        expected = " - files excluded:\nsecrets/api_key.txt"
         assert result == expected
 
     def test_format_user_exclusion_message_empty_list(self):
@@ -438,8 +438,7 @@ class TestFileExclusionPolicy:
 
         result = FileExclusionPolicy.format_llm_exclusion_message(blocked_files)
         expected = (
-            "Files excluded due to policy, continue without files:\n"
-            "secrets/api_key.txt"
+            "Files excluded due to policy, continue without files:\nsecrets/api_key.txt"
         )
         assert result == expected
 

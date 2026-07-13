@@ -87,7 +87,7 @@ async def _generate_code_embeddings(
         )
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
 
@@ -154,15 +154,15 @@ def _validate_and_get_model_metadata(
 
         if model_metadata is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="No model metadata created",
             )
 
         return model_metadata
     except (ValueError, JSONDecodeError, UnicodeDecodeError) as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Error creating the model_metadata: {str(e)}",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Error creating the model_metadata: {e!s}",
         )
 
 
@@ -170,7 +170,7 @@ def _validate_allowed_providers(model_metadata: EmbeddingsRequest.ModelMetadata)
     allowed_providers = [KindModelProvider.GITLAB, KindModelProvider.LITELLM]
     if model_metadata.provider not in allowed_providers:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Allowed providers are: {'|'.join([p.value for p in allowed_providers])}.",
         )
 
@@ -181,18 +181,18 @@ def _validate_litellm_provider_payload(model_metadata: EmbeddingsRequest.ModelMe
 
     if not model_metadata.name:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Model `name` must be set when using `litellm` provider.",
         )
 
     if model_metadata.name != EMBEDDING_MODEL_NAME:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Model `name` must be '{EMBEDDING_MODEL_NAME}' when using `litellm` provider.",
         )
 
     if not model_metadata.endpoint:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Model `endpoint` must be set when using `litellm` provider.",
         )

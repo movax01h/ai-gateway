@@ -35,7 +35,9 @@ has_sufficient_usage_quota (decorator)
   │               └─► HEAD /api/v1/consumers/resolve (CustomersDot)
   │                     ├─ 200 → allow, cache with Cache-Control max-age (or 1h fallback)
   │                     ├─ 402 → deny  (InsufficientCredits raised)
-  │                     └─ other (403, timeout, error) → fail-open, allow request
+  │                     ├─ 403 → deny  (InsufficientEntitlements raised)
+  │                     ├─ other HTTP error (4xx/5xx) → deny  (UsageQuotaCheckUnavailable raised)
+  │                     └─ timeout, connection failure, or unexpected error → deny  (UsageQuotaCheckUnavailable raised)
   │
   ├─► InsufficientCredits raised
   │     ├─ HTTP: 402 JSON response

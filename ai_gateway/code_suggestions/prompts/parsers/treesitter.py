@@ -146,6 +146,6 @@ class CodeParser(BaseCodeParser):
             parser = get_parser(lang_def.grammar_name)
             tree = parser.parse(bytes(content, "utf8"))
         except (AttributeError, TypeError) as ex:
-            raise ValueError(f"Unsupported code content: {str(ex)}")
+            raise ValueError(f"Unsupported code content: {ex!s}")
 
         return cls(tree, lang_id)

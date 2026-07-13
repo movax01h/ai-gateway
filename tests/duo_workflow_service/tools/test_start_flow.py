@@ -13,7 +13,11 @@ from duo_workflow_service.tools.start_flow import (
     StartDeveloperFlowInput,
     StartFixPipelineFlowInput,
     StartFlow,
+    StartFlowError,
     StartFlowInput,
+    StartResolveSastVulnerabilityFlowInput,
+    StartSastFpDetectionFlowInput,
+    StartSecretsFpDetectionFlowInput,
 )
 
 
@@ -64,6 +68,9 @@ def test_flow_identifier_map_covers_all_flow_names():
         "developer": "developer/v1",
         "fix_pipeline": "fix_pipeline/v1",
         "code_review": "code_review/v1",
+        "sast_fp_detection": "sast_fp_detection/v1",
+        "resolve_sast_vulnerability": "resolve_sast_vulnerability/v1",
+        "secrets_fp_detection": "secrets_fp_detection/v1",
     }
 
 
@@ -85,8 +92,8 @@ def test_description_mentions_async_progress(tool):
 
 
 def test_description_emphasizes_delegation(tool):
-    assert "prefer" in tool.description
-    assert "delegating" in tool.description
+    assert "Always use this tool" in tool.description
+    assert "Delegate a task" in tool.description
 
 
 def test_description_does_not_contain_versioned_identifiers(tool):
@@ -176,6 +183,51 @@ def test_start_flow_input_discriminates_code_review():
         }
     )
     assert isinstance(inp.flow, StartCodeReviewFlowInput)
+
+
+def test_start_flow_input_discriminates_sast_fp_detection():
+    inp = StartFlowInput(
+        flow={
+            "name": "sast_fp_detection",
+            "vulnerability_id": "gid://gitlab/Vulnerability/123",
+        }
+    )
+    assert isinstance(inp.flow, StartSastFpDetectionFlowInput)
+
+
+def test_start_flow_input_discriminates_resolve_sast_vulnerability():
+    inp = StartFlowInput(
+        flow={
+            "name": "resolve_sast_vulnerability",
+            "vulnerability_id": "gid://gitlab/Vulnerability/456",
+        }
+    )
+    assert isinstance(inp.flow, StartResolveSastVulnerabilityFlowInput)
+
+
+def test_start_flow_input_discriminates_secrets_fp_detection():
+    inp = StartFlowInput(
+        flow={
+            "name": "secrets_fp_detection",
+            "vulnerability_id": "gid://gitlab/Vulnerability/789",
+        }
+    )
+    assert isinstance(inp.flow, StartSecretsFpDetectionFlowInput)
+
+
+def test_start_sast_fp_detection_flow_input_requires_vulnerability_id():
+    with pytest.raises(ValidationError):
+        StartSastFpDetectionFlowInput(name="sast_fp_detection")
+
+
+def test_start_resolve_sast_vulnerability_flow_input_requires_vulnerability_id():
+    with pytest.raises(ValidationError):
+        StartResolveSastVulnerabilityFlowInput(name="resolve_sast_vulnerability")
+
+
+def test_start_secrets_fp_detection_flow_input_requires_vulnerability_id():
+    with pytest.raises(ValidationError):
+        StartSecretsFpDetectionFlowInput(name="secrets_fp_detection")
 
 
 def test_start_flow_input_rejects_unknown_flow_name():
@@ -550,18 +602,55 @@ async def test_execute_developer_invalid_project_url(tool, project_url):
 
 
 # ---------------------------------------------------------------------------
+# _execute: disabled flows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "foundational_flows",
+    [
+        {"enabled": True, "enabled_flows": ["code_review/v1"]},
+        {"enabled": False, "enabled_flows": None},
+    ],
+)
+async def test_execute_returns_unavailable_when_flow_is_disabled(
+    metadata, gitlab_client_mock, foundational_flows
+):
+    metadata["features"] = {"foundational_flows": foundational_flows}
+    tool = StartFlow(metadata=metadata)
+    gitlab_client_mock.apost = AsyncMock()
+
+    result = await tool._execute(
+        flow=StartDeveloperFlowInput(
+            name="developer",
+            goal="Implement the feature",
+        ),
+    )
+
+    assert json.loads(result) == {
+        "status": "unavailable",
+        "flow_name": "developer",
+        "message": "The developer flow is not enabled for this project.",
+    }
+    gitlab_client_mock.apost.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # _execute: HTTP errors and exceptions
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [400, 403, 404, 422, 500])
-async def test_execute_http_failure(tool, gitlab_client_mock, status_code):
+@pytest.mark.parametrize("status_code", [400, 404, 422, 500])
+async def test_execute_http_failure_non_403(tool, gitlab_client_mock, status_code):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=status_code, body="error body")
+        return_value=GitLabHttpResponse(
+            status_code=status_code, body={"message": "some internal detail"}
+        )
     )
 
-    with pytest.raises(ToolException) as exc_info:
+    with pytest.raises(StartFlowError) as exc_info:
         await tool._execute(
             flow=StartFixPipelineFlowInput(
                 name="fix_pipeline",
@@ -572,6 +661,37 @@ async def test_execute_http_failure(tool, gitlab_client_mock, status_code):
         )
 
     assert str(status_code) in str(exc_info.value)
+    assert "An internal error occurred while starting the flow." in str(exc_info.value)
+    assert "some internal detail" not in str(exc_info.value)
+    assert (
+        exc_info.value.response == "An internal error occurred while starting the flow."
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_http_failure_403_returns_permission_message(
+    tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=403,
+            body={"message": "Can not execute workflow in CI"},
+        )
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool._execute(
+            flow=StartCodeReviewFlowInput(
+                name="code_review",
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+            ),
+        )
+
+    assert "permissions" in str(exc_info.value)
+    assert "Can not execute workflow in CI" not in str(exc_info.value)
+    assert exc_info.value.response == (
+        "This flow isn't available, or you don't have sufficient permissions to start it."
+    )
 
 
 @pytest.mark.asyncio
@@ -736,11 +856,113 @@ async def test_execute_raises_for_unknown_flow_name(tool):
 
 
 def test_resolve_goal_project_and_linkable_raises_for_unknown_flow(tool):
-    """Raises ToolException when flow_name is not developer/fix_pipeline/code_review."""
+    """Raises ToolException when flow_name is not a known flow."""
     with pytest.raises(ToolException, match="Unknown flow"):
         tool._resolve_goal_project_and_linkable(
             "unknown_flow", {"name": "unknown_flow"}
         )
+
+
+# ---------------------------------------------------------------------------
+# _execute: sast_fp, sast_vr, secret_detection_fp
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_name,workflow_definition",
+    [
+        ("sast_fp_detection", "sast_fp_detection/v1"),
+        ("resolve_sast_vulnerability", "resolve_sast_vulnerability/v1"),
+        ("secrets_fp_detection", "secrets_fp_detection/v1"),
+    ],
+)
+async def test_execute_security_flows_success(
+    tool, gitlab_client_mock, flow_name, workflow_definition
+):
+    vulnerability_id = "gid://gitlab/Vulnerability/42"
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-sec-1"})
+    )
+
+    result = await tool.arun(
+        {"flow": {"name": flow_name, "vulnerability_id": vulnerability_id}}
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+    assert data["flow_name"] == flow_name
+    assert data["session_url"] == (
+        "https://gitlab.com/group/project/-/automate/agent-sessions/wf-sec-1"
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["workflow_definition"] == workflow_definition
+    assert posted_body["goal"] == vulnerability_id
+    assert posted_body["project_id"] == 42  # from self.project fixture
+    assert "additional_context" not in posted_body
+    assert "issue_id" not in posted_body
+    assert "merge_request_id" not in posted_body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_name",
+    ["sast_fp_detection", "resolve_sast_vulnerability", "secrets_fp_detection"],
+)
+async def test_execute_security_flows_without_project_omits_project_id(
+    tool_no_project, gitlab_client_mock, flow_name
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-sec-np"})
+    )
+
+    await tool_no_project.arun(
+        {
+            "flow": {
+                "name": flow_name,
+                "vulnerability_id": "gid://gitlab/Vulnerability/1",
+            }
+        }
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert "project_id" not in posted_body
+
+
+# ---------------------------------------------------------------------------
+# format_display_message: sast_fp, sast_vr, secret_detection_fp
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "flow_name,input_cls",
+    [
+        ("sast_fp_detection", StartSastFpDetectionFlowInput),
+        ("resolve_sast_vulnerability", StartResolveSastVulnerabilityFlowInput),
+        ("secrets_fp_detection", StartSecretsFpDetectionFlowInput),
+    ],
+)
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        "not valid json{{{",
+        json.dumps({}),
+    ],
+)
+def test_format_display_message_fallback_security_flows(
+    tool, flow_name, input_cls, response
+):
+    vulnerability_id = "gid://gitlab/Vulnerability/99"
+    args = StartFlowInput(
+        flow=input_cls(name=flow_name, vulnerability_id=vulnerability_id)
+    )
+
+    msg = tool.format_display_message(args, response)
+
+    assert flow_name in msg
+    assert vulnerability_id in msg
 
 
 # ---------------------------------------------------------------------------
@@ -1019,3 +1241,82 @@ async def test_execute_fix_pipeline_cross_project_mr_uses_mr_project(
     # MR project takes precedence so Rails resolves the IID correctly
     assert posted_body["project_id"] == "team-b/repo-b"
     assert posted_body["merge_request_id"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Per-flow enablement: description + runtime guard
+# ---------------------------------------------------------------------------
+
+
+def _tool_with_enabled(metadata, enabled):
+    return StartFlow(
+        metadata={
+            **metadata,
+            "features": {
+                "foundational_flows": {
+                    "enabled": True,
+                    "enabled_flows": enabled,
+                }
+            },
+        }
+    )
+
+
+def test_description_lists_all_flows_when_unrestricted(tool):
+    # No foundational flow features in metadata -> unrestricted (older GitLab).
+    for name in FLOW_IDENTIFIER_MAP:
+        assert f"- {name}:" in tool.description
+
+
+def test_description_lists_only_enabled_flows(metadata):
+    tool = _tool_with_enabled(metadata, ["code_review/v1"])
+
+    assert "- code_review:" in tool.description
+    assert "- developer:" not in tool.description
+    assert "- fix_pipeline:" not in tool.description
+
+
+def test_args_schema_restricted_to_single_enabled_flow(metadata):
+    tool = _tool_with_enabled(metadata, ["code_review/v1"])
+
+    # The enabled flow validates.
+    tool.args_schema.model_validate(
+        {
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": "https://gitlab.com/g/p/-/merge_requests/1",
+            }
+        }
+    )
+
+    # A disabled flow is not a valid option in the schema at all.
+    with pytest.raises(ValidationError):
+        tool.args_schema.model_validate({"flow": {"name": "developer", "goal": "x"}})
+
+
+def test_args_schema_restricted_to_multiple_enabled_flows(metadata):
+    tool = _tool_with_enabled(metadata, ["code_review/v1", "fix_pipeline/v1"])
+
+    tool.args_schema.model_validate(
+        {
+            "flow": {
+                "name": "fix_pipeline",
+                "pipeline_url": "https://gitlab.com/g/p/-/pipelines/9",
+                "merge_request_url": "https://gitlab.com/g/p/-/merge_requests/1",
+                "source_branch": "feat",
+            }
+        }
+    )
+    with pytest.raises(ValidationError):
+        tool.args_schema.model_validate({"flow": {"name": "developer", "goal": "x"}})
+
+
+def test_args_schema_unrestricted_allows_all_flows(tool):
+    for payload in (
+        {"name": "developer", "goal": "x"},
+        {
+            "name": "code_review",
+            "merge_request_url": "https://gitlab.com/g/p/-/merge_requests/1",
+        },
+    ):
+        tool.args_schema.model_validate({"flow": payload})

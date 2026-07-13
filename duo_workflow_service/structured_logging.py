@@ -2,19 +2,21 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.dev import ConsoleRenderer
 from structlog.processors import JSONRenderer
-from structlog.typing import Processor
+from structlog.typing import EventDict, Processor
 
 from duo_workflow_service.interceptors.correlation_id_interceptor import (
     correlation_id,
     gitlab_global_user_id,
 )
+from duo_workflow_service.tracking.monitoring_context import current_monitoring_context
+from lib.context.request_metadata import gitlab_instance_id, gitlab_realm
 from lib.context.workflow import _workflow_id, set_workflow_id
 
 __all__ = ["set_workflow_id", "setup_logging"]
@@ -68,15 +70,54 @@ def setup_logging():
         event_dict["workflow_id"] = _workflow_id.get()
         return event_dict
 
+    def add_workflow_identity(_: Any, __: str, event_dict: EventDict) -> EventDict:
+        """Add workflow and flow identity fields to structured log events."""
+        context = current_monitoring_context.get()
+        fields = {
+            "workflow_definition": context.workflow_definition,
+            "flow_name": context.flow_id,
+            "item_version": context.flow_version,
+            "schema_version": context.schema_version,
+        }
+
+        explicit_extra = event_dict.get("extra")
+        explicit_keys = (
+            explicit_extra.keys() if isinstance(explicit_extra, dict) else ()
+        )
+
+        for key, value in fields.items():
+            if value and key not in event_dict and key not in explicit_keys:
+                event_dict[key] = value
+
+        return event_dict
+
+    def add_gitlab_realm(_: Any, __: str, event_dict: EventDict) -> EventDict:
+        """Add gitlab_realm to structured log events."""
+        value = gitlab_realm.get()
+        if value is not None:
+            event_dict["gitlab_realm"] = value
+        return event_dict
+
+    def add_gitlab_instance_id(_: Any, __: str, event_dict: EventDict) -> EventDict:
+        """Add gitlab_instance_id to structured log events."""
+        value = gitlab_instance_id.get()
+        if value is not None:
+            event_dict["gitlab_instance_id"] = value
+        return event_dict
+
     # Setup shared processors
     shared_processors: list[Processor] = [
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
+        structlog.contextvars.merge_contextvars,
         add_correlation_id,
         add_gitlab_global_user_id,
         add_workflow_id,
+        add_gitlab_realm,
+        add_gitlab_instance_id,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.stdlib.ExtraAdder(),
+        add_workflow_identity,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.TimeStamper(fmt="iso"),
     ]

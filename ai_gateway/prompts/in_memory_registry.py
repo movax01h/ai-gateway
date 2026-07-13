@@ -147,9 +147,13 @@ class InMemoryPromptRegistry(BasePromptRegistry):
 
         prompt_template = raw_data.get("prompt_template", {})
         variables: set[str] = set()
-        for template_str in prompt_template.values():
-            if template_str:
-                variables.update(self._collect_jinja2_variables(template_str))
+        for template_msg in prompt_template.values():
+            items = [template_msg] if isinstance(template_msg, str) else template_msg
+
+            for item in items:
+                if item:
+                    variables.update(self._collect_jinja2_variables(item))
+
         return variables
 
     @override

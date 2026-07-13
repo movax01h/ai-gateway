@@ -1,0 +1,291 @@
+version: "v1"
+environment: ambient
+components:
+  # Step 1: Check if already reviewed (label dedup)
+  - name: "check_existing_review"
+    type: DeterministicStepComponent
+    tool_name: "get_merge_request"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: Apply triggered label for audit trail
+  - name: "apply_triggered_label"
+    type: DeterministicStepComponent
+    tool_name: "update_merge_request"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "security-review::triggered"
+        as: "add_labels"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: Fetch and format MR data
+  - name: "fetch_mr_data"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "true"
+        as: "include_diff_links"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 4: Enrich context — fetch linked issues, epics, discussions, codebase patterns
+  - name: "build_review_context"
+    type: AgentComponent
+    prompt_id: "security_review_build_context"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      # Exact username of this flow's per-group service account, supplied by Rails via the
+      # generic agent_platform_standard_context envelope (see flow.inputs below). Lets the
+      # prompts identify the agent's own prior comments without hardcoding a naming convention.
+      - from: "context:inputs.agent_platform_standard_context.service_account_name"
+        as: "service_account_name"
+        optional: True
+    toolset:
+      - "build_review_merge_request_context"
+      - "list_repository_tree"
+      - "get_repository_file"
+      - "read_file"
+      - "find_files"
+      - "blob_search"
+      - "list_all_merge_request_notes"
+      - "get_issue"
+      - "list_issues"
+      - "get_epic"
+      - "list_epics"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 5: Pre-scan codebase for security-relevant context
+  - name: "prescan_codebase"
+    type: AgentComponent
+    prompt_id: "security_review_prescan"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    toolset:
+      - "build_review_merge_request_context"
+      - "list_repository_tree"
+      - "get_repository_file"
+      - "read_file"
+      - "find_files"
+      - "blob_search"
+      - "list_all_merge_request_notes"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 6: Perform security review (AgentComponent — multi-turn with tool use)
+  - name: "perform_security_review"
+    type: AgentComponent
+    prompt_id: "security_review"
+    prompt_version: "^1.0.0"
+    response_schema_id: "security_review"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      - from: "context:build_review_context.final_answer"
+        as: "codebase_context"
+      - from: "context:prescan_codebase.final_answer"
+        as: "prescan_context"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    toolset:
+      - "get_issue"
+      - "get_repository_file"
+      - "read_file"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 7: Validate findings — senior AppSec engineer filters false positives
+  - name: "validate_and_publish"
+    type: AgentComponent
+    prompt_id: "security_review_validate"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      - from: "context:perform_security_review.final_answer.findings"
+        as: "review_findings"
+      - from: "context:build_review_context.final_answer"
+        as: "codebase_context"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_standard_context.service_account_name"
+        as: "service_account_name"
+        optional: True
+    toolset:
+      - "list_mr_discussions"
+      - "reply_to_discussion"
+      - "set_discussion_resolved"
+      # Pin the always-constant arguments so they cannot be overridden by an LLM
+      # hallucination or a prompt injection. Flipping the fold/internal flags on a
+      # public project would expose inline security findings, so these are enforced
+      # at the flow level rather than relying on the prompt.
+      - "submit_mr_review":
+          fold_inline_into_summary_when_public: true
+          inline_findings_title: "**Security Findings** (internal only — this project is public)"
+          summary_internal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 8: Apply completed label and remove triggered label
+  - name: "apply_completed_label"
+    type: DeterministicStepComponent
+    tool_name: "update_merge_request"
+    inputs:
+      - from: "context:goal"
+        as: "url"
+      - from: "security-review::completed"
+        as: "add_labels"
+        literal: true
+      - from: "security-review::triggered"
+        as: "remove_labels"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Respond path: when a developer @-mentions the reviewer to ask a follow-up
+  # question (event_type == "mention"), answer in context instead of running a
+  # full re-review. This handles BOTH a reply inside a finding thread and a
+  # standalone top-level MR comment (the latter is not inside any flow-authored
+  # thread, so the validate step's CASE 4 cannot match it -- see #604317). Skips
+  # prescan + perform_security_review, so a question-only mention does not consume
+  # a full review's worth of GitLab Credits.
+  - name: "respond_to_comment"
+    type: AgentComponent
+    prompt_id: "security_review_respond"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_standard_context.service_account_name"
+        as: "service_account_name"
+        optional: True
+      - from: "context:inputs.agent_platform_trigger_context.triggering_conversation"
+        as: "triggering_conversation"
+        optional: True
+    toolset:
+      # Read-only: the respond component answers via its final response, which the mention
+      # adapter posts as the single reply. It must NOT post itself (that double-posted: the
+      # tool reply + the adapter's final-answer note). See #604317 follow-up.
+      - "build_review_merge_request_context"
+      - "list_mr_discussions"
+      - "get_repository_file"
+      - "read_file"
+      - "get_issue"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+routers:
+  # Branch on the trigger event type. A "mention" (developer asked a follow-up
+  # question) routes to respond_to_comment; everything else (an "assign" trigger,
+  # any other/unknown trigger, or no trigger context at all) runs the full review
+  # pipeline as before. The trigger-context envelope is optional — Rails omits it
+  # entirely when nothing set it — so the input is declared in mapping form with
+  # optional: true: an absent category resolves to None, matches no route and
+  # falls through to default_route instead of raising a KeyError.
+  - from: "check_existing_review"
+    condition:
+      input:
+        from: "context:inputs.agent_platform_trigger_context.event_type"
+        optional: true
+      routes:
+        "mention": "respond_to_comment"
+        "default_route": "apply_triggered_label"
+  - from: "apply_triggered_label"
+    to: "fetch_mr_data"
+  - from: "fetch_mr_data"
+    to: "build_review_context"
+  - from: "build_review_context"
+    to: "prescan_codebase"
+  - from: "prescan_codebase"
+    to: "perform_security_review"
+  - from: "perform_security_review"
+    to: "validate_and_publish"
+  - from: "validate_and_publish"
+    to: "apply_completed_label"
+  - from: "apply_completed_label"
+    to: "end"
+  - from: "respond_to_comment"
+    to: "end"
+
+flow:
+  entry_point: "check_existing_review"
+  inputs:
+    # Rails always sends the agent_platform_standard_context envelope. additionalProperties is
+    # false, so every field it carries must be declared here. This flow only consumes
+    # service_account_name; the rest are declared (all optional) solely so the envelope validates.
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+          optional: true
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+          optional: true
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+          optional: true
+        service_account_name:
+          type: string
+          description: Username of this flow's per-group review service account
+          optional: true
+    # Trigger metadata (how the flow was started) travels in its own envelope, which Rails
+    # sends only when a trigger set at least one of these values. It is deliberately NOT a
+    # part of agent_platform_standard_context: envelopes validate with additionalProperties
+    # false, so a new field in a category an already-deployed service declares would fail
+    # envelope validation on version skew, while an unknown category is skipped with a
+    # warning. The category itself and both fields are optional. Reserved for routing a
+    # mention (follow-up question) to a targeted response instead of a full re-review.
+    - category: agent_platform_trigger_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        event_type:
+          type: string
+          description: The trigger event type (e.g. "assign", "mention").
+          optional: true
+        triggering_conversation:
+          type: string
+          description: The conversation context of the note that triggered the flow on a mention. Carries the developer's follow-up question.
+          optional: true

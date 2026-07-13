@@ -22,12 +22,12 @@ from ai_gateway.models.base import TokensConsumptionMetadata
 
 __all__ = [
     "CompletionsRequestV1",
-    "GenerationsRequestV1",
     "CompletionsRequestV2",
     "CompletionsRequestV3",
+    "GenerationsRequestV1",
     "GenerationsRequestV2",
-    "SuggestionsResponse",
     "StreamSuggestionsResponse",
+    "SuggestionsResponse",
 ]
 
 

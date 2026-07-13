@@ -1,4 +1,6 @@
-from json import dumps
+# pylint: disable=too-many-lines
+import asyncio
+from json import dumps, loads
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -7,7 +9,11 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
-from duo_workflow_service.checkpointer.notifier import UserInterface
+from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog, NodePhase
+from duo_workflow_service.checkpointer.notifier import (
+    UserInterface,
+    _agent_token_totals,
+)
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
@@ -281,6 +287,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "New message",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 }
             ],
         ),
@@ -302,6 +309,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "Nested content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 }
             ],
         ),
@@ -321,6 +329,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "Different content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 },
                 {
                     "message_id": "agent-msg-id",
@@ -332,6 +341,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "New content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 },
             ],
         ),
@@ -351,6 +361,7 @@ async def test_init_sets_attributes(outbox):
                     "content": "Existing content",
                     "tool_info": None,
                     "additional_context": None,
+                    "component_name": None,
                 },
             ],
         ),
@@ -386,6 +397,67 @@ async def test_send_event_messages_stream(
 
         assert action.newCheckpoint.goal == "test_goal"
         assert action.newCheckpoint.checkpoint is not None
+
+
+@pytest.mark.asyncio
+async def test_send_event_messages_stream_attributes_component_from_node(
+    checkpoint_notifier,
+):
+    # The messages stream yields (chunk, metadata); metadata["langgraph_node"] is
+    # the runtime node, e.g. "researcher#agent". The streamed entry must be stamped
+    # with the bare component name so the client can attribute it to a graph node.
+    await checkpoint_notifier.send_event(
+        "messages",
+        (
+            AIMessageChunk(id="agent-msg-id", content="hello"),
+            {"langgraph_node": "researcher#agent"},
+        ),
+        True,
+    )
+
+    assert checkpoint_notifier.ui_chat_log[-1]["component_name"] == "researcher"
+
+
+@pytest.mark.asyncio
+async def test_send_event_messages_stream_non_dict_metadata_yields_no_component(
+    checkpoint_notifier,
+):
+    # When the messages-stream metadata is not a dict, attribution is skipped
+    # gracefully: the entry is still created with component_name=None and no
+    # exception is raised.
+    await checkpoint_notifier.send_event(
+        "messages",
+        (AIMessageChunk(id="agent-msg-id", content="hello"), None),
+        True,
+    )
+
+    assert checkpoint_notifier.ui_chat_log[-1]["component_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_event_messages_stream_continuation_keeps_component(
+    checkpoint_notifier,
+):
+    # The first chunk stamps component_name; a continuation chunk with the same
+    # message id extends that entry and must not overwrite it, even when the
+    # continuation carries no node metadata.
+    await checkpoint_notifier.send_event(
+        "messages",
+        (
+            AIMessageChunk(id="agent-msg-id", content="hello "),
+            {"langgraph_node": "researcher#agent"},
+        ),
+        True,
+    )
+    await checkpoint_notifier.send_event(
+        "messages",
+        (AIMessageChunk(id="agent-msg-id", content="world"), {}),
+        True,
+    )
+
+    assert len(checkpoint_notifier.ui_chat_log) == 1
+    assert checkpoint_notifier.ui_chat_log[-1]["component_name"] == "researcher"
+    assert checkpoint_notifier.ui_chat_log[-1]["content"] == "hello world"
 
 
 @pytest.mark.asyncio
@@ -453,6 +525,27 @@ def test_most_recent_new_checkpoint(checkpoint_notifier):
         }
     )
     assert checkpoint3.checkpoint == expected_checkpoint3
+
+
+def test_most_recent_new_checkpoint_logs_tool_approval_request(checkpoint_notifier):
+    """Checkpoint with a REQUEST tool_info triggers the approval logging path."""
+    checkpoint_notifier.status = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+    checkpoint_notifier.ui_chat_log = [
+        {
+            "message_type": MessageTypeEnum.REQUEST,
+            "tool_info": {
+                "name": "run_command",
+                "args": {"command": "git checkout feature/x"},
+                "suggested_patterns": ["git checkout *"],
+            },
+            "message_id": "msg-1",
+        }
+    ]
+
+    checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+    data = checkpoint.checkpoint
+    assert "suggested_patterns" in data
+    assert "git checkout *" in data
 
 
 @pytest.mark.asyncio
@@ -804,6 +897,14 @@ async def test_throttle_trailing_edge_delivers_last_chunk(checkpoint_notifier):
         # Verify the trailing task will eventually fire (without real sleep to avoid flakiness)
         assert not trailing_task.done()
 
+        # Clean up: cancel the pending trailing task so it does not leak into
+        # subsequent tests or cause the event loop to wait for it.
+        trailing_task.cancel()
+        try:
+            await trailing_task
+        except asyncio.CancelledError:
+            pass
+
 
 @pytest.mark.asyncio
 async def test_throttle_trailing_edge_replaced_by_new_chunk(checkpoint_notifier):
@@ -823,6 +924,16 @@ async def test_throttle_trailing_edge_replaced_by_new_chunk(checkpoint_notifier)
     assert second_task is not first_task
     assert first_task is not None
     assert second_task is not None
+
+    # Clean up: cancel the pending trailing task so it does not leak into
+    # subsequent tests or cause the event loop to wait for it.
+    # Note: first_task was already cancelled by the third send_event call above.
+    if second_task and not second_task.done():
+        second_task.cancel()
+        try:
+            await second_task
+        except asyncio.CancelledError:
+            pass
 
 
 @pytest.mark.asyncio
@@ -891,3 +1002,253 @@ def test_most_recent_new_checkpoint_with_missing_message_ids(checkpoint_notifier
     )
     assert checkpoint2.checkpoint == expected_checkpoint2
     assert checkpoint_notifier.last_sent_ui_message_id == "msg-6"
+
+
+def _ai(total_tokens: int) -> AIMessage:
+    """Build a token-bearing AIMessage with the given cumulative total."""
+    return AIMessage(
+        content="response",
+        usage_metadata={
+            "input_tokens": total_tokens - 1,
+            "output_tokens": 1,
+            "total_tokens": total_tokens,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("conversation_history", "expected"),
+    [
+        ({}, {}),
+        ({"agent": []}, {}),  # empty list skipped
+        (
+            {"agent": [_ai(1234)], "executor": [_ai(5678)]},
+            {"agent": 1234, "executor": 5678},
+        ),
+    ],
+)
+def test_agent_token_totals(conversation_history, expected):
+    assert _agent_token_totals(conversation_history) == expected
+
+
+@pytest.mark.asyncio
+async def test_agent_context_usage_emission(checkpoint_notifier):
+    """Stamped per-agent limit wins; unstamped agents fall back to global; empty agents skipped."""
+    state = {
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "plan": {},
+        "conversation_history": {
+            "agent": [_ai(1234)],
+            "developer_agent": [_ai(5678)],
+            "empty_agent": [],
+        },
+        # Only "agent" runs a non-default model; developer_agent falls back.
+        "agent_context_limits": {"agent": 64_000},
+    }
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.get_current_model_max_context_token_limit",
+        return_value=200_000,
+    ):
+        await checkpoint_notifier.send_event("values", state, False)
+        checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    usage = checkpoint.agent_context_usage
+    assert "empty_agent" not in usage and len(usage) == 2
+    assert usage["agent"].total_tokens == 1234
+    assert usage["agent"].max_tokens == 64_000
+    assert usage["developer_agent"].total_tokens == 5678
+    assert usage["developer_agent"].max_tokens == 200_000
+
+
+@pytest.mark.asyncio
+async def test_agent_context_usage_reset_on_subsequent_event(checkpoint_notifier):
+    """A later values event with no conversation_history clears the map."""
+    populated_state = {
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "plan": {},
+        "conversation_history": {"agent": [_ai(1234)]},
+    }
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.get_current_model_max_context_token_limit",
+        return_value=200_000,
+    ):
+        await checkpoint_notifier.send_event("values", populated_state, False)
+        first_checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    assert "agent" in first_checkpoint.agent_context_usage
+    assert first_checkpoint.agent_context_usage["agent"].total_tokens == 1234
+
+    # Second event without conversation_history must clear the stored map.
+    reset_state = {
+        "status": WorkflowStatusEnum.EXECUTION,
+        "ui_chat_log": [],
+        "plan": {},
+    }
+    await checkpoint_notifier.send_event("values", reset_state, False)
+    second_checkpoint = checkpoint_notifier.most_recent_new_checkpoint()
+
+    assert len(second_checkpoint.agent_context_usage) == 0
+
+
+def _node_events_from(checkpoint) -> list[dict]:
+    return loads(checkpoint.checkpoint)["channel_values"].get("node_events")
+
+
+def test_checkpoint_includes_node_events_when_present(
+    outbox,
+    gl_version_18_7,  # pylint: disable=unused-argument  # sets capabilities version
+):
+    client_capabilities.set({"incremental_streaming"})
+    log = NodeEventLog()
+    log.record("run-1", "researcher", NodePhase.STARTED)
+    log.record("run-1", "researcher", NodePhase.ENDED)
+    notifier = UserInterface(outbox=outbox, goal="test_goal", node_event_log=log)
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "researcher", "phase": "started"},
+        {"run_id": "run-1", "component": "researcher", "phase": "ended"},
+    ]
+
+
+def test_checkpoint_omits_node_events_when_log_empty(outbox):
+    notifier = UserInterface(
+        outbox=outbox, goal="test_goal", node_event_log=NodeEventLog()
+    )
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    channel_values = loads(notifier.most_recent_new_checkpoint().checkpoint)[
+        "channel_values"
+    ]
+
+    assert "node_events" not in channel_values
+
+
+def test_checkpoint_omits_node_events_when_no_log(outbox):
+    notifier = UserInterface(outbox=outbox, goal="test_goal")
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    channel_values = loads(notifier.most_recent_new_checkpoint().checkpoint)[
+        "channel_values"
+    ]
+
+    assert "node_events" not in channel_values
+
+
+def test_node_events_sent_incrementally_advancing_only_on_send(
+    outbox,
+    gl_version_18_7,  # pylint: disable=unused-argument  # sets capabilities version
+):
+    # The cursor advances only when a checkpoint is composed for sending, so each
+    # checkpoint carries only the events appended since the previous one.
+    client_capabilities.set({"incremental_streaming"})
+    log = NodeEventLog()
+    notifier = UserInterface(outbox=outbox, goal="test_goal", node_event_log=log)
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    log.record("run-1", "build_context", NodePhase.STARTED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "build_context", "phase": "started"},
+    ]
+
+    log.record("run-1", "build_context", NodePhase.ENDED)
+    log.record("run-2", "researcher", NodePhase.STARTED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "build_context", "phase": "ended"},
+        {"run_id": "run-2", "component": "researcher", "phase": "started"},
+    ]
+
+    # Nothing new appended -> key omitted entirely.
+    channel_values = loads(notifier.most_recent_new_checkpoint().checkpoint)[
+        "channel_values"
+    ]
+    assert "node_events" not in channel_values
+
+
+def test_node_events_sent_in_full_without_incremental_streaming(outbox):
+    # Without the incremental capability the full log is resent each checkpoint;
+    # the client deduplicates by (run_id, phase).
+    client_capabilities.set(set())
+    log = NodeEventLog()
+    notifier = UserInterface(outbox=outbox, goal="test_goal", node_event_log=log)
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    log.record("run-1", "researcher", NodePhase.STARTED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "researcher", "phase": "started"},
+    ]
+
+    log.record("run-1", "researcher", NodePhase.ENDED)
+    assert _node_events_from(notifier.most_recent_new_checkpoint()) == [
+        {"run_id": "run-1", "component": "researcher", "phase": "started"},
+        {"run_id": "run-1", "component": "researcher", "phase": "ended"},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Tests for secret redaction in streamed content
+# ---------------------------------------------------------------------------
+
+
+class TestStreamingSecretRedaction:
+    """Tests that secret redaction is applied to streamed LLM chunks."""
+
+    @pytest.fixture(name="outbox")
+    def outbox_fixture(self) -> MagicMock:
+        return MagicMock(spec=Outbox())
+
+    @pytest.mark.asyncio
+    async def test_redact_secrets_for_ui_called_on_first_chunk(self, outbox):
+        """redact_secrets_for_ui is called when the first chunk of a message arrives."""
+        notifier = UserInterface(outbox=outbox, goal="goal")
+        original_content = "some content"
+        redacted_content = "redacted content"
+        message = AIMessageChunk(id="msg-1", content=original_content)
+
+        with patch(
+            "duo_workflow_service.checkpointer.notifier.redact_secrets_for_ui",
+            return_value=redacted_content,
+        ) as mock_redact:
+            await notifier.send_event("messages", (message, {}), True)
+
+        mock_redact.assert_called_once_with(original_content, tool_name="streaming")
+        assert len(notifier.ui_chat_log) == 1
+        assert notifier.ui_chat_log[0]["content"] == redacted_content
+
+    @pytest.mark.asyncio
+    async def test_redact_secrets_for_ui_called_on_accumulated_chunks(self, outbox):
+        """redact_secrets_for_ui is called with the full accumulated text on each chunk."""
+        notifier = UserInterface(outbox=outbox, goal="goal")
+        chunk1 = AIMessageChunk(id="msg-1", content="Hello ")
+        chunk2 = AIMessageChunk(id="msg-1", content="world")
+
+        with patch(
+            "duo_workflow_service.checkpointer.notifier.redact_secrets_for_ui",
+            side_effect=lambda text, **_: text,
+        ) as mock_redact:
+            await notifier.send_event("messages", (chunk1, {}), True)
+            await notifier.send_event("messages", (chunk2, {}), True)
+
+        # First call: just the first chunk text
+        assert mock_redact.call_args_list[0].args[0] == "Hello "
+        # Second call: accumulated text from both chunks
+        assert mock_redact.call_args_list[1].args[0] == "Hello world"
+        assert len(notifier.ui_chat_log) == 1
+        assert notifier.ui_chat_log[0]["content"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_safe_content_not_modified(self, outbox):
+        """When redact_secrets_for_ui returns the same content, it is stored as-is."""
+        notifier = UserInterface(outbox=outbox, goal="goal")
+        safe_content = "Here is the result of your request."
+        message = AIMessageChunk(id="msg-1", content=safe_content)
+
+        # Use the real redact_secrets_for_ui -- safe content should pass through unchanged
+        await notifier.send_event("messages", (message, {}), True)
+
+        assert len(notifier.ui_chat_log) == 1
+        assert notifier.ui_chat_log[0]["content"] == safe_content

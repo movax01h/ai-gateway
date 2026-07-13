@@ -5,7 +5,7 @@ from enum import StrEnum
 from prometheus_client import Histogram
 from starlette_context import context
 
-__all__ = ["benchmark", "KnownMetrics"]
+__all__ = ["KnownMetrics", "benchmark"]
 
 
 class KnownMetrics(StrEnum):

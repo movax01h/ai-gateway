@@ -4,10 +4,10 @@ from typing import List, NamedTuple
 from tree_sitter import Node
 
 __all__ = [
-    "Point",
-    "CodeContext",
-    "BaseVisitor",
     "BaseCodeParser",
+    "BaseVisitor",
+    "CodeContext",
+    "Point",
 ]
 
 Point = tuple[int, int]

@@ -9,3 +9,19 @@ The merge request URL is provided in the merge_request_url tag below:
   <merge_request_url>{{merge_request_url}}</merge_request_url>
 </merge_request>
 {% endif %}
+
+<failing_jobs>
+{{ failing_jobs }}
+</failing_jobs>
+
+{% if failing_bridge_jobs %}
+<failing_bridge_jobs>
+{{ failing_bridge_jobs }}
+</failing_bridge_jobs>
+{% endif %}
+
+{% if mr_diffs %}
+<mr_diffs>
+{{ mr_diffs }}
+</mr_diffs>
+{% endif %}

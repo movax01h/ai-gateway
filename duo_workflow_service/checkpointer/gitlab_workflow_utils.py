@@ -107,7 +107,7 @@ WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
         WorkflowStatusEnum.CANCELLED: "STOPPED",
         WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED: "TOOL_CALL_APPROVAL_REQUIRED",
     },
-    **{status: "RUNNING" for status in NOOP_WORKFLOW_STATUSES},
+    **dict.fromkeys(NOOP_WORKFLOW_STATUSES, "RUNNING"),
 }
 
 

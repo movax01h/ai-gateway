@@ -10,7 +10,7 @@ from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.context import current_model_metadata_context
+from lib.context import get_model_metadata
 
 logger = structlog.stdlib.get_logger("workflow")
 
@@ -76,11 +76,22 @@ class SlashCommandStatus(StrEnum):
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
 TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
+# Shared sub_type / JSON-payload error code used to tag tier-access-denied
+# events. Read by ChatAgent when tagging the AGENT UiChatLog and by
+# ToolsExecutor when serializing the tool_response payload.
+TIER_ACCESS_DENIED_SUB_TYPE = "tier_access_denied"
+
 
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
     tool_response: NotRequired[Any]
+    suggested_patterns: NotRequired[list[str]]
+    # Semantic version of the tool that produced this entry (from
+    # ``DuoBaseTool.tool_version``). Lets the client version the tool→component
+    # contract for generative UI. Source/server identity for MCP tools is a
+    # separate follow-up (needs a `server` field on the McpTool proto).
+    tool_version: NotRequired[str]
 
 
 class UiChatLog(TypedDict):
@@ -124,13 +135,12 @@ def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
             # ... unless it's marked for deletion, in which case skip it
             if not delete:
                 current["steps"].append(step)
+        # If step exists and is marked for deletion, remove it
+        elif delete:
+            current["steps"].remove(existing_step)
         else:
-            # If step exists and is marked for deletion, remove it
-            if delete:
-                current["steps"].remove(existing_step)
-            else:
-                # Update existing step with new values
-                existing_step.update(step)
+            # Update existing step with new values
+            existing_step.update(step)
 
     return current
 
@@ -156,17 +166,37 @@ def _conversation_history_reducer(
     return reduced
 
 
-def get_model_max_context_token_limit() -> int:
-    # Returns model-specific max_context_tokens if model_metadata is available and
-    # AI_PER_MODEL_CONTEXT_WINDOW feature flag is enabled, otherwise LEGACY_MAX_CONTEXT_TOKENS.
-    model_metadata = current_model_metadata_context.get()
+def get_model_max_context_token_limit(
+    model_tags: list[str] | str | None = None,
+) -> int:
+    """Return the context-window limit for the model resolved from ``model_tags``.
+
+    Args:
+        model_tags: Tag(s) selecting the model; ``None`` resolves the current default model.
+
+    Returns:
+        The resolved model's ``max_context_tokens``, or ``LEGACY_MAX_CONTEXT_TOKENS`` when no
+        model metadata is set on the request. The legacy fallback keeps older callers and
+        pre-model-metadata requests working with the historical window size instead of failing.
+    """
+    model_metadata = get_model_metadata(model_tags)
     token_limit = (
         model_metadata.llm_definition.max_context_tokens
         if model_metadata is not None
         else LEGACY_MAX_CONTEXT_TOKENS
     )
-    logger.info("Current model context window limit.", token_limit=token_limit)
+    logger.info(
+        "Model context window limit.",
+        model_tags=model_tags,
+        token_limit=token_limit,
+    )
     return token_limit
+
+
+def get_current_model_max_context_token_limit() -> int:
+    # Convenience wrapper for the current default model (the None = current-model
+    # convention of get_model_max_context_token_limit).
+    return get_model_max_context_token_limit(None)
 
 
 def _ui_chat_log_reducer(
@@ -239,14 +269,3 @@ class ChatWorkflowState(TypedDict):
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]
-
-
-class WorkflowContext(TypedDict):
-    id: int
-    plan: Plan
-    goal: str
-    summary: str
-
-
-class Context(TypedDict):
-    workflow: WorkflowContext

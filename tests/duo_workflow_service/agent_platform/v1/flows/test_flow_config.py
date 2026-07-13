@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import json
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     list_configs,
     load_component_class,
 )
+from duo_workflow_service.agent_platform.v1.routers.base import BaseRouter
 
 
 class TestFlowConfig:
@@ -79,7 +81,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -130,7 +132,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -139,7 +141,7 @@ class TestFlowConfig:
             },
             "system_config": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "timeout": {
@@ -192,7 +194,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"},
@@ -283,6 +285,7 @@ class TestFlowConfig:
         assert config.flow.entry_point == "test_agent"
         assert config.environment == "chat"
         assert config.version == "v1"
+        assert config.resolved_version == "1.0.0"
 
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises ValueError for missing flow."""
@@ -507,6 +510,78 @@ class TestLoadComponentClass:
             load_component_class("NonExistentComponent")
 
 
+class TestVersionConstraintsByCategory:
+    """Test BaseFlowConfig.version_constraints_by_category()."""
+
+    @staticmethod
+    def _make_config(**flow_kwargs):
+        return FlowConfig(
+            flow={"entry_point": "agent", **flow_kwargs},
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+    def test_no_inputs_returns_empty_dict(self):
+        """version_constraints_by_category returns empty dict when no inputs defined."""
+        config = self._make_config()
+        assert config.version_constraints_by_category() == {}
+
+    def test_with_constraint(self):
+        """version_constraints_by_category returns the declared constraint."""
+        config = self._make_config(
+            inputs=[
+                {
+                    "category": "agent_platform_standard_context",
+                    "version_constraint": "^1.0.0",
+                    "input_schema": {"primary_branch": {"type": "string"}},
+                }
+            ]
+        )
+        assert config.version_constraints_by_category() == {
+            "agent_platform_standard_context": "^1.0.0"
+        }
+
+    def test_without_constraint_returns_none(self):
+        """version_constraints_by_category returns None for inputs without a constraint."""
+        config = self._make_config(
+            inputs=[
+                {
+                    "category": "file",
+                    "input_schema": {
+                        "contents": {"type": "string"},
+                        "file_name": {"type": "string"},
+                    },
+                }
+            ]
+        )
+        assert config.version_constraints_by_category() == {"file": None}
+
+    def test_mixed_constrained_and_unconstrained(self):
+        """version_constraints_by_category handles a mix of constrained and unconstrained inputs."""
+        config = self._make_config(
+            inputs=[
+                {
+                    "category": "agent_platform_standard_context",
+                    "version_constraint": "^1.1.0",
+                    "input_schema": {"primary_branch": {"type": "string"}},
+                },
+                {
+                    "category": "file",
+                    "input_schema": {
+                        "contents": {"type": "string"},
+                        "file_name": {"type": "string"},
+                    },
+                },
+            ]
+        )
+        assert config.version_constraints_by_category() == {
+            "agent_platform_standard_context": "^1.1.0",
+            "file": None,
+        }
+
+
 class TestListConfigs:
     """Test list_configs function functionality."""
 
@@ -529,7 +604,9 @@ class TestListConfigs:
 
     def test_list_configs_empty_directory(self, tmp_path):
         """Test list_configs returns empty list when no config files exist."""
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
             assert not result
 
@@ -540,7 +617,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -571,7 +650,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -609,7 +690,9 @@ class TestListConfigs:
             with open(config_file, "w") as f:
                 yaml.dump(config_data, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 3
@@ -649,7 +732,9 @@ class TestListConfigs:
         with open(invalid_config_file, "w") as f:
             f.write(invalid_content)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         # Should only return the valid config, skipping the invalid one
@@ -680,7 +765,9 @@ class TestListConfigs:
                 raise IOError("Mocked IO error")
             return original_open(file, *args, **kwargs)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             with patch("builtins.open", side_effect=mock_open):
                 result = list_configs()
 
@@ -710,7 +797,9 @@ class TestListConfigs:
             with open(file_path, "w") as f:
                 f.write(content)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         # Should only return the .yml file
@@ -748,7 +837,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(complex_config, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -783,7 +874,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(minimal_config, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -868,6 +961,7 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "2.0.0")
         assert result.environment == "ambient"
+        assert result.resolved_version == "2.0.0"
 
     def test_caret_constraint_picks_highest(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml", environment="ambient")
@@ -876,6 +970,7 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "^1.0.0")
         assert result.environment == "chat"
+        assert result.resolved_version == "1.2.0"
 
     def test_tilde_constraint(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml", environment="ambient")
@@ -884,6 +979,7 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "~1.0.0")
         assert result.environment == "chat"
+        assert result.resolved_version == "1.0.5"
 
     def test_no_compatible_version_raises(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml")
@@ -897,15 +993,53 @@ class TestFromYamlConfigVersionResolution:
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "^1.0.0")
         assert result.environment == "ambient"
+        assert result.resolved_version == "1.0.0"
 
     def test_exact_prerelease_still_works(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.1.0-rc1.yml", environment="chat")
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow", "1.1.0-rc1")
         assert result.environment == "chat"
+        assert result.resolved_version == "1.1.0-rc1"
 
     def test_default_version_used_when_none(self, tmp_path, flow_dir):
         self._write_config(flow_dir / "1.0.0.yml")
         with patch.object(FlowConfig, "DIRECTORY_PATH", tmp_path):
             result = FlowConfig.from_yaml_config("myflow")
         assert result.environment == "ambient"
+        assert result.resolved_version == "1.0.0"
+
+
+class TestShippedConfigRouterIndentation:
+    """Regression guard for the 2026-06-23 resolve_sast_vulnerability incident.
+
+    A ``default_route`` indented as a sibling of ``routes:`` (a child of
+    ``condition`` rather than an entry inside ``routes``) is silently dropped:
+    the parser in ``flows/base.py`` only iterates ``condition["routes"]``. The
+    affected router then has no default branch and raises ``KeyError`` when the
+    routing input matches none of the explicit routes. This walks every shipped
+    v1 flow config and fails if any router reintroduces that misindentation.
+    """
+
+    def test_no_router_defines_default_route_outside_routes(self):
+        config_dir = FlowConfig.DIRECTORY_PATH
+        offenders = []
+
+        for config_file in sorted(config_dir.glob("*/*.yml")):
+            config = yaml.safe_load(config_file.read_text())
+            for router in (config or {}).get("routers", []) or []:
+                condition = router.get("condition")
+                if (
+                    isinstance(condition, dict)
+                    and BaseRouter.DEFAULT_ROUTE in condition
+                ):
+                    offenders.append(
+                        f"{config_file.relative_to(config_dir)} "
+                        f"(router from '{router.get('from')}'): "
+                        f"'{BaseRouter.DEFAULT_ROUTE}' is a sibling of 'routes:' and "
+                        "will be ignored — nest it inside 'routes:'."
+                    )
+
+        assert not offenders, "Misindented default_route(s) found:\n" + "\n".join(
+            offenders
+        )

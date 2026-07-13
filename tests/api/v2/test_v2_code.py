@@ -1,4 +1,4 @@
-# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments,unused-variable
+# pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments
 
 import time
 from typing import Any, Dict, List, Union
@@ -121,14 +121,14 @@ class TestCodeCompletions:
             # non-empty suggestions from model
             (
                 1,
-                "anthropic",
-                "claude-sonnet-4-20250514",
+                "amazon_q",
+                "amazon_q",
                 "def search",
                 {
                     "id": "id",
                     "model": {
-                        "engine": "anthropic",
-                        "name": "claude-sonnet-4-20250514",
+                        "engine": "amazon_q",
+                        "name": "amazon_q",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -149,14 +149,14 @@ class TestCodeCompletions:
             # prompt version 3
             (
                 3,
-                "anthropic",
-                "claude-sonnet-4-20250514",
+                "amazon_q",
+                "amazon_q",
                 "def search",
                 {
                     "id": "id",
                     "model": {
-                        "engine": "anthropic",
-                        "name": "claude-sonnet-4-20250514",
+                        "engine": "amazon_q",
+                        "name": "amazon_q",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -205,14 +205,14 @@ class TestCodeCompletions:
             # empty suggestions from model
             (
                 1,
-                "anthropic",
-                "claude-sonnet-4-20250514",
+                "amazon_q",
+                "amazon_q",
                 "",
                 {
                     "id": "id",
                     "model": {
-                        "engine": "anthropic",
-                        "name": "claude-sonnet-4-20250514",
+                        "engine": "amazon_q",
+                        "name": "amazon_q",
                         "lang": "python",
                         "tokens_consumption_metadata": None,
                         "region": "us-central1",
@@ -263,7 +263,7 @@ class TestCodeCompletions:
                 }
             )
 
-        if prompt_version == 3 and mock_suggestions_engine == "anthropic":
+        if prompt_version == 3 and mock_suggestions_engine == "mistral":
             raw_prompt = [
                 {
                     "role": "system",
@@ -331,9 +331,9 @@ class TestCodeCompletions:
             "prompt_version": prompt_version,
             "project_path": "gitlab-org/gitlab",
             "project_id": 278964,
-            "model_provider": "anthropic",
+            "model_provider": "litellm",
             "current_file": current_file,
-            "model_name": "claude-sonnet-4-20250514",
+            "model_name": "mistral",
         }
 
         code_completions_kwargs = {}
@@ -781,7 +781,7 @@ class TestCodeCompletions:
                 "foo",
                 [],
                 "gitlab",
-                "claude_sonnet_4_20250514",
+                "claude_sonnet_4_5_20250929",
                 None,
                 None,
                 None,
@@ -800,7 +800,7 @@ class TestCodeCompletions:
         ],
     )
     @pytest.mark.usefixtures("mock_config")
-    def test_non_stream_response(
+    def test_non_stream_response(  # noqa: PLR0913
         self,
         mock_client,
         mock_llm_text: Mock,
@@ -880,7 +880,7 @@ class TestCodeCompletions:
         [
             (
                 "def search",
-                "anthropic",
+                "litellm",
                 None,
                 {},
                 [],
@@ -939,7 +939,7 @@ class TestCodeCompletions:
             "current_file": current_file,
             "stream": True,
             "context": context,
-            "model_name": "claude-sonnet-4-20250514",
+            "model_name": "mistral",
         }
         if model:
             data["model_name"] = model
@@ -1138,9 +1138,9 @@ class TestCodeCompletions:
             "prompt_version": 1,
             "project_path": "gitlab-org/gitlab",
             "project_id": 278964,
-            "model_provider": "anthropic",
+            "model_provider": "gitlab",
             "current_file": current_file,
-            "model_name": "claude-sonnet-4-20250514",
+            "model_name": "claude_sonnet_4_5_20250929",
         }
 
         response = mock_client.post(
@@ -1256,8 +1256,8 @@ class TestCodeCompletions:
                 True,
             ),
             (
-                "claude_sonnet_4_20250514",
-                "claude_sonnet_4_20250514",
+                "claude_sonnet_4_5_20250929",
+                "claude_sonnet_4_5_20250929",
                 "anthropic",
                 False,
             ),
@@ -1298,8 +1298,7 @@ class TestCodeCompletions:
         assert (
             body["choices"][0]["text"] == expect_post_processed
             and "Post-processed completion response"
-            or "whatever"
-        )
+        ) or "whatever"
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
@@ -1545,8 +1544,8 @@ class TestGitLabModelProvider:
             ),
             (
                 "gitlab",
-                "claude_sonnet_4_20250514",
-                "claude-sonnet-4-20250514",
+                "claude_sonnet_4_5_20250929",
+                "claude_sonnet_4_5_20250929",
                 "anthropic",
                 {},
             ),
@@ -1626,7 +1625,7 @@ class TestGitLabModelProvider:
 
             assert response.status_code == 200
             assert mock_build.called
-            build_args, build_kwargs = mock_build.call_args
+            build_args, _build_kwargs = mock_build.call_args
             assert build_args[1].model_provider == provider
             assert build_args[1].model_name == gitlab_identifier
 
@@ -1781,7 +1780,7 @@ class TestGitLabModelProvider:
             max_context_tokens=200000,
             description="A model description",
             family=["test-family"],
-            provider="Vertex",
+            provider="Gemini Enterprise Agent Platform",
             params=ChatLiteLLMParams(temperature=0.0, max_tokens=4096),
         )
 
@@ -1837,7 +1836,7 @@ class TestGitLabModelProvider:
         [
             (
                 "codestral_2508_vertex",
-                "Vertex",
+                "Gemini Enterprise Agent Platform",
                 {"temperature": 0.0, "max_tokens": 4096},
             ),
             (
@@ -1846,7 +1845,7 @@ class TestGitLabModelProvider:
                 {"temperature": 0.0, "max_tokens": 4096, "model": "codestral-2501"},
             ),
             (
-                "claude_sonnet_4_20250514",
+                "claude_sonnet_4_5_20250929",
                 "Anthropic",
                 {"temperature": 0.0, "max_tokens": 4096},
             ),
@@ -1969,31 +1968,6 @@ class TestCodeGenerations:
                 1,
                 None,
                 "foo",
-                None,
-                "anthropic",
-                "claude-sonnet-4-20250514",
-                None,
-                None,
-                "foo",
-                False,
-                True,
-                False,
-                False,
-                200,
-                None,
-                [
-                    {
-                        "text": "foo",
-                        "index": 0,
-                        "finish_reason": "length",
-                    }
-                ],
-                ["flag_a", "flag_b"],
-            ),  # v1 without prompt - anthropic
-            (
-                1,
-                None,
-                "foo",
                 "bar",
                 "vertex-ai",
                 "code-bison@002",
@@ -2085,69 +2059,6 @@ class TestCodeGenerations:
                 ["flag_a", "flag_b"],
             ),  # v2 with prompt - vertex-ai
             (
-                2,
-                None,
-                "foo",
-                "bar",
-                "anthropic",
-                "claude-sonnet-4-20250514",
-                None,
-                None,
-                "foo",
-                False,
-                True,
-                False,
-                False,
-                200,
-                "bar",
-                [
-                    {
-                        "text": "foo",
-                        "index": 0,
-                        "finish_reason": "length",
-                    }
-                ],
-                ["flag_a", "flag_b"],
-            ),  # v2 with prompt - anthropic (now using chat version)
-            (
-                2,
-                None,
-                "foo",
-                None,
-                "anthropic",
-                "claude-sonnet-4-20250514",
-                None,
-                None,
-                "foo",
-                False,
-                False,
-                False,
-                False,
-                422,
-                None,
-                None,
-                ["flag_a", "flag_b"],
-            ),  # v2 without prompt field
-            (
-                2,
-                None,
-                "foo",
-                "bar",
-                "anthropic",
-                "claude-sonnet-4-20250514",
-                None,
-                None,
-                "",
-                False,
-                True,
-                False,
-                False,
-                200,
-                "bar",
-                [],
-                ["flag_a", "flag_b"],
-            ),  # v2 empty suggestions from model
-            (
                 3,
                 "",
                 "foo",
@@ -2211,7 +2122,7 @@ class TestCodeGenerations:
             ),
         ],
     )
-    def test_non_stream_response(
+    def test_non_stream_response(  # noqa: PLR0913
         self,
         mock_client,
         mock_code_bison: Mock,
@@ -2280,19 +2191,19 @@ class TestCodeGenerations:
                 enabled_feature_flags
             )
 
+    @pytest.mark.usefixtures("mock_llm_chat")
     def test_billing_event(
         self,
         mock_client,
         mock_track_billing_event,
-        mock_anthropic_chat,  # pylint: disable=unused-argument
     ):
         """Verify a generations request results in a billing event reaching the underlying BillingEventsClient with the
         expected payload."""
         synthetic_llm_ops = [
             {
-                "model_id": "claude-sonnet-4-20250514",
+                "model_id": "mistral",
                 "model_engine": "anthropic",
-                "model_provider": "anthropic",
+                "model_provider": "litellm",
                 "token_count": 10,
                 "prompt_tokens": 6,
                 "completion_tokens": 4,
@@ -2319,8 +2230,8 @@ class TestCodeGenerations:
                         "content_above_cursor": "foo",
                         "content_below_cursor": "\n",
                     },
-                    "model_provider": "anthropic",
-                    "model_name": "claude-sonnet-4-20250514",
+                    "model_provider": "litellm",
+                    "model_name": "mistral",
                 },
             )
 
@@ -2459,8 +2370,8 @@ class TestAmazonQIntegration:
                         issuer="gitlab-ai-gateway",
                     ),
                 ),
-                "anthropic",
-                "claude-sonnet-4-20250514",
+                "litellm",
+                "mistral",
             ),
             (
                 CloudConnectorUser(

@@ -22,6 +22,7 @@ from ai_gateway.chat.agents.typing import (
     AgentStep,
     CurrentFile,
     Message,
+    ReActParserConfig,
 )
 from ai_gateway.chat.context.current_page import Context, IssueContext
 from ai_gateway.chat.tools.gitlab import IssueReader, MergeRequestReader
@@ -217,6 +218,106 @@ class TestReActPlainTextParser:
         actual = parser._parse(text, finish_reason)
 
         assert actual == expected
+
+    @pytest.mark.parametrize(
+        ("strip_reasoning", "text", "expected_text"),
+        [
+            # Leaked orphan close tag (Qwen): the opening tag and the reasoning body
+            # were routed elsewhere, only the </think> boundary spilled into content.
+            (True, "t.\n</think>\n\nHello there", "Hello there"),
+            # A complete reasoning block is removed.
+            (True, "<think>reasoning here</think>Hello there", "Hello there"),
+            # No reasoning tags: text is left untouched.
+            (True, "Hello there", "Hello there"),
+            # Mid-stream: reasoning opened but not yet closed, suppress it entirely.
+            (True, "<think>still reasoning", ""),
+            # A genuine answer that merely mentions an opening tag (not at the start)
+            # is left untouched, since reasoning always leads the content.
+            (
+                True,
+                "Use the <think> tag to open reasoning",
+                "Use the <think> tag to open reasoning",
+            ),
+            # Disabled: the leak is preserved (e.g. for non-reasoning models).
+            (
+                False,
+                "t.\n</think>\n\nHello there",
+                "t.\n</think>\n\nHello there",
+            ),
+        ],
+    )
+    def test_strip_reasoning_unknown_action(
+        self, strip_reasoning: bool, text: str, expected_text: str
+    ):
+        parser = ReActPlainTextParser(
+            config=ReActParserConfig(strip_reasoning=strip_reasoning)
+        )
+        actual = parser.parse(text)
+
+        assert isinstance(actual, AgentUnknownAction)
+        assert actual.text == expected_text
+
+    def test_strip_reasoning_ignores_late_close(self):
+        # A </think> appearing well past the leak prefix belongs to a genuine answer
+        # (e.g. one explaining the tag), so it must be left intact rather than truncated.
+        parser = ReActPlainTextParser(config=ReActParserConfig(strip_reasoning=True))
+        prefix = "a" * (parser.config.orphan_close_max_prefix + 1)
+        text = f"{prefix}</think> trailing"
+
+        actual = parser.parse(text)
+
+        assert isinstance(actual, AgentUnknownAction)
+        assert actual.text == text
+
+    def test_strip_reasoning_removes_block_preserving_remainder(self):
+        parser = ReActPlainTextParser(config=ReActParserConfig(strip_reasoning=True))
+
+        assert (
+            parser._strip_reasoning("<think>reasoning</think>\nremaining content")
+            == "\nremaining content"
+        )
+
+    @pytest.mark.parametrize(
+        ("buffer", "expected_type", "expected_text"),
+        [
+            # The parser is cumulative: langchain re-parses the full accumulated buffer
+            # on every chunk. These cases walk a leaked reasoning stream tick by tick and
+            # assert that a stray fragment never surfaces as an AgentFinalAnswer (the only
+            # event ReActAgent.astream streams incrementally). AgentUnknownAction is buffered
+            # to stream end, so the transient fragment it carries is never sent to the user.
+            #
+            # Orphan-close stream: fragment -> partial close -> full close -> answer body.
+            ("t.", AgentUnknownAction, "t."),
+            ("t.\n</thi", AgentUnknownAction, "t.\n</thi"),  # codespell:ignore
+            ("t.\n</think>", AgentUnknownAction, ""),
+            ("t.\n</think>\n\nFinal Answer: Hello", AgentFinalAnswer, "Hello"),
+            # Partial-opener stream: a half-arrived <think> is held until it completes.
+            ("<thi", AgentUnknownAction, "<thi"),  # codespell:ignore
+            ("<think>rea", AgentUnknownAction, ""),
+            ("<think>reasoning</think>", AgentUnknownAction, ""),
+            (
+                "<think>reasoning</think>\n\nFinal Answer: Hello",
+                AgentFinalAnswer,
+                "Hello",
+            ),
+            # Orphan fragment and the Final Answer marker land on the same tick: the
+            # close is already present, so stripping runs before parsing -> no leak.
+            ("t.\n</think>\n\nFinal Answer: Hello", AgentFinalAnswer, "Hello"),
+            # Pathological ordering: a Final Answer marker precedes a complete close.
+            # Stripping wipes everything up to </think>, so it suppresses rather than leaks.
+            ("t.\nFinal Answer: Hi\n</think>", AgentUnknownAction, ""),
+        ],
+    )
+    def test_strip_reasoning_partial_stream_never_leaks_fragment(
+        self, buffer: str, expected_type: type, expected_text: str
+    ):
+        parser = ReActPlainTextParser(config=ReActParserConfig(strip_reasoning=True))
+
+        event = parser.parse_result([Generation(text=buffer)], partial=True)
+
+        assert isinstance(event, expected_type)
+        assert isinstance(event, (AgentFinalAnswer, AgentUnknownAction))
+        assert event.text == expected_text
 
 
 class TestReActAgent:

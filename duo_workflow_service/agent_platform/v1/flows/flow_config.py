@@ -15,8 +15,8 @@ from duo_workflow_service.agent_platform.v1.components import (
 from lib.version import resolve_version
 
 __all__ = [
-    "BaseFlowConfig",
     "DEFAULT_FLOW_VERSION",
+    "BaseFlowConfig",
     "FlowConfig",
     "FlowConfigInput",
     "FlowConfigMetadata",
@@ -69,6 +69,7 @@ class FlowConfigInputSchema(BaseModel):
 class FlowConfigInput(BaseModel):
     category: str
     input_schema: dict[str, FlowConfigInputSchema]
+    version_constraint: Optional[str] = None
 
 
 class FlowConfigMetadata(BaseModel):
@@ -84,6 +85,12 @@ class BaseFlowConfig(BaseModel):
     routers: list[dict]
     environment: str
     version: str
+    # The concrete semver this config represents (e.g. "2.1.0"), set when loaded via
+    # ``from_yaml_config`` from the filename stem. This is the flow's own identity — the
+    # version actually run — as opposed to ``version`` (the schema version, e.g. "v1") or
+    # the constraint a client requested (e.g. "^2.0.0"). ``None`` for configs built
+    # directly (inline flows, tests), which have no registry resolution step.
+    resolved_version: Optional[str] = None
     prompts: Optional[list] = None
     response_schemas: Optional[list] = None
     name: Optional[str] = None
@@ -106,7 +113,7 @@ class BaseFlowConfig(BaseModel):
 
             jsonschema = {
                 "$schema": INPUT_JSONSCHEMA_VERSION,
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": schema,
                 "required": required_keys,
@@ -115,6 +122,17 @@ class BaseFlowConfig(BaseModel):
             json_schemas_by_category[item.category] = jsonschema
 
         return json_schemas_by_category
+
+    def version_constraints_by_category(self) -> dict[str, Optional[str]]:
+        """Return a mapping of input category to its declared version constraint.
+
+        Returns:
+            A dict mapping each input category to its ``version_constraint`` string
+            (e.g. ``"^1.0.0"``), or ``None`` when no constraint was declared.
+        """
+        if not self.flow.inputs:
+            return {}
+        return {item.category: item.version_constraint for item in self.flow.inputs}
 
     @classmethod
     def from_yaml_config(cls, flow_id: str, flow_version: Optional[str] = None) -> Self:
@@ -126,6 +144,10 @@ class BaseFlowConfig(BaseModel):
                 Supports the same constraint syntax as Poetry — see
                 https://python-poetry.org/docs/dependency-specification/#version-constraints
                 Path traversal is prevented by _safe_resolve.
+
+        Returns:
+            The loaded config, with ``resolved_version`` set to the concrete semver the
+            constraint resolved to (e.g. "2.1.0").
         """
         version_query = flow_version or DEFAULT_FLOW_VERSION
         base_path = cls.DIRECTORY_PATH.resolve()
@@ -142,7 +164,7 @@ class BaseFlowConfig(BaseModel):
             yaml_path = _safe_resolve(flow_dir / f"{version}.yml", base_path)
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)
-            return cls(**yaml_content)
+            return cls(**yaml_content, resolved_version=version)
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"{flow_id}/{version} file not found in {cls.DIRECTORY_PATH}"

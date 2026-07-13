@@ -8,20 +8,33 @@ import logging
 import re
 import sqlite3
 import sys
+import tarfile
 import tempfile
 from contextlib import closing
 from pathlib import Path
 from shutil import rmtree
 from typing import Any, Optional
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 import requests
 from langchain_community.docstore.document import Document
+from requests.exceptions import HTTPError
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(-\w+)?$")
+
+# Archive formats to try in order. The ``zip`` endpoint occasionally serves a
+# cached 0-byte artifact for a given tag while the ``tar.gz`` variant of the
+# same tag is healthy, so ``tar.gz`` acts as a fallback for the whole tag list.
+ARCHIVE_FORMATS = ("zip", "tar.gz")
 
 
 # Function to parse command-line arguments
@@ -71,12 +84,30 @@ def candidate_version_tags(version_tag: str) -> list[str]:
     return [f"v{major}.{minor}.{p}{suffix}" for p in range(patch, -1, -1)]
 
 
-def _download_docs_archive(version_tag: str) -> Optional[bytes]:
-    docs_url = f"https://gitlab.com/gitlab-org/gitlab/-/archive/{version_tag}/gitlab-{version_tag}.zip?path=doc"
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=3, min=3, max=30),
+    retry=retry_if_exception_type(HTTPError),
+)
+def _download_docs_archive(version_tag: str, archive_format: str) -> Optional[bytes]:
+    docs_url = (
+        f"https://gitlab.com/gitlab-org/gitlab/-/archive/{version_tag}/"
+        f"gitlab-{version_tag}.{archive_format}?path=doc"
+    )
     logger.info("Fetching documents from %s", docs_url)
     response = requests.get(docs_url, timeout=100)
     if response.status_code == 200:
+        if not response.content:
+            logger.warning(
+                "Downloaded an empty %s archive for %s.",
+                archive_format,
+                version_tag,
+            )
+            return None
         return response.content
+    if response.status_code == 429:
+        response.raise_for_status()
     logger.warning(
         "Failed to download documents for %s. Status code: %d",
         version_tag,
@@ -85,12 +116,104 @@ def _download_docs_archive(version_tag: str) -> Optional[bytes]:
     return None
 
 
+def _extract_archive(content: bytes, archive_format: str) -> Optional[Path]:
+    """Write ``content`` to a temp file and extract it as ``archive_format``.
+
+    Args:
+        content: Raw bytes of the downloaded archive.
+        archive_format: Either ``zip`` or ``tar.gz``.
+
+    Returns:
+        Path to the extracted documentation directory, or ``None`` if the
+        archive is corrupt or contains no top-level directory. Callers treat
+        ``None`` as a signal to fall back to the next tag or format.
+    """
+    tmpdirname = tempfile.mkdtemp()
+    archive_path = Path(tmpdirname) / f"docs.{archive_format}"
+
+    with open(archive_path, "wb") as f:
+        f.write(content)
+
+    try:
+        if archive_format == "zip":
+            with ZipFile(archive_path, "r") as zip_ref:
+                zip_ref.extractall(tmpdirname)
+        else:
+            with tarfile.open(archive_path, "r:gz") as tar_ref:
+                tar_ref.extractall(tmpdirname, filter="data")
+    except (BadZipFile, tarfile.TarError) as error:
+        logger.warning("Failed to extract %s archive: %s", archive_format, error)
+        rmtree(tmpdirname)
+        return None
+
+    archive_path.unlink()
+
+    extracted_dirs = [path for path in Path(tmpdirname).iterdir() if path.is_dir()]
+    if not extracted_dirs:
+        logger.warning(
+            "No directory found after extracting %s archive.", archive_format
+        )
+        rmtree(tmpdirname)
+        return None
+
+    extracted_dir = extracted_dirs[0]
+    logger.info("Extracted documents to %s", extracted_dir)
+    return extracted_dir
+
+
+def _fetch_documents_for_format(
+    version_tag: str, archive_format: str
+) -> Optional[Path]:
+    """Download and extract the docs archive for a single ``archive_format``.
+
+    Tries the requested tag first, then earlier patch tags within the same
+    minor via :func:`candidate_version_tags`.
+
+    Args:
+        version_tag: A GitLab version tag such as ``v19.0.1-ee``, or
+            ``master``.
+        archive_format: Either ``zip`` or ``tar.gz``.
+
+    Returns:
+        Path to the extracted documentation directory, or ``None`` if no
+        candidate tag yielded a usable archive in this format.
+    """
+    for candidate in candidate_version_tags(version_tag):
+        try:
+            content = _download_docs_archive(candidate, archive_format)
+        except HTTPError:
+            logger.warning(
+                "Rate-limited for %s (%s) after all retries; trying next candidate.",
+                candidate,
+                archive_format,
+            )
+            content = None
+
+        if content is None:
+            continue
+
+        extracted_dir = _extract_archive(content, archive_format)
+        if extracted_dir is None:
+            continue
+
+        if candidate != version_tag:
+            logger.warning(
+                "Docs for %s were unavailable; falling back to %s.",
+                version_tag,
+                candidate,
+            )
+        return extracted_dir
+
+    return None
+
+
 def fetch_documents(version_tag: str) -> Path:
     """Download and extract the GitLab docs archive for ``version_tag``.
 
-    Tries the requested tag first, then earlier patch tags within the same
-    minor via :func:`candidate_version_tags`. Exits the process via
-    :func:`execution_error` if no candidate returns HTTP 200.
+    Tries each format in :data:`ARCHIVE_FORMATS` in order, exhausting the
+    full candidate-tag list for one format before moving to the next. Exits
+    the process via :func:`execution_error` if no format and tag combination
+    yields a usable archive.
 
     Args:
         version_tag: A GitLab version tag such as ``v19.0.1-ee``, or
@@ -99,40 +222,21 @@ def fetch_documents(version_tag: str) -> Path:
     Returns:
         Path to the directory containing the extracted documentation files.
     """
-    content: Optional[bytes] = None
-    for candidate in candidate_version_tags(version_tag):
-        content = _download_docs_archive(candidate)
-        if content is not None:
-            if candidate != version_tag:
-                logger.warning(
-                    "Docs for %s were unavailable; falling back to %s.",
-                    version_tag,
-                    candidate,
-                )
-            break
+    for archive_format in ARCHIVE_FORMATS:
+        extracted_dir = _fetch_documents_for_format(version_tag, archive_format)
+        if extracted_dir is not None:
+            logger.info("Documents are fetched.")
+            return extracted_dir
 
-    if content is None:
-        return execution_error(
-            f"Failed to download documents for {version_tag} and all fallback tags."
+        logger.warning(
+            "No usable %s archive for %s or its fallback tags.",
+            archive_format,
+            version_tag,
         )
 
-    tmpdirname = tempfile.mkdtemp()
-    zip_path = Path(tmpdirname) / "docs.zip"
-
-    with open(zip_path, "wb") as f:
-        f.write(content)
-    with ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(tmpdirname)
-
-    # Find the directory that was extracted
-    extracted_dirs = [path for path in Path(tmpdirname).iterdir() if path.is_dir()]
-    if not extracted_dirs:
-        execution_error("No directory found after extraction. Exiting.")
-    zip_path.unlink()
-    logger.info("Documents are fetched.")
-    extracted_dir = extracted_dirs[0]
-    logger.info("Extracted documents to %s", extracted_dir)
-    return extracted_dir
+    return execution_error(
+        f"Failed to download documents for {version_tag} across all tags and formats."
+    )
 
 
 def build_row_corpus(row: dict):

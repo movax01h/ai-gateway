@@ -41,7 +41,6 @@ class AuditEvent(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     workflow_id: str
     sequence: Optional[int] = None
-    ip_address: Optional[str] = None
 
     def to_cloudevent(self) -> dict[str, Any]:
         data = self.model_dump(

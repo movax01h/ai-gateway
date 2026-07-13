@@ -16,8 +16,34 @@ from langchain_core.runnables import Runnable
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
-from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
+from ai_gateway.models.v2.chat_litellm import (
+    ChatLiteLLM,
+    _force_gpt_5_max_completion_tokens,
+    _remove_deprecated_temperature_parameters,
+    _rewrite_trailing_assistant_prefill,
+)
+from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
+
+
+def test_importing_module_applies_empty_text_patch():
+    """Guards against the litellm_empty_text_patch import being dropped from chat_litellm.py.
+
+    ChatLiteLLM.acompletion_with_retry routes Anthropic-shaped requests through litellm's anthropic_messages_pt, which
+    calls _sanitize_empty_text_content. The patch must be applied as a side effect of importing this module, since
+    nothing else guarantees it loads.
+    """
+    from litellm.litellm_core_utils.prompt_templates import factory as prompt_factory
+
+    message = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "toolu_1", "type": "function"}],
+    }
+
+    result = prompt_factory._sanitize_empty_text_content(message)
+
+    assert result["content"] == ""
 
 
 @pytest.mark.asyncio
@@ -375,18 +401,18 @@ async def test_fireworks_exponential_backoff_timing():
         # Expected delays: ~1s, ~2s, ~4s, ~8s (with some tolerance)
         # Note: First 4 retries should follow exponential pattern
         if len(delays) >= 4:
-            assert (
-                0.8 <= delays[0] <= 1.5
-            ), f"First delay should be ~1s, got {delays[0]}"
-            assert (
-                1.8 <= delays[1] <= 2.5
-            ), f"Second delay should be ~2s, got {delays[1]}"
-            assert (
-                3.5 <= delays[2] <= 4.5
-            ), f"Third delay should be ~4s, got {delays[2]}"
-            assert (
-                7.0 <= delays[3] <= 9.0
-            ), f"Fourth delay should be ~8s, got {delays[3]}"
+            assert 0.8 <= delays[0] <= 1.5, (
+                f"First delay should be ~1s, got {delays[0]}"
+            )
+            assert 1.8 <= delays[1] <= 2.5, (
+                f"Second delay should be ~2s, got {delays[1]}"
+            )
+            assert 3.5 <= delays[2] <= 4.5, (
+                f"Third delay should be ~4s, got {delays[2]}"
+            )
+            assert 7.0 <= delays[3] <= 9.0, (
+                f"Fourth delay should be ~8s, got {delays[3]}"
+            )
 
 
 def test_fireworks_max_retries_set_via_params():
@@ -537,7 +563,6 @@ class TestClaude46PrefillCompat:
                 id="4.7-opus-bedrock",
             ),
             # Claude <= 4.5: prefill supported, payload untouched
-            pytest.param("claude-sonnet-4@20250514", False, id="4.0-sonnet-vertex"),
             pytest.param("claude-sonnet-4-5@20250929", False, id="4.5-sonnet-vertex"),
             pytest.param("claude-haiku-4-5@20251001", False, id="4.5-haiku-vertex"),
             pytest.param("claude-opus-4-5@20251101", False, id="4.5-opus-vertex"),
@@ -567,6 +592,103 @@ class TestClaude46PrefillCompat:
         else:
             expected = {"role": "assistant", "content": "Thought: "}
         assert dicts[-1] == expected
+
+
+class TestGpt5MaxCompletionTokens:
+    @pytest.mark.parametrize(
+        "model",
+        ["gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-nano"],
+    )
+    def test_gpt_5_on_custom_openai_moves_to_extra_body(self, model):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": "custom_openai",
+            "max_tokens": 12,
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["custom_llm_provider"] == "custom_openai"
+        assert "max_tokens" not in kwargs
+        assert kwargs["extra_body"] == {"max_completion_tokens": 12}
+
+    @pytest.mark.parametrize(
+        "provider",
+        ["azure", "custom_openai", "openai", "fireworks_ai", None],
+    )
+    def test_gpt_5_moves_to_extra_body_regardless_of_provider(self, provider):
+        kwargs = {
+            "model": "gpt-5",
+            "custom_llm_provider": provider,
+            "max_tokens": 12,
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["custom_llm_provider"] == provider
+        assert "max_tokens" not in kwargs
+        assert kwargs["extra_body"] == {"max_completion_tokens": 12}
+
+    @pytest.mark.parametrize(
+        "model", ["gpt-4o", "gpt-3.5-turbo", "claude-3-5-sonnet", "gpt-5-chat"]
+    )
+    @pytest.mark.parametrize("provider", ["custom_openai", "azure", "openai"])
+    def test_non_gpt_5_is_left_alone(self, model, provider):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": provider,
+            "max_tokens": 12,
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["max_tokens"] == 12
+        assert "extra_body" not in kwargs
+
+    def test_missing_model_is_noop(self):
+        kwargs = {"custom_llm_provider": "custom_openai", "max_tokens": 12}
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["max_tokens"] == 12
+
+    def test_no_max_tokens_is_noop(self):
+        kwargs = {"model": "gpt-5", "custom_llm_provider": "custom_openai"}
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert "extra_body" not in kwargs
+
+    def test_existing_extra_body_is_preserved(self):
+        kwargs = {
+            "model": "gpt-5",
+            "custom_llm_provider": "custom_openai",
+            "max_tokens": 12,
+            "extra_body": {"foo": "bar"},
+        }
+
+        _force_gpt_5_max_completion_tokens(kwargs)
+
+        assert kwargs["extra_body"] == {"foo": "bar", "max_completion_tokens": 12}
+
+    @pytest.mark.asyncio
+    async def test_acompletion_with_retry_applies_before_calling_super(self):
+        chat = ChatLiteLLM(model="gpt-5", custom_llm_provider="custom_openai")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(return_value="ok"),
+        ) as super_call:
+            result = await chat.acompletion_with_retry(
+                model="gpt-5", custom_llm_provider="custom_openai", max_tokens=12
+            )
+
+        assert result == "ok"
+        super_kwargs = super_call.call_args.kwargs
+        assert super_kwargs["custom_llm_provider"] == "custom_openai"
+        assert "max_tokens" not in super_kwargs
+        assert super_kwargs["extra_body"] == {"max_completion_tokens": 12}
 
 
 class TestBedrockGuardrailConfig:
@@ -644,3 +766,206 @@ class TestBedrockGuardrailConfig:
 
             call_kwargs = mock_acompletion.call_args[1]
             assert call_kwargs["guardrailConfig"] == self._expected_guardrail_config()
+
+
+class TestDeprecatedTemperatureRemoval:
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-7",
+            "anthropic.claude-opus-4-7-20250101-v1:0",
+            "claude-opus-4-8",
+            "claude-opus-4.8",
+            "anthropic.claude-opus-4-8-20250101-v1:0",
+            "claude-sonnet-5",
+            "anthropic.claude-sonnet-5",
+            "claude-fable-5",
+            "anthropic.claude-fable-5",
+            "claude-mythos-5",
+            "anthropic.claude-mythos-5",
+        ],
+    )
+    def test_removes_temperature(self, model):
+        kwargs = {"model": model, "temperature": 0.7}
+
+        _remove_deprecated_temperature_parameters(kwargs)
+
+        assert "temperature" not in kwargs
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-7",
+        ],
+    )
+    def test_deprecated_model_with_no_temperature(self, model):
+        kwargs = {"model": model}
+
+        _remove_deprecated_temperature_parameters(kwargs)
+
+        assert "temperature" not in kwargs
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-6",
+            "claude-opus-4.6",
+            "claude-3-5-sonnet",
+            "claude-sonnet-4-5",
+            "gpt-5",
+        ],
+    )
+    def test_other_models_keep_temperature(self, model):
+        kwargs = {"model": model, "temperature": 0.7}
+
+        _remove_deprecated_temperature_parameters(kwargs)
+
+        assert kwargs.get("temperature") == 0.7
+
+    @pytest.mark.asyncio
+    async def test_acompletion_with_retry_applies_before_calling_super(self):
+        chat = ChatLiteLLM(model="claude-opus-4-8", custom_llm_provider="bedrock")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(return_value="ok"),
+        ) as super_call:
+            result = await chat.acompletion_with_retry(
+                model="claude-opus-4-8",
+                custom_llm_provider="bedrock",
+                temperature=0.7,
+            )
+
+        assert result == "ok"
+        super_kwargs = super_call.call_args.kwargs
+        assert "temperature" not in super_kwargs
+
+
+class TestTrailingAssistantPrefillRewrite:
+    def _prefilled_messages(self):
+        return [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "Thought: "},
+        ]
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-opus-4-7",
+            "us.anthropic.claude-opus-4-7",
+            "claude-opus-4-8",
+            "anthropic.claude-opus-4-8-20250101-v1:0",
+            "claude-3-5-sonnet",
+            "claude-3-opus-20240229",
+        ],
+    )
+    def test_prefill_incompatible_claude_is_rewritten(self, model):
+        kwargs = {"model": model, "messages": self._prefilled_messages()}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"][-1] == {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"{PREVIOUS_ASSISTANT_CONTEXT_PREFIX}Thought: ",
+                }
+            ],
+        }
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-1",
+            "claude-opus-4-5",
+            "anthropic/claude-opus-4-5",
+            "claude-sonnet-4-5",
+            "us.anthropic.claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            # Legacy pre-4.6 models still available for self-hosting.
+            "anthropic.claude-sonnet-4-20250514-v1:0",
+            "anthropic.claude-3-haiku-20240307-v1:0",
+            "anthropic.claude-3-sonnet-20240229-v1:0",
+        ],
+    )
+    def test_allowlisted_claude_keeps_prefill(self, model):
+        messages = self._prefilled_messages()
+        kwargs = {"model": model, "messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gpt-5",
+            "deepseek/deepseek-chat",
+            "llama-3-70b",
+        ],
+    )
+    def test_non_claude_keeps_prefill(self, model):
+        messages = self._prefilled_messages()
+        kwargs = {"model": model, "messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    def test_trailing_user_message_is_noop(self):
+        messages = [
+            {"role": "assistant", "content": "hello"},
+            {"role": "user", "content": "hi"},
+        ]
+        kwargs = {"model": "claude-opus-4-7", "messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    def test_missing_model_is_noop(self):
+        messages = self._prefilled_messages()
+        kwargs = {"messages": messages}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == messages
+
+    def test_missing_messages_is_noop(self):
+        kwargs = {"model": "claude-opus-4-7"}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert "messages" not in kwargs
+
+    def test_empty_messages_list_is_noop(self):
+        kwargs = {"model": "claude-opus-4-7", "messages": []}
+
+        _rewrite_trailing_assistant_prefill(kwargs)
+
+        assert kwargs["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_acompletion_with_retry_rewrites_before_calling_super(self):
+        chat = ChatLiteLLM(model="claude-opus-4-7", custom_llm_provider="bedrock")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(return_value="ok"),
+        ) as super_call:
+            result = await chat.acompletion_with_retry(
+                model="us.anthropic.claude-opus-4-7",
+                custom_llm_provider="bedrock",
+                messages=[
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "Thought: "},
+                ],
+            )
+
+        assert result == "ok"
+        assert super_call.call_args.kwargs["messages"][-1]["role"] == "user"

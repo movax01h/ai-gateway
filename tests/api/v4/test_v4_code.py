@@ -92,6 +92,53 @@ class TestEditorContentCompletionStream:
         )
 
 
+class TestEditorContentCompletionNonStream:
+    @pytest.mark.usefixtures("mock_completions")
+    def test_response_reports_resolved_model_under_metadata(
+        self,
+        mock_client: TestClient,
+        mock_suggestions_output_text: str,
+        mock_suggestions_model: str,
+        mock_suggestions_engine: str,
+        route: str,
+    ):
+        payload = {
+            "file_name": "main.py",
+            "content_above_cursor": "def hello_world():\n    print(",
+            "content_below_cursor": "",
+            "language_identifier": "python",
+            "stream": False,
+        }
+
+        data = {
+            "prompt_components": [
+                {"type": "code_editor_completion", "payload": payload}
+            ],
+        }
+
+        response = mock_client.post(
+            route,
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "test-user-id",
+            },
+            json=data,
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+
+        assert body["choices"][0]["text"] == mock_suggestions_output_text
+
+        assert body["metadata"]["model"]["engine"] == mock_suggestions_engine
+        assert body["metadata"]["model"]["name"] == mock_suggestions_model
+
+        assert "model" not in body
+
+
 class TestEditorContentGenerationStream:
     @pytest.mark.parametrize(
         (

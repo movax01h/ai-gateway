@@ -236,6 +236,8 @@ class TestOneOffComponentAttachNodes:
             agent_call_kwargs["internal_event_client"]
             == one_off_component.internal_event_client
         )
+        # Wiring guard: attach passes the resolved per-agent limit through.
+        assert "max_context_tokens" in agent_call_kwargs
 
         # Verify ToolNodeWithErrorCorrection creation
         mock_tool_node_cls.assert_called_once()

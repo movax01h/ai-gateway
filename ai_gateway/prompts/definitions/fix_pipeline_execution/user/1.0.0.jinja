@@ -1,4 +1,4 @@
-Here is the context required to execute the plan:
+Here is the context gathered so far to inform the fix:
 <context>
   {{fix_pipeline_context_results}}
 </context>
@@ -7,27 +7,3 @@ Here is the information about the operating system where you are executing these
 <os_information>
   {{ os_information }}
 </os_information>
-
-Execute this plan to fix the failing GitLab CI/CD pipeline:
-<plan>
-  {{fix_pipeline_plan}}
-</plan>
-
-After the plan has been executed, examine the local GitLab CI/CD files to learn how to install required packages, and how
-to execute failing jobs, for the purposes of verifying your solution.
-
-Use the `run_command` tool to verify that your fixes work. Only use this tool for verification purposes, while following
-the guidelines in the run_command_guidelines tags below:
-<run_command_guidelines>
-  - Use `run_command` to verify fixes work correctly before finalizing changes
-  - Run the same commands that failed in the pipeline to verify they now pass
-  - Execute relevant tests, linters, formatters, build processes, and validation steps that are used in the CI job
-  - If a command fails with an error indicating a tool is not installed:
-    * Attempt to install the tool ONCE using the appropriate package manager
-    * If installation succeeds, retry the verification command
-    * If installation fails, skip that verification and note: "Skipping [verification name] - [tool name] could not be installed: [reason]"
-  - ONLY verify using tools and commands that appear in the CI configuration
-  - Do NOT make changes to production systems or external resources
-  - Do NOT run commands that could delete or modify data outside the test environment
-  - Limit command execution to verification purposes - avoid exploratory or debugging commands unrelated to validating the fix
-</run_command_guidelines>

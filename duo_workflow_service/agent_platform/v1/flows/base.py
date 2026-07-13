@@ -1,13 +1,14 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, Optional, override
+from typing import Any, Dict, NoReturn, Optional, override
 from uuid import uuid4
 
 import jsonschema
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command, Overwrite
 
@@ -45,7 +46,10 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.typing import GENERIC_WORKFLOW_ERROR_MESSAGE
+from duo_workflow_service.errors.typing import (
+    GENERIC_WORKFLOW_ERROR_MESSAGE,
+    EnvelopeVersionMismatchException,
+)
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
@@ -59,8 +63,12 @@ from lib.internal_events.context import (
     merge_request_url_context,
     pipeline_source_context,
 )
+from lib.version import resolve_version
 
 __all__ = ["Flow", "persist_error_to_ui_chat_log"]
+
+_ENVELOPE_DEFAULT_VERSION = "1.0.0"
+_ENVELOPE_DEFAULT_CONSTRAINT = "^1.0.0"
 
 _EXECUTOR_CONTEXT = [
     "os_information",
@@ -105,15 +113,19 @@ async def persist_error_to_ui_chat_log(
     """
     if isinstance(error, NotifiableAgentException):
         error_message = error.ui_message
+    elif isinstance(error, ValueError):
+        error_str = str(error)
+        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE + f"\n```\n{error_str}\n```"
     else:
-        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE
+        typestr = type(error).__name__
+        error_message = GENERIC_WORKFLOW_ERROR_MESSAGE + f"\n```\nError: {typestr}\n```"
 
     error_log = UiChatLog(
         message_type=MessageTypeEnum.AGENT,
         message_sub_type=None,
         content=error_message,
         timestamp=datetime.now(timezone.utc).isoformat(),
-        message_id=f"error-{str(uuid4())}",
+        message_id=f"error-{uuid4()!s}",
         status=ToolStatus.FAILURE,
         correlation_id=None,
         tool_info=None,
@@ -151,6 +163,7 @@ class Flow(AbstractWorkflow):
         workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
         config: FlowConfig,
+        streaming: bool = False,
         mcp_tools: list[contract_pb2.McpTool] = [],
         additional_context: Optional[list[AdditionalContext]] = None,
         approval: Optional[contract_pb2.Approval] = None,
@@ -178,6 +191,7 @@ class Flow(AbstractWorkflow):
             **kwargs,
         )
         self._config = config
+        self._stream = streaming
 
         self._flow_prompt_registry = InMemoryPromptRegistry(prompt_registry)
         if self._config.prompts:
@@ -224,7 +238,7 @@ class Flow(AbstractWorkflow):
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=f"Starting Flow: {goal}",
-            message_id=f"tool-{str(uuid4())}",
+            message_id=f"tool-{uuid4()!s}",
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=ToolStatus.SUCCESS,
             correlation_id=None,
@@ -276,11 +290,76 @@ class Flow(AbstractWorkflow):
                 ),
                 **gitlab_service_context,
             },
+            agent_context_limits={},
         )
 
     @override
     def _support_namespace_level_workflow(self) -> bool:
         return True
+
+    def _resolve_envelope_content(
+        self,
+        category: str,
+        envelopes: list[AdditionalContext],
+        schema: Any,
+        constraint: Optional[str],
+    ) -> Any:
+        # Flows without an explicit constraint implicitly require ^1.0.0: they
+        # were authored against the 1.x series and must not silently receive a
+        # breaking v2.x envelope.
+        if constraint is None:
+            self.log.warning(
+                "No version_constraint declared for envelope category; falling back to default constraint",
+                category=category,
+                default_constraint=_ENVELOPE_DEFAULT_CONSTRAINT,
+            )
+        effective_constraint = (
+            constraint if constraint is not None else _ENVELOPE_DEFAULT_CONSTRAINT
+        )
+        try:
+            versioned: list[tuple[str, Any]] = []
+            for item in envelopes:
+                if not item.content:
+                    raise ValueError(
+                        f"content must be specified for input '{category}'."
+                    )
+                obj = json.loads(item.content)
+                raw = (item.metadata or {}).get("version")
+                if not isinstance(raw, str):
+                    self.log.warning(
+                        "Envelope payload does not declare a version; falling back to default version",
+                        category=category,
+                        default_version=_ENVELOPE_DEFAULT_VERSION,
+                    )
+                versioned.append(
+                    (raw if isinstance(raw, str) else _ENVELOPE_DEFAULT_VERSION, obj)
+                )
+
+            versions = [v for v, _ in versioned]
+            try:
+                best = resolve_version(versions, effective_constraint)
+            except ValueError:
+                detail = (
+                    f"No envelope for '{category}' satisfies constraint "
+                    f"'{effective_constraint}'. Available versions: {versions}."
+                )
+                raise NotifiableAgentException(
+                    "Your GitLab instance sent additional context in an incompatible "
+                    "version. Please upgrade your GitLab instance to a compatible version "
+                    "and try again.",
+                    internal_detail=detail,
+                ) from EnvelopeVersionMismatchException(detail)
+
+            # resolve_version returns a string from its input list, so this
+            # lookup is always safe. On duplicate version strings, last wins.
+            content = dict(versioned)[best]
+
+            jsonschema.validate(content, schema)
+            return content
+        except jsonschema.ValidationError as e:
+            raise ValueError(f"input '{category}' does not match specified schema: {e}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in input item, {e}")
 
     def _process_additional_context(
         self, additional_context: list[AdditionalContext]
@@ -288,6 +367,10 @@ class Flow(AbstractWorkflow):
         processed_additional_context = {}
 
         jsonschemas_by_category = self._config.input_json_schemas_by_category()
+        version_constraints_by_category = self._config.version_constraints_by_category()
+
+        # Group non-executor envelopes by category, handling executor context inline.
+        grouped: dict[str, list[AdditionalContext]] = {}
         for item in additional_context:
             if (
                 item.category in _EXECUTOR_CONTEXT
@@ -306,30 +389,40 @@ class Flow(AbstractWorkflow):
                     additional_context_category=item.category,
                 )
                 continue
-            try:
-                schema = jsonschemas_by_category.get(item.category)
-                if not item.content:
-                    raise ValueError(
-                        f"content must be specified for input '{item.category}'."
-                    )
 
-                content_object = json.loads(item.content)
-                jsonschema.validate(content_object, schema)
-                processed_additional_context[item.category] = content_object
-            except jsonschema.ValidationError as e:
-                raise ValueError(
-                    f"input '{item.category}' does not match specified schema: {e}"
-                )
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in input item, {e}")
+            grouped.setdefault(item.category, []).append(item)
+
+        for category, envelopes in grouped.items():
+            schema = jsonschemas_by_category.get(category)
+            constraint = version_constraints_by_category.get(category)
+            processed_additional_context[category] = self._resolve_envelope_content(
+                category, envelopes, schema, constraint
+            )
 
         return processed_additional_context
 
     def _resume_command(self, goal: str) -> Command:
+        # `context.inputs` is populated once, at workflow START
+        # (`get_workflow_state`). Re-process the additional context sent with
+        # this turn so per-turn inputs (e.g. `plan_context.plan_enabled` from the
+        # Duo CLI plan/build picker) refresh the flow state on resume. `context`
+        # uses a deep-merge reducer, so this updates only the inputs that changed
+        # and leaves the rest of the context intact.
+        state_update: dict[str, Any] = {}
+        refreshed_inputs = self._process_additional_context(
+            self._additional_context or []
+        )
+        if refreshed_inputs:
+            state_update["context"] = {"inputs": refreshed_inputs}
+
         event = FlowEvent(event_type=FlowEventType.RESPONSE, message=goal)
         if not self._approval or self._approval.WhichOneof("user_decision") is None:
-            # Handle case where approval is None
-            return Command(resume=event)
+            # No approval — forward the goal as a RESPONSE event to the graph.
+            # If the goal is empty (e.g. a websocket-drop auto-retry), the
+            # recipient component (e.g. FetchNode) is responsible for detecting
+            # the bad input and raising InvalidRequestException so the workflow
+            # state is preserved and the caller receives INVALID_ARGUMENT.
+            return Command(resume=event, update=state_update or None)
 
         ui_chat_log_update: list[UiChatLog] = []
 
@@ -350,7 +443,7 @@ class Flow(AbstractWorkflow):
                             message_type=MessageTypeEnum.USER,
                             message_sub_type=None,
                             content=message,
-                            message_id=f"user-{str(uuid4())}",
+                            message_id=f"user-{uuid4()!s}",
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             status=ToolStatus.SUCCESS,
                             correlation_id=None,
@@ -369,8 +462,8 @@ class Flow(AbstractWorkflow):
                 )
 
         if ui_chat_log_update:
-            return Command(resume=event, update={"ui_chat_log": ui_chat_log_update})
-        return Command(resume=event)
+            state_update["ui_chat_log"] = ui_chat_log_update
+        return Command(resume=event, update=state_update or None)
 
     @override
     async def get_graph_input(
@@ -560,9 +653,13 @@ class Flow(AbstractWorkflow):
                 ].items():
                     to_components[route_key] = components[comp_name]
 
+                # A condition input is either a plain state-path string or, like
+                # component inputs, a mapping ({from: ..., optional: true}) so a
+                # router can branch on a key that may be absent from the state.
+                # BaseRouter parses both forms via IOKey.parse_key.
                 input_field = router_config["condition"]["input"]
-                if not isinstance(input_field, str):
-                    raise ValueError("Router input must be a string.")
+                if not isinstance(input_field, (str, dict)):
+                    raise ValueError("Router input must be a string or a mapping.")
 
                 router = Router(
                     from_component=from_comp,
@@ -623,6 +720,21 @@ class Flow(AbstractWorkflow):
                         tool_options[tool_name] = options
 
         return tools_registry.toolset(tool_names, tool_options=tool_options)
+
+    @override
+    async def _handle_compile_and_run_exception(
+        self,
+        e: BaseException,
+        compiled_graph: Any,
+        graph_config: Any,
+    ) -> NoReturn:
+        if isinstance(e, GraphRecursionError):
+            e = NotifiableAgentException(
+                "The workflow reached its maximum step limit and could not complete. "
+                "Please try again with a more focused goal, or break the task into smaller steps.",
+                internal_detail=f"GraphRecursionError: recursion limit of {self._recursion_limit()} steps exceeded.",
+            )
+        await super()._handle_compile_and_run_exception(e, compiled_graph, graph_config)
 
     @override
     async def _handle_workflow_failure(

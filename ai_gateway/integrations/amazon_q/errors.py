@@ -8,8 +8,8 @@ from fastapi import HTTPException, status
 from ai_gateway.tracking import log_exception
 
 __all__ = [
-    "AccessDeniedExceptionReason",
     "AWSException",
+    "AccessDeniedExceptionReason",
     "raise_aws_errors",
 ]
 

@@ -1,10 +1,12 @@
-from typing import Annotated, Any, ClassVar, Optional, Self, TypedDict
+from typing import Annotated, Any, ClassVar, Optional, Self, TypedDict, override
 
 from dependency_injector.wiring import inject
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -100,8 +102,7 @@ def extract_subagent_names(subagents: list[SubagentConfig]) -> list[str]:
     for entry in subagents:
         if not isinstance(entry, dict) or "name" not in entry:
             raise ValueError(
-                f"Each subagents entry must be a dict with a 'name' key, "
-                f"got: {entry!r}"
+                f"Each subagents entry must be a dict with a 'name' key, got: {entry!r}"
             )
         name = entry["name"]
         if name in names:
@@ -135,7 +136,7 @@ class _SubagentRouter:
 
     def route(self, _state: FlowState) -> Annotated[str, "Next node"]:
         """Always route to the subagent_return node."""
-        return f"{self._supervisor_name}#subagent_return"
+        return f"{self._supervisor_name}{NODE_ROLE_SEPARATOR}subagent_return"
 
 
 @inject
@@ -192,6 +193,26 @@ class SupervisorAgentComponent(AgentComponentBase):
             "final_answer",
         ],
     )
+    _subsession_tool_approval_decision_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[
+            IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE,
+            IOKeyTemplate.COMPONENT_NAME_TEMPLATE,
+            IOKeyTemplate.SUBSESSION_ID_TEMPLATE,
+            "tool_approval_decision",
+        ],
+        optional=True,
+    )
+    _subsession_cycle_count_key: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=[
+            IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE,
+            IOKeyTemplate.COMPONENT_NAME_TEMPLATE,
+            IOKeyTemplate.SUBSESSION_ID_TEMPLATE,
+            "cycle_count",
+        ],
+        optional=True,
+    )
 
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         # Supervisor's own conversation history and final answer
@@ -214,6 +235,20 @@ class SupervisorAgentComponent(AgentComponentBase):
 
     ui_log_events: list[UILogEventsSupervisor] = Field(default_factory=list)
     ui_role_as: str = "agent"
+
+    @override
+    def _agent_node_invoke_config(self) -> RunnableConfig:
+        """Return TAG_NOSTREAM config unless both LLM output event types are declared.
+
+        Both ON_AGENT_FINAL_ANSWER and ON_AGENT_REASONING must be present because AgentNode tokens may become either —
+        they are indistinguishable at chunk time.
+        """
+        if (
+            UILogEventsSupervisor.ON_AGENT_FINAL_ANSWER in self.ui_log_events
+            and UILogEventsSupervisor.ON_AGENT_REASONING in self.ui_log_events
+        ):
+            return self.STREAMING_ENABLED_CONFIG
+        return self.STREAMING_DISABLED_CONFIG
 
     subagent_components: dict[str, Any] = Field(
         description="Resolved subagent component instances, injected by the flow builder at construction time.",
@@ -363,10 +398,10 @@ class SupervisorAgentComponent(AgentComponentBase):
         )
 
         if active_subagent_name and active_subagent_name in self.managed_agent_names:
-            return f"{active_subagent_name}#agent"
+            return f"{active_subagent_name}{NODE_ROLE_SEPARATOR}agent"
 
         # Delegation failed — route back to supervisor so LLM can react
-        return f"{self.name}#agent"
+        return f"{self.name}{NODE_ROLE_SEPARATOR}agent"
 
     def _agent_node_router(self, state: FlowState) -> str:
         """Router for the supervisor's agent node.
@@ -396,24 +431,27 @@ class SupervisorAgentComponent(AgentComponentBase):
                     f"Schema mode requires a tool call but got a text-only response "
                     f"for component {self.name}"
                 )
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         # Check for delegate_task
         delegate_title: str = self._delegate_task_cls.tool_title  # type: ignore[attr-defined]
         if any(
             tool_call["name"] == delegate_title for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#delegation"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}delegation"
 
         # Check for schema tool (final response)
         if self._response_schema is not None and any(
             tool_call["name"] == self._response_schema.tool_title
             for tool_call in last_message.tool_calls
         ):
-            return f"{self.name}#final_response"
+            return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
-        # Regular tools
-        return f"{self.name}#tools"
+        # Regular tools — optionally gated by tool approval
+        if self.require_tool_approval:
+            return f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request"
+
+        return f"{self.name}{NODE_ROLE_SEPARATOR}tools"
 
     def _subsession_history_key_factory(
         self, subagent_name: str, subsession_id: int
@@ -510,6 +548,56 @@ class SupervisorAgentComponent(AgentComponentBase):
             ),
         )
 
+    def _subagent_tool_approval_decision_key_for(
+        self, subagent_name: str
+    ) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` that resolves the tool_approval_decision IOKey for a specific subagent.
+
+        The returned ``RuntimeIOKey`` reads the active subsession ID from state at runtime
+        and builds the IOKey for the given subagent_name.  Passed into
+        ``AgentComponent.bind_to_supervisor`` so the subagent's tool approval nodes
+        store and read the decision under a subsession-scoped key, preventing race
+        conditions when the same subagent runs in multiple subsessions.
+
+        Args:
+            subagent_name: The name of the subagent this key is scoped to.
+        """
+        return RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda state: self._subsession_tool_approval_decision_key.to_iokey(
+                {
+                    IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
+                    IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,
+                    IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(
+                        self._resolved_active_subsession_key.value_from_state(state)
+                    ),
+                }
+            ),
+        )
+
+    def _subagent_cycle_count_key_for(self, subagent_name: str) -> RuntimeIOKey:
+        """Return a ``RuntimeIOKey`` that resolves the cycle_count IOKey for a specific subagent.
+
+        Reads the active subsession ID from state at runtime so parallel subsessions of the same
+        subagent each maintain an independent cycle counter, preventing one runaway subsession
+        from exhausting the cycle budget for its siblings.
+
+        Args:
+            subagent_name: The name of the subagent this key is scoped to.
+        """
+        return RuntimeIOKey(
+            alias="cycle_count",
+            factory=lambda state: self._subsession_cycle_count_key.to_iokey(
+                {
+                    IOKeyTemplate.SUPERVISOR_NAME_TEMPLATE: self.name,
+                    IOKeyTemplate.COMPONENT_NAME_TEMPLATE: subagent_name,
+                    IOKeyTemplate.SUBSESSION_ID_TEMPLATE: str(
+                        self._resolved_active_subsession_key.value_from_state(state)
+                    ),
+                }
+            ),
+        )
+
     @property
     def _active_subagent_final_answer_key(self) -> RuntimeIOKey:
         """Return a ``RuntimeIOKey`` that resolves the final_answer IOKey for the currently active subagent.
@@ -573,6 +661,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             flow_id=self.flow_id,
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
+            invoke_config=self._agent_node_invoke_config(),
             compactor=(
                 create_conversation_compactor(
                     config=(
@@ -596,6 +685,9 @@ class SupervisorAgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            max_cycles=self.max_cycles,
+            cycle_count_key=self._cycle_count_key,
+            max_wrap_up_retries=self.max_wrap_up_retries,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
@@ -603,7 +695,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
         )
         node_tools = ToolNode(
-            name=f"{self.name}#tools",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}tools",
             conversation_history_key=supervisor_history_key,
             toolset=self.toolset,
             ui_history=UIHistory(
@@ -617,7 +709,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             session_id_key=NoneIOKey(alias="session_id"),
         )
         node_final_response = FinalResponseNode(
-            name=f"{self.name}#final_response",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
             conversation_history_key=supervisor_history_key,
             output_key=RuntimeIOKey(
                 alias="final_answer", factory=lambda _: static_output_key
@@ -638,7 +730,7 @@ class SupervisorAgentComponent(AgentComponentBase):
 
         # --- Delegation node ---
         node_delegation = DelegationNode(
-            name=f"{self.name}#delegation",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}delegation",
             max_delegations=self.max_delegations,
             delegate_task_cls=self._delegate_task_cls,
             delegation_count_key=self._resolved_delegation_count_key,
@@ -649,7 +741,10 @@ class SupervisorAgentComponent(AgentComponentBase):
             subsession_history_key_factory=self._subsession_history_key_factory,
             subsession_goal_key_factory=self._subsession_goal_key_factory,
             ui_history=UIHistory(
-                events=[UILogEventsSupervisor.ON_DELEGATION],
+                events=[
+                    UILogEventsSupervisor.ON_DELEGATION,
+                    UILogEventsSupervisor.ON_DELEGATION_ERROR,
+                ],
                 writer_class=default_ui_log_writer_class(
                     events_class=UILogEventsSupervisor,
                     ui_role_as=MessageTypeEnum.TOOL.value,
@@ -660,7 +755,7 @@ class SupervisorAgentComponent(AgentComponentBase):
 
         # --- Subagent return node ---
         node_subagent_return = SubagentReturnNode(
-            name=f"{self.name}#subagent_return",
+            name=f"{self.name}{NODE_ROLE_SEPARATOR}subagent_return",
             delegate_task_cls=self._delegate_task_cls,
             active_subsession_key=self._resolved_active_subsession_key,
             active_subagent_name_key=self._resolved_active_subagent_name_key,
@@ -682,6 +777,12 @@ class SupervisorAgentComponent(AgentComponentBase):
         graph.add_node(node_final_response.name, node_final_response.run)
         graph.add_node(node_delegation.name, node_delegation.run)
         graph.add_node(node_subagent_return.name, node_subagent_return.run)
+
+        self._attach_tool_approval_nodes(
+            graph,
+            conversation_history_key=supervisor_history_key,
+            ui_log_events=agent_events,
+        )
 
         # --- Supervisor edges ---
         # 3-way conditional routing from agent node
@@ -717,5 +818,9 @@ class SupervisorAgentComponent(AgentComponentBase):
                 output_key=self._subagent_final_answer_key_for(agent_name),
                 goal_key=self._subsession_goal_key_for(agent_name),
                 session_id_key=self._resolved_active_subsession_key,
+                tool_approval_decision_key=self._subagent_tool_approval_decision_key_for(
+                    agent_name
+                ),
+                cycle_count_key=self._subagent_cycle_count_key_for(agent_name),
             )
             subagent.attach(graph, subagent_router)

@@ -5,7 +5,7 @@ import structlog
 
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import AuditEvent
-from lib.context import ip_address
+from duo_workflow_service.monitoring import duo_workflow_metrics
 
 logger = structlog.stdlib.get_logger("audit_event_collector")
 
@@ -34,16 +34,17 @@ class AuditEventCollector:
     def capture(self, event: AuditEvent) -> None:
         self._sequence += 1
         event.sequence = self._sequence
-        if event.ip_address is None:
-            if (ip := ip_address.get()) is not None:
-                event.ip_address = ip
         self._buffer.append(event)
+        duo_workflow_metrics.count_audit_events_captured(
+            event_type=event.event_type.value
+        )
         if len(self._buffer) >= self._buffer_size:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self.flush())
             except RuntimeError:
                 logger.warning("No running event loop, skipping auto-flush")
+                duo_workflow_metrics.count_audit_events_auto_flush_skipped()
 
     async def flush(self, is_final: bool = False) -> None:
         async with self._lock:

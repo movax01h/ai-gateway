@@ -42,50 +42,44 @@ class TestCompactionConfig:
 class TestCompactionResult:
     """Test suite for CompactionResult dataclass."""
 
-    def test_build_ui_chat_log_when_compacted(self):
-        """Should return UiChatLog when was_compacted is True."""
-        result = CompactionResult(messages=[], was_compacted=True)
-        ui_log = result.build_ui_chat_log()
-        assert ui_log is not None
-        assert "summarized" in ui_log["content"]
-
-    def test_build_ui_chat_log_when_not_compacted(self):
-        """Should return None when was_compacted is False."""
-        result = CompactionResult(messages=[], was_compacted=False)
-        assert result.build_ui_chat_log() is None
-
     def test_default_values(self):
         """Should have expected default values for optional fields."""
-        result = CompactionResult(messages=[], was_compacted=False)
+        result = CompactionResult(messages=[], was_modified=False)
         assert result.tokens_before == 0
         assert result.tokens_after == 0
         assert result.messages_summarized == 0
+        assert result.compaction_input_tokens == 0
+        assert result.compaction_output_tokens == 0
         assert result.error is None
 
     def test_with_messages(self):
         """Should store messages correctly."""
         messages = [HumanMessage(content="test")]
-        result = CompactionResult(messages=messages, was_compacted=True)
+        result = CompactionResult(messages=messages, was_modified=True)
         assert result.messages == messages
 
     def test_with_error(self):
         """Should store error correctly."""
         error = Exception("test error")
-        result = CompactionResult(messages=[], was_compacted=False, error=error)
+        result = CompactionResult(messages=[], was_modified=False, error=error)
         assert result.error is error
 
     def test_with_token_counts(self):
         """Should store token counts correctly."""
         result = CompactionResult(
             messages=[],
-            was_compacted=True,
+            was_modified=True,
             tokens_before=1000,
             tokens_after=500,
             messages_summarized=10,
+            compaction_input_tokens=800,
+            compaction_output_tokens=150,
         )
         assert result.tokens_before == 1000
         assert result.tokens_after == 500
         assert result.messages_summarized == 10
+        assert result.compaction_input_tokens == 800
+        assert result.compaction_output_tokens == 150
 
 
 class TestMessageSlices:

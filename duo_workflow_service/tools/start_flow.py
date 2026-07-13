@@ -5,8 +5,9 @@ from urllib.parse import unquote
 import structlog
 from langchain_core.tools import ToolException
 from packaging.version import Version
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model, model_validator
 
+from duo_workflow_service.gitlab.gitlab_api import WorkflowFeatures
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
@@ -17,7 +18,94 @@ FLOW_IDENTIFIER_MAP = {
     "developer": "developer/v1",
     "fix_pipeline": "fix_pipeline/v1",
     "code_review": "code_review/v1",
+    "sast_fp_detection": "sast_fp_detection/v1",
+    "resolve_sast_vulnerability": "resolve_sast_vulnerability/v1",
+    "secrets_fp_detection": "secrets_fp_detection/v1",
 }
+
+_DESCRIPTION_PREFIX = (
+    "Delegate a task to a specialist GitLab agent that works "
+    "asynchronously over multiple steps. Always use this tool when the "
+    "user's request matches one of the agents below — specialist "
+    "agents are purpose-built for their domain and deliver better "
+    "outcomes than inline handling.\n"
+    "\n"
+    "Available agents:\n"
+)
+
+_FLOW_AGENT_DESCRIPTIONS = {
+    "developer": (
+        "- developer: General-purpose agent for tasks that involve writing or "
+        "changing code, resolving an issue, or implementing changes described "
+        "in chat. The `goal` is the agent's only briefing — it does not see this "
+        "conversation, so include the user's intent, any relevant GitLab URLs, "
+        "and context from chat the agent would otherwise miss.\n"
+    ),
+    "fix_pipeline": "- fix_pipeline: fixing, debugging, or investigating a failing pipeline or broken "
+    "build (e.g. 'fix this pipeline', 'the build is broken').\n",
+    "code_review": "- code_review: read-only review and assessment of the changes in a merge request — "
+    "not for implementing feedback or making changes "
+    '(e.g. "review this MR", "can you review my merge request?").\n',
+    "sast_fp_detection": "- sast_fp_detection: analyse a SAST vulnerability for false positives. Requires a "
+    "vulnerability_id.\n",
+    "resolve_sast_vulnerability": "- resolve_sast_vulnerability: resolve a SAST vulnerability by generating a code fix. Requires a "
+    "vulnerability_id.\n",
+    "secrets_fp_detection": "- secrets_fp_detection: analyse a secret detection vulnerability for false positives. "
+    "Requires a vulnerability_id.\n",
+}
+
+_DESCRIPTION_SUFFIX = (
+    "\n\nReturns a session URL the user can follow to track progress. The user "
+    "is prompted to approve the handoff before the agent starts."
+)
+
+
+def enabled_flow_identifiers(
+    features: Optional[WorkflowFeatures],
+) -> Optional[list[str]]:
+    """Enabled foundational flow identifiers for a workflow."""
+    foundational_flows = (features or {}).get("foundational_flows")
+    if foundational_flows is None:
+        return None
+    if not foundational_flows.get("enabled", True):
+        return []
+    return foundational_flows.get("enabled_flows")
+
+
+def enabled_flow_names(flow_identifiers: Optional[list[str]]) -> list[str]:
+    """Supported flow names enabled for the project."""
+    if flow_identifiers is None:
+        return list(FLOW_IDENTIFIER_MAP)
+    return [
+        name
+        for name, identifier in FLOW_IDENTIFIER_MAP.items()
+        if identifier in flow_identifiers
+    ]
+
+
+def _build_description(enabled_names: list[str]) -> str:
+    agents = "\n".join(
+        _FLOW_AGENT_DESCRIPTIONS[name]
+        for name in FLOW_IDENTIFIER_MAP
+        if name in enabled_names
+    )
+    return _DESCRIPTION_PREFIX + agents + _DESCRIPTION_SUFFIX
+
+
+class StartFlowError(ToolException):
+    """Raised when starting a flow fails.
+
+    ``response`` is read by ToolsExecutor._handle_tool_error to surface the
+    failure reason in the UI chat log, not just the LLM-facing message.
+
+    Args:
+        message: Human-readable description of the failure, forwarded to the LLM.
+        response: Optional user-facing reason surfaced in the UI chat log. Defaults to None.
+    """
+
+    def __init__(self, message: str, response: Optional[str] = None):
+        super().__init__(message)
+        self.response = response
 
 
 class StartDeveloperFlowInput(BaseModel):
@@ -70,6 +158,35 @@ class StartCodeReviewFlowInput(BaseModel):
     )
 
 
+class StartSastFpDetectionFlowInput(BaseModel):
+    """Input for the SAST False Positive Detection flow."""
+
+    name: Literal["sast_fp_detection"]
+    vulnerability_id: str = Field(
+        description="The ID of the SAST vulnerability to analyse for false positives.",
+    )
+
+
+class StartResolveSastVulnerabilityFlowInput(BaseModel):
+    """Input for the SAST Vulnerability Resolution flow."""
+
+    name: Literal["resolve_sast_vulnerability"]
+    vulnerability_id: str = Field(
+        description="The ID of the SAST vulnerability to resolve.",
+    )
+
+
+class StartSecretsFpDetectionFlowInput(BaseModel):
+    """Input for the Secret Detection False Positive Detection flow."""
+
+    name: Literal["secrets_fp_detection"]
+    vulnerability_id: str = Field(
+        description=(
+            "The ID of the secret detection vulnerability to analyse for false positives."
+        ),
+    )
+
+
 class StartFlowInput(BaseModel):
     """Input schema for the start_flow tool."""
 
@@ -78,31 +195,61 @@ class StartFlowInput(BaseModel):
             StartDeveloperFlowInput,
             StartFixPipelineFlowInput,
             StartCodeReviewFlowInput,
+            StartSastFpDetectionFlowInput,
+            StartResolveSastVulnerabilityFlowInput,
+            StartSecretsFpDetectionFlowInput,
         ],
         Field(discriminator="name"),
     ]
 
 
+_FLOW_INPUT_SCHEMAS: dict[str, Type[BaseModel]] = {
+    "developer": StartDeveloperFlowInput,
+    "fix_pipeline": StartFixPipelineFlowInput,
+    "code_review": StartCodeReviewFlowInput,
+    "sast_fp_detection": StartSastFpDetectionFlowInput,
+    "resolve_sast_vulnerability": StartResolveSastVulnerabilityFlowInput,
+    "secrets_fp_detection": StartSecretsFpDetectionFlowInput,
+}
+
+
+def _build_args_schema(enabled_names: list[str]) -> Type[BaseModel]:
+    """Input schema exposing only the enabled flows."""
+    enabled_flow_inputs = [
+        _FLOW_INPUT_SCHEMAS[name]
+        for name in FLOW_IDENTIFIER_MAP
+        if name in enabled_names
+    ]
+    # Full schema when all flows are enabled; the empty case is unreachable
+    # since start_flow is only registered when a flow is available.
+    if not enabled_flow_inputs or len(enabled_flow_inputs) == len(_FLOW_INPUT_SCHEMAS):
+        return StartFlowInput
+    if len(enabled_flow_inputs) == 1:
+        flow_annotation: Any = enabled_flow_inputs[0]
+    else:
+        flow_annotation = Annotated[
+            Union[tuple(enabled_flow_inputs)], Field(discriminator="name")
+        ]
+    return create_model("StartFlowInput", flow=(flow_annotation, ...))
+
+
 class StartFlow(DuoBaseTool):
     name: str = "start_flow"
     tool_version: ClassVar[Version] = Version("0.0.1")
-    description: str = (
-        "Hand off a task to a specialist agent. These agents work asynchronously "
-        "over multiple steps and are purpose-built for their task — prefer "
-        "delegating to them over attempting the work yourself whenever the user's "
-        "request matches one of the agents below.\n\n"
-        "Available agents:\n"
-        "- developer: General-purpose agent for tasks that involve writing or "
-        "changing code, working from an issue, or implementing changes described "
-        "in chat. The `goal` is the agent's only briefing — it does not see this "
-        "conversation, so include the user's intent, any relevant GitLab URLs, "
-        "and context from chat the agent would otherwise miss.\n"
-        "- fix_pipeline: Diagnoses and fixes failing CI/CD pipelines.\n"
-        "- code_review: Reviews the changes in a merge request.\n\n"
-        "Returns a session URL the user can follow to track progress. The user "
-        "is prompted to approve the handoff before the agent starts."
-    )
+    # Lists all agents by default; narrowed to enabled flows in the validator below.
+    description: str = _build_description(list(FLOW_IDENTIFIER_MAP))
     args_schema: Type[BaseModel] = StartFlowInput
+
+    def _enabled_flow_identifiers(self) -> Optional[list[str]]:
+        return enabled_flow_identifiers((self.metadata or {}).get("features"))
+
+    @model_validator(mode="after")
+    def _configure_enabled_flow_schema(self) -> "StartFlow":
+        flow_identifiers = self._enabled_flow_identifiers()
+        enabled_names = enabled_flow_names(flow_identifiers)
+        self.description = _build_description(enabled_names)
+        self.args_schema = _build_args_schema(enabled_names)
+        return self
 
     async def _execute(
         self,
@@ -110,6 +257,9 @@ class StartFlow(DuoBaseTool):
             StartDeveloperFlowInput
             | StartFixPipelineFlowInput
             | StartCodeReviewFlowInput
+            | StartSastFpDetectionFlowInput
+            | StartResolveSastVulnerabilityFlowInput
+            | StartSecretsFpDetectionFlowInput
         ),
         **_kwargs: Any,
     ) -> str:
@@ -122,6 +272,16 @@ class StartFlow(DuoBaseTool):
         backend_flow_id = FLOW_IDENTIFIER_MAP.get(flow_name)
         if not backend_flow_id:
             raise ToolException(f"Unknown flow: {flow_name!r}")
+
+        flow_identifiers = self._enabled_flow_identifiers()
+        if flow_identifiers is not None and backend_flow_id not in flow_identifiers:
+            return json.dumps(
+                {
+                    "status": "unavailable",
+                    "flow_name": flow_name,
+                    "message": f"The {flow_name} flow is not enabled for this project.",
+                }
+            )
 
         effective_goal, project_id, linkable_ids = (
             self._resolve_goal_project_and_linkable(flow_name, flow_data)
@@ -168,9 +328,16 @@ class StartFlow(DuoBaseTool):
                 body=response.body,
                 workflow_definition=flow_name,
             )
-            raise ToolException(
-                f"Failed to start flow: HTTP {response.status_code}: "
-                f"{str(response.body)[:300]}"
+            if response.status_code == 403:
+                detail = (
+                    "This flow isn't available, or you don't have sufficient "
+                    "permissions to start it."
+                )
+            else:
+                detail = "An internal error occurred while starting the flow."
+            raise StartFlowError(
+                f"Failed to start flow: HTTP {response.status_code}: {detail}",
+                response=detail,
             )
 
         body = response.body
@@ -201,6 +368,10 @@ class StartFlow(DuoBaseTool):
         For flows that accept a URL (fix_pipeline, code_review), the project
         is extracted from the URL so the workflow runs against the correct
         project — even when it differs from the current chat context.
+        For security flows (sast_fp_detection, resolve_sast_vulnerability,
+        secrets_fp_detection), the project falls back to ``self.project``
+        when available, since the vulnerability ID already encodes the
+        resource identity.
 
         Args:
             flow_name: The flow identifier (e.g. ``"developer"``).
@@ -275,6 +446,14 @@ class StartFlow(DuoBaseTool):
             )
             linkable_ids["merge_request_id"] = mr_iid
             return str(mr_iid), project_path, linkable_ids
+
+        if flow_name in (
+            "sast_fp_detection",
+            "resolve_sast_vulnerability",
+            "secrets_fp_detection",
+        ):
+            project_id = self.project.get("id") if self.project else None
+            return flow_data["vulnerability_id"], project_id, linkable_ids
 
         raise ToolException(f"Unknown flow: {flow_name!r}")
 
@@ -362,6 +541,12 @@ class StartFlow(DuoBaseTool):
             detail = str(flow_dict.get("pipeline_url", ""))
         elif flow_name == "code_review":
             detail = str(flow_dict.get("merge_request_url", ""))
+        elif flow_name in (
+            "sast_fp_detection",
+            "resolve_sast_vulnerability",
+            "secrets_fp_detection",
+        ):
+            detail = str(flow_dict.get("vulnerability_id", ""))
         else:
             detail = str(flow_dict)
 

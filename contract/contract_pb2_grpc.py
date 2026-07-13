@@ -26,7 +26,11 @@ if _version_not_supported:
 
 
 class DuoWorkflowStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """DuoWorkflow is the gRPC service that orchestrates AI-powered workflow execution
+    for GitLab Duo. It serves all GitLab deployment types (SaaS, self-managed, dedicated,
+    self-hosted) and provides RPCs for running workflows, managing authentication,
+    discovering available tools and flows, and self-hosted billing tracking.
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -43,6 +47,11 @@ class DuoWorkflowStub(object):
                 '/DuoWorkflow/GenerateToken',
                 request_serializer=contract_dot_contract__pb2.GenerateTokenRequest.SerializeToString,
                 response_deserializer=contract_dot_contract__pb2.GenerateTokenResponse.FromString,
+                _registered_method=True)
+        self.ListCapabilities = channel.unary_unary(
+                '/DuoWorkflow/ListCapabilities',
+                request_serializer=contract_dot_contract__pb2.ListCapabilitiesRequest.SerializeToString,
+                response_deserializer=contract_dot_contract__pb2.ListCapabilitiesResponse.FromString,
                 _registered_method=True)
         self.ListTools = channel.unary_unary(
                 '/DuoWorkflow/ListTools',
@@ -67,40 +76,61 @@ class DuoWorkflowStub(object):
 
 
 class DuoWorkflowServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """DuoWorkflow is the gRPC service that orchestrates AI-powered workflow execution
+    for GitLab Duo. It serves all GitLab deployment types (SaaS, self-managed, dedicated,
+    self-hosted) and provides RPCs for running workflows, managing authentication,
+    discovering available tools and flows, and self-hosted billing tracking.
+    """
 
     def ExecuteWorkflow(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """ExecuteWorkflow starts a bidirectional streaming session for running a Duo Workflow.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GenerateToken(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """GenerateToken issues a short-lived authentication token for a workflow session.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListCapabilities(self, request, context):
+        """ListCapabilities returns the capabilities advertised by the server for capability negotiation.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ListTools(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """ListTools returns the set of tools available to the workflow executor.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ListFlows(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """ListFlows returns the set of flow configurations available for execution.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def TrackSelfHostedExecuteWorkflow(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """TrackSelfHostedExecuteWorkflow is the billing bridge for self-hosted Duo deployments using
+        cloud (online) licensing. Workhorse opens this bidirectional stream to Cloud DWS for the
+        lifetime of a workflow. Cloud DWS performs an upfront quota check on stream open. For each
+        LLM call, the self-hosted DWS sends a TrackSelfHostedClientEvent; Cloud DWS responds with a
+        TrackSelfHostedAction to allow or deny the call. LLM traffic never leaves customer infrastructure.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ValidateFlowConfig(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """ValidateFlowConfig validates a provided flow configuration against the registered schema.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -117,6 +147,11 @@ def add_DuoWorkflowServicer_to_server(servicer, server):
                     servicer.GenerateToken,
                     request_deserializer=contract_dot_contract__pb2.GenerateTokenRequest.FromString,
                     response_serializer=contract_dot_contract__pb2.GenerateTokenResponse.SerializeToString,
+            ),
+            'ListCapabilities': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListCapabilities,
+                    request_deserializer=contract_dot_contract__pb2.ListCapabilitiesRequest.FromString,
+                    response_serializer=contract_dot_contract__pb2.ListCapabilitiesResponse.SerializeToString,
             ),
             'ListTools': grpc.unary_unary_rpc_method_handler(
                     servicer.ListTools,
@@ -147,7 +182,11 @@ def add_DuoWorkflowServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class DuoWorkflow(object):
-    """Missing associated documentation comment in .proto file."""
+    """DuoWorkflow is the gRPC service that orchestrates AI-powered workflow execution
+    for GitLab Duo. It serves all GitLab deployment types (SaaS, self-managed, dedicated,
+    self-hosted) and provides RPCs for running workflows, managing authentication,
+    discovering available tools and flows, and self-hosted billing tracking.
+    """
 
     @staticmethod
     def ExecuteWorkflow(request_iterator,
@@ -193,6 +232,33 @@ class DuoWorkflow(object):
             '/DuoWorkflow/GenerateToken',
             contract_dot_contract__pb2.GenerateTokenRequest.SerializeToString,
             contract_dot_contract__pb2.GenerateTokenResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListCapabilities(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/DuoWorkflow/ListCapabilities',
+            contract_dot_contract__pb2.ListCapabilitiesRequest.SerializeToString,
+            contract_dot_contract__pb2.ListCapabilitiesResponse.FromString,
             options,
             channel_credentials,
             insecure,

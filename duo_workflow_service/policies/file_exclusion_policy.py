@@ -51,14 +51,14 @@ class FileExclusionPolicy:
     @staticmethod
     def format_user_exclusion_message(blocked_files: List[str]) -> str:
         if blocked_files:
-            return f" - files excluded:\n{"\n".join(blocked_files)}"
+            return f" - files excluded:\n{'\n'.join(blocked_files)}"
 
         return ""
 
     @staticmethod
     def format_llm_exclusion_message(blocked_files: List[str]) -> str:
         if blocked_files:
-            return f"Files excluded due to policy, continue without files:\n{"\n".join(blocked_files)}"
+            return f"Files excluded due to policy, continue without files:\n{'\n'.join(blocked_files)}"
 
         return ""
 

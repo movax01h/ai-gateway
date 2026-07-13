@@ -79,7 +79,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -130,7 +130,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"}
@@ -139,7 +139,7 @@ class TestFlowConfig:
             },
             "system_config": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "timeout": {
@@ -192,7 +192,7 @@ class TestFlowConfig:
         expected = {
             "user_input": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema#",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "User message"},
@@ -283,6 +283,7 @@ class TestFlowConfig:
         assert config.flow.entry_point == "test_agent"
         assert config.environment == "local"
         assert config.version == "experimental"
+        assert config.resolved_version == "1.0.0"
 
     def test_flowconfig_from_yaml_config_file_not_found(self):
         """Test loading YAML config raises ValueError for missing flow."""
@@ -529,7 +530,9 @@ class TestListConfigs:
 
     def test_list_configs_empty_directory(self, tmp_path):
         """Test list_configs returns empty list when no config files exist."""
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
             assert not result
 
@@ -540,7 +543,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -570,7 +575,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(sample_config_data, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -608,7 +615,9 @@ class TestListConfigs:
             with open(config_file, "w") as f:
                 yaml.dump(config_data, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 3
@@ -648,7 +657,9 @@ class TestListConfigs:
         with open(invalid_config_file, "w") as f:
             f.write(invalid_content)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         # Should only return the valid config, skipping the invalid one
@@ -679,7 +690,9 @@ class TestListConfigs:
                 raise IOError("Mocked IO error")
             return original_open(file, *args, **kwargs)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             with patch("builtins.open", side_effect=mock_open):
                 result = list_configs()
 
@@ -709,7 +722,9 @@ class TestListConfigs:
             with open(file_path, "w") as f:
                 f.write(content)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         # Should only return the .yml file
@@ -747,7 +762,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(complex_config, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1
@@ -782,7 +799,9 @@ class TestListConfigs:
         with open(config_file, "w") as f:
             yaml.dump(minimal_config, f)
 
-        with (patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),):
+        with (
+            patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)),
+        ):
             result = list_configs()
 
         assert len(result) == 1

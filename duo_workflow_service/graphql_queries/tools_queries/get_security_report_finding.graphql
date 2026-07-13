@@ -1,0 +1,303 @@
+fragment Url on VulnerabilityDetailUrl {
+  type: __typename
+  name
+  href
+}
+
+fragment Diff on VulnerabilityDetailDiff {
+  type: __typename
+  name
+  before
+  after
+}
+
+fragment Code on VulnerabilityDetailCode {
+  type: __typename
+  name
+  value
+}
+
+fragment FileLocation on VulnerabilityDetailFileLocation {
+  type: __typename
+  name
+  fileName
+  lineStart
+  lineEnd
+}
+
+fragment ModuleLocation on VulnerabilityDetailModuleLocation {
+  type: __typename
+  name
+  moduleName
+  offset
+}
+
+fragment Commit on VulnerabilityDetailCommit {
+  type: __typename
+  name
+  value
+}
+
+fragment Text on VulnerabilityDetailText {
+  type: __typename
+  name
+  value
+}
+
+fragment Markdown on VulnerabilityDetailMarkdown {
+  type: __typename
+  name
+  value
+}
+
+fragment Boolean on VulnerabilityDetailBoolean {
+  type: __typename
+  name
+  value
+}
+
+fragment Int on VulnerabilityDetailInt {
+  type: __typename
+  name
+  value
+}
+
+fragment NonNestedReportTypes on VulnerabilityDetail {
+  ...FileLocation
+  ...Url
+  ...Diff
+  ...Code
+  ...Commit
+  ...Markdown
+  ...Text
+  ...Int
+  ...Boolean
+  ...ModuleLocation
+}
+
+fragment ListFields on VulnerabilityDetailList {
+  type: __typename
+  name
+}
+
+fragment List on VulnerabilityDetailList {
+  ...ListFields
+  items {
+    ...NonNestedReportTypes
+    ... on VulnerabilityDetailList {
+      ...ListFields
+      items {
+        ...NonNestedReportTypes
+      }
+    }
+  }
+}
+
+fragment TableFields on VulnerabilityDetailTable {
+  type: __typename
+  name
+  headers {
+    ...NonNestedReportTypes
+  }
+  rows {
+    row {
+      ...NonNestedReportTypes
+    }
+  }
+}
+
+fragment Table on VulnerabilityDetailTable {
+  type: __typename
+  name
+  headers {
+    ...NonNestedReportTypes
+  }
+  rows {
+    row {
+      ...NonNestedReportTypes
+      ...TableFields
+    }
+  }
+}
+
+fragment NamedList on VulnerabilityDetailNamedList {
+  type: __typename
+  name
+  items {
+    name
+    fieldName
+    value {
+      ...NonNestedReportTypes
+      ...Table
+      ... on VulnerabilityDetailList {
+        ...ListFields
+        items {
+          ...NonNestedReportTypes
+        }
+      }
+    }
+  }
+}
+
+query GetSecurityReportFinding($projectFullPath: ID!, $ref: String!, $findingUuid: String!) {
+  project(fullPath: $projectFullPath) {
+    id
+    webUrl
+    nameWithNamespace
+    pipelines(first: 1, ref: $ref) {
+      nodes {
+        id
+        iid
+        sha
+        ref
+        status
+        createdAt
+        securityReportFinding(uuid: $findingUuid) {
+          uuid
+          title
+          description
+          descriptionHtml
+          state
+          severity
+          solution
+          solutionHtml
+          reportType
+          falsePositive
+          dismissalReason
+          aiResolutionEnabled
+          aiResolutionAvailable
+          remediations {
+            diff
+            summary
+          }
+          scanner {
+            id
+            name
+          }
+          assets {
+            name
+            url
+          }
+          evidence {
+            summary
+            request {
+              body
+              headers {
+                name
+                value
+              }
+              method
+              url
+            }
+            response {
+              body
+              reasonPhrase
+              statusCode
+              headers {
+                name
+                value
+              }
+            }
+            supportingMessages {
+              name
+              response {
+                body
+                reasonPhrase
+                statusCode
+                headers {
+                  name
+                  value
+                }
+              }
+            }
+            source {
+              name
+            }
+          }
+          location {
+            ... on VulnerabilityLocationSast {
+              startLine
+              endLine
+              file
+              blobPath
+            }
+            ... on VulnerabilityLocationSecretDetection {
+              startLine
+              endLine
+              file
+              blobPath
+            }
+            ... on VulnerabilityLocationDependencyScanning {
+              blobPath
+              file
+            }
+            ... on VulnerabilityLocationContainerScanning {
+              image
+              operatingSystem
+            }
+            ... on VulnerabilityLocationCoverageFuzzing {
+              startLine
+              endLine
+              file
+              blobPath
+              crashAddress
+              crashType
+              stacktraceSnippet
+              vulnerableMethod
+              vulnerableClass
+            }
+            ... on VulnerabilityLocationDast {
+              hostname
+              path
+            }
+          }
+          links {
+            name
+            url
+          }
+          identifiers {
+            name
+            url
+            externalType
+            externalId
+          }
+          issueLinks {
+            nodes {
+              id
+              linkType
+              issue {
+                id
+                iid
+                createdAt
+                webUrl
+              }
+            }
+          }
+          details {
+            __typename
+            ...List
+            ...Table
+            ...NamedList
+            ...NonNestedReportTypes
+          }
+          dismissedAt
+          dismissedBy {
+            id
+            name
+            username
+            webUrl
+          }
+          stateComment
+          vulnerability {
+            id
+            presentOnDefaultBranch
+          }
+          userPermissions {
+            adminVulnerability
+            createIssue
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@ from contextvars import ContextVar
 from enum import StrEnum
 from typing import Set
 
-__all__ = ["is_feature_enabled", "current_feature_flag_context", "FeatureFlag"]
+__all__ = ["FeatureFlag", "current_feature_flag_context", "is_feature_enabled"]
 
 
 class FeatureFlag(StrEnum):
@@ -11,9 +11,9 @@ class FeatureFlag(StrEnum):
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
     AI_PROMPT_SCANNING = "ai_prompt_scanning"
     DAP_WEB_SEARCH = "dap_web_search"
-    AI_CONTEXT_COMPACTION = "ai_context_compaction"
     AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
+    DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
     # Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/gitlab_com_derisk/ai_gateway_multi_default_models.yml
     AI_GATEWAY_MULTI_DEFAULT_MODELS = "ai_gateway_multi_default_models"

@@ -360,6 +360,148 @@ When making the call to the Service API, these additional context parameters are
 ]
 ```
 
+### Envelope versioning
+
+Additional context envelopes support **semantic versioning** to ensure backwards compatibility as envelope schemas
+evolve across different GitLab deployment scenarios (SaaS, self-managed, dedicated).
+
+#### Why versioning matters
+
+Without versioning, every new field added to an envelope must be treated as optional forever, because there is no way
+to know whether the sender (the GitLab monolith) is aware of the field. This forces flow authors into one of three
+bad outcomes:
+
+- **Silent quality degradation** — `None` guards and silent fallbacks that are invisible to users and dashboards.
+- **Feature abandonment** — fields cannot be used in `DeterministicStepComponent` at all if they cannot be guaranteed
+  present.
+- **Branching logic explosion** — explicit conditional routing for every optional field, compounding as more fields are
+  added.
+
+Envelope versioning solves this by letting a flow declare the minimum envelope version it requires. If the sender
+provides an incompatible version, the flow fails immediately with a clear, actionable error rather than silently
+degrading.
+
+#### How it works
+
+Each envelope carries a `version` field in its `metadata` (e.g. `"1.1.0"`). The flow YAML declares the minimum version it
+requires via `version_constraint` on the input definition. At flow instantiation time, DWS validates the received
+version against the constraint using Poetry-compatible semver ranges.
+
+**Envelope (sent by the GitLab monolith) — version in `metadata`, domain data in `content`:**
+
+```json
+{
+  "agent_platform_standard_context": {
+    "metadata": { "version": "1.1.0" },
+    "content": {
+      "project_id": 123,
+      "workload_user_id": 456
+    }
+  }
+}
+```
+
+**Flow YAML declaration:**
+
+```yaml
+flow:
+  entry_point: "my_agent"
+  inputs:
+    - category: agent_platform_standard_context
+      version_constraint: "^1.1.0"
+      input_schema:
+        project_id:
+          type: integer
+          description: GitLab project ID
+        workload_user_id:
+          type: integer
+          description: ID of the user who initiated the workflow
+```
+
+#### Backwards compatibility
+
+The versioning scheme is fully backwards compatible with existing senders:
+
+- **Envelopes without a `version` field** are treated as `"1.0.0"`. This covers all GitLab instances that predate
+  the versioning scheme.
+- **Flows without a `version_constraint`** use an implicit `^1.0.0` constraint, accepting any `1.x.x` envelope.
+- **All existing envelopes** are retroactively assigned version `1.0.0`.
+
+> **Deprecated — both default fallbacks should never be relied upon.**
+>
+> The implicit defaults exist only to keep legacy senders and flows working during migration; they are **deprecated**
+> and must not be skipped in new code. Always declare an explicit `version` on every envelope and an explicit
+> `version_constraint` on every flow input.
+>
+> DWS emits a structured `warning` log whenever a default is substituted, so operators can identify the senders and
+> flows that still rely on them:
+>
+> - When an envelope payload does not declare a `version`, DWS logs
+>   `Envelope payload does not declare a version; falling back to default version` with the `category` and the
+>   substituted `default_version` (`1.0.0`).
+> - When a flow input declares no `version_constraint`, DWS logs
+>   `No version_constraint declared for envelope category; falling back to default constraint` with the `category` and
+>   the substituted `default_constraint` (`^1.0.0`).
+>
+> Each warning is emitted only when the fallback is actually used, not on every call. Treat these warnings as an
+> action item to add the missing explicit `version` / `version_constraint`.
+
+#### Version constraint syntax
+
+`version_constraint` uses the same Poetry-compatible semver syntax as `prompt_version` and `response_schema_version`:
+
+| Constraint | Matches             | Description                                |
+|------------|---------------------|--------------------------------------------|
+| `1.0.0`    | Exactly `1.0.0`     | Exact version                              |
+| `^1.0.0`   | `≥1.0.0`, `<2.0.0`  | Compatible updates (minor and patch bumps) |
+| `~1.1.0`   | `≥1.1.0`, `<1.2.0`  | Patch updates only                         |
+| `>=1.1.0`  | `≥1.1.0`            | Any version 1.1.0 or later                 |
+
+The recommended constraint for most flows is `"^1.0.0"`, which accepts any `1.x.x` envelope and ignores `2.x.x`
+(breaking) envelopes.
+
+#### Error behavior
+
+DWS scans through all available envelopes for a given category and selects the highest version that satisfies the
+flow's declared constraint. Envelopes with incompatible versions are silently ignored. An error is only raised when
+**none** of the available envelopes satisfy the constraint. In that case, DWS returns a `FAILED_PRECONDITION` gRPC
+status with a human-readable message instructing the user to upgrade their GitLab instance. The error is also
+surfaced in the UI chat log.
+
+> **Version resolution and schema validation are two separate gates.** After an envelope is selected by version, its
+> `content` is validated against the flow's `input_schema` with **`additionalProperties: true`** and every
+> non-`optional` field marked **required**. This means:
+>
+> - An envelope whose `content` carries a field the flow's `input_schema` does **not** declare is **accepted** — extra
+>   fields are silently ignored. This makes envelope schema changes that only add new fields backwards-compatible.
+> - An envelope missing a required (non-`optional`) field fails validation.
+>
+> A missing required field raises a `ValueError` during flow setup — it is not silently ignored. (Note: this is
+> field-level validation within a recognized category. An envelope of an entirely *unknown* category is skipped with a
+> warning, not failed.)
+
+#### Adding (or removing) a field in an existing envelope
+
+**Adding** a field to an existing envelope is now a **backwards-compatible** change. Because envelopes validate with
+`additionalProperties: true`, flows that have not yet declared the new field in their `input_schema` simply ignore it.
+The new field is available in the envelope's `content` dict and can be accessed by flows that do declare it.
+
+**Removing or renaming** a field is still a **breaking change** if any flow declares that field as required. In that
+case, use a major version bump:
+
+1. **Bump the envelope to a new major version** in the GitLab monolith (e.g. `1.0.0` → `2.0.0`) by setting
+   `metadata.version`, and keep sending the previous major (`1.x.x`) alongside it.
+1. **Create a new flow version** (e.g. `2.0.0.yml`) that declares the updated field set in `input_schema` and pins
+   `version_constraint: "^2.0.0"`.
+1. **Leave existing flow versions on `^1.0.0`.** They keep selecting the `1.x.x` envelope the monolith still sends, so
+   legacy GitLab instances are unaffected.
+
+> **Reserve `MINOR`/`PATCH` for changes that do not alter the required field set** (e.g. a value-level bug fix or
+> adding an optional field). Those are safe for `^`-pinned flows because the validated required field set is unchanged.
+
+See [Envelope versioning](contribution_guidelines.md#envelope-versioning) in the Contribution Guidelines for the full
+policy on when to bump versions and how to handle breaking changes.
+
 ### Output
 
 Output management handles the automatic production and storage of component results.

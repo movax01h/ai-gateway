@@ -105,13 +105,11 @@ def _load_yaml_file(config_file_path: Path) -> Dict[str, Any]:
         return config_data
 
     except yaml.YAMLError as yaml_error:
-        error_message = (
-            f"Failed to parse YAML in '{config_file_path}': {str(yaml_error)}"
-        )
+        error_message = f"Failed to parse YAML in '{config_file_path}': {yaml_error!s}"
         LOGGER.error(error_message)
         raise SlashCommandConfigError(error_message)
 
     except Exception as e:
-        error_message = f"Error loading slash command configuration from '{config_file_path}': {str(e)}"
+        error_message = f"Error loading slash command configuration from '{config_file_path}': {e!s}"
         LOGGER.error(error_message)
         raise SlashCommandConfigError(error_message)

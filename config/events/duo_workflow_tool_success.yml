@@ -3,6 +3,8 @@ description: Tracks successful Duo Workflow tool calls
 internal_events: true
 action: duo_workflow_tool_success
 product_group: agent_foundations
+product_categories:
+  - duo_agent_platform
 additional_properties:
   label:
     description: Hardcoded string workflow_tool_call

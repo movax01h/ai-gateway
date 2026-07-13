@@ -151,7 +151,7 @@ class GetWikiPage(WikiBaseTool):
             except json.JSONDecodeError as e:
                 logger.error("Failed to parse wiki page JSON", error=str(e))
                 raise ToolException(
-                    f"Failed to parse wiki page response as JSON: {str(e)}"
+                    f"Failed to parse wiki page response as JSON: {e!s}"
                 )
         else:
             wiki_page_dict = wiki_page
@@ -213,7 +213,7 @@ class GetWikiPage(WikiBaseTool):
             logger.warning(
                 "Exception while fetching wiki notes", error=str(notes_error)
             )
-            return None, f"Failed to fetch notes: {str(notes_error)}"
+            return None, f"Failed to fetch notes: {notes_error!s}"
 
     async def _execute(
         self,

@@ -8,7 +8,8 @@ components:
   - name: "orbit_agent"
     type: AgentComponent
     prompt_id: "orbit_agent_prompt"
-    model_size_preference: "large"
+    model_tags:
+      - "large"
     inputs:
       - from: "context:goal"
         as: "goal"

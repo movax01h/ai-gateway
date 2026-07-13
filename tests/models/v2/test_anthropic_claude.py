@@ -158,7 +158,6 @@ class TestChatAnthropic:
             pytest.param("claude-opus-4-6", True, id="4.6-opus"),
             pytest.param("claude-opus-4-7", True, id="4.7-opus"),
             # Claude <= 4.5: prefill supported, payload untouched
-            pytest.param("claude-sonnet-4-20250514", False, id="4.0-sonnet"),
             pytest.param("claude-opus-4-1-20250805", False, id="4.1-opus"),
             pytest.param("claude-sonnet-4-5-20250929", False, id="4.5-sonnet"),
             pytest.param("claude-opus-4-5-20251101", False, id="4.5-opus"),

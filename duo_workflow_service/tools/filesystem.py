@@ -1,5 +1,6 @@
 import json
 from enum import IntEnum
+from textwrap import dedent
 from typing import Any, ClassVar, List, Optional, Type
 
 import gitmatch
@@ -21,6 +22,49 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
+
+# Trusted path segments for globally-installed agent skills, Duo plugins, and Duo config.
+# Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md or
+# ~/.gitlab/duo/plugins/<plugin>/...) advertised via absolute file:// URIs by the
+# workspace_agent_skills mechanism (!3201) and the per-user Duo plugins store.
+#
+# Scope is intentionally limited: `.agents` exposes only `skills/`, while the Duo config
+# roots expose `skills/` and `plugins/`, so the rest of `.gitlab/duo` — which is in the
+# denylist below — stays protected.
+#
+# Every entry is dotfile-anchored (first segment starts with ".") to prevent a CI
+# repository checkout from matching: a repo containing a `gitlab/duo/skills/` directory
+# must NOT be trusted via this mechanism. The XDG variant is therefore anchored to the
+# conventional `~/.config` location rather than an arbitrary `$XDG_CONFIG_HOME`.
+#
+# Intentional fail-closed: skills under a non-standard `$GLAB_CONFIG_DIR` or
+# `$XDG_CONFIG_HOME` are rejected server-side; the client-side gate
+# (`getTrustedReadableDirectories`) is the authoritative second check.
+TRUSTED_ABSOLUTE_PATH_SEGMENTS = (
+    ".agents/skills",
+    ".gitlab/duo/skills",
+    ".config/gitlab/duo/skills",
+    ".gitlab/duo/plugins",
+    ".config/gitlab/duo/plugins",
+)
+
+# Path-traversal patterns rejected for every path, regardless of tool or trust level.
+PATH_TRAVERSAL_PATTERNS = ("../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e")
+
+# NOTE appended to file-access tool descriptions to explain gitignore and secrets-denylist
+# restrictions.  Kept in one place so all five tools stay in sync.
+GITIGNORED_FILE_NOTE = (
+    "NOTE on file-access restrictions:\n"
+    "- Gitignored files: This tool cannot access files listed in .gitignore. If the file is\n"
+    "    not sensitive, you may fall back to the `run_command` tool with a shell command\n"
+    '    (e.g. `cat <file>`, `sed -i`, `echo "content" > file`). Do NOT use `git rm --cached`\n'
+    "    as a workaround.\n"
+    "- Secrets-denylisted files: Files such as `.env`, `.env.*`, `.ssh/`, `.gnupg/`,\n"
+    "    `Dockerfile.secrets`, and similar sensitive paths are protected by the Duo security\n"
+    "    denylist. Do NOT attempt to access these files by any means, including via\n"
+    "    `run_command` or any shell command. This restriction exists to prevent accidental\n"
+    "    exposure of secrets."
+)
 
 # Security denylist of sensitive directories and files that should not be accessed
 DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
@@ -49,12 +93,61 @@ DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
 )
 
 
-def validate_duo_context_exclusions(file_path: str) -> None:
+def _contains_path_traversal(file_path: str) -> bool:
+    """Return ``True`` if *file_path* contains any known path-traversal pattern.
+
+    Shared by ``_is_trusted_absolute_path`` (which fails closed) and
+    ``validate_duo_context_exclusions`` (which raises) so the traversal denylist lives in
+    one place and the two security-critical checks cannot drift apart.
+    """
+    return any(pattern in file_path for pattern in PATH_TRAVERSAL_PATTERNS)
+
+
+def _is_trusted_absolute_path(file_path: str) -> bool:
+    """Return True if *file_path* is absolute, traversal-free, and contains a trusted segment sequence.
+
+    Traversal patterns are checked here so this helper is safe to call standalone — a path
+    like ``/home/u/.agents/skills/../../etc/passwd`` is never reported as trusted.
+
+    Args:
+        file_path: File path to check (backslashes are normalised to ``/`` internally).
+
+    Returns:
+        True when the path is absolute, traversal-free, and contains a trusted segment
+        sequence from `TRUSTED_ABSOLUTE_PATH_SEGMENTS`.
+    """
+    file_path = file_path.replace("\\", "/")
+    if not file_path.startswith("/"):
+        return False
+
+    if _contains_path_traversal(file_path):
+        return False
+
+    segments = file_path.split("/")
+    for trusted in TRUSTED_ABSOLUTE_PATH_SEGMENTS:
+        parts = trusted.split("/")
+        if any(
+            segments[i : i + len(parts)] == parts
+            for i in range(len(segments) - len(parts) + 1)
+        ):
+            return True
+    return False
+
+
+def validate_duo_context_exclusions(
+    file_path: str, allow_trusted_absolute: bool = False
+) -> None:
     """Check if the given file path is in the managed Duo Context Exclusion denylist of sensitive paths or contains path
     traversal attempts.
 
     Args:
-        file_path: The file path to check
+        file_path: The file path to check.
+        allow_trusted_absolute: When ``True``, absolute paths whose segments include one
+            of the entries in ``TRUSTED_ABSOLUTE_PATH_SEGMENTS`` are allowed through
+            without hitting the ``gitmatch`` denylist (which rejects all absolute paths).
+            Should only be set to ``True`` for read-only tools (``ReadFile``,
+            ``ReadFileChunked``, ``ReadFiles``).  Write/edit/list tools keep the default
+            ``False`` so they continue to reject absolute paths.
 
     Raises:
         ToolException: If the path is in the denylist or an invalid path.
@@ -65,11 +158,18 @@ def validate_duo_context_exclusions(file_path: str) -> None:
     file_path = file_path.replace("\\", "/")
     while file_path.startswith("./"):
         file_path = file_path.replace("./", "", 1)
-    for pattern in ["../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e"]:
-        if pattern in file_path:
-            raise ToolException(
-                f"Access denied: Cannot access '{file_path}' as it contains path traversal patterns"
-            )
+
+    # Traversal guard must run first — this prevents ~/.agents/../../etc/passwd from
+    # being allowed even when allow_trusted_absolute is True.
+    if _contains_path_traversal(file_path):
+        raise ToolException(
+            f"Access denied: Cannot access '{file_path}' as it contains path traversal patterns"
+        )
+
+    # gitmatch raises InvalidPathError on any absolute path, so trusted skill paths must
+    # short-circuit before reaching it.
+    if allow_trusted_absolute and _is_trusted_absolute_path(file_path):
+        return
 
     try:
         excluded = DEFAULT_CONTEXT_EXCLUSIONS.match(file_path)
@@ -80,11 +180,13 @@ def validate_duo_context_exclusions(file_path: str) -> None:
             )
     except gitmatch.InvalidPathError as ex:
         raise ToolException(
-            f"Access denied: Not accessing invalid path '{file_path}'. {str(ex)}"
+            f"Access denied: Not accessing invalid path '{file_path}'. {ex!s}"
         )
 
     if file_path != file_path.lower():
-        validate_duo_context_exclusions(file_path.lower())
+        validate_duo_context_exclusions(
+            file_path.lower(), allow_trusted_absolute=allow_trusted_absolute
+        )
         return
 
 
@@ -94,12 +196,13 @@ class ReadFileInput(BaseModel):
 
 class ReadFile(DuoBaseTool):
     name: str = "read_file"
-    description: str = """Read the contents of a file.
+    description: str = f"""Read the contents of a file.
 
     IMPORTANT:
     - When a task requires reading multiple files, include batches of tool calls in a single response
     - Do not make separate responses for each file - group related files together
 
+    {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileInput
     handle_tool_error: bool = True
@@ -109,12 +212,10 @@ class ReadFile(DuoBaseTool):
     ]
 
     async def _execute(self, file_path: str) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
-        validate_duo_context_exclusions(file_path)
+        validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
         return await _execute_action(
             self.metadata,  # type: ignore
@@ -151,7 +252,7 @@ class ReadFileChunked(DuoBaseTool):
     """
 
     name: str = "read_file"
-    description: str = """Read a file from the local filesystem.
+    description: str = f"""Read a file from the local filesystem.
 
     Usage:
     - By default, returns up to 2000 lines from the start of the file.
@@ -160,6 +261,8 @@ class ReadFileChunked(DuoBaseTool):
     - If the file is truncated, a hint is returned at the end with the next offset value — use it to continue reading.
     - Call this tool in parallel when you need to read multiple files.
     - Avoid tiny repeated slices; if you need more context, read a larger window.
+
+    {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileChunkedInput
     handle_tool_error: bool = True
@@ -172,12 +275,10 @@ class ReadFileChunked(DuoBaseTool):
         offset: int = DEFAULT_READ_FILE_OFFSET,
         limit: int = DEFAULT_READ_FILE_LIMIT,
     ) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
-        validate_duo_context_exclusions(file_path)
+        validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
         return await _execute_action(
             self.metadata,  # type: ignore
@@ -204,7 +305,9 @@ class ReadFilesInput(BaseModel):
 
 class ReadFiles(DuoBaseTool):
     name: str = "read_files"
-    description: str = """Read one or more files in a single operation.
+    description: str = f"""Read one or more files in a single operation.
+
+    {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFilesInput
     handle_tool_error: bool = True
@@ -215,7 +318,7 @@ class ReadFiles(DuoBaseTool):
         log = structlog.stdlib.get_logger("workflow")
 
         for file_path in file_paths:
-            validate_duo_context_exclusions(file_path)
+            validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
         result_dict = {}
 
@@ -253,11 +356,9 @@ class ReadFiles(DuoBaseTool):
                     )
                 raise ToolException(error_msg)
 
-        # Add excluded files with error messages
         for path in excluded_file_paths:
             result_dict[path] = {"error": CONTEXT_EXCLUSION_MESSAGE}
 
-        # Return as JSON string
         return json.dumps(result_dict)
 
     def format_display_message(
@@ -283,27 +384,34 @@ class ReadFiles(DuoBaseTool):
 
 
 class WriteFileInput(BaseModel):
-    file_path: str = Field(description="the file_path to write the file to")
+    file_path: str = Field(
+        description="The path of the new file to create. The file must not already exist."
+    )
     contents: str = Field(
-        description="the contents to write in the file. *This is required*"
+        description="The full contents to write into the newly created file. Must be non-empty."
     )
 
 
 class WriteFile(DuoBaseTool):
     name: str = "create_file_with_contents"
-    description: str = (
-        "Create and write the given contents to a file. Please specify the `file_path` and the `contents` to write."
+    description: str = dedent(
+        f"""\
+        Use this tool to create a brand new file with the given contents.
+
+        IMPORTANT:
+        - This tool is only for creating files that do not yet exist. It writes the full contents of a new file.
+        - Do not use this tool to modify, append to, or overwrite an existing file. If the file already exists, use other dedicated tools instead.
+
+        {GITIGNORED_FILE_NOTE}"""
     )
     args_schema: Type[BaseModel] = WriteFileInput
     handle_tool_error: bool = True
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, file_path: str, contents: str) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
         return await _execute_action(
@@ -378,12 +486,10 @@ class FindFiles(DuoBaseTool):
             ),
         )
 
-        # Filter results based on file exclusion policy
         policy = FileExclusionPolicy(self.project)
         lines = result.strip().split("\n") if result.strip() else []
         allowed_files, _excluded_files = policy.filter_allowed(lines)
 
-        # Build the response
         response_parts = []
         if allowed_files:
             response_parts.append("\n".join(allowed_files))
@@ -437,97 +543,71 @@ class Mkdir(DuoBaseTool):
 
 
 class EditFileInput(BaseModel):
-    file_path: str = Field(description="the path of the file to edit.")
+    file_path: str = Field(
+        description="The path of the existing file to edit. The file must already exist."
+    )
     old_str: str = Field(
         "",
-        description="The string to replace. Please provide at least one line above and below to make it unique across "
-        "the file. *This is required*",
+        description=(
+            "The exact text to replace. Must match the file content character-for-character, "
+            "including whitespace and indentation. Include enough surrounding context (typically "
+            "at least one line above and below the change) so the text appears exactly once in the "
+            "file; only the first occurrence is replaced."
+        ),
     )
     new_str: str = Field(
-        "", description="The new value of the string. *This is required*"
+        "",
+        description=(
+            "The text to insert in place of `old_str`. Provide the full replacement block, keeping "
+            "any surrounding context lines from `old_str` unchanged. Use an empty string to delete "
+            "the matched text."
+        ),
     )
 
 
 class EditFile(DuoBaseTool):
     name: str = "edit_file"
-    description: str = """Use this tool to edit an existing file.
+    description: str = dedent(
+        f"""\
+        Use this tool to edit an existing file by replacing `old_str` with `new_str`.
 
-IMPORTANT:
-- When making similar changes to multiple files, include batches of tool calls in a single response
-- Do not make separate responses for each file - group related files together
-- You must read the file using the read_file tool before attempting to edit it
-- Attempting to edit a file without reading it first will result in an error
+        IMPORTANT:
+        - You must read the file with read_file before editing it; editing without reading first fails.
+        - `old_str` must match the file exactly (including whitespace) and be unique; include enough surrounding context. Only the first match is replaced.
+        - To edit multiple files, batch the tool calls in a single response rather than one response per file.
+        - Secret-like values may appear as `[REDACTED]`. This is a placeholder, not the real content, so an `old_str` containing it will never match. Anchor edits on surrounding non-secret text.
 
-Examples of individual file edits:
-- Update a function parameter:
-    edit_file(
-        file_path="src/utils.py",
-        old_str="# Utility functions\n\ndef process_data(data):\n
-            # Process the input data\n    return data.upper()\n\n# More functions below",
-        new_str="# Utility functions\n\ndef process_data(data, transform=True):\n
-            # Process the input data\n    return data.upper() if transform else data\n\n# More functions below"
-    )
+        {GITIGNORED_FILE_NOTE}
 
-- Fix a bug in a specific file:
-    edit_file(
-        file_path="src/api/endpoints.py",
-        old_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
-            return db.find_user(id)\n\n# Other endpoints",
-        new_str="# User endpoints\n@app.route('/users/<id>')\ndef get_user(id):\n
-            user = db.find_user(id)\n    return user if user else {'error': 'User not found'}\n\n# Other endpoints"
-    )
+        Examples:
 
-- Add a new import statement:
-    edit_file(
-        file_path="src/models.py",
-        old_str="import os\nimport sys\n\nclass User:",
-        new_str="import os\nimport sys\nimport datetime\n\nclass User:"
-    )
+        - Single edit (change a function signature):
+            edit_file(
+                file_path="src/utils.py",
+                old_str="def process_data(data):\\n    return data.upper()",
+                new_str="def process_data(data, transform=True):\\n    return data.upper() if transform else data"
+            )
 
-Examples of batched file edits:
-- Rename a function across multiple files:
-    edit_file(
-        file_path="src/utils.py",
-        old_str="# Configuration functions\ndef get_config():\n    return load_config()\n\n# Other utility functions",
-        new_str="# Configuration functions\ndef fetch_config():\n    return load_config()\n\n# Other utility functions"
+        - Batch multiple files in one response (rename a function):
+            edit_file(
+                file_path="src/utils.py",
+                old_str="def get_config():",
+                new_str="def fetch_config():"
+            )
+            edit_file(
+                file_path="src/app.py",
+                old_str="config = get_config()",
+                new_str="config = fetch_config()"
+            )"""
     )
-    edit_file(
-        file_path="src/app.py",
-        old_str="from utils import get_config\n\nconfig = get_config()\n\n# Application setup",
-        new_str="from utils import fetch_config\n\nconfig = fetch_config()\n\n# Application setup"
-    )
-    edit_file(
-        file_path="tests/test_utils.py",
-        old_str="# Test configuration\ndef test_get_config():\n    config = get_config()\n    assert config is not None",
-        new_str="# Test configuration\ndef test_fetch_config():\n    config = fetch_config()\n    assert config is not None"
-    )
-
-- Update version number across the codebase:
-    edit_file(
-        file_path="src/version.py",
-        old_str="# Version information\nVERSION = '1.0.0'\n# End of version info",
-        new_str="# Version information\nVERSION = '1.1.0'\n# End of version info"
-    )
-    edit_file(
-        file_path="README.md",
-        old_str="# Project Documentation\n\n## MyApp v1.0.0\n\n### Features",
-        new_str="# Project Documentation\n\n## MyApp v1.1.0\n\n### Features"
-    )
-    edit_file(
-        file_path="docs/changelog.md",
-        old_str="# Changelog\n\n## 1.0.0",
-        new_str="# Changelog\n\n## 1.1.0\n- Bug fixes\n- Performance improvements\n\n## 1.0.0"
-    )"""
     args_schema: Type[BaseModel] = EditFileInput
     handle_tool_error: bool = True
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     async def _execute(self, file_path: str, old_str: str, new_str: str) -> str:
-        # Check file exclusion policy
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
-        # Check path security before proceeding
         validate_duo_context_exclusions(file_path)
 
         return await _execute_action(
@@ -585,11 +665,9 @@ class ListDir(DuoBaseTool):
     args_schema: Type[BaseModel] = ListDirInput
 
     async def _execute(self, directory: str) -> str:
-        # Check file exclusion policy before executing action
         if not FileExclusionPolicy.is_allowed_for_project(self.project, directory):
             return FileExclusionPolicy.format_llm_exclusion_message([directory])
 
-        # Check path security before proceeding
         validate_duo_context_exclusions(directory)
 
         result = await _execute_action(
@@ -599,12 +677,10 @@ class ListDir(DuoBaseTool):
             ),
         )
 
-        # Filter results based on file exclusion policy
         policy = FileExclusionPolicy(self.project)
         lines = result.strip().split("\n") if result.strip() else []
         allowed_files, _excluded_files = policy.filter_allowed(lines)
 
-        # Build the response
         response_parts = []
         if allowed_files:
             response_parts.append("\n".join(allowed_files))

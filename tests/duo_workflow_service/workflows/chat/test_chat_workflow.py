@@ -1,12 +1,13 @@
 # pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg
 import json
-from unittest.mock import ANY, MagicMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from uuid import UUID
 
 import pytest
 from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import PromptConfig
@@ -25,20 +26,25 @@ from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
 )
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools.toolset import Toolset
+from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_FLOW_TOOLS,
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
     CHAT_READ_ONLY_TOOLS,
+    CHAT_SESSION_CONTEXT_TOOLS,
     CHAT_UTILITY_TOOLS,
     RUN_COMMAND_TOOLS,
     Routes,
     Workflow,
+    _resolve_additional_context_vars,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.feature_flags import current_feature_flag_context
+from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
 
 @pytest.fixture(name="flow_type")
@@ -84,6 +90,10 @@ def mock_prompt_adapter_fixture():
 
 @pytest.fixture(name="mock_chat_agent")
 def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
+    from duo_workflow_service.conversation.history_optimizer.pipeline import (
+        HistoryOptimizerPipeline,
+    )
+
     mock_toolset = Mock(spec=Toolset)
     mock_toolset.validate_tool_call.return_value = None
     agent = ChatAgent(
@@ -92,6 +102,7 @@ def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
         tools_registry=mock_tools_registry,
         system_template_override=None,
         toolset=mock_toolset,
+        optimizer_pipeline=HistoryOptimizerPipeline([]),
     )
     return agent
 
@@ -436,7 +447,6 @@ async def test_workflow_run(
                 system_template_override=workflow.system_template_override,
                 agent_name_override=None,  # Default workflow has no override
                 compaction=ANY,
-                internal_events_client=ANY,
             )
 
             mock_user_interface_instance.send_event.assert_called_with(
@@ -516,7 +526,6 @@ async def test_workflow_run_with_agent_name_override(
                 system_template_override=None,
                 agent_name_override="348/0",  # Should pass the override
                 compaction=ANY,
-                internal_events_client=ANY,
             )
 
 
@@ -548,7 +557,8 @@ class TestUnauthorizedChatExecution:
             CHAT_READ_ONLY_TOOLS
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
-            + CHAT_GITLAB_MUTATION_TOOLS,
+            + CHAT_GITLAB_MUTATION_TOOLS
+            + CHAT_SESSION_CONTEXT_TOOLS,
         ),
         (
             ["agentic_foundational_flow_tool"],
@@ -557,7 +567,8 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
-            + CHAT_FLOW_TOOLS,
+            + CHAT_FLOW_TOOLS
+            + CHAT_SESSION_CONTEXT_TOOLS,
         ),
         (
             ["duo_chat_clarification_question_tool"],
@@ -566,7 +577,8 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
-            + CHAT_UTILITY_TOOLS,
+            + CHAT_UTILITY_TOOLS
+            + CHAT_SESSION_CONTEXT_TOOLS,
         ),
     ],
     ids=[
@@ -601,6 +613,80 @@ def test_tools_registry_interaction(
 
     for tool in expected_tools:
         assert tool in tools_passed_to_get_batch
+
+
+@pytest.mark.parametrize(
+    ("config_overrides", "expect_start_flow"),
+    [
+        ({}, True),
+        (
+            {
+                "features": {
+                    "foundational_flows": {"enabled": True, "enabled_flows": None}
+                }
+            },
+            True,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {"enabled": False, "enabled_flows": None}
+                }
+            },
+            False,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {
+                        "enabled": True,
+                        "enabled_flows": ["code_review/v1"],
+                    }
+                }
+            },
+            True,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {"enabled": True, "enabled_flows": []}
+                }
+            },
+            False,
+        ),
+        (
+            {
+                "features": {
+                    "foundational_flows": {
+                        "enabled": True,
+                        "enabled_flows": ["unsupported/v1"],
+                    }
+                }
+            },
+            False,
+        ),
+    ],
+    ids=[
+        "defaults_to_available",
+        "foundational_flows_enabled",
+        "foundational_flows_disabled",
+        "some_flows_enabled",
+        "no_flows_enabled",
+        "only_unsupported_flows_enabled",
+    ],
+)
+def test_start_flow_tool_gated_by_enablement(
+    config_overrides, expect_start_flow, workflow_with_project
+):
+    """start_flow is only offered when foundational flows can run for the project."""
+    current_feature_flag_context.set({"agentic_foundational_flow_tool"})
+
+    workflow = workflow_with_project
+    workflow._workflow_config = {**workflow._workflow_config, **config_overrides}
+
+    tools = workflow._get_tools()
+
+    assert ("start_flow" in tools) is expect_start_flow
 
 
 @pytest.mark.asyncio
@@ -1309,6 +1395,24 @@ class TestMcpServerToolsFiltering:
         # Documentation search should still be present
         assert "gitlab_documentation_search" in tools
 
+    @pytest.mark.asyncio
+    async def test_get_previous_session_context_requested_regardless_of_flags(
+        self, workflow_with_project
+    ):
+        """Requests get_previous_session_context regardless of feature flags.
+
+        This asserts the tool name is in the list returned by ``_get_tools()``.
+        Whether it resolves in the compiled toolset depends on the session
+        having the ``read_only_gitlab`` privilege (a default privilege); that
+        privilege-to-tool resolution is covered by ``test_registry_initialization``
+        in ``tests/duo_workflow_service/components/test_tools_registry.py``.
+        """
+        set_enabled_mcp_server_tools(set())
+
+        tools = workflow_with_project._get_tools()
+
+        assert "get_previous_session_context" in tools
+
 
 @pytest.mark.asyncio
 async def test_agent_returns_content_and_tool_calls(workflow_with_project):
@@ -1411,3 +1515,264 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     assert result["ui_chat_log"][1]["message_id"] == "request-toolu_approval_id"
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
     assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
+    workflow_with_project,
+):
+    """GraphRecursionError is converted to NotifiableException before propagating."""
+
+    notifier = MagicMock()
+    notifier.ui_chat_log = []
+    notifier.send_event = AsyncMock()
+    workflow_with_project.checkpoint_notifier = notifier
+
+    with pytest.raises(TraceableException) as exc_info:
+        await workflow_with_project._handle_compile_and_run_exception(
+            GraphRecursionError("Recursion limit reached"),
+            AsyncMock(),
+            {},
+        )
+
+    wrapped = exc_info.value.original_exception
+    assert isinstance(wrapped, NotifiableException)
+    assert (
+        str(wrapped)
+        == "The workflow reached its maximum step limit and could not complete. "
+        "Please try again with a more focused goal, or break the task into smaller steps."
+    )
+
+
+class TestResolveAdditionalContextVars:
+    def _make_ctx(self, category, content):
+        return AdditionalContext(category=category, content=content)
+
+    def test_extracts_value_from_matching_inputs_path(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": true}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"orbit_enabled": True}
+
+    def test_non_dict_spec_is_skipped(self):
+        component_inputs = [
+            "not-a-dict",
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": true}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"orbit_enabled": True}
+
+    def test_skips_non_inputs_keys(self):
+        component_inputs = [
+            {"from": "context:goal", "as": "goal"},
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": false}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert "goal" not in result
+        assert result == {"orbit_enabled": False}
+
+    def test_optional_missing_key_returns_none(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, [])
+
+        assert result == {"orbit_enabled": None}
+
+    def test_non_optional_missing_key_is_excluded(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, [])
+
+        assert not result
+
+    def test_uses_last_path_segment_when_no_alias(self):
+        component_inputs = [
+            {"from": "context:inputs.my_context.my_flag"},
+        ]
+        additional_context = [
+            self._make_ctx("my_context", '{"my_flag": true}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"my_flag": True}
+
+    def test_invalid_json_content_is_skipped(self):
+        component_inputs = [
+            {"from": "context:inputs.bad_ctx.value", "as": "value", "optional": True},
+        ]
+        additional_context = [
+            self._make_ctx("bad_ctx", "not-json"),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"value": None}
+
+    def test_multiple_categories_resolved_independently(self):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+            },
+            {"from": "context:inputs.feature_flags.flag_a", "as": "flag_a"},
+        ]
+        additional_context = [
+            self._make_ctx("orbit_context", '{"orbit_enabled": true}'),
+            self._make_ctx("feature_flags", '{"flag_a": false}'),
+        ]
+
+        result = _resolve_additional_context_vars(component_inputs, additional_context)
+
+        assert result == {"orbit_enabled": True, "flag_a": False}
+
+
+class TestWorkflowSystemTemplatePreRender:
+    def test_component_inputs_config_pre_renders_template(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        additional_context = [
+            AdditionalContext(
+                category="orbit_context", content='{"orbit_enabled": true}'
+            ),
+        ]
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=additional_context,
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit on"
+
+    def test_orbit_disabled_renders_else_branch(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        additional_context = [
+            AdditionalContext(
+                category="orbit_context", content='{"orbit_enabled": false}'
+            ),
+        ]
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=additional_context,
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit off"
+
+    def test_missing_optional_context_renders_falsy(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=[],
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit off"
+
+    def test_no_component_inputs_config_skips_pre_render(self, flow_type):
+        template = "{% if orbit_enabled %}orbit on{% else %}orbit off{% endif %}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=[],
+        )
+
+        assert workflow.system_template_override == template
+
+    def test_unknown_variables_preserved_for_later_render(self, flow_type):
+        component_inputs = [
+            {
+                "from": "context:inputs.orbit_context.orbit_enabled",
+                "as": "orbit_enabled",
+                "optional": True,
+            },
+        ]
+        additional_context = [
+            AdditionalContext(
+                category="orbit_context", content='{"orbit_enabled": true}'
+            ),
+        ]
+        template = "{% if orbit_enabled %}orbit on{% endif %} goal={{ goal }}"
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            system_template_override=template,
+            additional_context=additional_context,
+            component_inputs_config=component_inputs,
+        )
+
+        assert workflow.system_template_override == "orbit on goal={{ goal }}"
