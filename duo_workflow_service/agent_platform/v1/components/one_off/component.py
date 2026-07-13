@@ -157,7 +157,7 @@ class OneOffComponent(BaseComponent):
         tools = self.toolset.bindable
         tool_choice = "auto"
 
-        model_metadata = get_model_metadata(self.model_size_preference)
+        model_metadata = get_model_metadata(self.model_tags)
 
         prompt = self.prompt_registry.get_on_behalf(
             self.user,
@@ -194,9 +194,7 @@ class OneOffComponent(BaseComponent):
             internal_event_client=self.internal_event_client,
             # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
             invoke_config={"tags": [TAG_NOSTREAM]},
-            max_context_tokens=get_model_max_context_token_limit(
-                self.model_size_preference
-            ),
+            max_context_tokens=get_model_max_context_token_limit(self.model_tags),
             compactor=(
                 create_conversation_compactor(
                     config=(

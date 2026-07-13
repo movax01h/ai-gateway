@@ -25,9 +25,12 @@ class TestGetModelMetadata:
             ([], None),
             (["small"], "small"),
             (["large"], "large"),
+            (["claude"], "claude"),
+            (["reasoning"], "reasoning"),
+            ([["large", "claude"]], ["large", "claude"]),
         ],
     )
-    def test_forwards_size_to_config(self, args, expected_key):
+    def test_forwards_tags_to_config(self, args, expected_key):
         model_size_config = MagicMock()
         current_model_metadata_with_size_context.set(model_size_config)
 

@@ -54,6 +54,47 @@ class ComponentWithoutOutputs(BaseComponent):
         return f"{self.name}_entry"
 
 
+class TestBaseComponentModelSizePreferenceAlias:
+    """Test the deprecated model_size_preference -> model_tags backward-compat alias."""
+
+    def test_model_size_preference_maps_to_model_tags(self, flow_type, user):
+        """A deprecated model_size_preference value is mapped onto model_tags."""
+        component = ConcreteComponent(
+            name="test_component",
+            flow_id="test_workflow",
+            flow_type=flow_type,
+            user=user,
+            model_size_preference="small",
+        )
+
+        assert component.model_tags == "small"
+
+    def test_model_tags_takes_precedence_over_deprecated_field(self, flow_type, user):
+        """When both are set, model_tags wins and the deprecated field is ignored."""
+        component = ConcreteComponent(
+            name="test_component",
+            flow_id="test_workflow",
+            flow_type=flow_type,
+            user=user,
+            model_tags=["large"],
+            model_size_preference="small",
+        )
+
+        assert component.model_tags == ["large"]
+
+    def test_model_size_preference_excluded_from_serialization(self, flow_type, user):
+        """The deprecated field is excluded from the serialized model."""
+        component = ConcreteComponent(
+            name="test_component",
+            flow_id="test_workflow",
+            flow_type=flow_type,
+            user=user,
+            model_size_preference="small",
+        )
+
+        assert "model_size_preference" not in component.model_dump()
+
+
 class TestBaseComponentValidateFields:
     """Test BaseComponent field validation methods."""
 

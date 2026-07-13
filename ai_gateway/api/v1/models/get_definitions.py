@@ -1,5 +1,3 @@
-from typing import Literal
-
 from fastapi import APIRouter, status
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel
@@ -33,7 +31,10 @@ class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
     default_model: str  # deprecated, maintained for backward compatibility
     default_models: list[str]
-    models_for_size_preference: dict[Literal["small", "large"], str]
+    models_for_tags: dict[str, str]
+    models_for_size_preference: dict[
+        str, str
+    ]  # deprecated alias for models_for_tags, maintained for backward compatibility
     selectable_models: list[str]
     beta_models: list[str]
     dev: DevConfig | None
@@ -97,6 +98,10 @@ async def get_models():
             ]
         else:
             values["default_model"] = default_models[0]
+
+        # Expose models_for_size_preference as a deprecated alias for models_for_tags
+        # so existing consumers are not broken by the rename.
+        values["models_for_size_preference"] = values["models_for_tags"]
 
         unit_primitives.append(_GetModelResponseUnitPrimitive(**values))
 
