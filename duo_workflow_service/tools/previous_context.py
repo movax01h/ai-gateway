@@ -1,9 +1,10 @@
 import asyncio
 import json
-from typing import Any, Optional, Tuple, Type, Union
+from typing import Any, ClassVar, Optional, Tuple, Type, Union
 
 import structlog
 from langchain_core.tools import ToolException
+from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.gitlab_workflow_params import fetch_workflow_config
@@ -60,6 +61,11 @@ class GetSessionContext(DuoBaseTool):
         "cannot be found."
     )
     args_schema: Type[BaseModel] = GetSessionContextInput
+    # Excludes this tool from ListTools (see STABLE_VERSION_THRESHOLD in
+    # duo_workflow_service/tools/duo_base_tool.py), which backs the
+    # Direct Access tool-discovery API (GET .../duo_workflows/list_tools in
+    # the gitlab monolith).
+    tool_version: ClassVar[Version] = Version("0.1.0")
 
     async def _execute(self, previous_session_id: int, **_kwargs: Any) -> str:
         if not self.workflow_id:

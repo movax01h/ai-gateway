@@ -63,6 +63,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.previous_context import GetSessionContext
 from duo_workflow_service.tracking import MonitoringContext
 from duo_workflow_service.workflows.registry import ResolvedFlow
 from duo_workflow_service.workflows.type_definitions import (
@@ -523,6 +524,45 @@ async def test_list_tools_excludes_experimental(
     ]
     assert "stable_tool" in tool_names
     assert "experimental_tool" not in tool_names
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._READ_ONLY_GITLAB_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._AGENT_PRIVILEGES")
+@patch("duo_workflow_service.server.convert_to_openai_tool")
+async def test_list_tools_excludes_get_previous_session_context(
+    mock_convert_to_openai_tool,
+    mock_agent_privileges,
+    mock_readonly_tools,
+    mock_default_tools,
+    mock_context,
+    servicer,
+):
+    """get_previous_session_context is deliberately kept below STABLE_VERSION_THRESHOLD, so ListTools (which backs the
+    Direct Access tool-discovery API) must not surface it."""
+
+    def mock_convert_side_effect(tool):
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": f"{tool.name} description",
+            },
+        }
+
+    mock_default_tools.__add__.return_value = []
+    mock_readonly_tools.__add__.return_value = [GetSessionContext]
+    mock_agent_privileges.values.return_value = []
+    mock_convert_to_openai_tool.side_effect = mock_convert_side_effect
+
+    response = await servicer.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+
+    assert isinstance(response, contract_pb2.ListToolsResponse)
+    tool_names = [
+        MessageToDict(tool).get("function", {}).get("name") for tool in response.tools
+    ]
+    assert "get_previous_session_context" not in tool_names
 
 
 @pytest.mark.asyncio
