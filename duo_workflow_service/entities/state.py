@@ -87,6 +87,11 @@ class ToolInfo(TypedDict):
     args: dict[str, Any]
     tool_response: NotRequired[Any]
     suggested_patterns: NotRequired[list[str]]
+    # Semantic version of the tool that produced this entry (from
+    # ``DuoBaseTool.tool_version``). Lets the client version the tool→component
+    # contract for generative UI. Source/server identity for MCP tools is a
+    # separate follow-up (needs a `server` field on the McpTool proto).
+    tool_version: NotRequired[str]
 
 
 class UiChatLog(TypedDict):

@@ -13,6 +13,7 @@ class FeatureFlag(StrEnum):
     DAP_WEB_SEARCH = "dap_web_search"
     AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
+    DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
     # Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/gitlab_com_derisk/ai_gateway_multi_default_models.yml
     AI_GATEWAY_MULTI_DEFAULT_MODELS = "ai_gateway_multi_default_models"
