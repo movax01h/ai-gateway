@@ -255,6 +255,11 @@ class TestToolNodeWithErrorCorrectionRun:
         ui_history_one_off.log.success.assert_called_once()
         ui_history_one_off.pop_state_updates.assert_called_once()
 
+        assert (
+            ui_history_one_off.log.success.call_args.kwargs["message_id"]
+            == mock_tool_call["id"]
+        )
+
     @pytest.mark.asyncio
     async def test_run_with_io_keys_storage(
         self,
@@ -311,6 +316,7 @@ class TestToolNodeWithErrorCorrectionRun:
         tool_node_with_error_correction,
         flow_state_with_tool_calls_one_off,
         mock_tool,
+        mock_tool_call,
         ui_history_one_off,
         mock_prompt_security,
         mock_internal_event_client,
@@ -335,6 +341,11 @@ class TestToolNodeWithErrorCorrectionRun:
 
         # Verify error UI logging
         ui_history_one_off.log.error.assert_called_once()
+
+        assert (
+            ui_history_one_off.log.error.call_args.kwargs["message_id"]
+            == mock_tool_call["id"]
+        )
 
     @pytest.mark.asyncio
     async def test_run_with_type_error(

@@ -149,6 +149,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
             tool_response="Tool execution result",
+            message_id=mock_tool_call["id"],
             subsession_id=None,
         )
 
@@ -279,6 +280,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response="Invalid argument type",
+            message_id=mock_tool_call["id"],
             subsession_id=None,
         )
 
@@ -339,6 +341,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response=ANY,
+            message_id=mock_tool_call["id"],
             subsession_id=None,
         )
 
@@ -400,6 +403,7 @@ class TestToolNode:
             tool_call_args=mock_tool_call["args"],
             event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
             tool_response="Generic error",
+            message_id=mock_tool_call["id"],
             subsession_id=None,
         )
 

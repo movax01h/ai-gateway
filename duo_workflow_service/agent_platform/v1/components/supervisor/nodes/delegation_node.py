@@ -200,6 +200,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 event=UILogEventsSupervisor.ON_DELEGATION_ERROR,
                 message_sub_type=self.MESSAGE_SUB_TYPE_ERROR,
                 tool_info=build_tool_info(delegate_tool_title, {}, str(e)),
+                message_id=e.call_ids[0],
                 subsession_id=None,
             )
             ui_updates = self._ui_history.pop_state_updates()
@@ -236,6 +237,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             event=UILogEventsSupervisor.ON_DELEGATION,
             message_sub_type=self.MESSAGE_SUB_TYPE,
             tool_info=build_tool_info(delegate_tool_title, delegate_args),
+            message_id=call_id,
             subsession_id=None,
         )
 

@@ -188,6 +188,7 @@ class ToolNode:
             response = await self._execute_tool(
                 tool=self._toolset[tool_name],
                 tool_call_args=tool_call_args,
+                tool_call_id=tool_call_id,
                 session_id=session_id,
             )
 
@@ -200,6 +201,7 @@ class ToolNode:
             tool_name=tool_name,
             tool_call_args=tool_call_args,
             tool=tool,
+            tool_call_id=tool_call_id,
             session_id=session_id,
         )
         return ToolMessage(
@@ -211,6 +213,7 @@ class ToolNode:
         self,
         tool_call_args: dict[str, Any],
         tool: BaseTool,
+        tool_call_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> str:
         try:
@@ -235,6 +238,7 @@ class ToolNode:
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
                 tool_response=tool_call_result,
+                message_id=tool_call_id,
                 subsession_id=session_id,
             )
 
@@ -246,6 +250,7 @@ class ToolNode:
                 tool_call_args=tool_call_args,
                 event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
                 tool_response=f"{e!s} {response}" if response else str(e),
+                message_id=tool_call_id,
                 subsession_id=session_id,
             )
 
@@ -280,6 +285,7 @@ class ToolNode:
         tool_name: str,
         tool_call_args: dict[str, Any],
         tool: BaseTool | None = None,
+        tool_call_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> str | dict | list:
         set_hidden_layer_log_context(tool_name, tool_call_args)
@@ -299,6 +305,7 @@ class ToolNode:
                     tool_call_args={},
                     message=error_message,
                     event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                    message_id=tool_call_id,
                     subsession_id=session_id,
                 )
             return error_message
