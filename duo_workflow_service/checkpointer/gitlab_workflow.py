@@ -46,6 +46,7 @@ from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     BILLABLE_STATUSES,
     CHECKPOINT_STATUS_TO_STATUS_EVENT,
+    INTERNAL_TO_RAILS_STATUS_EVENT,
     NOOP_WORKFLOW_STATUSES,
     STATUS_TO_EVENT_PROPERTY,
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
@@ -419,7 +420,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if self._offline_mode:
             return
 
-        await self._status_handler.update_workflow_status(self._workflow_id, status)
+        rails_status = INTERNAL_TO_RAILS_STATUS_EVENT.get(status, status)
+        await self._status_handler.update_workflow_status(
+            self._workflow_id, rails_status
+        )
 
     def _track_internal_event(
         self,
@@ -527,6 +531,13 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 label = EventLabelEnum.WORKFLOW_RESUME_LABEL
                 event_name = EventEnum.WORKFLOW_RESUME
                 session_type_context.set(SessionTypeEnum.RESUME.value)
+            elif self.initial_status_event == WorkflowStatusEventEnum.STOP_RECOVERY:
+                # A stop-recovery is recorded in Rails as a `retry`, so reuse the
+                # RETRY tracking labels — still an accurate description of what
+                # Rails recorded.
+                label = EventLabelEnum.WORKFLOW_RESUME_LABEL
+                event_name = EventEnum.WORKFLOW_RETRY
+                session_type_context.set(SessionTypeEnum.RETRY.value)
             else:
                 # no event to track
                 return self
@@ -645,6 +656,16 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     f"Found checkpoint: {checkpoint_tuple}"
                 )
             return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
+
+        if status == WorkflowStatusEnum.STOPPED:
+            # Pure detection — no checkpoint access here. The resolution of this
+            # DWS-internal signal into RESUME/START (or a legacy plain RETRY)
+            # happens in AbstractWorkflow._resolve_stop_recovery; the wire event
+            # sent to Rails is translated to `retry` in _update_workflow_status.
+            return (
+                WorkflowStatusEventEnum.STOP_RECOVERY,
+                EventPropertyEnum.WORKFLOW_RESUME_BY_USER,
+            )
 
         return (
             WorkflowStatusEventEnum.RETRY,

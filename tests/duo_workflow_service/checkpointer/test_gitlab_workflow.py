@@ -3655,31 +3655,6 @@ async def test_iter_checkpoint_pages_stops_on_failed_or_empty_response(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status_code,body",
-    [
-        (404, []),
-        (200, None),
-        (200, []),
-    ],
-    ids=["non_success", "no_body", "empty_body"],
-)
-async def test_checkpoints_reversed_yields_nothing_on_failed_or_empty_response(
-    gitlab_workflow, http_client, status_code, body
-):
-    """checkpoints_reversed must yield nothing when the underlying HTTP response is non-success or empty."""
-
-    async def mock_aget(path, **_kwargs):
-        return GitLabHttpResponse(status_code=status_code, body=body, headers={})
-
-    http_client.aget = mock_aget
-
-    results = [t async for t in gitlab_workflow.checkpoints_reversed()]
-
-    assert results == []
-
-
-@pytest.mark.asyncio
 async def test_checkpoints_reversed_skips_malformed_checkpoint_and_continues(
     gitlab_workflow, http_client
 ):
@@ -3712,3 +3687,140 @@ async def test_checkpoints_reversed_skips_malformed_checkpoint_and_continues(
     mock_log_exception.assert_called_once()
     _, kwargs = mock_log_exception.call_args
     assert kwargs.get("extra", {}).get("context") == "Skipping malformed checkpoint"
+
+
+@pytest.mark.asyncio
+async def test_get_initial_status_event_stopped_returns_stop_recovery(
+    http_client, workflow_id, workflow_type
+):
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "latest_checkpoint": None,
+        "workflow_status": WorkflowStatusEnum.STOPPED,
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    status_event, event_property = await gitlab_workflow._get_initial_status_event(
+        {"configurable": {}}
+    )
+
+    assert status_event == WorkflowStatusEventEnum.STOP_RECOVERY
+    assert event_property == EventPropertyEnum.WORKFLOW_RESUME_BY_USER
+    # Pure detection: no checkpoint/HTTP access at all.
+    http_client.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_event,expected_rails_event",
+    [
+        (WorkflowStatusEventEnum.STOP_RECOVERY, WorkflowStatusEventEnum.RETRY),
+        (WorkflowStatusEventEnum.RESUME, WorkflowStatusEventEnum.RESUME),
+    ],
+    ids=["stop_recovery_translated_to_retry", "regular_event_passed_through"],
+)
+async def test_update_workflow_status_translates_stop_recovery_to_retry(
+    gitlab_workflow, workflow_id, status_event, expected_rails_event
+):
+    gitlab_workflow._status_handler = AsyncMock()
+
+    await gitlab_workflow._update_workflow_status(status_event)
+
+    gitlab_workflow._status_handler.update_workflow_status.assert_called_once_with(
+        workflow_id, expected_rails_event
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,body",
+    [
+        (404, []),
+        (200, None),
+        (200, []),
+    ],
+    ids=["non_success", "no_body", "empty_body"],
+)
+async def test_checkpoints_reversed_yields_nothing_on_failed_or_empty_response(
+    gitlab_workflow, http_client, status_code, body
+):
+    """checkpoints_reversed must yield nothing when the underlying HTTP response is non-success or empty."""
+
+    async def mock_aget(path, **_kwargs):
+        return GitLabHttpResponse(status_code=status_code, body=body, headers={})
+
+    http_client.aget = mock_aget
+
+    results = [t async for t in gitlab_workflow.checkpoints_reversed()]
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_workflow_context_manager_stop_recovery(
+    mock_duo_workflow_metrics,
+    http_client_for_retry,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """A stopped workflow enters as STOP_RECOVERY: Rails receives the wire-valid `retry` event and the session is
+    tracked with the same labels the old catch-all RETRY branch used."""
+    workflow_config: dict[str, Any] = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "latest_checkpoint": None,
+        "workflow_status": WorkflowStatusEnum.STOPPED,
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+    gitlab_workflow = GitLabWorkflow(
+        http_client_for_retry,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    async with gitlab_workflow as workflow:
+        assert isinstance(workflow, GitLabWorkflow)
+        assert workflow.initial_status_event == WorkflowStatusEventEnum.STOP_RECOVERY
+
+    # Rails only ever sees `retry` — never the DWS-internal `stop_recovery`.
+    http_client_for_retry.apatch.assert_called_once_with(
+        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
+        body=json.dumps({"status_event": WorkflowStatusEventEnum.RETRY.value}),
+        parse_json=True,
+    )
+
+    internal_event_client.track_event.assert_has_calls(
+        [
+            call(
+                event_name=EventEnum.WORKFLOW_RETRY.value,
+                additional_properties=InternalEventAdditionalProperties(
+                    label=EventLabelEnum.WORKFLOW_RESUME_LABEL.value,
+                    property=EventPropertyEnum.WORKFLOW_RESUME_BY_USER.value,
+                    value=workflow_id,
+                ),
+                category=workflow_type,
+            ),
+        ]
+    )
+    mock_duo_workflow_metrics.count_agent_platform_session_retry.assert_called_once_with(
+        flow_type=workflow_type.value,
+    )
