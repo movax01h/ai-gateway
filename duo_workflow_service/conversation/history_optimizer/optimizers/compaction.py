@@ -7,11 +7,13 @@ for backwards compatibility while callers migrate.
 """
 
 import time
+from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any, Literal, cast
+from uuid import uuid4
 
 from gitlab_cloud_connector import CloudConnectorUser
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
@@ -30,9 +32,15 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
+    TOOL_RESPONSE_MAX_DISPLAY_MSG,
+    MessageTypeEnum,
+    ToolInfo,
+    ToolStatus,
+    UiChatLog,
     get_current_model_max_context_token_limit,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from lib.context import StarletteUser, is_gitlab_team_member
 from lib.context.model import get_model_metadata
 from lib.internal_events.client import InternalEventsClient
@@ -107,14 +115,14 @@ class CompactionOptimizer(HistoryOptimizer):
         """Self-guarded automatic compaction.
 
         Always callable by the ``HistoryOptimizerPipeline``; internally
-        short-circuits when ``should_compact(history)`` is False.
-
-        UI tool cards are not yet produced here; ``ui_chat_logs`` stays empty
-        in MR 1. The UI-building logic will move from ``ChatAgent`` into this
-        method in MR 2.
+        short-circuits when ``should_compact(history)`` is False. When a
+        summary is produced, populates ``result.ui_chat_logs`` with a single
+        ``compaction`` tool card.
         """
         result = await self.compact(messages=history)
-        result.optimizer_name = self.__class__.__name__
+        entry = _maybe_build_auto_compaction_entry(result)
+        if entry is not None:
+            result.ui_chat_logs = [entry]
         return result
 
     async def optimize_manual(
@@ -126,15 +134,17 @@ class CompactionOptimizer(HistoryOptimizer):
         """User-forced compaction (``/compact``).
 
         Bypasses the auto-threshold and slicing fall-throughs; always
-        attempts to produce a summary. UI tool cards continue to be built by
-        ``ChatAgent`` in MR 1 — they move here in MR 2.
+        attempts to produce a summary. On success, ``result.ui_chat_logs``
+        carries a single tool card describing the compaction. On failure or
+        no-op, ``ui_chat_logs`` carries a tool-card + agent-message pair
+        matching the shape ``ChatAgent`` used to emit directly.
         """
         result = await self.compact(
             messages=history,
             is_manual=True,
             user_instruction=user_instruction,
         )
-        result.optimizer_name = self.__class__.__name__
+        result.ui_chat_logs = _build_manual_compaction_ui_logs(result)
         return result
 
     def should_compact(self, messages: list[BaseMessage]) -> bool:
@@ -449,6 +459,126 @@ class CompactionOptimizer(HistoryOptimizer):
             ),
             category="ConversationCompactor",
         )
+
+
+def build_compaction_tool_card(
+    trigger: Literal["auto", "manual"],
+    result: CompactionResult | None,
+    status: ToolStatus,
+    content: str | None = None,
+) -> UiChatLog:
+    """Build a ``UiChatLog`` tool card for any compaction outcome.
+
+    Mirrors the shape produced by ``ToolsExecutor._create_tool_ui_chat_log``
+    so the client renders it uniformly: success cards carry the summary in
+    ``tool_info.tool_response`` (a ``ToolMessage`` to match the FE
+    deserialization contract); no-op / failure cards still populate
+    ``tool_info`` with the args metadata but omit ``tool_response``,
+    matching how real tool failures are rendered.
+
+    ``content`` defaults to the ``"Summarized N message(s)"`` summary line
+    and should be overridden for no-op / failure entries.
+    """
+    n = result.messages_summarized if result is not None else 0
+    if content is None:
+        plural = "s" if n != 1 else ""
+        content = f"Summarized {n} message{plural}"
+
+    tool_call_id = f"compaction-{uuid4()}"
+    args: dict[str, Any] = {
+        "trigger": trigger,
+        "messages_summarized": n,
+        "compaction_input_tokens": (
+            result.compaction_input_tokens if result is not None else 0
+        ),
+        "compaction_output_tokens": (
+            result.compaction_output_tokens if result is not None else 0
+        ),
+    }
+
+    tool_info = ToolInfo(name="compaction", args=args)
+    summary = result.summary if result is not None else None
+    if summary is not None:
+        redacted = redact_secrets_for_ui(summary.text(), tool_name="compaction")
+        tool_info["tool_response"] = ToolMessage(
+            content=redacted[:TOOL_RESPONSE_MAX_DISPLAY_MSG],
+            name="compaction",
+            tool_call_id=tool_call_id,
+            status="success",
+        )
+
+    return UiChatLog(
+        message_type=MessageTypeEnum.TOOL,
+        message_sub_type="compaction",
+        content=content,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        status=status,
+        correlation_id=None,
+        tool_info=tool_info,
+        additional_context=None,
+        message_id=tool_call_id,
+    )
+
+
+def build_compaction_agent_message(content: str) -> UiChatLog:
+    """Build an AGENT-typed ``UiChatLog`` carrying a user-facing compaction notice.
+
+    Front end ignores ``content`` on failed tool cards, so non-success
+    compaction paths emit this entry alongside the tool card to surface the
+    explanation to the user.
+    """
+    return UiChatLog(
+        message_type=MessageTypeEnum.AGENT,
+        message_sub_type=None,
+        content=content,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        status=ToolStatus.SUCCESS,
+        correlation_id=None,
+        tool_info=None,
+        additional_context=None,
+        message_id=f"compaction-{uuid4()}",
+    )
+
+
+def _maybe_build_auto_compaction_entry(
+    result: CompactionResult | None,
+) -> UiChatLog | None:
+    if result is None or not result.succeeded:
+        return None
+    return build_compaction_tool_card(
+        trigger="auto",
+        result=result,
+        status=ToolStatus.SUCCESS,
+    )
+
+
+def _build_manual_compaction_ui_logs(result: CompactionResult) -> list[UiChatLog]:
+    """Build the UI entries surfaced after a manual ``/compact`` invocation.
+
+    Matches the pre-refactor ``ChatAgent`` behavior:
+    - success: single tool card carrying the summary
+    - failure (error or missing summary): tool card + agent message pair
+    """
+    if result.succeeded:
+        return [
+            build_compaction_tool_card(
+                trigger="manual",
+                result=result,
+                status=ToolStatus.SUCCESS,
+            )
+        ]
+
+    return [
+        build_compaction_tool_card(
+            trigger="manual",
+            result=result,
+            content="Compaction failed",
+            status=ToolStatus.FAILURE,
+        ),
+        build_compaction_agent_message(
+            "Failed to compact conversation. Please try again."
+        ),
+    ]
 
 
 def create_conversation_compactor(

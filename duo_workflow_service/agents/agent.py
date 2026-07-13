@@ -15,12 +15,14 @@ from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
-from duo_workflow_service.conversation.compaction import (
-    CompactionConfig,
-    ConversationCompactor,
-    create_conversation_compactor,
-    maybe_compact_history,
+from duo_workflow_service.conversation.history_optimizer.builder import (
+    FlowContext,
+    build_history_optimizer_pipeline,
 )
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.event import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
@@ -81,7 +83,7 @@ class Agent(BaseAgent):
     check_events: bool = True
     http_client: GitlabHttpClient
     prompt_template_inputs: dict = {}
-    compactor: ConversationCompactor | None = None
+    optimizer_pipeline: HistoryOptimizerPipeline
 
     async def run(self, state: DuoWorkflowStateType) -> dict[str, Any]:
         with duo_workflow_metrics.time_compute(
@@ -97,12 +99,8 @@ class Agent(BaseAgent):
 
             try:
                 history = state["conversation_history"].get(self.name, [])
-                compacted_history, _ = await maybe_compact_history(
-                    compactor=self.compactor,
-                    history=history,
-                    agent_name=self.name,
-                )
-                state["conversation_history"][self.name] = compacted_history
+                optimized_history, _ = await self.optimizer_pipeline.optimize(history)
+                state["conversation_history"][self.name] = optimized_history
 
                 input = self._prepare_input(state)
 
@@ -228,23 +226,20 @@ def build_agent(
         },
     )
 
-    compactor = (
-        create_conversation_compactor(
-            config=compaction,
-            prompt_registry=prompt_registry,
+    optimizer_pipeline = build_history_optimizer_pipeline(
+        compaction=compaction if compaction is not None else False,
+        flow_context=FlowContext(
+            flow_id=workflow_id,
+            flow_type=workflow_type.value,
             user=user,
-            agent_name=name,
-            workflow_id=workflow_id,
-            workflow_type=workflow_type.value,
-        )
-        if compaction
-        else None
+        ),
+        agent_name=name,
     )
 
     return Agent(
         name=name,
         workflow_id=workflow_id,
         prompt=prompt,
-        compactor=compactor,
+        optimizer_pipeline=optimizer_pipeline,
         **kwargs,
     )

@@ -14,11 +14,7 @@ from duo_workflow_service.conversation.history_optimizer.optimizers.compaction i
 from duo_workflow_service.conversation.history_optimizer.optimizers.legacy_trim import (
     LegacyTrimOptimizer,
 )
-from duo_workflow_service.conversation.history_optimizer.schema import (
-    CompactionConfig,
-    LegacyTrimConfig,
-    ToolResultPrunerConfig,
-)
+from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 
 
 @pytest.fixture(name="flow_context")
@@ -55,38 +51,10 @@ class TestFlowContext:
 
 
 class TestBuildHistoryOptimizerPipeline:
-    def test_empty_configs_yield_empty_pipeline(
+    def test_default_uses_legacy_trim(
         self, flow_context, mock_prompt_registry, mock_internal_events_client
     ):
         pipeline = build_history_optimizer_pipeline(
-            [],
-            flow_context=flow_context,
-            agent_name="agent",
-            prompt_registry=mock_prompt_registry,
-            internal_events_client=mock_internal_events_client,
-        )
-        assert pipeline.optimizers == []
-
-    def test_compaction_config_builds_compaction_optimizer(
-        self, flow_context, mock_prompt_registry, mock_internal_events_client
-    ):
-        cfg = CompactionConfig()
-        pipeline = build_history_optimizer_pipeline(
-            [cfg],
-            flow_context=flow_context,
-            agent_name="agent",
-            prompt_registry=mock_prompt_registry,
-            internal_events_client=mock_internal_events_client,
-        )
-        assert len(pipeline.optimizers) == 1
-        assert isinstance(pipeline.optimizers[0], CompactionOptimizer)
-
-    def test_legacy_trim_config_builds_legacy_trim_optimizer(
-        self, flow_context, mock_prompt_registry, mock_internal_events_client
-    ):
-        cfg = LegacyTrimConfig()
-        pipeline = build_history_optimizer_pipeline(
-            [cfg],
             flow_context=flow_context,
             agent_name="agent",
             prompt_registry=mock_prompt_registry,
@@ -95,50 +63,55 @@ class TestBuildHistoryOptimizerPipeline:
         assert len(pipeline.optimizers) == 1
         assert isinstance(pipeline.optimizers[0], LegacyTrimOptimizer)
 
-    def test_tool_result_pruner_config_raises_not_implemented(
+    def test_compaction_false_yields_legacy_trim(
         self, flow_context, mock_prompt_registry, mock_internal_events_client
     ):
-        with pytest.raises(NotImplementedError, match="ToolResultPruner"):
-            build_history_optimizer_pipeline(
-                [ToolResultPrunerConfig()],
-                flow_context=flow_context,
-                agent_name="agent",
-                prompt_registry=mock_prompt_registry,
-                internal_events_client=mock_internal_events_client,
-            )
+        pipeline = build_history_optimizer_pipeline(
+            compaction=False,
+            flow_context=flow_context,
+            agent_name="agent",
+            prompt_registry=mock_prompt_registry,
+            internal_events_client=mock_internal_events_client,
+        )
+        assert len(pipeline.optimizers) == 1
+        assert isinstance(pipeline.optimizers[0], LegacyTrimOptimizer)
 
-    def test_validation_runs_before_construction(
+    def test_compaction_true_yields_default_compaction_optimizer(
         self, flow_context, mock_prompt_registry, mock_internal_events_client
     ):
-        with pytest.raises(ValueError, match="at most one of"):
-            build_history_optimizer_pipeline(
-                [CompactionConfig(), LegacyTrimConfig()],
-                flow_context=flow_context,
-                agent_name="agent",
-                prompt_registry=mock_prompt_registry,
-                internal_events_client=mock_internal_events_client,
-            )
+        pipeline = build_history_optimizer_pipeline(
+            compaction=True,
+            flow_context=flow_context,
+            agent_name="agent",
+            prompt_registry=mock_prompt_registry,
+            internal_events_client=mock_internal_events_client,
+        )
+        assert len(pipeline.optimizers) == 1
+        optimizer = pipeline.optimizers[0]
+        assert isinstance(optimizer, CompactionOptimizer)
+        assert optimizer._config == CompactionConfig()
 
-    def test_unknown_config_type_raises_value_error(
+    def test_compaction_config_yields_compaction_optimizer_with_config(
         self, flow_context, mock_prompt_registry, mock_internal_events_client
     ):
-        class UnknownConfig:
-            pass
-
-        with pytest.raises(ValueError, match="Unknown HistoryOptimizerConfig"):
-            build_history_optimizer_pipeline(
-                [UnknownConfig()],
-                flow_context=flow_context,
-                agent_name="agent",
-                prompt_registry=mock_prompt_registry,
-                internal_events_client=mock_internal_events_client,
-            )
+        cfg = CompactionConfig(trim_threshold=0.5)
+        pipeline = build_history_optimizer_pipeline(
+            compaction=cfg,
+            flow_context=flow_context,
+            agent_name="agent",
+            prompt_registry=mock_prompt_registry,
+            internal_events_client=mock_internal_events_client,
+        )
+        assert len(pipeline.optimizers) == 1
+        optimizer = pipeline.optimizers[0]
+        assert isinstance(optimizer, CompactionOptimizer)
+        assert optimizer._config is cfg
 
     def test_compaction_optimizer_receives_flow_context_fields(
         self, flow_context, mock_prompt_registry, mock_internal_events_client
     ):
         pipeline = build_history_optimizer_pipeline(
-            [CompactionConfig()],
+            compaction=CompactionConfig(),
             flow_context=flow_context,
             agent_name="my_agent",
             prompt_registry=mock_prompt_registry,
@@ -150,4 +123,19 @@ class TestBuildHistoryOptimizerPipeline:
         assert optimizer._user is flow_context.user
         assert optimizer._agent_name == "my_agent"
         assert optimizer._prompt_registry is mock_prompt_registry
+        assert optimizer._internal_events_client is mock_internal_events_client
+
+    def test_legacy_trim_receives_agent_name_and_events_client(
+        self, flow_context, mock_prompt_registry, mock_internal_events_client
+    ):
+        pipeline = build_history_optimizer_pipeline(
+            compaction=False,
+            flow_context=flow_context,
+            agent_name="my_agent",
+            prompt_registry=mock_prompt_registry,
+            internal_events_client=mock_internal_events_client,
+        )
+        optimizer = pipeline.optimizers[0]
+        assert isinstance(optimizer, LegacyTrimOptimizer)
+        assert optimizer._agent_name == "my_agent"
         assert optimizer._internal_events_client is mock_internal_events_client

@@ -48,7 +48,6 @@ class LegacyTrimOptimizer(HistoryOptimizer):
             tokens_before=result.tokens_before,
             tokens_after=result.tokens_after,
             duration_ms=result.duration_ms,
-            optimizer_name=self.__class__.__name__,
             token_budget=result.token_budget,
             max_context_tokens=result.max_context_tokens,
         )

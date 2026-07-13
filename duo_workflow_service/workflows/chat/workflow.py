@@ -398,7 +398,6 @@ class Workflow(AbstractWorkflow):
             system_template_override=self.system_template_override,
             agent_name_override=self._agent_name_override,
             compaction=CompactionConfig(trim_threshold=0.7),
-            internal_events_client=self._internal_event_client,
         )
 
         tools_runner = ToolsExecutor(

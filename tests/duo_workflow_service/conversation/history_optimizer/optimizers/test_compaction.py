@@ -20,6 +20,15 @@ from duo_workflow_service.conversation.history_optimizer.optimizers.compaction i
     COMPACTION_PROMPT_ID,
     COMPACTION_PROMPT_MANUAL_ID,
     CompactionStatus,
+    _build_manual_compaction_ui_logs,
+    _maybe_build_auto_compaction_entry,
+    build_compaction_agent_message,
+    build_compaction_tool_card,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import CompactionResult
+from duo_workflow_service.entities.state import (
+    MessageTypeEnum,
+    ToolStatus,
 )
 
 DEFAULT_MAX_RECENT_MESSAGES = 10
@@ -1239,14 +1248,15 @@ class TestCompactorLazyPromptLoad:
 class TestCompactionOptimizerInterface:
     """Tests for the ``HistoryOptimizer`` interface methods on ``CompactionOptimizer``.
 
-    ``optimize`` / ``optimize_manual`` are thin wrappers around ``compact`` that
-    set ``optimizer_name``. Behavior beyond that is covered by the existing
-    ``compact`` tests.
+    ``optimize`` / ``optimize_manual`` are thin wrappers around ``compact``
+    that additionally populate ``ui_chat_logs`` with the compaction tool card
+    (and, for manual, the failure-path agent message). Behavior beyond that
+    is covered by the existing ``compact`` tests.
     """
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
-    async def test_optimize_delegates_to_compact_and_sets_optimizer_name(
+    async def test_optimize_delegates_to_compact_and_populates_ui_logs(
         self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
     ):
         mock_get_max_context.return_value = 400_000
@@ -1257,7 +1267,11 @@ class TestCompactionOptimizerInterface:
 
         assert result.was_modified is True
         assert result.was_compacted is True
-        assert result.optimizer_name == "CompactionOptimizer"
+        assert len(result.ui_chat_logs) == 1
+        entry = result.ui_chat_logs[0]
+        assert entry["message_type"].value == "tool"
+        assert entry["message_sub_type"] == "compaction"
+        assert entry["tool_info"]["args"]["trigger"] == "auto"
         mock_prompt.ainvoke.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1272,7 +1286,7 @@ class TestCompactionOptimizerInterface:
         result = await compactor.optimize([HumanMessage(content="short")])
 
         assert result.was_modified is False
-        assert result.optimizer_name == "CompactionOptimizer"
+        assert not result.ui_chat_logs
         mock_prompt.ainvoke.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1290,7 +1304,9 @@ class TestCompactionOptimizerInterface:
         )
 
         assert result.was_modified is True
-        assert result.optimizer_name == "CompactionOptimizer"
+        assert len(result.ui_chat_logs) == 1
+        entry = result.ui_chat_logs[0]
+        assert entry["tool_info"]["args"]["trigger"] == "manual"
         inputs = mock_prompt.ainvoke.call_args[0][0]
         assert inputs.get("user_instruction") == "focus on auth bug"
 
@@ -1308,3 +1324,163 @@ class TestCompactionOptimizerInterface:
         assert result.was_modified is True
         inputs = mock_prompt.ainvoke.call_args[0][0]
         assert inputs["user_instruction"] is None
+
+
+class TestBuildCompactionToolCard:
+    """Tests for the module-level compaction UI builders."""
+
+    def test_success_card_carries_summary_in_tool_response(self):
+        summary = AIMessage(content="Summary text", id="summary-id")
+        result = CompactionResult(
+            messages=[summary],
+            was_modified=True,
+            messages_summarized=5,
+            compaction_input_tokens=4200,
+            compaction_output_tokens=350,
+            summary=summary,
+        )
+
+        entry = build_compaction_tool_card(
+            trigger="auto",
+            result=result,
+            status=ToolStatus.SUCCESS,
+        )
+
+        assert entry["message_type"] == MessageTypeEnum.TOOL
+        assert entry["message_sub_type"] == "compaction"
+        assert entry["status"] == ToolStatus.SUCCESS
+        assert entry["content"] == "Summarized 5 messages"
+        assert entry["message_id"].startswith("compaction-")
+        tool_info = entry["tool_info"]
+        assert tool_info["name"] == "compaction"
+        assert tool_info["args"] == {
+            "trigger": "auto",
+            "messages_summarized": 5,
+            "compaction_input_tokens": 4200,
+            "compaction_output_tokens": 350,
+        }
+        assert isinstance(tool_info["tool_response"], ToolMessage)
+        assert tool_info["tool_response"].content == "Summary text"
+        assert tool_info["tool_response"].tool_call_id == entry["message_id"]
+
+    def test_success_card_redacts_secrets_in_summary(self):
+        leaked = "glpat-AAAAABBBBCCCCDDDDEEEE"
+        summary = AIMessage(content=f"User shared {leaked}", id="s")
+        result = CompactionResult(
+            messages=[summary],
+            was_modified=True,
+            messages_summarized=1,
+            summary=summary,
+        )
+
+        entry = build_compaction_tool_card(
+            trigger="auto",
+            result=result,
+            status=ToolStatus.SUCCESS,
+        )
+
+        redacted = entry["tool_info"]["tool_response"].content
+        assert leaked not in redacted
+        assert "[REDACTED]" in redacted
+
+    def test_failure_card_omits_tool_response(self):
+        entry = build_compaction_tool_card(
+            trigger="manual",
+            result=None,
+            content="Compaction failed",
+            status=ToolStatus.FAILURE,
+        )
+
+        assert entry["status"] == ToolStatus.FAILURE
+        assert entry["content"] == "Compaction failed"
+        assert "tool_response" not in entry["tool_info"]
+        assert entry["tool_info"]["args"]["trigger"] == "manual"
+        assert entry["tool_info"]["args"]["messages_summarized"] == 0
+
+    def test_singular_message_pluralization(self):
+        result = CompactionResult(
+            messages=[],
+            was_modified=True,
+            messages_summarized=1,
+            summary=AIMessage(content="one"),
+        )
+        entry = build_compaction_tool_card(
+            trigger="auto",
+            result=result,
+            status=ToolStatus.SUCCESS,
+        )
+        assert entry["content"] == "Summarized 1 message"
+
+
+class TestBuildCompactionAgentMessage:
+    def test_returns_agent_typed_ui_log(self):
+        entry = build_compaction_agent_message("Hello")
+        assert entry["message_type"] == MessageTypeEnum.AGENT
+        assert entry["content"] == "Hello"
+        assert entry["status"] == ToolStatus.SUCCESS
+        assert entry["message_id"].startswith("compaction-")
+
+
+class TestMaybeBuildAutoCompactionEntry:
+    def test_none_result_returns_none(self):
+        assert _maybe_build_auto_compaction_entry(None) is None
+
+    def test_no_op_returns_none(self):
+        result = CompactionResult(was_modified=False)
+        assert _maybe_build_auto_compaction_entry(result) is None
+
+    def test_missing_summary_returns_none(self):
+        result = CompactionResult(was_modified=True, summary=None)
+        assert _maybe_build_auto_compaction_entry(result) is None
+
+    def test_success_returns_tool_card(self):
+        summary = AIMessage(content="s")
+        result = CompactionResult(
+            messages=[summary],
+            was_modified=True,
+            messages_summarized=2,
+            summary=summary,
+        )
+        entry = _maybe_build_auto_compaction_entry(result)
+        assert entry is not None
+        assert entry["tool_info"]["args"]["trigger"] == "auto"
+
+
+class TestBuildManualCompactionUiLogs:
+    def test_success_returns_single_tool_card(self):
+        summary = AIMessage(content="s")
+        result = CompactionResult(
+            messages=[summary],
+            was_modified=True,
+            messages_summarized=3,
+            summary=summary,
+        )
+        logs = _build_manual_compaction_ui_logs(result)
+        assert len(logs) == 1
+        assert logs[0]["status"] == ToolStatus.SUCCESS
+        assert logs[0]["tool_info"]["args"]["trigger"] == "manual"
+
+    def test_error_returns_tool_card_and_agent_message(self):
+        result = CompactionResult(
+            messages=[],
+            was_modified=False,
+            error=RuntimeError("boom"),
+        )
+        logs = _build_manual_compaction_ui_logs(result)
+        assert len(logs) == 2
+        tool_entry, agent_entry = logs
+        assert tool_entry["status"] == ToolStatus.FAILURE
+        assert tool_entry["content"] == "Compaction failed"
+        assert "tool_response" not in tool_entry["tool_info"]
+        assert agent_entry["message_type"] == MessageTypeEnum.AGENT
+        assert "failed" in agent_entry["content"].lower()
+
+    def test_missing_summary_returns_failure_pair(self):
+        result = CompactionResult(
+            messages=[],
+            was_modified=False,
+            summary=None,
+        )
+        logs = _build_manual_compaction_ui_logs(result)
+        assert len(logs) == 2
+        assert logs[0]["status"] == ToolStatus.FAILURE
