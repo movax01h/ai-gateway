@@ -24,7 +24,7 @@ def proxy_client_fixture(limits, internal_event_client, billing_event_service):
 def request_params_fixture():
     """Fixture for common request parameters."""
     return {
-        "model": "gpt-5-codex",
+        "model": "gpt-5.3-codex",
         "max_tokens": 1024,
         "messages": [{"role": "user", "content": "Hi, how are you?"}],
         "stream": True,
@@ -202,7 +202,7 @@ async def test_stream_flag_extraction(
     """Test stream flag extraction from request."""
     # Test with stream=True
     stream_params = {
-        "model": "gpt-5-codex",
+        "model": "gpt-5.3-codex",
         "messages": [{"role": "user", "content": "Hello"}],
         "stream": True,
     }
@@ -221,7 +221,7 @@ async def test_stream_flag_extraction(
 
     # Test with stream=False (default)
     no_stream_params = {
-        "model": "gpt-5-codex",
+        "model": "gpt-5.3-codex",
         "messages": [{"role": "user", "content": "Hello"}],
     }
 
