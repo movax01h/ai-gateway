@@ -8,10 +8,10 @@ compatibility while callers migrate.
 """
 
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, Union
+from typing import Literal
 
 from langchain_core.messages import AIMessage, BaseMessage
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from duo_workflow_service.entities.state import UiChatLog
 
@@ -49,43 +49,6 @@ class CompactionConfig(BaseModel):
         return v
 
 
-class LegacyTrimConfig(BaseModel):
-    """Configuration for the legacy token-based trim optimizer.
-
-    Defaults (token budget, threshold) live in
-    ``duo_workflow_service.conversation.trimmer``; this config has no fields
-    today but the discriminator key keeps the YAML/Python surfaces symmetric.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    type: Literal["legacy_trim"] = "legacy_trim"
-
-
-class ToolResultPrunerConfig(BaseModel):
-    """Stub config for the future ``ToolResultPruner`` optimizer.
-
-    The optimizer itself is not implemented in MR 1; the builder raises
-    ``NotImplementedError`` when it encounters this config. The schema entry
-    exists so YAML flows can reference the future optimizer once it lands.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    type: Literal["tool_result_pruner"] = "tool_result_pruner"
-
-
-HistoryOptimizerConfig = Annotated[
-    Union[CompactionConfig, LegacyTrimConfig, ToolResultPrunerConfig],
-    Field(discriminator="type"),
-]
-"""Discriminated union of all supported optimizer configs.
-
-Pydantic models that reference this alias get correct ``type``-discriminated
-parsing for free.
-"""
-
-
 @dataclass
 class MessageSlices:
     """Result of slicing messages for summarization."""
@@ -111,7 +74,6 @@ class OptimizationResult:
     tokens_before: int = 0
     tokens_after: int = 0
     duration_ms: float = 0.0
-    optimizer_name: str = ""
     ui_chat_logs: list[UiChatLog] = field(default_factory=list)
 
 
@@ -139,6 +101,11 @@ class CompactionResult(OptimizationResult):
         ``was_modified=...``.
         """
         return self.was_modified
+
+    @property
+    def succeeded(self) -> bool:
+        """True when compaction produced a usable summary and no error occurred."""
+        return self.error is None and self.summary is not None and self.was_compacted
 
 
 @dataclass

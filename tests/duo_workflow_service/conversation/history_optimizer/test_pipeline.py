@@ -22,7 +22,7 @@ class _FakeOptimizer(HistoryOptimizer):
     ):
         self._modified = modified
         self._replacement = replacement
-        self._name = name
+        self.name = name
         self.calls: list[list[BaseMessage]] = []
 
     async def optimize(self, history: list[BaseMessage]) -> OptimizationResult:
@@ -31,7 +31,6 @@ class _FakeOptimizer(HistoryOptimizer):
         return OptimizationResult(
             messages=messages if messages is not None else history,
             was_modified=self._modified,
-            optimizer_name=self._name,
         )
 
 
@@ -83,7 +82,8 @@ class TestHistoryOptimizerPipeline:
         assert messages == second_out
         assert first.calls == [original]
         assert second.calls == [first_out]
-        assert [r.optimizer_name for r in results] == ["First", "Second"]
+        assert len(results) == 2
+        assert all(r.was_modified for r in results)
 
     @pytest.mark.asyncio
     async def test_first_no_op_second_modifies(self):
@@ -106,7 +106,8 @@ class TestHistoryOptimizerPipeline:
         opts = [_FakeOptimizer(modified=False, name=f"O{i}") for i in range(3)]
         pipeline = HistoryOptimizerPipeline(opts)
         _, results = await pipeline.optimize([HumanMessage(content="x")])
-        assert [r.optimizer_name for r in results] == ["O0", "O1", "O2"]
+        assert len(results) == 3
+        assert all(not r.was_modified for r in results)
 
     def test_optimizers_property(self):
         opts = [_FakeOptimizer(modified=False)]

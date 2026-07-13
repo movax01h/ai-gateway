@@ -88,6 +88,10 @@ def mock_prompt_adapter_fixture():
 
 @pytest.fixture(name="mock_chat_agent")
 def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
+    from duo_workflow_service.conversation.history_optimizer.pipeline import (
+        HistoryOptimizerPipeline,
+    )
+
     mock_toolset = Mock(spec=Toolset)
     mock_toolset.validate_tool_call.return_value = None
     agent = ChatAgent(
@@ -96,6 +100,7 @@ def mock_chat_agent_fixture(mock_prompt_adapter, mock_tools_registry):
         tools_registry=mock_tools_registry,
         system_template_override=None,
         toolset=mock_toolset,
+        optimizer_pipeline=HistoryOptimizerPipeline([]),
     )
     return agent
 
@@ -440,7 +445,6 @@ async def test_workflow_run(
                 system_template_override=workflow.system_template_override,
                 agent_name_override=None,  # Default workflow has no override
                 compaction=ANY,
-                internal_events_client=ANY,
             )
 
             mock_user_interface_instance.send_event.assert_called_with(
@@ -520,7 +524,6 @@ async def test_workflow_run_with_agent_name_override(
                 system_template_override=None,
                 agent_name_override="348/0",  # Should pass the override
                 compaction=ANY,
-                internal_events_client=ANY,
             )
 
 

@@ -3,9 +3,21 @@ from unittest.mock import Mock, patch
 import pytest
 
 from duo_workflow_service.agents.chat_agent import ChatAgent
-from duo_workflow_service.agents.chat_agent_factory import create_agent
+from duo_workflow_service.agents.chat_agent_factory import (
+    _extract_manual_compactor,
+    create_agent,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
-from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    CompactionOptimizer,
+)
+from duo_workflow_service.conversation.history_optimizer.optimizers.legacy_trim import (
+    LegacyTrimOptimizer,
+)
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 from duo_workflow_service.tools.toolset import Toolset
 from lib.feature_flags.context import FeatureFlag
 from lib.internal_events.event_enum import CategoryEnum
@@ -36,7 +48,6 @@ class TestCreateAgent:
         mock_local_prompt_registry,
         prompt,
     ):
-        # Mock feature flag and client capability to return False by default
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
 
@@ -82,7 +93,6 @@ class TestCreateAgent:
         prompt,
     ):
         """Test that agent_name_override is used for chat-partial foundational agents."""
-        # Mock feature flag and client capability to return False by default
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
 
@@ -110,7 +120,7 @@ class TestCreateAgent:
             tools=[],
             bind_tools_params={},
             internal_event_extra={
-                "agent_name": "348/0",  # Should use the override
+                "agent_name": "348/0",
                 "workflow_id": "workflow_123",
                 "workflow_type": CategoryEnum.AI_CATALOG_AGENT,
             },
@@ -128,7 +138,6 @@ class TestCreateAgent:
         mock_local_prompt_registry,
     ):
         """Test that agent_name defaults to 'chat' when no override is provided."""
-        # Mock feature flag and client capability to return False by default
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
 
@@ -146,7 +155,6 @@ class TestCreateAgent:
 
         assert isinstance(agent, ChatAgent)
 
-        # Verify that the agent_name defaults to "chat"
         call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
         assert call_kwargs["internal_event_extra"]["agent_name"] == "chat"
         assert call_kwargs["bind_tools_params"] == {}
@@ -217,44 +225,36 @@ class TestCreateAgent:
 
         assert isinstance(agent, ChatAgent)
 
-        # Verify bind_tools_params matches expected
         call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
         assert call_kwargs["bind_tools_params"] == expected_params, (
             f"Failed for scenario: {test_description}"
         )
 
-        # Verify the feature flag was checked once for DAP_WEB_SEARCH
         assert mock_is_feature_enabled.call_count == 1
         mock_is_feature_enabled.assert_any_call(FeatureFlag.DAP_WEB_SEARCH)
 
-        # Verify client capability was checked only when feature flag is enabled
-        # (due to short-circuit evaluation of the 'and' operator)
         if should_check_capability:
             mock_is_client_capable.assert_called_once_with("web_search")
         else:
             mock_is_client_capable.assert_not_called()
 
-    @patch(
-        "duo_workflow_service.agents.chat_agent_factory.create_conversation_compactor"
-    )
     @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
     @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
     def test_create_agent_with_compaction_default_config(
         self,
         mock_is_client_capable,
         mock_is_feature_enabled,
-        mock_create_compactor,
         user,
         mock_tools_registry,
         mock_toolset,
         mock_local_prompt_registry,
     ):
-        """Test that compactor is created when compaction=CompactionConfig()."""
+        """When compaction=CompactionConfig() is passed, the pipeline uses a CompactionOptimizer and the manual
+        compactor is reused from the pipeline (same object)."""
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
-        mock_compactor = Mock()
-        mock_create_compactor.return_value = mock_compactor
 
+        cfg = CompactionConfig()
         agent = create_agent(
             user=user,
             tools_registry=mock_tools_registry,
@@ -264,40 +264,33 @@ class TestCreateAgent:
             workflow_id="workflow_123",
             workflow_type=CategoryEnum.WORKFLOW_CHAT,
             system_template_override=None,
-            compaction=CompactionConfig(),
+            compaction=cfg,
         )
 
         assert isinstance(agent, ChatAgent)
-        assert agent._compactor == mock_compactor
-        mock_create_compactor.assert_called_once()
-        call_kwargs = mock_create_compactor.call_args.kwargs
-        assert isinstance(call_kwargs["config"], CompactionConfig)
-        assert call_kwargs["prompt_registry"] == mock_local_prompt_registry
-        assert call_kwargs["user"] == user
-        assert call_kwargs["agent_name"] == "chat"
-        assert call_kwargs["workflow_id"] == "workflow_123"
-        assert call_kwargs["workflow_type"] == CategoryEnum.WORKFLOW_CHAT.value
+        optimizers = agent._optimizer_pipeline.optimizers
+        assert len(optimizers) == 1
+        assert isinstance(optimizers[0], CompactionOptimizer)
+        assert optimizers[0]._config is cfg
 
-    @patch(
-        "duo_workflow_service.agents.chat_agent_factory.create_conversation_compactor"
-    )
+        # The manual compactor is the same object as the pipeline optimizer — no duplicate.
+        assert agent._manual_compactor is optimizers[0]
+
     @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
     @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
-    def test_create_agent_with_compaction_config(
+    def test_create_agent_with_custom_compaction_config(
         self,
         mock_is_client_capable,
         mock_is_feature_enabled,
-        mock_create_compactor,
         user,
         mock_tools_registry,
         mock_toolset,
         mock_local_prompt_registry,
     ):
-        """Test that custom CompactionConfig is used when provided."""
+        """Custom CompactionConfig flows through to the pipeline optimizer; the manual compactor is reused from the
+        pipeline (same object)."""
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
-        mock_compactor = Mock()
-        mock_create_compactor.return_value = mock_compactor
 
         custom_config = CompactionConfig(
             max_recent_messages=15,
@@ -317,27 +310,24 @@ class TestCreateAgent:
         )
 
         assert isinstance(agent, ChatAgent)
-        assert agent._compactor == mock_compactor
-        mock_create_compactor.assert_called_once()
-        call_kwargs = mock_create_compactor.call_args.kwargs
-        assert call_kwargs["config"] == custom_config
+        optimizers = agent._optimizer_pipeline.optimizers
+        assert isinstance(optimizers[0], CompactionOptimizer)
+        assert optimizers[0]._config is custom_config
+        # The manual compactor is the same object as the pipeline optimizer — no duplicate.
+        assert agent._manual_compactor is optimizers[0]
 
-    @patch(
-        "duo_workflow_service.agents.chat_agent_factory.create_conversation_compactor"
-    )
     @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
     @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
     def test_create_agent_without_compaction(
         self,
         mock_is_client_capable,
         mock_is_feature_enabled,
-        mock_create_compactor,
         user,
         mock_tools_registry,
         mock_toolset,
         mock_local_prompt_registry,
     ):
-        """Test that no compactor is created when compaction=None (default)."""
+        """When compaction is None, the pipeline falls back to legacy trim and manual compactor is None."""
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
 
@@ -354,5 +344,47 @@ class TestCreateAgent:
         )
 
         assert isinstance(agent, ChatAgent)
-        assert agent._compactor is None
-        mock_create_compactor.assert_not_called()
+        optimizers = agent._optimizer_pipeline.optimizers
+        assert len(optimizers) == 1
+        assert isinstance(optimizers[0], LegacyTrimOptimizer)
+        assert agent._manual_compactor is None
+
+
+class TestExtractManualCompactor:
+    """Unit tests for _extract_manual_compactor."""
+
+    def test_returns_none_when_compaction_is_none(self):
+        """When compaction config is None, always return None regardless of pipeline contents."""
+        compactor = Mock(spec=CompactionOptimizer)
+        pipeline = HistoryOptimizerPipeline([compactor])
+        assert _extract_manual_compactor(pipeline, None) is None
+
+    def test_returns_none_when_pipeline_is_empty(self):
+        """When the pipeline has no optimizers, return None even if compaction is configured."""
+        pipeline = HistoryOptimizerPipeline([])
+        assert _extract_manual_compactor(pipeline, CompactionConfig()) is None
+
+    def test_returns_compaction_optimizer_at_index_zero(self):
+        """Returns the CompactionOptimizer when it is the first (and only) optimizer."""
+        compactor = Mock(spec=CompactionOptimizer)
+        pipeline = HistoryOptimizerPipeline([compactor])
+        result = _extract_manual_compactor(pipeline, CompactionConfig())
+        assert result is compactor
+
+    def test_returns_compaction_optimizer_not_at_index_zero(self):
+        """Returns the CompactionOptimizer even when it is not the first entry in the pipeline.
+
+        This covers the case where pre-main optimizers (e.g. ToolResultPruner) are inserted ahead of the
+        CompactionOptimizer as the pipeline grows.
+        """
+        pre_main = Mock(spec=LegacyTrimOptimizer)
+        compactor = Mock(spec=CompactionOptimizer)
+        pipeline = HistoryOptimizerPipeline([pre_main, compactor])
+        result = _extract_manual_compactor(pipeline, CompactionConfig())
+        assert result is compactor
+
+    def test_returns_none_when_no_compaction_optimizer_in_pipeline(self):
+        """Returns None when the pipeline contains no CompactionOptimizer instance."""
+        trim_optimizer = Mock(spec=LegacyTrimOptimizer)
+        pipeline = HistoryOptimizerPipeline([trim_optimizer])
+        assert _extract_manual_compactor(pipeline, CompactionConfig()) is None

@@ -57,7 +57,6 @@ class TestLegacyTrimOptimizer:
         assert isinstance(result, TrimResult)
         assert result.was_modified is False
         assert result.messages == messages
-        assert result.optimizer_name == "LegacyTrimOptimizer"
         assert result.token_budget == 280_000
         assert result.max_context_tokens == 400_000
         mock_internal_events_client.track_event.assert_not_called()

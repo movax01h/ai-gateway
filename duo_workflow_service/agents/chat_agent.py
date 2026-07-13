@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import structlog
@@ -14,14 +14,16 @@ from duo_workflow_service.agents.tool_call_validator import (
     validate_tool_calls,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
-from duo_workflow_service.conversation.compaction import (
-    ConversationCompactor,
-    maybe_compact_history,
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    CompactionOptimizer,
+    build_compaction_agent_message,
+    build_compaction_tool_card,
 )
-from duo_workflow_service.conversation.compaction.schema import CompactionResult
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
 from duo_workflow_service.entities.state import (
     TIER_ACCESS_DENIED_SUB_TYPE,
-    TOOL_RESPONSE_MAX_DISPLAY_MSG,
     ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
@@ -35,7 +37,6 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
-from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
@@ -110,13 +111,15 @@ class ChatAgent:
         tools_registry: ToolsRegistry,
         toolset: Toolset,
         system_template_override: str | None,
-        compactor: ConversationCompactor | None = None,
+        optimizer_pipeline: HistoryOptimizerPipeline,
+        manual_compactor: CompactionOptimizer | None = None,
     ):
         self.name = name
         self.prompt_adapter = prompt_adapter
         self.tools_registry = tools_registry
         self.system_template_override = system_template_override
-        self._compactor = compactor
+        self._optimizer_pipeline = optimizer_pipeline
+        self._manual_compactor = manual_compactor
         self.toolset = toolset
 
     async def _get_approvals(
@@ -360,115 +363,21 @@ class ChatAgent:
 
         raise NotifiableException(ui_content) from error
 
-    def _build_compaction_tool_card(
-        self,
-        trigger: Literal["auto", "manual"],
-        result: CompactionResult | None,
-        status: ToolStatus,
-        content: str | None = None,
-    ) -> UiChatLog:
-        """Build a ``UiChatLog`` tool card for any compaction outcome.
-
-        Mirrors the shape produced by ``ToolsExecutor._create_tool_ui_chat_log``
-        so the client renders it uniformly: success cards carry the summary in
-        ``tool_info.tool_response`` (a ``ToolMessage`` to match the FE
-        deserialization contract); no-op / failure cards still populate
-        ``tool_info`` with the args metadata but omit ``tool_response``,
-        matching how real tool failures are rendered.
-
-        ``content`` defaults to the ``"Summarized N message(s)"`` summary line
-        and should be overridden for no-op / failure entries.
-        """
-        n = result.messages_summarized if result is not None else 0
-        if content is None:
-            plural = "s" if n != 1 else ""
-            content = f"Summarized {n} message{plural}"
-
-        tool_call_id = f"compaction-{uuid4()}"
-        args: dict[str, Any] = {
-            "trigger": trigger,
-            "messages_summarized": n,
-            "compaction_input_tokens": (
-                result.compaction_input_tokens if result is not None else 0
-            ),
-            "compaction_output_tokens": (
-                result.compaction_output_tokens if result is not None else 0
-            ),
-        }
-
-        tool_info = ToolInfo(name="compaction", args=args)
-        summary = result.summary if result is not None else None
-        if summary is not None:
-            redacted = redact_secrets_for_ui(summary.text(), tool_name="compaction")
-            tool_info["tool_response"] = ToolMessage(
-                content=redacted[:TOOL_RESPONSE_MAX_DISPLAY_MSG],
-                name="compaction",
-                tool_call_id=tool_call_id,
-                status="success",
-            )
-
-        return UiChatLog(
-            message_type=MessageTypeEnum.TOOL,
-            message_sub_type="compaction",
-            content=content,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            status=status,
-            correlation_id=None,
-            tool_info=tool_info,
-            additional_context=None,
-            message_id=tool_call_id,
-        )
-
     @staticmethod
-    def _build_compaction_agent_message(content: str) -> UiChatLog:
-        """Build an AGENT-typed ``UiChatLog`` carrying a user-facing compaction notice.
-
-        Front end ignores ``content`` on failed tool cards, so non-success
-        compaction paths emit this entry alongside the tool card to surface the
-        explanation to the user.
-        """
-        return UiChatLog(
-            message_type=MessageTypeEnum.AGENT,
-            message_sub_type=None,
-            content=content,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            status=ToolStatus.SUCCESS,
-            correlation_id=None,
-            tool_info=None,
-            additional_context=None,
-            message_id=f"compaction-{uuid4()}",
-        )
-
-    def _maybe_build_auto_compaction_entry(
-        self, compaction_result: CompactionResult | None
-    ) -> UiChatLog | None:
-        if (
-            compaction_result is None
-            or not compaction_result.was_compacted
-            or compaction_result.summary is None
-        ):
-            return None
-        return self._build_compaction_tool_card(
-            trigger="auto",
-            result=compaction_result,
-            status=ToolStatus.SUCCESS,
-        )
-
-    @staticmethod
-    def _append_compaction_entry(
-        compaction_entry: UiChatLog | None,
-        ui_chat_logs: List[UiChatLog],
+    def _append_optimizer_ui_logs(
+        base: List[UiChatLog],
+        optimizer_logs: List[UiChatLog],
     ) -> List[UiChatLog]:
-        """Append the compaction entry after the assistant entry.
+        """Append optimizer-produced UI entries after the base entries.
 
-        The compaction LLM call completes before the assistant LLM call, so chronologically the compaction event happens
-        first. Front end sorts UI entries by timestamp, so the displayed order remains compaction → assistant regardless
-        of array position. Appending (rather than prepending) is what the front end currently requires to render the
-        compaction tool card; prepending causes it to be silently dropped.
+        The optimizer runs before the assistant LLM call, so chronologically the optimizer events happen first. Front
+        end sorts UI entries by timestamp, so the displayed order remains optimizer → assistant regardless of array
+        position. Appending (rather than prepending) is what the front end currently requires to render the compaction
+        tool card; prepending causes it to be silently dropped.
         """
-        if compaction_entry is None:
-            return ui_chat_logs
-        return [*ui_chat_logs, compaction_entry]
+        if not optimizer_logs:
+            return base
+        return [*base, *optimizer_logs]
 
     def _detect_compact_command(
         self, state: ChatWorkflowState
@@ -502,19 +411,17 @@ class ChatAgent:
         Runs compaction in manual mode, replaces conversation_history in place, and returns a single tool-card UI entry.
         On failure or no-op, returns a status entry and leaves history unchanged.
         """
-        if self._compactor is None:
+        if self._manual_compactor is None:
             return {
                 "status": WorkflowStatusEnum.INPUT_REQUIRED,
                 "ui_chat_log": [
-                    self._build_compaction_tool_card(
+                    build_compaction_tool_card(
                         trigger="manual",
                         result=None,
                         content="Compaction failed",
                         status=ToolStatus.FAILURE,
                     ),
-                    self._build_compaction_agent_message(
-                        "Compaction is not available."
-                    ),
+                    build_compaction_agent_message("Compaction is not available."),
                 ],
             }
 
@@ -525,25 +432,24 @@ class ChatAgent:
             return {
                 "status": WorkflowStatusEnum.INPUT_REQUIRED,
                 "ui_chat_log": [
-                    self._build_compaction_tool_card(
+                    build_compaction_tool_card(
                         trigger="manual",
                         result=None,
                         content="Nothing to compact",
                         status=ToolStatus.SUCCESS,
                     ),
-                    self._build_compaction_agent_message(
+                    build_compaction_agent_message(
                         "There is no conversation history to compact yet."
                     ),
                 ],
             }
 
-        result = await self._compactor.compact(
+        result = await self._manual_compactor.optimize_manual(
             history_to_compact,
-            is_manual=True,
             user_instruction=user_instruction,
         )
 
-        if result.error is not None or result.summary is None:
+        if not result.succeeded:
             log.warning(
                 "Manual compaction did not produce a summary",
                 agent_name=self.name,
@@ -554,30 +460,14 @@ class ChatAgent:
             )
             return {
                 "status": WorkflowStatusEnum.INPUT_REQUIRED,
-                "ui_chat_log": [
-                    self._build_compaction_tool_card(
-                        trigger="manual",
-                        result=result,
-                        content="Compaction failed",
-                        status=ToolStatus.FAILURE,
-                    ),
-                    self._build_compaction_agent_message(
-                        "Failed to compact conversation. Please try again."
-                    ),
-                ],
+                "ui_chat_log": list(result.ui_chat_logs),
             }
 
         state["conversation_history"][self.name] = result.messages
 
         return {
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
-            "ui_chat_log": [
-                self._build_compaction_tool_card(
-                    trigger="manual",
-                    result=result,
-                    status=ToolStatus.SUCCESS,
-                )
-            ],
+            "ui_chat_log": list(result.ui_chat_logs),
         }
 
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
@@ -635,15 +525,14 @@ class ChatAgent:
             self._handle_approval_rejection(state, approval_state)
 
         history = state["conversation_history"].get(self.name, [])
-        compacted_history, compaction_result = await maybe_compact_history(
-            compactor=self._compactor,
-            history=history,
-            agent_name=self.name,
-        )
-        state["conversation_history"][self.name] = compacted_history
-        auto_compaction_entry = self._maybe_build_auto_compaction_entry(
-            compaction_result
-        )
+        (
+            optimized_history,
+            optimization_results,
+        ) = await self._optimizer_pipeline.optimize(history)
+        state["conversation_history"][self.name] = optimized_history
+        optimizer_ui_logs: List[UiChatLog] = [
+            entry for result in optimization_results for entry in result.ui_chat_logs
+        ]
 
         try:
             with GitLabServiceContext(
@@ -674,8 +563,8 @@ class ChatAgent:
                         )
 
             response = await self._build_response(agent_response, state)
-            response["ui_chat_log"] = self._append_compaction_entry(
-                auto_compaction_entry, response["ui_chat_log"]
+            response["ui_chat_log"] = self._append_optimizer_ui_logs(
+                response["ui_chat_log"], optimizer_ui_logs
             )
             return response
 
@@ -696,8 +585,8 @@ class ChatAgent:
                 additional_context=None,
                 message_id=f"error-{uuid4()!s}",
             )
-            ui_chat_logs = self._append_compaction_entry(
-                auto_compaction_entry, [ui_chat_log]
+            ui_chat_logs = self._append_optimizer_ui_logs(
+                [ui_chat_log], optimizer_ui_logs
             )
             return {
                 "conversation_history": {self.name: [error_message]},
