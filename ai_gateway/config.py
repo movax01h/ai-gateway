@@ -1,10 +1,11 @@
 import os
-from typing import Annotated, Literal, Optional, Set, TypedDict
+from typing import Annotated, Literal, Optional, Set, Tuple, TypedDict, Union
 from urllib.parse import urlparse
 
+import httpx
 import litellm
 from dotenv import find_dotenv
-from pydantic import BaseModel, Field, Json, RootModel, model_validator
+from pydantic import BaseModel, Field, Json, RootModel, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "ConfigModelKeys",
     "ConfigModelLimits",
     "ConfigModelSelection",
+    "ConfigMtls",
     "ConfigProcessLevelFeatureFlags",
     "ConfigProxyEndpoints",
     "ConfigSnowplow",
@@ -69,6 +71,62 @@ class ConfigTLS(BaseModel):
             raise ValueError(f"cert_file does not point to a file: {self.cert_file}")
         if not os.path.isfile(self.key_file):
             raise ValueError(f"key_file does not point to a file: {self.key_file}")
+        return self
+
+
+class ConfigMtls(BaseModel):
+    """Client-certificate (mutual TLS) auth for upstream model endpoints.
+
+    Applies to any endpoint LiteLLM reaches through the OpenAI/Azure SDK client
+    (self-hosted OpenAI-compatible proxies, Azure OpenAI, custom models). LiteLLM
+    exposes no per-request hook for a client certificate on that path, so the cert
+    is installed process-wide via litellm.client_session / litellm.aclient_session
+    in setup_litellm.
+
+    `verify` / `ca_bundle` control server-certificate trust and are independent of
+    the client certificate: httpx does not read SSL_CERT_FILE / REQUESTS_CA_BUNDLE,
+    so a corporate CA must be supplied explicitly via `ca_bundle`.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable client-certificate (mTLS) auth for upstream model endpoints.",
+    )
+    cert_file: Optional[str] = Field(
+        default=None,
+        description="Path to the client certificate PEM (cert only, or combined cert+key).",
+    )
+    key_file: Optional[str] = Field(
+        default=None,
+        description="Path to the client private key, if not bundled into cert_file.",
+    )
+    key_password: Optional[SecretStr] = Field(
+        default=None,
+        description="Password for an encrypted client private key.",
+    )
+    verify: bool = Field(
+        default=True,
+        description="Verify the upstream server certificate.",
+    )
+    ca_bundle: Optional[str] = Field(
+        default=None,
+        description="CA bundle to verify the upstream server certificate (e.g. a corporate CA).",
+    )
+
+    @model_validator(mode="after")
+    def validate_when_enabled(self) -> "ConfigMtls":
+        if not self.enabled:
+            return self
+        if not self.cert_file:
+            raise ValueError("cert_file must be set when mTLS is enabled")
+        if not os.path.isfile(self.cert_file):
+            raise ValueError(f"cert_file does not point to a file: {self.cert_file}")
+        if self.key_file and not os.path.isfile(self.key_file):
+            raise ValueError(f"key_file does not point to a file: {self.key_file}")
+        if self.key_password and not self.key_file:
+            raise ValueError("key_file must be set when key_password is provided")
+        if self.ca_bundle and not os.path.isfile(self.ca_bundle):
+            raise ValueError(f"ca_bundle does not point to a file: {self.ca_bundle}")
         return self
 
 
@@ -479,6 +537,7 @@ class Config(BaseSettings):
     custom_models: Annotated[
         ConfigCustomModels, Field(default_factory=ConfigCustomModels)
     ]
+    mtls: Annotated[ConfigMtls, Field(default_factory=ConfigMtls)]
     duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)]
     model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)]
     vertex_text_model: Annotated[
@@ -555,3 +614,47 @@ def setup_litellm(config: Config):
     # pylint: disable=direct-environment-variable-reference
     litellm.vertex_location = os.getenv("VERTEXAI_LOCATION") or "global"
     # pylint: enable=direct-environment-variable-reference
+
+    _setup_litellm_mtls(config.mtls)
+
+
+def _setup_litellm_mtls(mtls: ConfigMtls) -> None:
+    """Install a client certificate for mutual TLS with upstream model endpoints.
+
+    litellm.client_session / litellm.aclient_session is the only hook LiteLLM
+    consults when building the OpenAI/Azure SDK client, which is the path used for
+    self-hosted OpenAI-compatible and Azure endpoints. Setting them process-wide is
+    harmless for other endpoints: a client certificate is only sent when the server
+    requests one during the TLS handshake.
+    """
+    if not mtls.enabled:
+        return
+
+    # cert_file presence is guaranteed by ConfigMtls.validate_when_enabled.
+    assert mtls.cert_file is not None
+
+    # httpx `cert`: single PEM, (cert, key), or (cert, key, password).
+    # key_password without key_file is rejected by ConfigMtls.validate_when_enabled.
+    cert: Union[str, Tuple[str, str], Tuple[str, str, str]]
+    if mtls.key_file and mtls.key_password:
+        cert = (mtls.cert_file, mtls.key_file, mtls.key_password.get_secret_value())
+    elif mtls.key_file:
+        cert = (mtls.cert_file, mtls.key_file)
+    else:
+        cert = mtls.cert_file
+
+    # httpx `verify` (server trust): explicit CA bundle > disabled > certifi default.
+    verify: Union[bool, str]
+    if not mtls.verify:
+        verify = False
+    elif mtls.ca_bundle:
+        verify = mtls.ca_bundle
+    else:
+        verify = True
+
+    # Installed once at startup and reused for the process lifetime; cleaned up on
+    # process exit. setup_litellm is not re-invoked at runtime, so any previous
+    # sessions are intentionally not closed here — they may still be serving
+    # in-flight requests, and AsyncClient.aclose() cannot be awaited from here.
+    litellm.client_session = httpx.Client(cert=cert, verify=verify)
+    litellm.aclient_session = httpx.AsyncClient(cert=cert, verify=verify)

@@ -26,6 +26,7 @@ from ai_gateway.config import (
     ConfigMockUsageQuotaServer,
     ConfigModelLimits,
     ConfigModelSelection,
+    ConfigMtls,
     ConfigProcessLevelFeatureFlags,
     ConfigSnowplow,
     ConfigTLS,
@@ -904,6 +905,193 @@ def test_setup_litellm_vertex_location(env: dict, expected_location: str):
         setup_litellm(Config(_env_file=None))
 
         assert litellm.vertex_location == expected_location
+
+
+@pytest.fixture
+def mtls_cert_files(tmp_path):
+    """Create dummy cert/key/CA files so ConfigMtls validation passes.
+
+    Contents are irrelevant because httpx is mocked in these tests; only the resolution logic (cert tuple + verify
+    value) is under test.
+    """
+    cert = tmp_path / "client.pem"
+    key = tmp_path / "client.key"
+    ca = tmp_path / "ca.crt"
+    for path in (cert, key, ca):
+        path.write_text("dummy")
+
+    return mock.Mock(cert=str(cert), key=str(key), ca=str(ca))
+
+
+def test_setup_litellm_mtls_disabled():
+    with (
+        mock.patch.dict(os.environ, {}, clear=True),
+        mock.patch.object(litellm, "aclient_session", None),
+        mock.patch.object(litellm, "client_session", None),
+        mock.patch("ai_gateway.config.httpx.AsyncClient") as async_client,
+        mock.patch("ai_gateway.config.httpx.Client") as sync_client,
+    ):
+        setup_litellm(Config(_env_file=None))
+
+        async_client.assert_not_called()
+        sync_client.assert_not_called()
+        assert litellm.aclient_session is None
+        assert litellm.client_session is None
+
+
+@pytest.mark.parametrize(
+    ("include_key", "include_password", "expected"),
+    [
+        (False, False, "cert"),
+        (True, False, "cert_key"),
+        (True, True, "cert_key_password"),
+    ],
+)
+def test_setup_litellm_mtls_resolves_cert(
+    include_key, include_password, expected, mtls_cert_files
+):
+    env = {
+        "AIGW_MTLS__ENABLED": "true",
+        "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+    }
+    if include_key:
+        env["AIGW_MTLS__KEY_FILE"] = mtls_cert_files.key
+    if include_password:
+        env["AIGW_MTLS__KEY_PASSWORD"] = "secret"
+
+    expected_cert = {
+        "cert": mtls_cert_files.cert,
+        "cert_key": (mtls_cert_files.cert, mtls_cert_files.key),
+        "cert_key_password": (mtls_cert_files.cert, mtls_cert_files.key, "secret"),
+    }[expected]
+
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        mock.patch.object(litellm, "aclient_session", None),
+        mock.patch.object(litellm, "client_session", None),
+        mock.patch("ai_gateway.config.httpx.AsyncClient") as async_client,
+        mock.patch("ai_gateway.config.httpx.Client") as sync_client,
+    ):
+        setup_litellm(Config(_env_file=None))
+
+        async_client.assert_called_once_with(cert=expected_cert, verify=True)
+        sync_client.assert_called_once_with(cert=expected_cert, verify=True)
+        assert litellm.aclient_session is async_client.return_value
+        assert litellm.client_session is sync_client.return_value
+
+
+def test_setup_litellm_mtls_verify_uses_ca_bundle(mtls_cert_files):
+    env = {
+        "AIGW_MTLS__ENABLED": "true",
+        "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+        "AIGW_MTLS__CA_BUNDLE": mtls_cert_files.ca,
+    }
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        mock.patch.object(litellm, "aclient_session", None),
+        mock.patch.object(litellm, "client_session", None),
+        mock.patch("ai_gateway.config.httpx.AsyncClient") as async_client,
+        mock.patch("ai_gateway.config.httpx.Client") as sync_client,
+    ):
+        setup_litellm(Config(_env_file=None))
+
+        async_client.assert_called_once_with(
+            cert=mtls_cert_files.cert, verify=mtls_cert_files.ca
+        )
+        sync_client.assert_called_once_with(
+            cert=mtls_cert_files.cert, verify=mtls_cert_files.ca
+        )
+
+
+def test_setup_litellm_mtls_verify_disabled(mtls_cert_files):
+    env = {
+        "AIGW_MTLS__ENABLED": "true",
+        "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+        "AIGW_MTLS__VERIFY": "false",
+    }
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        mock.patch.object(litellm, "aclient_session", None),
+        mock.patch.object(litellm, "client_session", None),
+        mock.patch("ai_gateway.config.httpx.AsyncClient") as async_client,
+        mock.patch("ai_gateway.config.httpx.Client") as sync_client,
+    ):
+        setup_litellm(Config(_env_file=None))
+
+        async_client.assert_called_once_with(cert=mtls_cert_files.cert, verify=False)
+        sync_client.assert_called_once_with(cert=mtls_cert_files.cert, verify=False)
+
+
+def test_config_mtls_enabled_without_cert_raises():
+    with (
+        mock.patch.dict(os.environ, {"AIGW_MTLS__ENABLED": "true"}, clear=True),
+        pytest.raises(ValidationError, match="cert_file must be set when mTLS"),
+    ):
+        Config(_env_file=None)
+
+
+def test_config_mtls_enabled_with_missing_cert_file_raises():
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"AIGW_MTLS__ENABLED": "true", "AIGW_MTLS__CERT_FILE": "/no/such.pem"},
+            clear=True,
+        ),
+        pytest.raises(ValidationError, match="cert_file does not point to a file"),
+    ):
+        Config(_env_file=None)
+
+
+def test_config_mtls_enabled_with_missing_key_file_raises(mtls_cert_files):
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                "AIGW_MTLS__ENABLED": "true",
+                "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+                "AIGW_MTLS__KEY_FILE": "/no/such.key",
+            },
+            clear=True,
+        ),
+        pytest.raises(ValidationError, match="key_file does not point to a file"),
+    ):
+        Config(_env_file=None)
+
+
+def test_config_mtls_key_password_without_key_file_raises(mtls_cert_files):
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                "AIGW_MTLS__ENABLED": "true",
+                "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+                "AIGW_MTLS__KEY_PASSWORD": "secret",
+            },
+            clear=True,
+        ),
+        pytest.raises(ValidationError, match="key_file must be set when key_password"),
+    ):
+        Config(_env_file=None)
+
+
+def test_config_mtls_enabled_with_missing_ca_bundle_raises(mtls_cert_files):
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                "AIGW_MTLS__ENABLED": "true",
+                "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+                "AIGW_MTLS__CA_BUNDLE": "/no/such.ca",
+            },
+            clear=True,
+        ),
+        pytest.raises(ValidationError, match="ca_bundle does not point to a file"),
+    ):
+        Config(_env_file=None)
+
+
+def test_config_mtls_defaults_disabled():
+    assert ConfigMtls().enabled is False
 
 
 @pytest.mark.parametrize(
