@@ -26,6 +26,7 @@ from google.protobuf.struct_pb2 import Struct
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 
 import duo_workflow_service.workflows.registry as flow_registry
@@ -184,6 +185,20 @@ def _extract_error_message(error: BaseException) -> str:
             message = body.get("error", {}).get("message") or raw
         except (json.JSONDecodeError, AttributeError):
             message = raw or str(error)
+    elif isinstance(error, LiteLLMAPIConnectionError):
+        # Strip the variable BedrockException payload so that per-request ARN/action/resource
+        # values don't fragment SLO grouping.  str(error) looks like:
+        #   "litellm.APIConnectionError: litellm.APIConnectionError: BedrockException - {"Message":"User: <ARN>..."}"
+        # We keep only the stable "litellm.APIConnectionError" prefix so the caller assembles:
+        #   "workflow execution failure: APIConnectionError: litellm.APIConnectionError"
+        # For non-Bedrock errors the regex won't match and we fall back to str(error).
+        raw = str(error)
+        stripped = re.sub(r": BedrockException - \{.*\}$", "", raw, flags=re.DOTALL)
+        if stripped != raw:
+            # Remove the outer "litellm.APIConnectionError: " wrapper added by LiteLLM
+            message = re.sub(r"^litellm\.APIConnectionError: ", "", stripped)
+        else:
+            message = raw
     elif isinstance(error, APIStatusError):
         body = error.body
         error_field = body.get("error") if isinstance(body, dict) else None
