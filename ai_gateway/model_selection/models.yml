@@ -39,6 +39,19 @@ models:
       temperature: 0.0
       max_tokens: 8_192
 
+  - name: "GLM 5.2"
+    provider: "Fireworks"
+    gitlab_identifier: "glm_5_2_fireworks"
+    description: "Open-source 1M-context MoE model for agentic coding and long-horizon engineering tasks."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    params:
+      model: "accounts/gitlab/deployments/e0cdhz2n"
+      custom_llm_provider: "fireworks_ai"
+      temperature: 0.0
+      max_tokens: 8_192
+
   - name: "Devstral 2"
     provider: "Mistral"
     gitlab_identifier: "devstral_2_mistral"
