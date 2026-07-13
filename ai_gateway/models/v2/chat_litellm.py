@@ -11,6 +11,9 @@ from litellm import AnthropicConfig, OpenAIGPT5Config
 from pydantic import BaseModel
 
 from ai_gateway.models.base import validate_custom_endpoint
+from ai_gateway.models.v2 import (
+    litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
+)
 from ai_gateway.models.v2._model_compat import (
     remove_trailing_assistant_message,
     supports_assistant_prefill,

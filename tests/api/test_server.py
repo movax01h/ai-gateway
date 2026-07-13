@@ -1,7 +1,6 @@
 import asyncio
 import os
 import socket
-from typing import cast
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,7 +8,7 @@ import litellm
 import pytest
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
+from fastapi.routing import RouteContext, iter_route_contexts
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.testing import capture_logs
@@ -32,6 +31,13 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.structured_logging import setup_logging
+
+
+def _flatten_routes(app: FastAPI) -> list[RouteContext]:
+    """fastapi>=0.130 no longer flattens included routers into `app.routes` directly; `iter_route_contexts` walks them
+    and resolves each route's final (prefix-applied) `path`/`methods`."""
+    return [ctx for ctx in iter_route_contexts(app.routes) if ctx.methods]
+
 
 _ROUTES_V1 = [
     ("/v1/chat/{chat_invokable}", ["POST"]),  # legacy path
@@ -119,9 +125,9 @@ class TestServerRoutes:
         ]
 
         routes_actual = [
-            (cast(APIRoute, route).path, method)
-            for route in fastapi_server_app.routes
-            for method in cast(APIRoute, route).methods
+            (route.path, method)
+            for route in _flatten_routes(fastapi_server_app)
+            for method in route.methods or []
         ]
 
         assert set(routes_expected).issubset(routes_actual)
@@ -153,12 +159,13 @@ def test_setup_router():
     app = FastAPI()
     server.setup_router(app)
 
-    assert any(route.path == "/v1/chat/{chat_invokable}" for route in app.routes)
-    assert any(route.path == "/v2/code/completions" for route in app.routes)
-    assert any(route.path == "/v1/models/definitions" for route in app.routes)
-    assert any(route.path == "/v3/code/completions" for route in app.routes)
-    assert any(route.path == "/v4/code/suggestions" for route in app.routes)
-    assert any(route.path == "/monitoring/healthz" for route in app.routes)
+    routes = _flatten_routes(app)
+    assert any(route.path == "/v1/chat/{chat_invokable}" for route in routes)
+    assert any(route.path == "/v2/code/completions" for route in routes)
+    assert any(route.path == "/v1/models/definitions" for route in routes)
+    assert any(route.path == "/v3/code/completions" for route in routes)
+    assert any(route.path == "/v4/code/suggestions" for route in routes)
+    assert any(route.path == "/monitoring/healthz" for route in routes)
 
 
 def test_setup_prometheus_fastapi_instrumentator():

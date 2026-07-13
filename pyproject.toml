@@ -24,7 +24,7 @@ fetch-foundational-agents = "duo_workflow_service.scripts.fetch_foundational_age
 verify-pricing-multipliers = "scripts.verify_pricing_multipliers:main"
 
 [tool.poetry.dependencies]
-fastapi = "^0.124.4"
+fastapi = "^0.139.0"
 dependency-injector = "^4.41.0"
 uvicorn = {version = "^0.33.0", extras = ["standard"]}
 requests = "^2.32.3"
@@ -34,7 +34,7 @@ fastapi-health = "^0.4.0"
 google-cloud-aiplatform = "^1.36.4"
 structlog = "^25.0.0"
 asgi-correlation-id = "^4.1.0"
-prometheus-fastapi-instrumentator = "^7.0.0"
+prometheus-fastapi-instrumentator = "^8.0.2"
 python-jose = { extras = ["cryptography"], version = "^3.3.0" }
 starlette-context = "^0.5.0"
 google-cloud-profiler = "^4.1.0"
@@ -46,14 +46,14 @@ snowplow-tracker = "^1.0.3"
 anthropic = "^0.116.0"
 pydantic = "^2.7.4"
 pydantic-settings = "^2.1.0"
-starlette = "^0.47.2"
+starlette = "^1.0.1"
 httpx = {version = "^0.28.0", extras = ["socks"]}
 prometheus-client = "^0.25.0"
 tree-sitter-languages = "^1.10.2"
 jinja2 = "^3.1.3"
 pyyaml = "^6.0.2"
 google-cloud-discoveryengine = "^0.20.0"
-litellm = {version = ">=1.84.0,<1.85.0", extras = ["proxy"]}
+litellm = {version = ">=1.88.0,<1.89.0", extras = ["proxy"]}
 langgraph = "^1.0.2"
 langchain-anthropic = "^1.4.3"
 langchain-community = "^0.4.1"
@@ -172,7 +172,11 @@ ignore-multiline-regex = "codespell:ignore-begin.*\n.*codespell:ignore-end"
 [tool.pytest.ini_options]
 addopts = "--disable-warnings --import-mode=importlib"
 testpaths = ["tests"]
-filterwarnings = ["error::UserWarning"]
+filterwarnings = [
+  "error::UserWarning",
+  # Remove after migrating to httpx2
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
