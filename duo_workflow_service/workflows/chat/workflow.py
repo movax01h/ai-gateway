@@ -185,6 +185,9 @@ CHAT_FLOW_TOOLS = ["start_flow"]
 
 CHAT_UTILITY_TOOLS = ["clarification_question"]
 
+# Session context tool for retrieving context from previous agent sessions
+CHAT_SESSION_CONTEXT_TOOLS = ["get_previous_session_context"]
+
 # Generative-UI tools: the agent composes a declarative ui_spec of catalog
 # components. Paving the way only — `render_ui` is registered but intentionally
 # NOT offered to the agent this iteration. Tool approval is rendered from the
@@ -481,6 +484,7 @@ class Workflow(AbstractWorkflow):
             + CHAT_GITLAB_MUTATION_TOOLS
             + flow_tools
             + utility_tools
+            + CHAT_SESSION_CONTEXT_TOOLS
             + genui_tools
         )
         return available_tools
