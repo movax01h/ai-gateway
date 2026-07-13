@@ -1,0 +1,168 @@
+name: "Fix pipeline (experiment)"
+description: |
+  Experimental single-agent Fix Pipeline flow.
+  A single autonomous agent investigates the failing CI pipeline, decides how to act, and
+  delivers the result (inline code suggestions, a new merge request, a comment, or no action).
+  When a merge request URL is provided it works on that MR's branch; otherwise it opens a new MR.
+  The agent records failure_category / suggested_fix_type / decision / confidence / summary as its
+  final answer purely for observability.
+product_group: agent_foundations
+version: "experimental"
+environment: ambient
+
+components:
+  # Configures git remote with authenticated URL so the agent can use plain git
+  # commands via run_command. Backward-compatibility measure for GitLab instances
+  # that predate the runner-level git setup. Copied from configs/developer.
+  - name: "git_setup"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: 'git config user.name "${DUO_WORKFLOW_GIT_AUTHOR_USER_NAME:-Duo}"; git config user.email "${DUO_WORKFLOW_GIT_AUTHOR_EMAIL:-noreply@gitlab.com}"; proto="${DUO_WORKFLOW_GIT_HTTP_BASE_URL:?DUO_WORKFLOW_GIT_HTTP_BASE_URL is not set}"; proto="${proto%%://*}"; host="${DUO_WORKFLOW_GIT_HTTP_BASE_URL#*://}"; repo_url="${proto}://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD:?DUO_WORKFLOW_GIT_HTTP_PASSWORD is not set}@${host%/}/${GITLAB_PROJECT_PATH:?GITLAB_PROJECT_PATH is not set}.git"; git remote set-url origin "${repo_url}"'
+        as: "command"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # The CI runner creates a depth=1 shallow clone. Unshallow so the agent has
+  # full history for commits, amends, rebases, and pushes. Copied from configs/developer.
+  - name: "git_unshallow"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "if git rev-parse --is-shallow-repository | grep -q true; then git fetch --unshallow; fi"
+        as: "command"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "fix_pipeline_agent"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_agent"
+    response_schema_id: "fix_pipeline_context"
+    response_schema_version: "^1.0.0"
+    response_schema_tracking: true
+    response_schema_tracking_context:
+      project_id: "context:project_id"
+      merge_request_url: "context:inputs.merge_request.url"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+        optional: True
+      - from: "context:inputs.pipeline.source_branch"
+        as: "source_branch"
+        optional: True
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: True
+      - from: "context:inputs.agent_platform_standard_context.session_owner_id"
+        as: "assignee_id"
+        optional: True
+      - from: "context:workflow_id"
+        as: "workflow_id"
+      - from: "context:session_url"
+        as: "session_url"
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: True
+    toolset:
+      # Structured trace retrieval (kept bespoke: scalable, filtered, downstream-aware)
+      - get_pipeline_failing_jobs:
+          exclude_allow_failure: true
+      - get_failing_bridge_jobs
+      - get_job_logs
+      # Inline code suggestions on an existing MR (glab cannot post inline diff notes)
+      - build_review_merge_request_context
+      - create_merge_request_diff_note
+      # Docs lookups
+      - gitlab_documentation_search
+      # Developer file/edit/search/run set; GitLab API operations go through glab via run_command
+      - read_file
+      - edit_file
+      - create_file_with_contents
+      - find_files
+      - list_dir
+      - grep
+      - mkdir
+      - run_command
+      - todo_write
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "git_setup"
+    to: "git_unshallow"
+  - from: "git_unshallow"
+    to: "fix_pipeline_agent"
+  - from: "fix_pipeline_agent"
+    to: "end"
+
+flow:
+  entry_point: "git_setup"
+  inputs:
+    - category: merge_request
+      version_constraint: "^1.0.0"
+      input_schema:
+        url:
+          type: string
+          format: uri
+          description: The URL for the GitLab Merge Request
+    - category: pipeline
+      version_constraint: "^1.0.0"
+      input_schema:
+        source_branch:
+          type: string
+        source:
+          type: string
+          description: The pipeline source (e.g. merge_request_event, push)
+          optional: true
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
+
+prompts:
+  - name: "fix_pipeline_agent"
+    prompt_id: "fix_pipeline_agent"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'fix_pipeline_experiment/system/1.0.0.jinja' %}
+      user: |
+        {% include 'fix_pipeline_experiment/user/1.0.0.jinja' %}

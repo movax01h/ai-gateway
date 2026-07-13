@@ -229,6 +229,29 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `fix_pipeline 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_setup;
+    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    fix_pipeline_agent(fix_pipeline_agent<br>#91;AgentComponent#93;);
+    git_setup --> git_unshallow;
+    git_unshallow --> fix_pipeline_agent;
+    fix_pipeline_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `resolve_dependency_bump 1.0.0 (experimental)` (Flow Registry)
 
 ```mermaid
