@@ -19,6 +19,7 @@ from gitlab_cloud_connector import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from packaging.version import Version
 
@@ -3487,3 +3488,48 @@ def test_extract_error_message_additional_context_schema_error_is_collapsed():
         _extract_error_message(error)
         == "input 'agent_platform_standard_context' does not match specified schema"
     )
+
+
+def test_extract_error_message_bedrock_api_connection_error_collapses_to_stable_prefix():
+    # Bedrock authorization errors embed a per-request ARN/action/resource in the JSON
+    # payload, causing each occurrence to fragment into its own SLO row.  The function
+    # must strip the variable "BedrockException - {...}" tail so that all Bedrock auth
+    # failures group under the stable "litellm.APIConnectionError" label.
+    bedrock_msg = (
+        "litellm.APIConnectionError: BedrockException - "
+        '{"Message":"User: arn:aws:iam::123456789012:role/MyRole is not authorized to perform: '
+        "bedrock:InvokeModelWithResponseStream on resource "
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0 "
+        'because no resource-based policy allows the bedrock:InvokeModelWithResponseStream action"}'
+    )
+    error = LiteLLMAPIConnectionError(
+        message=bedrock_msg,
+        llm_provider="bedrock",
+        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    )
+    assert _extract_error_message(error) == "litellm.APIConnectionError"
+
+
+def test_extract_error_message_non_bedrock_api_connection_error_is_left_untouched():
+    # Non-Bedrock APIConnectionErrors have no "BedrockException - {...}" payload, so
+    # the function must fall back gracefully and preserve the original message.
+    error = LiteLLMAPIConnectionError(
+        message="litellm.APIConnectionError: Connection refused",
+        llm_provider="openai",
+        model="gpt-4",
+    )
+    result = _extract_error_message(error)
+    assert "Connection refused" in result
+
+
+def test_extract_error_message_api_connection_error_token_normalization_still_applies():
+    # The trailing token-count normalization must still fire for APIConnectionError
+    # messages that contain a token count (edge case: non-Bedrock error with token info).
+    error = LiteLLMAPIConnectionError(
+        message="litellm.APIConnectionError: prompt is too long: 205531 tokens > 200000 maximum",
+        llm_provider="openai",
+        model="gpt-4",
+    )
+    result = _extract_error_message(error)
+    assert "<N> tokens" in result
+    assert "205531" not in result
