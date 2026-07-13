@@ -205,7 +205,7 @@ class GetSessionContext(DuoBaseTool):
         raw_log: list[dict] = channel_values.get("ui_chat_log") or []
         recent_activity = self._build_recent_activity(raw_log)
         # Derived from the last agent entry in the chat log; distinct from the
-        # record-level ``summary`` (which is typically only populated on error).
+        # record-level ``summary``.
         last_message = self._extract_last_message(raw_log)
 
         return {

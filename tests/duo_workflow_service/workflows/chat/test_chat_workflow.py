@@ -34,6 +34,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     CHAT_GITLAB_MUTATION_TOOLS,
     CHAT_MUTATION_TOOLS,
     CHAT_READ_ONLY_TOOLS,
+    CHAT_SESSION_CONTEXT_TOOLS,
     CHAT_UTILITY_TOOLS,
     RUN_COMMAND_TOOLS,
     Routes,
@@ -43,6 +44,7 @@ from duo_workflow_service.workflows.chat.workflow import (
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.feature_flags import current_feature_flag_context
+from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
 
 @pytest.fixture(name="flow_type")
@@ -555,7 +557,8 @@ class TestUnauthorizedChatExecution:
             CHAT_READ_ONLY_TOOLS
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
-            + CHAT_GITLAB_MUTATION_TOOLS,
+            + CHAT_GITLAB_MUTATION_TOOLS
+            + CHAT_SESSION_CONTEXT_TOOLS,
         ),
         (
             ["agentic_foundational_flow_tool"],
@@ -564,7 +567,8 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
-            + CHAT_FLOW_TOOLS,
+            + CHAT_FLOW_TOOLS
+            + CHAT_SESSION_CONTEXT_TOOLS,
         ),
         (
             ["duo_chat_clarification_question_tool"],
@@ -573,7 +577,8 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
-            + CHAT_UTILITY_TOOLS,
+            + CHAT_UTILITY_TOOLS
+            + CHAT_SESSION_CONTEXT_TOOLS,
         ),
     ],
     ids=[
@@ -1389,6 +1394,24 @@ class TestMcpServerToolsFiltering:
 
         # Documentation search should still be present
         assert "gitlab_documentation_search" in tools
+
+    @pytest.mark.asyncio
+    async def test_get_previous_session_context_requested_regardless_of_flags(
+        self, workflow_with_project
+    ):
+        """Requests get_previous_session_context regardless of feature flags.
+
+        This asserts the tool name is in the list returned by ``_get_tools()``.
+        Whether it resolves in the compiled toolset depends on the session
+        having the ``read_only_gitlab`` privilege (a default privilege); that
+        privilege-to-tool resolution is covered by ``test_registry_initialization``
+        in ``tests/duo_workflow_service/components/test_tools_registry.py``.
+        """
+        set_enabled_mcp_server_tools(set())
+
+        tools = workflow_with_project._get_tools()
+
+        assert "get_previous_session_context" in tools
 
 
 @pytest.mark.asyncio
