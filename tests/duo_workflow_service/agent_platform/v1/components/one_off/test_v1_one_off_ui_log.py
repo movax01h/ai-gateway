@@ -149,6 +149,45 @@ class TestUILogWriterOneOffTools:  # pylint: disable=too-many-public-methods
         args = mock_callback.call_args[0][0]
         assert args.record["content"] == custom_message
 
+    @pytest.mark.parametrize(
+        "method_name,event",
+        [
+            ("success", UILogEventsOneOff.ON_TOOL_EXECUTION_SUCCESS),
+            ("error", UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED),
+        ],
+    )
+    def test_log_message_id_uses_supplied_value(
+        self, ui_log_writer, mock_tool, mock_callback, method_name, event
+    ):
+        getattr(ui_log_writer, method_name)(
+            tool=mock_tool,
+            tool_call_args={"param1": "value1"},
+            event=event,
+            message_id="toolu_01ABC",
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["message_id"] == "toolu_01ABC"
+
+    @pytest.mark.parametrize(
+        "method_name,event",
+        [
+            ("success", UILogEventsOneOff.ON_TOOL_EXECUTION_SUCCESS),
+            ("error", UILogEventsOneOff.ON_TOOL_EXECUTION_FAILED),
+        ],
+    )
+    def test_log_message_id_defaults_to_uuid_when_absent(
+        self, ui_log_writer, mock_tool, mock_callback, method_name, event
+    ):
+        getattr(ui_log_writer, method_name)(
+            tool=mock_tool,
+            tool_call_args={"param1": "value1"},
+            event=event,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["message_id"].startswith("tool-")
+
     def test_log_tool_call_input(self, ui_log_writer, mock_tool, mock_callback):
         """Test the _log_tool_call_input method."""
         tool_call_args = {"param1": "value1", "param2": "value2"}

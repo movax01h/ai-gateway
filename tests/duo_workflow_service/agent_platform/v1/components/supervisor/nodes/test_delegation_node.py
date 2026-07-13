@@ -734,6 +734,7 @@ class TestDelegationNodeUILog:
         subsession_goal_key_factory,
         supervisor_flow_state,
         ai_message_with_delegate,
+        delegate_tool_call_id,
         ui_history,
     ):
         """DelegationNode calls ui_history.log.success and includes pop_state_updates in result."""
@@ -764,6 +765,7 @@ class TestDelegationNodeUILog:
         assert call_kwargs["message_sub_type"] == DelegationNode.MESSAGE_SUB_TYPE
         assert call_kwargs["tool_info"] is not None
         assert call_kwargs["tool_info"]["name"] == delegate_task_cls.tool_title
+        assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_log_entry"]
         # Error log should not be called on the success path
@@ -783,6 +785,7 @@ class TestDelegationNodeUILog:
         subsession_goal_key_factory,
         supervisor_flow_state,
         ai_message_with_delegate,
+        delegate_tool_call_id,
         ui_history,
     ):
         """DelegationNode emits ON_DELEGATION_ERROR via ui_history.log.error when delegation fails."""
@@ -818,5 +821,6 @@ class TestDelegationNodeUILog:
         assert call_kwargs["message_sub_type"] == DelegationNode.MESSAGE_SUB_TYPE_ERROR
         assert call_kwargs["tool_info"] is not None
         assert call_kwargs["tool_info"]["name"] == delegate_task_cls.tool_title
+        assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_error_log_entry"]

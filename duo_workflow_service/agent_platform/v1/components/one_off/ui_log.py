@@ -46,6 +46,11 @@ class UILogWriterOneOffTools(BaseUILogWriter):
     by the caller on each ``_log_success`` / ``_log_error`` invocation via
     ``**kwargs``.
 
+    Callers may also pass ``message_id`` via ``**kwargs`` to ``_log_success`` /
+    ``_log_error`` (e.g. the originating tool call's ``id``) so that a PENDING
+    entry streamed earlier for the same tool call can be replaced in place by
+    the final SUCCESS/FAILURE entry. When omitted, a random UUID is generated.
+
     Args:
         log_callback: Callback function that receives log entries.
         component_name: Human-readable name of the component that owns this writer.
@@ -85,7 +90,7 @@ class UILogWriterOneOffTools(BaseUILogWriter):
             ),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
-            message_id=f"tool-{uuid4()!s}",
+            message_id=kwargs.get("message_id") or f"tool-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
@@ -112,7 +117,7 @@ class UILogWriterOneOffTools(BaseUILogWriter):
             tool_info=ToolInfo(name=tool.name, args=tool_call_args),
             additional_context=kwargs.get("context_elements", []),
             message_sub_type=tool.name,
-            message_id=f"tool-{uuid4()!s}",
+            message_id=kwargs.get("message_id") or f"tool-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )
