@@ -297,6 +297,44 @@ def _serialize_channel_blobs(
     return blobs, is_compaction
 
 
+def _serialize_all_channels_full(
+    checkpoint: Checkpoint,
+) -> List[Dict[str, Any]]:
+    """Serialize every reconstructable channel as a full ``compaction`` snapshot.
+
+    Emitted at the start of a new current_thread group so the group is self-contained:
+    reconstruction folds these full snapshots plus the group's later ``conversation``
+    deltas, without depending on a previous group or the full-checkpoint header (see
+    https://gitlab.com/gitlab-org/gitlab/-/issues/605653). Channel selection and JSON
+    encoding mirror _serialize_channel_blobs — list/dict channels plus the status
+    scalar; other scalars are intentionally dropped. Versions come from the checkpoint
+    (not new_versions), since unchanged channels must be re-seeded too.
+    """
+    channel_values = checkpoint.get("channel_values", {})
+    channel_versions = checkpoint.get("channel_versions", {})
+    blobs = []
+
+    for channel, val in channel_values.items():
+        if (
+            not isinstance(val, (list, dict))
+            and channel not in _ALWAYS_BLOBBED_SCALAR_CHANNELS
+        ):
+            continue
+
+        bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
+        blobs.append(
+            {
+                "channel": channel,
+                "version": str(channel_versions.get(channel) or ""),
+                "data": base64.b64encode(zlib.compress(bval)).decode("utf-8"),
+                "write_type": "json",
+                "step_action": "compaction",
+            }
+        )
+
+    return blobs
+
+
 class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any]):  # pylint: disable=too-many-instance-attributes
     _client: GitlabHttpClient
     _logger: structlog.stdlib.BoundLogger
@@ -1213,6 +1251,18 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             starts_new_thread = (
                 self._current_thread_started_at is None or stale_cache or is_compaction
             )
+            # A genuine group boundary: the workflow's first checkpoint, a stale-cache
+            # reset, or a compaction. Keyed on _prev_checkpoint_id (not the started_at
+            # marker, which stays None when a checkpoint id isn't time-based) so later
+            # checkpoints in a group are never re-seeded.
+            is_group_start = (
+                self._prev_checkpoint_id is None or stale_cache or is_compaction
+            )
+            if is_group_start:
+                # A group must be self-contained (issue 605653): re-seed EVERY channel
+                # as a full snapshot so this group reconstructs without a prior group or
+                # the checkpoint header. Otherwise keep the per-channel deltas above.
+                channel_blobs = _serialize_all_channels_full(checkpoint)
             if stale_cache or is_compaction:
                 self._current_thread += 1
             if starts_new_thread:

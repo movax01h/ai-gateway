@@ -21,6 +21,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     WorkflowStatusEventEnum,
     _dict_of_list_delta,
     _get_orbit_tool_calls,
+    _serialize_all_channels_full,
     _serialize_channel_blobs,
     _thread_started_at_from_id,
 )
@@ -2789,6 +2790,52 @@ def test_thread_started_at_from_id_returns_none_for_malformed():
     assert _thread_started_at_from_id("not-a-uuid") is None
 
 
+def test_serialize_all_channels_full_reseeds_and_drops_non_status_scalars():
+    """Group-start snapshot: list/dict channels and the status scalar are re-seeded as
+    full 'compaction' blobs (versions from the checkpoint); other scalars are dropped."""
+    import base64
+
+    checkpoint = {
+        "channel_values": {
+            "messages": ["a", "b"],
+            "conversation_history": {"planner": [1, 2]},
+            "status": "Execution",
+            "plan_step": 3,  # non-status scalar -> dropped
+        },
+        "channel_versions": {
+            "messages": "2",
+            "conversation_history": "1",
+            "status": "1",
+            "plan_step": "1",
+        },
+    }
+
+    blobs = _serialize_all_channels_full(checkpoint)
+
+    by_channel = {b["channel"]: b for b in blobs}
+    assert set(by_channel) == {"messages", "conversation_history", "status"}
+    assert all(b["step_action"] == "compaction" for b in blobs)
+    assert by_channel["messages"]["version"] == "2"
+    assert json.loads(
+        zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
+    ) == ["a", "b"]
+
+
+def test_serialize_all_channels_full_version_defaults_to_empty_when_absent():
+    """A channel present in channel_values but missing from channel_versions falls back to an empty version string
+    rather than raising or dropping the channel."""
+    checkpoint = {
+        "channel_values": {"messages": ["a"]},
+        "channel_versions": {},
+    }
+
+    blobs = _serialize_all_channels_full(checkpoint)
+
+    assert len(blobs) == 1
+    assert blobs[0]["channel"] == "messages"
+    assert blobs[0]["version"] == ""
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_sends_full_checkpoint_and_channel_blobs(
@@ -2807,6 +2854,11 @@ async def test_aput_sends_full_checkpoint_and_channel_blobs(
     checkpoint = checkpoint_data[0]["checkpoint"]
     checkpoint["channel_values"]["messages"] = ["msg1", "msg2"]
     checkpoint["channel_values"]["status"] = WorkflowStatusEnum.EXECUTION
+    checkpoint["channel_versions"] = {
+        "conversation_history": "1.0",
+        "messages": "2.1",
+        "status": "1.0",
+    }
 
     new_versions = ChannelVersions({"messages": "2.1"})
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
@@ -2818,10 +2870,14 @@ async def test_aput_sends_full_checkpoint_and_channel_blobs(
     # Full checkpoint must still be present (Phase 1 — backward compatible reads)
     assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
 
+    # First checkpoint starts a self-contained group (issue 605653): every
+    # reconstructable channel is re-seeded as a full compaction snapshot, not just
+    # the channel in new_versions.
     blobs = post_call_body["channel_blobs"]
-    assert len(blobs) == 1
-    assert blobs[0]["channel"] == "messages"
-    assert blobs[0]["version"] == "2.1"
+    by_channel = {b["channel"]: b for b in blobs}
+    assert set(by_channel) == {"conversation_history", "messages", "status"}
+    assert all(b["step_action"] == "compaction" for b in blobs)
+    assert by_channel["messages"]["version"] == "2.1"
 
 
 @pytest.mark.asyncio
@@ -2850,10 +2906,10 @@ async def test_aput_accumulates_list_deltas_across_calls(
         checkpoint_metadata,
         ChannelVersions({"messages": "1.0"}),
     )
+    # First checkpoint starts a self-contained group, so messages is a full snapshot.
     body1 = json.loads(http_client.apost.call_args[1]["body"])
-    val1 = json.loads(
-        zlib.decompress(base64.b64decode(body1["channel_blobs"][0]["data"]))
-    )
+    messages1 = next(b for b in body1["channel_blobs"] if b["channel"] == "messages")
+    val1 = json.loads(zlib.decompress(base64.b64decode(messages1["data"])))
     assert val1 == ["a", "b"]
 
     checkpoint["id"] = "ckpt-2"
@@ -2864,10 +2920,10 @@ async def test_aput_accumulates_list_deltas_across_calls(
         checkpoint_metadata,
         ChannelVersions({"messages": "2.0"}),
     )
+    # Not a new group: only the appended tail is sent.
     body2 = json.loads(http_client.apost.call_args[1]["body"])
-    val2 = json.loads(
-        zlib.decompress(base64.b64decode(body2["channel_blobs"][0]["data"]))
-    )
+    messages2 = next(b for b in body2["channel_blobs"] if b["channel"] == "messages")
+    val2 = json.loads(zlib.decompress(base64.b64decode(messages2["data"])))
     assert val2 == ["c", "d"]
 
 
@@ -2917,6 +2973,61 @@ async def test_aput_increments_thread_id_on_compaction(
         ChannelVersions({"messages": "3.0"}),
     )
     assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 1
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_compaction_reseeds_all_channels_as_full_snapshot(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A compaction starts a self-contained group: EVERY channel is re-seeded as a full
+    'compaction' snapshot, even a channel that did not change in the compacting step, so
+    the new group reconstructs without the previous group or the checkpoint header
+    (issue 605653)."""
+    import base64
+
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    # Group 0: both channels seeded.
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0", "conversation_history": "1.0"}),
+    )
+
+    # Compaction: messages shrinks; conversation_history is unchanged this step.
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    checkpoint["channel_versions"] = {"messages": "2.0", "conversation_history": "1.0"}
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-1"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0"}),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    by_channel = {b["channel"]: b for b in body["channel_blobs"]}
+    # Both channels re-seeded, not just the one that compacted.
+    assert set(by_channel) == {"messages", "conversation_history"}
+    assert all(b["step_action"] == "compaction" for b in body["channel_blobs"])
+    assert json.loads(
+        zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
+    ) == ["summary"]
+    # The unchanged channel carries its full value, not an empty delta.
+    ch_val = json.loads(
+        zlib.decompress(base64.b64decode(by_channel["conversation_history"]["data"]))
+    )
+    assert len(ch_val["planner"]) == 3
 
 
 @pytest.mark.asyncio
@@ -3054,12 +3165,13 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
         ChannelVersions({"messages": "2.0"}),
     )
 
-    # Cache was reset to {} so full list is stored (no delta), not just ["c"]
+    # Stale cache starts a new self-contained group: the full list is stored for
+    # messages (no delta), not just ["c"].
     body = json.loads(http_client.apost.call_args[1]["body"])
-    val = json.loads(
-        zlib.decompress(base64.b64decode(body["channel_blobs"][0]["data"]))
-    )
+    messages = next(b for b in body["channel_blobs"] if b["channel"] == "messages")
+    val = json.loads(zlib.decompress(base64.b64decode(messages["data"])))
     assert val == ["a", "b", "c"]
+    assert messages["step_action"] == "compaction"
     # Thread must be bumped so Rails starts reconstruction from this checkpoint
     assert body["current_thread"] == 1
 
