@@ -56,6 +56,10 @@ class BaseLLMDefinition(BaseModel):
     cost_indicator: Literal["$", "$$", "$$$", "$$$$"] | None = None
     params: BaseModelParams
     family: list[str] = []
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Semantic tags for this model (e.g. 'small', 'large', 'reasoning'). Used as metadata; resolution is driven by models_for_tags in unit_primitives.yml.",
+    )
     deprecation: Optional[DeprecationInfo] = None
     proxy_provider: Optional[str] = None
     # Claude 4.6+ rejects requests ending with an assistant turn (prefill).
@@ -129,9 +133,7 @@ class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
     default_models: list[str] = Field(min_length=1)
-    models_for_size_preference: dict[Literal["small", "large"], str] = Field(
-        default_factory=dict
-    )
+    models_for_tags: dict[str, str] = Field(default_factory=dict)
     selectable_models: list[str] = Field(default_factory=list)
     beta_models: list[str] = Field(default_factory=list)
     dev: DevConfig | None = None
@@ -227,7 +229,7 @@ class ModelSelectionConfig:
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
                 unit_primitive_config.default_models,
-                unit_primitive_config.models_for_size_preference.values(),
+                unit_primitive_config.models_for_tags.values(),
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
                 (

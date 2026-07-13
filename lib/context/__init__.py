@@ -16,7 +16,6 @@ from lib.context.llm_operations import (
     token_usage,
 )
 from lib.context.model import (
-    ModelSizeBucket,
     current_model_metadata_context,
     current_model_metadata_with_size_context,
     get_model_metadata,
@@ -87,7 +86,6 @@ __all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "current_model_metadata_with_size_context",
     "current_model_metadata_context",
     "get_model_metadata",
-    "ModelSizeBucket",
     # orbit
     "is_orbit_tool",
     "init_orbit_counters",

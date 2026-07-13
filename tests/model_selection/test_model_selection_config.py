@@ -789,13 +789,13 @@ def test_fireworks_models_have_max_retries_10(selection_config):
 
 
 @pytest.mark.usefixtures("mock_fs")
-def test_get_model_for_feature_with_size_preference_config(selection_config):
-    """get_model_for_feature should use default_models when models_for_size_preference is set."""
+def test_get_model_for_feature_with_tags_config(selection_config):
+    """get_model_for_feature should use default_models when models_for_tags is set."""
     models_config = UnitPrimitiveConfig(
         feature_setting="test_config",
         unit_primitives=[],
         default_models=["gitlab-model-2"],
-        models_for_size_preference={
+        models_for_tags={
             "small": "gitlab-model-1",
             "large": "gitlab-model-2",
         },
@@ -810,8 +810,8 @@ def test_get_model_for_feature_with_size_preference_config(selection_config):
         assert result.gitlab_identifier == "gitlab-model-2"
 
 
-def test_validate_with_size_preference_field(selection_config, fs: FakeFilesystem):
-    """Validate() should check model IDs in models_for_size_preference."""
+def test_validate_with_tags_field(selection_config, fs: FakeFilesystem):
+    """Validate() should check model IDs in models_for_tags."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
@@ -849,7 +849,7 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "small-model"
                   large: "large-model"
                 selectable_models:
@@ -862,10 +862,8 @@ def test_validate_with_size_preference_field(selection_config, fs: FakeFilesyste
     selection_config.validate()
 
 
-def test_validate_with_invalid_size_preference_field(
-    selection_config, fs: FakeFilesystem
-):
-    """Validate() should report model IDs in models_for_size_preference that don't exist."""
+def test_validate_with_invalid_tags_field(selection_config, fs: FakeFilesystem):
+    """Validate() should report model IDs in models_for_tags that don't exist."""
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
     )
@@ -893,7 +891,7 @@ def test_validate_with_invalid_size_preference_field(
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "non-existent-small"
                   large: "large-model"
                 selectable_models:
@@ -911,10 +909,9 @@ def test_validate_with_invalid_size_preference_field(
 
 @pytest.fixture(name="size_preference_model_dir")
 def size_preference_model_dir_fixture(fs: FakeFilesystem):
-    """Shared fixture for size preference validation tests.
+    """Shared fixture for tag-based model routing validation tests.
 
-    Creates a minimal models.yml with small and large models for testing models_for_size_preference validation
-    scenarios.
+    Creates a minimal models.yml with small and large models for testing models_for_tags validation scenarios.
     """
     model_selection_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
@@ -948,16 +945,16 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
     return model_selection_dir
 
 
-def test_validate_size_preference_without_selectable_models_passes(
+def test_validate_tags_without_selectable_models_passes(
     selection_config,
     size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
-    """Server-side size routing without selectable_models should pass validation.
+    """Server-side tag routing without selectable_models should pass validation.
 
-    A feature using models_for_size_preference for pure server-side routing has no UI model picker, so requiring
-    default_model to be in selectable_models is incorrect. Validation must only enforce that constraint when
-    selectable_models is non-empty.
+    A feature using models_for_tags for pure server-side routing has no UI model picker, so requiring default_model to
+    be in selectable_models is incorrect. Validation must only enforce that constraint when selectable_models is non-
+    empty.
     """
     # editorconfig-checker-disable
     fs.create_file(
@@ -969,7 +966,7 @@ def test_validate_size_preference_without_selectable_models_passes(
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "small-model"
                   large: "large-model"
             """),
@@ -979,18 +976,18 @@ def test_validate_size_preference_without_selectable_models_passes(
     selection_config.validate()  # must not raise
 
 
-def test_validate_size_preference_models_not_required_in_selectable(
+def test_validate_tags_models_not_required_in_selectable(
     selection_config,
     size_preference_model_dir: Path,
     fs: FakeFilesystem,
 ):
-    """models_for_size_preference values don't need to appear in selectable_models.
+    """models_for_tags values don't need to appear in selectable_models.
 
-    Size-preference models are resolved server-side; selectable_models is the UI model picker list. They are orthogonal:
-    a model can be used for size routing without being exposed to users as a UI choice, and vice-versa.
+    Tag-mapped models are resolved server-side; selectable_models is the UI model picker list. They are orthogonal: a
+    model can be used for tag routing without being exposed to users as a UI choice, and vice-versa.
     """
     # editorconfig-checker-disable
-    # large-model is selectable; small-model is only used for size routing
+    # large-model is selectable; small-model is only used for tag routing
     fs.create_file(
         size_preference_model_dir / "unit_primitives.yml",
         contents=dedent("""
@@ -1000,7 +997,7 @@ def test_validate_size_preference_models_not_required_in_selectable(
                   - "ask_commit"
                 default_models:
                   - "large-model"
-                models_for_size_preference:
+                models_for_tags:
                   small: "small-model"
                 selectable_models:
                   - "large-model"

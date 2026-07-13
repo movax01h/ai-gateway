@@ -40,7 +40,7 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
 
     with (
         patch(
-            "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_size"
+            "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_tag"
         ) as mock_create,
         patch(
             "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_context"
@@ -69,7 +69,7 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
 
 @pytest.mark.asyncio
 async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_user):
-    """JSON 'null' parses to None, which create_model_metadata_by_size rejects with ValueError.
+    """JSON 'null' parses to None, which create_model_metadata_by_tag rejects with ValueError.
 
     Both context vars must remain unset and the request must still continue.
     """
@@ -101,15 +101,16 @@ async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_u
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "invocation_metadata,_test_case",
+    "invocation_metadata,_test_case,expected_header_present",
     [
-        ([("other-header", "other-value")], "no_metadata_header"),
+        ([("other-header", "other-value")], "no_metadata_header", False),
         (
             [
                 ("x-gitlab-agent-platform-model-metadata", ""),
                 ("other-header", "other-value"),
             ],
             "empty_metadata",
+            False,
         ),
         (
             [
@@ -117,11 +118,12 @@ async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_u
                 ("other-header", "other-value"),
             ],
             "invalid_json",
+            True,
         ),
     ],
 )
 async def test_model_metadata_interceptor_no_processing_scenarios(
-    invocation_metadata, _test_case
+    invocation_metadata, _test_case, expected_header_present
 ):
     """Test that the interceptor handles cases where no model metadata processing occurs."""
     interceptor = ModelMetadataInterceptor()
@@ -133,7 +135,7 @@ async def test_model_metadata_interceptor_no_processing_scenarios(
 
     with (
         patch(
-            "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_size"
+            "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_tag"
         ) as mock_create,
         patch(
             "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_context"
@@ -141,6 +143,9 @@ async def test_model_metadata_interceptor_no_processing_scenarios(
         patch(
             "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_with_size_context"
         ) as mock_size_context,
+        patch(
+            "duo_workflow_service.interceptors.model_metadata_interceptor.log"
+        ) as mock_log,
     ):
         result = await interceptor.intercept_service(continuation, handler_call_details)
 
@@ -149,6 +154,12 @@ async def test_model_metadata_interceptor_no_processing_scenarios(
         mock_size_context.set.assert_not_called()
         continuation.assert_called_once_with(handler_call_details)
         assert result == "mocked_response"
+
+        mock_log.warning.assert_called_once()
+        _, log_kwargs = mock_log.warning.call_args
+        assert log_kwargs["header_present"] is expected_header_present
+        # The raw header may carry provider API keys, so it must never be logged.
+        assert "invalid-json{" not in str(log_kwargs)
 
 
 @pytest.mark.asyncio
@@ -172,6 +183,7 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
 
     continuation = AsyncMock(return_value="ok")
     fake_default = MagicMock()
+    fake_by_tag = {"small": MagicMock()}
 
     fake_model_keys = MagicMock()
     fake_model_keys.model_dump.return_value = {"fireworks_provider_api_key": "fw"}
@@ -189,7 +201,11 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
             return_value=fake_default,
         ) as mock_build,
         patch(
-            "duo_workflow_service.interceptors.model_metadata_interceptor.ModelMetadataBySize"
+            "duo_workflow_service.interceptors.model_metadata_interceptor.build_model_metadata_by_tag",
+            return_value=fake_by_tag,
+        ) as mock_build_by_tag,
+        patch(
+            "duo_workflow_service.interceptors.model_metadata_interceptor.ModelMetadataByTag"
         ) as mock_by_size_cls,
         patch(
             "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_context"
@@ -211,7 +227,10 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
             fireworks_api_base_url="https://fw",
             user=mock_user,
         )
-        mock_by_size_cls.assert_called_once_with(default=fake_default)
+        mock_build_by_tag.assert_called_once_with("duo_agent_platform_agentic_chat")
+        mock_by_size_cls.assert_called_once_with(
+            default=fake_default, by_tag=fake_by_tag
+        )
         mock_context.set.assert_called_once_with(fake_default)
         mock_size_context.set.assert_called_once_with(fake_by_size)
         continuation.assert_called_once_with(handler_call_details)
@@ -238,7 +257,7 @@ async def test_gitlab_provider_without_identifier_or_feature_setting_falls_throu
             "duo_workflow_service.interceptors.model_metadata_interceptor.build_default_feature_setting_metadata"
         ) as mock_build,
         patch(
-            "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_size"
+            "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_tag"
         ) as mock_create,
     ):
         mock_create.return_value = MagicMock()

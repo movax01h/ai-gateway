@@ -330,7 +330,7 @@ class AgentComponentBase(BaseComponent):
 
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
-        model_metadata = get_model_metadata(self.model_size_preference)
+        model_metadata = get_model_metadata(self.model_tags)
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
@@ -708,9 +708,7 @@ class AgentComponent(AgentComponentBase):
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
             invoke_config=self._agent_node_invoke_config(),
-            max_context_tokens=get_model_max_context_token_limit(
-                self.model_size_preference
-            ),
+            max_context_tokens=get_model_max_context_token_limit(self.model_tags),
             compactor=(
                 create_conversation_compactor(
                     config=(
