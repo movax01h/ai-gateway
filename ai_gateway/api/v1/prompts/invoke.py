@@ -78,7 +78,7 @@ async def _invoke(
         )
     except ParseConstraintError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Invalid version constraint",
         )
     except ValueError as e:
@@ -100,7 +100,7 @@ async def _invoke(
     # We don't use `isinstance` because we don't want to match subclasses
     if type(prompt) is not Prompt:  # pylint: disable=unidiomatic-typecheck
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Prompt '{prompt_id}' is not supported",
         )
 
@@ -126,7 +126,7 @@ async def _invoke(
         return process_chunk(response_chunk)
     except KeyError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
     except Exception as e:

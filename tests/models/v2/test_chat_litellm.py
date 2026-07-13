@@ -26,6 +26,26 @@ from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLit
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 
 
+def test_importing_module_applies_empty_text_patch():
+    """Guards against the litellm_empty_text_patch import being dropped from chat_litellm.py.
+
+    ChatLiteLLM.acompletion_with_retry routes Anthropic-shaped requests through litellm's anthropic_messages_pt, which
+    calls _sanitize_empty_text_content. The patch must be applied as a side effect of importing this module, since
+    nothing else guarantees it loads.
+    """
+    from litellm.litellm_core_utils.prompt_templates import factory as prompt_factory
+
+    message = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "toolu_1", "type": "function"}],
+    }
+
+    result = prompt_factory._sanitize_empty_text_content(message)
+
+    assert result["content"] == ""
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "acompletion_response_fixture", ["acompletion_stream_response"]
