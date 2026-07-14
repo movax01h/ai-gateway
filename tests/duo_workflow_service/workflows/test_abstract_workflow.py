@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langgraph.errors import GraphRecursionError
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
@@ -413,7 +414,7 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_invalid
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
-async def test_compile_and_run_graph_merges_with_existing_preapproved_tools(
+async def test_compile_and_run_graph_caps_client_preapproved_to_jwt_allow_list(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
@@ -436,11 +437,206 @@ async def test_compile_and_run_graph_merges_with_existing_preapproved_tools(
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
     )
+    # client-supplied preapproved tool that is NOT in the JWT allow-list
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    # ceiling: the client cannot widen pre-approval beyond the JWT allow-list
+    assert "read_file" not in workflow._preapproved_tools
+    assert "create_issue" in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_client_cannot_preapprove_denied_tool(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": [], "deny": ["create_merge_request"]}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    # client tries to pre-approve a denied tool plus an unrelated one; governance is
+    # active (deny is non-empty), so the empty allow-list ceiling is enforced
+    workflow._preapproved_tools = ["create_merge_request", "run_command"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert "create_merge_request" not in workflow._preapproved_tools
+    assert "run_command" not in workflow._preapproved_tools
+    assert "create_merge_request" in workflow._denied_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_ask_only_policy_enforces_ceiling(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": [], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    # "ask everything" makes allow+deny empty; a non-empty ask list still marks
+    # governance active, so the client cannot pre-approve the ask'd tool
+    workflow._preapproved_tools = ["run_command"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert "run_command" not in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_parses_tool_access_policies_dict(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            # claim provided as a dict (not a JSON string) exercises model_validate
+            extra={"tool_access_policies": {"allow": ["create_issue"], "deny": []}},
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert "read_file" not in workflow._preapproved_tools
+    assert "create_issue" in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_fails_closed_on_invalid_claim(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas", extra={"tool_access_policies": "not_valid_json"}
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    # a present-but-unparsable claim must not leave client values in effect
+    workflow._preapproved_tools = ["run_command"]
+    with capture_logs() as cap_logs:
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert not workflow._preapproved_tools
+    # the fail-closed path must warn for operator visibility
+    assert any(
+        entry["event"]
+        == "tool_access_policies claim present but unparsable; "
+        "failing closed and clearing client preapproved_tools"
+        and entry["log_level"] == "warning"
+        for entry in cap_logs
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_keeps_client_preapproved_when_governance_inactive(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={"tool_access_policies": '{"allow": [], "ask": [], "deny": []}'},
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    # empty allow+ask+deny is indistinguishable from governance-off, so client-supplied
+    # preapproved tools are left untouched (no regression for ungoverned flows)
     workflow._preapproved_tools = ["read_file"]
     await workflow._compile_and_run_graph("Test goal")
 
     assert "read_file" in workflow._preapproved_tools
-    assert "create_issue" in workflow._preapproved_tools
 
 
 @pytest.mark.asyncio
