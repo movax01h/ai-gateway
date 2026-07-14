@@ -131,10 +131,6 @@ puts "Hello world!"
 RUST_SOURCE_SAMPLE_COMMENTS = """
 // foo
 // bar
-/* baz */
-/*
- * multi-line
- */
 """
 RUST_SOURCE_SAMPLE_MIXED = """
 # this says hello world

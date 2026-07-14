@@ -9,7 +9,7 @@ class RubyParserMixin:
             return False
 
         first, second = node.children
-        first_text = first.text.decode("utf-8", errors="ignore") if first.text else ""
+        first_text = first.text.decode("utf-8", errors="ignore")
 
         return (
             first_text in {"require", "require_relative"}
