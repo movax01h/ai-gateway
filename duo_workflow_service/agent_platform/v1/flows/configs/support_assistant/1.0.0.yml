@@ -12,6 +12,7 @@ components:
       - "gitlab_documentation_search"
       - "gitlab_issue_search"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"

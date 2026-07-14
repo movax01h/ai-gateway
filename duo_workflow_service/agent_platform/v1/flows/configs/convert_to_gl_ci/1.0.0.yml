@@ -29,6 +29,7 @@ components:
       - "create_file_with_contents"
       - "read_file"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -60,6 +61,7 @@ components:
         as: "workspace_agent_skills"
         optional: True
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -79,6 +81,7 @@ components:
     toolset:
       - "run_git_command"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -109,6 +112,7 @@ components:
       - "run_git_command"
       - "create_merge_request"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
