@@ -51,7 +51,7 @@ def tree_dfs(tree: Tree, visitor: BaseVisitor, max_visit_count: int = 1_000):
         current_node = cursor.node
         visit_count += 1
 
-        if visitor.stop_tree_traversal:
+        if visitor.stop_tree_traversal or current_node is None:
             break
 
         visitor.visit(current_node)

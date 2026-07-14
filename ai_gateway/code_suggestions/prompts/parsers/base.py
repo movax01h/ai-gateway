@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Optional
 
 from tree_sitter import Node
 
@@ -20,8 +20,9 @@ class CodeContext(NamedTuple):
 
     @classmethod
     def from_node(cls, node: Node):
+        text = node.text.decode("utf-8", errors="ignore") if node.text else ""
         return cls(
-            text=node.text.decode("utf-8", errors="ignore"),
+            text=text,
             start=node.start_point,
             end=node.end_point,
         )
@@ -47,7 +48,9 @@ class BaseVisitor(ABC):
         if self._TARGET_SYMBOLS and node.type in self._TARGET_SYMBOLS:
             self._visit_node(node)
 
-    def _bytes_to_str(self, data: bytes) -> str:
+    def _bytes_to_str(self, data: Optional[bytes]) -> str:
+        if data is None:
+            return ""
         return data.decode("utf-8", errors="ignore")
 
 

@@ -114,8 +114,15 @@ class RubyCommentVisitor(BaseCommentVisitor):
 
 
 class RustCommentVisitor(BaseCommentVisitor):
+    # Newer tree-sitter-rust grammars nest the comment delimiter tokens
+    # ("//", "/*", "*/") as children of the comment nodes, so they must be
+    # treated as comment-only symbols too.
     _TARGET_SYMBOLS = [
         "line_comment",
+        "block_comment",
+        "//",
+        "/*",
+        "*/",
         "source_file",
     ]
 
