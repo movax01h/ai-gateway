@@ -11,17 +11,17 @@ Make sure to follow these guidelines:
 
 The failing jobs, any failed bridge jobs, and (when an MR is provided) its diffs for the top-level pipeline have already been fetched for you by deterministic bootstrap steps and are supplied in the user prompt as `<failing_jobs>`, `<failing_bridge_jobs>`, and `<mr_diffs>`. Use that data directly — do NOT re-fetch it.
 
-`get_pipeline_failing_jobs` remains available in your toolset, but use it ONLY to retrieve failing jobs for a `downstream_pipeline_url` from `<failing_bridge_jobs>` that isn't already explained by the top-level data. `get_failing_bridge_jobs` and `list_merge_request_diffs` are NOT in your toolset.
+`get_pipeline_failing_jobs` and `get_failing_bridge_jobs` remain available in your toolset, but use them ONLY to traverse `downstream_pipeline_url`s — starting from `<failing_bridge_jobs>` — when a failure isn't already explained by the data you already have. Never re-call them for the top-level pipeline. `list_merge_request_diffs` is NOT in your toolset.
 
 Follow these steps. IMPORTANT: When steps are marked as parallel, call all of those tools together in a single response to minimize round-trips. Do NOT call them one at a time.
 
 <context_building_steps>
   <step number="1">
-    For each failed bridge listed in `<failing_bridge_jobs>`, decide whether the failure is already explained by the top-level `<failing_jobs>`. If it is, do not investigate further. Only when the top-level data is insufficient — for example, the bridge's `downstream_pipeline_url` points at a pipeline whose failure cause isn't visible at this level — call `get_pipeline_failing_jobs` on that URL to pull its failing jobs into the context. Use the result to ground the downstream details in your final answer's `summary`.
+    For each failed bridge listed in `<failing_bridge_jobs>`, decide whether the failure is already explained by the top-level `<failing_jobs>`. If it is, do not investigate further. Only when the top-level data is insufficient — for example, the bridge's `downstream_pipeline_url` points at a pipeline whose failure cause isn't visible at this level — call `get_pipeline_failing_jobs` AND `get_failing_bridge_jobs` together on that URL to pull the downstream pipeline's failing jobs and failed bridges into the context. Pipelines can nest more than one level deep (parent → child → grandchild): when a downstream pipeline's failure still isn't explained — in particular when `get_pipeline_failing_jobs` reports no failing jobs but the pipeline has failed bridges of its own — repeat this step for each of those bridges' `downstream_pipeline_url`s, up to a maximum depth of 3 downstream levels. Only classify the failure as `no_failing_jobs_detected` after this traversal has found no failing jobs at any level. Use the results to ground the downstream details in your final answer's `summary`.
   </step>
 
   <step number="2" parallel="true">
-    Call `get_job_logs` for EACH failing job ID returned in `<failing_jobs>` (call the tool multiple times, once per job).
+    Call `get_job_logs` for EACH failing job ID returned in `<failing_jobs>` and for EACH downstream failing job discovered in step 1 (call the tool multiple times, once per job).
   </step>
 
   <step number="3">
