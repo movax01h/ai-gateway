@@ -13,7 +13,7 @@ class GetGlqlSchemaInput(BaseModel):
         description="""Which data source schema(s) to retrieve.
 
         Accepted values:
-        - A single data source: "WorkItem", "MergeRequest", "Pipeline", "Job", "Project", or "CodeSuggestion"
+        - A single data source: "WorkItem", "MergeRequest", "Pipeline", "Job", "Project", "CodeSuggestion", or "Contribution"
         - Multiple comma-separated: "Pipeline,Job" (returns a dict keyed by source name)
         - "all" (default): returns every data source schema
 
@@ -475,6 +475,24 @@ _SCHEMAS = {
             ],
         },
     },
+    "Contribution": {
+        "scope": ["project", "group"],
+        "supported_modes": ["analytics"],
+        "analytics": {
+            "filters": [
+                {
+                    "name": "user",
+                    "operators": ["=", "in"],
+                    "note": "numeric user ID only (e.g. user = 123)",
+                },
+                {"name": "created", "operators": ["=", ">", "<", ">=", "<="]},
+            ],
+            "dimensions": ["created"],
+            "metrics": ["totalCount", "usersCount"],
+            "sort_fields": ["created", "totalCount", "usersCount"],
+            "note": "created groups by month.",
+        },
+    },
 }
 
 
@@ -486,7 +504,7 @@ class GetGlqlSchema(DuoBaseTool):
     MUST be called before building any GLQL query to ensure only valid fields are used.
 
     Supports fetching a single source, multiple comma-separated sources, or "all" sources at once.
-    Supported data sources: WorkItem, MergeRequest, Pipeline, Job, Project, CodeSuggestion.
+    Supported data sources: WorkItem, MergeRequest, Pipeline, Job, Project, CodeSuggestion, Contribution.
     Check the returned schema's supported_modes to determine if a source uses standard or analytics mode.
     """
     args_schema: Type[BaseModel] = GetGlqlSchemaInput

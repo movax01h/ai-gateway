@@ -34,6 +34,7 @@ async def test_all_data_sources(schema_tool):
         "Job",
         "Project",
         "CodeSuggestion",
+        "Contribution",
     }
 
 
@@ -66,4 +67,4 @@ async def test_unknown_in_comma_separated(schema_tool):
 async def test_default_is_all(schema_tool):
     """Default data_source returns all schemas."""
     result = json.loads(await schema_tool._execute())
-    assert len(result) == 6
+    assert len(result) == 7

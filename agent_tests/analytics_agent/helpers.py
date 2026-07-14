@@ -328,6 +328,16 @@ SAMPLE_PIPELINE_ANALYTICS_WEEKLY = [
     {"finished": "2026-04-27T00:00:00Z", "totalCount": 198, "successRate": 0.93},
 ]
 
+SAMPLE_CONTRIBUTIONS_MONTHLY = [
+    {"created": "2026-05-01", "totalCount": 320, "usersCount": 12},
+    {"created": "2026-06-01", "totalCount": 410, "usersCount": 15},
+    {"created": "2026-07-01", "totalCount": 275, "usersCount": 11},
+]
+
+SAMPLE_CONTRIBUTIONS_OVERALL = [
+    {"totalCount": 1005, "usersCount": 22},
+]
+
 
 EMPTY_RESPONSE: list[dict[str, Any]] = []
 

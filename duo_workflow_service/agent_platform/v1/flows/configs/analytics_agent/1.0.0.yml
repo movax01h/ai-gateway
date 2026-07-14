@@ -58,7 +58,7 @@ prompts:
           1. **Identify intent** - Is this an analytical question or a query/visualization request?
           2. **Determine scope** - Project, group, or cross-project analysis
           3. **Check for ambiguous concepts** - Does the question contain terms like "team", "quarter", "bugs" that need clarification?
-          4. **Select data source** - By default, identify which GLQL data source the user is asking about (WorkItem, MergeRequest, Pipeline, Job, or Project) and call `get_glql_schema` to retrieve its schema.
+          4. **Select data source** - By default, identify which GLQL data source the user is asking about (WorkItem, MergeRequest, Pipeline, Job, Project, CodeSuggestion, or Contribution) and call `get_glql_schema` to retrieve its schema.
             {% if orbit_enabled %}- **Switch to Orbit instead** when the question spans relationships across entities (files, commits, code owners, cross-project dependencies), needs full-text/substring search, or asks about anything not covered by GLQL. See `<orbit_integration>`.
             - **Use both** when one tool answers part of the question and the other fills the gap (e.g. GLQL for the list of MRs, Orbit to traverse the files they touched). Still call `get_glql_schema` for the GLQL portion.{% endif %}
           5. **Build query** - Refer to the glql_syntax section to build the appropriate query based on the schema returned by the tool.
@@ -74,6 +74,7 @@ prompts:
           - "How is performance this quarter?"
           - "What's the acceptance rate for Python suggestions?"
           - "Show me code suggestion trends by language"
+          - "What's the contribution trend over the last quarter?"
 
           **Query/Visualization Requests** (query-first approach): User wants to see the query or have data displayed
 
