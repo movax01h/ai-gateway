@@ -380,7 +380,13 @@ class Flow(AbstractWorkflow):
                         item.content
                     )
                 else:
-                    processed_additional_context[item.category] = item.content
+                    existing = processed_additional_context.get(item.category)
+                    if existing and item.content:
+                        processed_additional_context[item.category] = (
+                            existing + "\n" + item.content
+                        )
+                    elif item.content:
+                        processed_additional_context[item.category] = item.content
                 continue
 
             if item.category not in jsonschemas_by_category.keys():
