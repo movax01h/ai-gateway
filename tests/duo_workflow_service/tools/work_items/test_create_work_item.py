@@ -366,7 +366,84 @@ async def test_create_work_item_invalid_type(
             type_name="invalid_type",  # Type that doesn't exist
         )
 
-    assert "Unknown work item type: 'invalid_type'" in str(exc_info.value)
+    error_msg = str(exc_info.value)
+    assert "Work item type 'invalid_type' not found" in error_msg
+    assert all(t in error_msg for t in ["Issue", "Epic", "Task"])
+
+
+@pytest.mark.asyncio
+async def test_create_work_item_type_resolution_graphql_errors(
+    gitlab_client_mock, metadata
+):
+    """GraphQL errors while fetching work item types are surfaced as a ToolException."""
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        {"errors": [{"message": "Something went wrong"}]}
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    resolved_parent = ResolvedParent(type="group", full_path="namespace/group")
+    tool._validate_parent_url = AsyncMock(return_value=resolved_parent)
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            group_id="namespace/group",
+            title="Need a hand",
+            type_name="Request For Help",
+        )
+
+    assert "GraphQL errors" in str(exc_info.value)
+    assert "Something went wrong" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_create_work_item_with_custom_work_item_type(
+    gitlab_client_mock,
+    metadata,
+    created_work_item_data_fixture,
+):
+    """Custom work item types (CWITs) resolvable in the namespace can be created."""
+    cwit_type_data = {
+        "namespace": {
+            "workItemTypes": {
+                "nodes": [
+                    {"id": "gid://gitlab/WorkItems::Type/1", "name": "Issue"},
+                    {
+                        "id": "gid://gitlab/WorkItems::Type/42",
+                        "name": "Request For Help",
+                    },
+                ]
+            }
+        }
+    }
+    gitlab_client_mock.graphql = AsyncMock()
+    gitlab_client_mock.graphql.side_effect = [
+        cwit_type_data,
+        {"workItemCreate": {"workItem": created_work_item_data_fixture, "errors": []}},
+    ]
+
+    tool = CreateWorkItem(description="create work item", metadata=metadata)
+
+    resolved_parent = ResolvedParent(type="group", full_path="namespace/group")
+    tool._validate_parent_url = AsyncMock(return_value=resolved_parent)
+
+    response = await tool._arun(
+        group_id="namespace/group",
+        title="Need a hand",
+        type_name="Request For Help",
+    )
+
+    response_json = json.loads(response)
+    assert "work_item" in response_json
+    assert "created successfully" in response_json["message"]
+
+    second_call_args = gitlab_client_mock.graphql.call_args_list[1][0]
+    assert "workItemCreate" in second_call_args[0]
+    assert (
+        second_call_args[1]["input"]["workItemTypeId"]
+        == "gid://gitlab/WorkItems::Type/42"
+    )
 
 
 @pytest.mark.asyncio

@@ -43,9 +43,8 @@ from duo_workflow_service.tools.work_items.version_compatibility import (
 
 log = structlog.stdlib.get_logger(__name__)
 
-# Supported work item types in GitLab
+# Supported group work item types in GitLab.
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
-ALL_TYPES = {"Issue", "Task", *GROUP_ONLY_TYPES}
 STATE_EVENT_MAPPING = {
     "closed": "CLOSE",
     "opened": "REOPEN",
@@ -597,13 +596,6 @@ class WorkItemBaseTool(DuoBaseTool):
         )
 
     async def _create_work_item(self, resolved, type_name: str, kwargs: dict) -> str:
-        if type_name not in ALL_TYPES:
-            supported_types = ", ".join(sorted(ALL_TYPES))
-            raise ToolException(
-                f"Unknown work item type: '{type_name}'. "
-                f"Supported types are: {supported_types}."
-            )
-
         if resolved.type == "project" and type_name in GROUP_ONLY_TYPES:
             raise ToolException(
                 f"Work item type '{type_name}' cannot be created in a project – only in groups."

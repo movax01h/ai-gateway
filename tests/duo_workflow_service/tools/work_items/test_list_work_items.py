@@ -234,6 +234,7 @@ async def test_list_work_items_with_filters(
         (["Issue", "Epic"], ["ISSUE", "EPIC"], False),
         (["Banana", "Task"], ["TASK"], True),
         (["invalid1", "invalid2"], [], True),
+        (["Incident", "Ticket"], ["INCIDENT", "TICKET"], False),
     ],
 )
 async def test_list_work_items_with_types_filtering(
