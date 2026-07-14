@@ -2,7 +2,7 @@ import asyncio
 from typing import Optional, override
 
 from tree_sitter import Node, Tree
-from tree_sitter_language_pack import get_parser
+from tree_sitter_languages import get_parser
 
 from ai_gateway.code_suggestions.processing.ops import (
     LanguageId,
@@ -75,7 +75,7 @@ class CodeParser(BaseCodeParser):
         Returns None if there are no rules for the language or no relevant context was found.
         """
         node = self._context_near_cursor(point)
-        if not node or node.text is None:
+        if not node:
             return None
 
         point_in_node = convert_point_to_relative_point_in_node(node, point)
