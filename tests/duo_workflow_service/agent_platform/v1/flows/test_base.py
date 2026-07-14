@@ -1266,6 +1266,136 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
         assert "agent-skills-instructions" not in result
 
+    @pytest.mark.parametrize(
+        "items,expected",
+        [
+            (
+                [
+                    AdditionalContext(
+                        category="user_rule",
+                        id="chat-rules-user",
+                        content="# User chat-rules.md",
+                    ),
+                    AdditionalContext(
+                        category="user_rule",
+                        id="agents-md-user-instructions",
+                        content="# AGENTS.md content",
+                    ),
+                ],
+                "# User chat-rules.md\n# AGENTS.md content",
+            ),
+            (
+                [
+                    AdditionalContext(
+                        category="user_rule",
+                        id="chat-rules-user",
+                        content="# User chat-rules.md",
+                    ),
+                    AdditionalContext(
+                        category="user_rule",
+                        id="agents-md-user-instructions",
+                        content="# AGENTS.md content",
+                    ),
+                    AdditionalContext(
+                        category="user_rule",
+                        id="chat-rules-workspace",
+                        content="# Workspace chat-rules.md",
+                    ),
+                ],
+                "# User chat-rules.md\n# AGENTS.md content\n# Workspace chat-rules.md",
+            ),
+        ],
+        ids=["two_items", "three_items"],
+    )
+    def test_process_additional_context_user_rule_items_concatenated(
+        self, flow_instance, items, expected
+    ):
+        """Multiple user_rule items are joined by newline in arrival order."""
+        result = flow_instance._process_additional_context(items)
+
+        assert result["user_rule"] == expected
+
+    def test_process_additional_context_user_rule_agent_skills_unaffected(
+        self, flow_instance
+    ):
+        """Agent skills still route to workspace_agent_skills and are unaffected by concatenation."""
+        additional_context = [
+            AdditionalContext(
+                category="user_rule",
+                id="chat-rules-user",
+                content="# User chat-rules.md",
+            ),
+            AdditionalContext(
+                category="user_rule",
+                id="agent-skills-instructions",
+                content="<available_skills>...</available_skills>",
+            ),
+            AdditionalContext(
+                category="user_rule",
+                id="agents-md-user-instructions",
+                content="# AGENTS.md content",
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        assert result["user_rule"] == "# User chat-rules.md\n# AGENTS.md content"
+        assert (
+            result["workspace_agent_skills"]
+            == "<available_skills>...</available_skills>"
+        )
+
+    def test_process_additional_context_user_rule_single_item(self, flow_instance):
+        """A single user_rule item works without leading or trailing newline."""
+        additional_context = [
+            AdditionalContext(
+                category="user_rule",
+                id="chat-rules",
+                content="# Only rule",
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        assert result["user_rule"] == "# Only rule"
+
+    def test_process_additional_context_user_rule_none_content_keeps_existing(
+        self, flow_instance
+    ):
+        """A later user_rule item with no content does not overwrite accumulated content."""
+        additional_context = [
+            AdditionalContext(
+                category="user_rule",
+                id="chat-rules",
+                content="# User chat-rules.md",
+            ),
+            AdditionalContext(
+                category="user_rule",
+                id="empty-rule",
+                content=None,
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        assert result["user_rule"] == "# User chat-rules.md"
+
+    def test_process_additional_context_user_rule_leading_none_content_no_entry(
+        self, flow_instance
+    ):
+        """A leading user_rule item with no content does not materialize an empty entry."""
+        additional_context = [
+            AdditionalContext(
+                category="user_rule",
+                id="empty-rule",
+                content=None,
+            ),
+        ]
+
+        result = flow_instance._process_additional_context(additional_context)
+
+        assert "user_rule" not in result
+
     @pytest.mark.usefixtures("mock_state_graph")
     def test_build_routers_always_passes_tracking_params_for_conditional_routers(
         self,
