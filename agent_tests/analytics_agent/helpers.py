@@ -320,6 +320,7 @@ SAMPLE_PIPELINE_ANALYTICS_BY_STATUS = [
     {"status": "failed", "totalCount": 92},
     {"status": "canceled", "totalCount": 18},
     {"status": "skipped", "totalCount": 4},
+    {"status": "running", "totalCount": 12},
 ]
 
 SAMPLE_PIPELINE_ANALYTICS_WEEKLY = [

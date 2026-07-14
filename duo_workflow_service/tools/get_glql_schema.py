@@ -281,7 +281,29 @@ _SCHEMAS = {
                 {
                     "name": "status",
                     "operators": ["=", "in"],
-                    "values": ["success", "failed", "canceled", "skipped"],
+                    "values": [
+                        "canceled",
+                        "canceling",
+                        "created",
+                        "failed",
+                        "manual",
+                        "pending",
+                        "preparing",
+                        "running",
+                        "scheduled",
+                        "skipped",
+                        "success",
+                        "waiting_for_callback",
+                        "waiting_for_resource",
+                    ],
+                    "note": (
+                        "Accepts in-progress statuses such as running and pending, "
+                        "not only completed ones. totalCount counts all pipelines "
+                        "including in-progress ones; successRate, failureRate, "
+                        "canceledRate and skippedRate are computed among completed "
+                        "pipelines only and are null when no completed pipelines "
+                        "match."
+                    ),
                 },
                 {"name": "ref", "operators": ["=", "in"]},
                 {"name": "source", "operators": ["=", "in"]},
