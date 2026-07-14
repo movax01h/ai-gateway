@@ -45,6 +45,8 @@ components:
       - "find_files"
       - "grep"
       - "list_dir"
+      # Session context tool
+      - "get_previous_session_context"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -183,6 +185,7 @@ prompts:
         - Read relevant files to understand implementation
         - Check GitLab resources if URLs provided
         - Parallel tool calls when independent
+        - If the user refers to a previous session by ID (e.g. "based on session 123", "continue workflow 456"), call get_previous_session_context to retrieve its goal, status, and activity before proceeding
 
         When done, provide structured summary of findings.
 
