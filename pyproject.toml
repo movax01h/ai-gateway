@@ -176,6 +176,10 @@ filterwarnings = [
   "error::UserWarning",
   # Remove after migrating to httpx2
   "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+  # pytest 9.1 emits PytestRemovedIn10Warning (a UserWarning subclass, so it is
+  # otherwise turned into an error above) for class-scoped fixtures defined as
+  # instance methods. Remove after migrating those fixtures to @classmethod.
+  "ignore::pytest.PytestRemovedIn10Warning",
 ]
 asyncio_default_fixture_loop_scope = "function"
 
