@@ -23,6 +23,7 @@ components:
       - from: "context:goal"
         as: "date_range"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -43,6 +44,7 @@ components:
       - from: "context:goal"
         as: "date_range"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -63,6 +65,7 @@ components:
       - from: "context:goal"
         as: "date_range"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -82,6 +85,7 @@ components:
       - from: "context:goal"
         as: "date_range"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -101,6 +105,7 @@ components:
       - from: "context:goal"
         as: "date_range"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -120,6 +125,7 @@ components:
       - from: "context:goal"
         as: "date_range"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -164,6 +170,7 @@ components:
       - from: "context:summarize_activity.final_answer"
         as: "summary"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"

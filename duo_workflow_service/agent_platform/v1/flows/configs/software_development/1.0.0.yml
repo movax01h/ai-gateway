@@ -48,6 +48,7 @@ components:
       # Session context tool
       - "get_previous_session_context"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -72,6 +73,7 @@ components:
       - "find_files"
       - "grep"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -132,6 +134,7 @@ components:
     pre_approved_tools:
       - "todo_write"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"

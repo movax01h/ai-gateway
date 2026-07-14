@@ -14,6 +14,7 @@ components:
       - "gitlab_graphql"
       - "set_form_permissions"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_agent_final_answer"
       - "on_tool_execution_success"
 routers: []

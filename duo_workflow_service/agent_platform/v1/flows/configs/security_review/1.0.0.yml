@@ -71,6 +71,7 @@ components:
       - "get_epic"
       - "list_epics"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -94,6 +95,7 @@ components:
       - "blob_search"
       - "list_all_merge_request_notes"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -121,6 +123,7 @@ components:
       - "get_repository_file"
       - "read_file"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -157,6 +160,7 @@ components:
           inline_findings_title: "**Security Findings** (internal only — this project is public)"
           summary_internal: true
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
@@ -210,6 +214,7 @@ components:
       - "read_file"
       - "get_issue"
     ui_log_events:
+      - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
