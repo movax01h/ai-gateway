@@ -307,8 +307,9 @@ class LocalPromptRegistry(BasePromptRegistry):
     ) -> Optional[str]:
         """Adjust tool_choice based on model-specific requirements.
 
-        Different model providers have different tool_choice requirements:
-        - Bedrock and Azure models don't support 'any' as a tool_choice value, so we convert it to 'required'.
+        Different model providers have different tool_choice requirements. Bedrock,
+        Bedrock Mantle and Azure models don't support 'any' as a tool_choice value,
+        so we convert it to 'required'.
 
         Args:
             tool_choice: The original tool_choice value
@@ -328,7 +329,11 @@ class LocalPromptRegistry(BasePromptRegistry):
         if (
             tool_choice == "any"
             and model_identifier
-            and ("bedrock/" in model_identifier or "azure/" in model_identifier)
+            and (
+                "bedrock/" in model_identifier
+                or "bedrock_mantle/" in model_identifier
+                or "azure/" in model_identifier
+            )
         ):
             return "required"
         return tool_choice

@@ -1189,6 +1189,9 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
             ("any", "bedrock/anthropic.claude-v2", "required"),
             ("any", "bedrock/anthropic.claude-3-sonnet-20240229-v1:0", "required"),
             ("any", "bedrock/meta.llama3-70b-instruct-v1:0", "required"),
+            # Bedrock Mantle models: 'any' should be converted to 'required'
+            ("any", "bedrock_mantle/openai.gpt-5.5", "required"),
+            ("any", "bedrock_mantle/anthropic.claude-mythos-preview", "required"),
             # Azure models: 'any' should be converted to 'required'
             ("any", "azure/gpt-4", "required"),
             ("any", "azure/gpt-35-turbo", "required"),
