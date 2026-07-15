@@ -61,7 +61,7 @@ boto3 = "^1.35.37"
 python-gitlab = "^7.0.0"
 langchain-google-vertexai = "^3.2.0"
 gitlab-cloud-connector = {version = "^3.19.0", source = "gitlab_cloud_connector"}
-sse-starlette = "^2.1.3"
+sse-starlette = "^3.0.0"
 q_developer_boto3 = { path = "./vendor/q_developer_boto3-1.12.0-py3-none-any.whl" }
 poetry-core = "^2.0.1"
 google-auth = "^2.38.0"
