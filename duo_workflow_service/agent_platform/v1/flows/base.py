@@ -7,7 +7,7 @@ from uuid import uuid4
 import jsonschema
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
-from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command, Overwrite
@@ -76,6 +76,12 @@ _EXECUTOR_CONTEXT = [
     "agent_user_environment",
     "user_rule",
 ]
+
+# Checkpoint statuses that represent a stable conversational boundary a stopped
+# flow can safely be rolled back to (see Flow._resolve_stop_recovery).
+_STABLE_BOUNDARY_STATUSES = frozenset(
+    {WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.NOT_STARTED}
+)
 
 
 class UserDecision(StrEnum):
@@ -470,6 +476,44 @@ class Flow(AbstractWorkflow):
         if ui_chat_log_update:
             state_update["ui_chat_log"] = ui_chat_log_update
         return Command(resume=event, update=state_update or None)
+
+    @override
+    async def _resolve_stop_recovery(
+        self, checkpointer: BaseCheckpointSaver
+    ) -> tuple[Optional[CheckpointTuple], WorkflowStatusEventEnum]:
+        """Walk the checkpoint chain backwards to the nearest stable boundary and resolve what kind of resume this stop-
+        recovery actually is.
+
+        Returns the boundary CheckpointTuple (or None if no boundary checkpoint exists anywhere in the chain — the
+        flow was stopped before its first pause point) alongside the WorkflowStatusEventEnum it resolves to: RESUME
+        when the boundary is an ``interrupt()`` pause (INPUT_REQUIRED), START otherwise — the stopped session's work
+        is discarded and the goal starts a fresh chain.
+
+        When ``checkpointer`` does not expose ``checkpoints_reversed`` (e.g. a ``MemorySaver`` used in offline mode),
+        the boundary walk is not possible and the method falls back to the base-class behaviour: treat the
+        stop-recovery as a plain RETRY.
+        """
+        if not hasattr(checkpointer, "checkpoints_reversed"):
+            return None, WorkflowStatusEventEnum.RETRY
+
+        boundary = None
+        async for candidate in checkpointer.checkpoints_reversed(
+            matches=lambda cv: cv.get("status") in _STABLE_BOUNDARY_STATUSES
+        ):
+            boundary = candidate
+            break
+
+        boundary_status = (
+            boundary.checkpoint["channel_values"]["status"]
+            if boundary
+            else WorkflowStatusEnum.NOT_STARTED
+        )
+        resolved_event = (
+            WorkflowStatusEventEnum.RESUME
+            if boundary_status == WorkflowStatusEnum.INPUT_REQUIRED
+            else WorkflowStatusEventEnum.START
+        )
+        return boundary, resolved_event
 
     @override
     async def get_graph_input(
