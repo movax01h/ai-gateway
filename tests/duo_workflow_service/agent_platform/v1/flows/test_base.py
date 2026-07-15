@@ -2178,6 +2178,178 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             f"Unexpected default-version warning(s): {version_warnings}"
         )
 
+    @staticmethod
+    def _checkpoint_tuple_with_status(checkpoint_id, status):
+        # Deliberately unannotated: langgraph's Checkpoint TypedDict requires
+        # many keys irrelevant to these tests, and existing checkpoint-building
+        # test fixtures follow the same partial-dict convention.
+        return CheckpointTuple(
+            config={
+                "configurable": {
+                    "thread_id": "test-workflow-123",
+                    "checkpoint_id": checkpoint_id,
+                }
+            },
+            checkpoint={
+                "id": checkpoint_id,
+                "channel_values": {"status": status},
+            },
+            metadata={},
+            parent_config=None,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "statuses_newest_first,expected_boundary_id,expected_input_type",
+        [
+            (
+                [
+                    ("cp-2", WorkflowStatusEnum.EXECUTION),
+                    ("cp-1", WorkflowStatusEnum.INPUT_REQUIRED),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-1",
+                Command,
+            ),
+            (
+                [
+                    ("cp-1", WorkflowStatusEnum.EXECUTION),
+                    ("cp-0", WorkflowStatusEnum.PLANNING),
+                ],
+                None,
+                dict,
+            ),
+            (
+                [
+                    ("cp-1", WorkflowStatusEnum.EXECUTION),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-0",
+                dict,
+            ),
+        ],
+        ids=[
+            "input_required_boundary_resolves_to_resume",
+            "no_boundary_resolves_to_start",
+            "not_started_boundary_resolves_to_start",
+        ],
+    )
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_flow_resolve_stop_recovery(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+        statuses_newest_first,
+        expected_boundary_id,
+        expected_input_type,
+    ):
+        """Flow._resolve_stop_recovery walks the checkpoint chain newest-first and resolves the correct boundary.
+
+        Each case drives the workflow through the public ``run()`` entry point with
+        ``STOP_RECOVERY`` as the initial status event, then inspects the ``input`` and
+        ``config`` kwargs forwarded to the compiled graph's ``astream`` call:
+
+        - ``input`` reflects the resolved event: ``Command`` for an INPUT_REQUIRED boundary
+            (RESUME), ``dict`` for any other boundary or no boundary (START).
+        - ``config["configurable"]["checkpoint_id"]`` is pinned to the boundary checkpoint
+            when one is found, and absent when no boundary exists.
+        """
+        goal = "test goal"
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+
+        checkpoint_tuples = [
+            self._checkpoint_tuple_with_status(
+                checkpoint_id,
+                # raw strings, mirroring what checkpoint decompression yields
+                status.value,
+            )
+            for checkpoint_id, status in statuses_newest_first
+        ]
+
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+            for ct in checkpoint_tuples:
+                if matches(ct.checkpoint.get("channel_values", {})):
+                    yield ct
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+
+        await flow_instance.run(goal)
+
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        graph_input = call_kwargs.get("input")
+        graph_config = call_kwargs.get("config", {})
+
+        assert isinstance(graph_input, expected_input_type)
+        if expected_boundary_id is None:
+            assert "checkpoint_id" not in graph_config.get("configurable", {})
+        else:
+            assert graph_config["configurable"]["checkpoint_id"] == expected_boundary_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_flow_resolve_stop_recovery_without_checkpoints_reversed(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """When the checkpointer has no ``checkpoints_reversed`` (e.g. offline MemorySaver mode), _resolve_stop_recovery
+        falls back to RETRY so the run continues from the latest checkpoint without attempting the boundary walk."""
+        goal = "test goal"
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        # Ensure the mock has no checkpoints_reversed attribute, simulating offline mode.
+        if hasattr(mock_checkpointer, "checkpoints_reversed"):
+            del mock_checkpointer.checkpoints_reversed
+
+        await flow_instance.run(goal)
+
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        graph_input = call_kwargs.get("input")
+        graph_config = call_kwargs.get("config", {})
+
+        # RETRY with no checkpoint → falls through to get_workflow_state (a dict)
+        assert isinstance(graph_input, dict)
+        assert "checkpoint_id" not in graph_config.get("configurable", {})
+
+    @pytest.mark.asyncio
+    async def test_get_graph_input_unchanged_for_resume_and_start(
+        self, flow_instance: Flow, checkpoint_tuple
+    ):
+        """Regression guard: get_graph_input's behavior for START/RESUME/RETRY is unchanged by the stop-recovery fix,
+        and STOP_RECOVERY itself (resolved before get_graph_input ever runs) falls into the catch-all None branch."""
+        flow_instance._project = None
+        flow_instance._namespace = None
+
+        start_input = await flow_instance.get_graph_input(
+            "test goal", WorkflowStatusEventEnum.START, None
+        )
+        assert isinstance(start_input, dict)
+        assert start_input["context"]["goal"] == "test goal"
+        assert start_input["status"] == WorkflowStatusEnum.NOT_STARTED
+
+        resume_input = await flow_instance.get_graph_input(
+            "test goal", WorkflowStatusEventEnum.RESUME, None
+        )
+        assert isinstance(resume_input, Command)
+        assert resume_input.resume["event_type"] == FlowEventType.RESPONSE  # type: ignore[index]
+        assert resume_input.resume["message"] == "test goal"  # type: ignore[index]
+
+        retry_with_checkpoint = await flow_instance.get_graph_input(
+            "test goal", WorkflowStatusEventEnum.RETRY, checkpoint_tuple
+        )
+        assert retry_with_checkpoint is None
+
+        retry_without_checkpoint = await flow_instance.get_graph_input(
+            "test goal", WorkflowStatusEventEnum.RETRY, None
+        )
+        assert isinstance(retry_without_checkpoint, dict)
+
+        stop_recovery_input = await flow_instance.get_graph_input(
+            "test goal", WorkflowStatusEventEnum.STOP_RECOVERY, checkpoint_tuple
+        )
+        assert stop_recovery_input is None
+
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
 class TestSetTrackingContextFromAdditionalContext:
