@@ -25,6 +25,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_SUBJECT_TYPE,
     X_GITLAB_TEAM_MEMBER_HEADER,
+    X_GITLAB_TRACKING_CONTEXT,
     X_GITLAB_USER_ID_HEADER,
     X_GITLAB_VERSION_HEADER,
 )
@@ -32,6 +33,7 @@ from ai_gateway.api.middleware_utils import get_valid_namespace_ids
 from lib.internal_events import (
     EventContext,
     current_event_context,
+    parse_tracking_context,
     tracked_internal_events,
     validate_event_context,
 )
@@ -109,9 +111,17 @@ class InternalEventMiddleware:
             else None
         )
 
+        # Forward the optional, client-supplied tracking context into extra so it
+        # is attached to Snowflake events. Best-effort: absent/malformed values are
+        # dropped by parse_tracking_context.
+        tracking_context = (
+            parse_tracking_context(request.headers.get(X_GITLAB_TRACKING_CONTEXT)) or {}
+        )
+
         # EventContext uses Pydantic which coerces int and string to boolean type
         # Reference: https://docs.pydantic.dev/latest/api/standard_library_types/#booleans
         context = EventContext(
+            extra=tracking_context,
             environment=self.environment,
             source="ai-gateway-python",
             realm=realm,

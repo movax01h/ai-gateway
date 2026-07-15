@@ -18,6 +18,7 @@ X_GITLAB_LANGUAGE_SERVER_VERSION = "x-gitlab-language-server-version"
 X_GITLAB_DEPLOYMENT_TYPE = "x-gitlab-deployment-type"
 X_GITLAB_SUBJECT_TYPE = "x-gitlab-subject-type"
 X_GITLAB_ORGANIZATION_ID = "x-gitlab-organization-id"
+X_GITLAB_TRACKING_CONTEXT_HEADER = "x-gitlab-tracking-context"
 
 GRPC_HEALTH_METHODS = (
     "/grpc.health.v1.Health/Check",

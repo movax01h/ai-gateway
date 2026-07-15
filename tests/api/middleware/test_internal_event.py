@@ -24,6 +24,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_SAAS_DUO_PRO_NAMESPACE_IDS_HEADER,
     X_GITLAB_SUBJECT_TYPE,
     X_GITLAB_TEAM_MEMBER_HEADER,
+    X_GITLAB_TRACKING_CONTEXT,
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
@@ -180,6 +181,61 @@ async def test_middleware_set_context(internal_event_middleware, user):
 def test_x_gitlab_subject_type_constant_value():
     """Lock the canonical header name to catch typos in the constant."""
     assert X_GITLAB_SUBJECT_TYPE == "X-Gitlab-Subject-Type"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "header_value,expected_extra",
+    [
+        (None, {}),
+        (
+            b'{"distribution": "npm", "execution_environment": "CI"}',
+            {"distribution": "npm", "execution_environment": "CI"},
+        ),
+        (
+            b'{"distribution": "glab", "future_key": "value"}',
+            {"distribution": "glab", "future_key": "value"},
+        ),
+        (b"not-json", {}),
+        (b'["not", "an", "object"]', {}),
+        (b"", {}),
+    ],
+)
+async def test_middleware_forwards_tracking_context_into_extra(
+    internal_event_middleware, user, header_value, expected_extra
+):
+    """The x-gitlab-tracking-context header is parsed and merged into extra."""
+    headers: list[tuple[bytes, bytes]] = [
+        (X_GITLAB_REALM_HEADER.lower().encode(), b"test-realm"),
+        (X_GITLAB_INSTANCE_ID_HEADER.lower().encode(), b"test-instance"),
+        (X_GITLAB_HOST_NAME_HEADER.lower().encode(), b"test-host"),
+        (X_GITLAB_GLOBAL_USER_ID_HEADER.lower().encode(), b"test-user"),
+    ]
+    if header_value is not None:
+        headers.append((X_GITLAB_TRACKING_CONTEXT.lower().encode(), header_value))
+
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": headers,
+            "user": user,
+        }
+    )
+    scope = request.scope
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(scope, receive, send)
+
+        set_context = mock_event_context.set.call_args[0][0]
+        assert set_context.extra == expected_extra
 
 
 @pytest.mark.asyncio
