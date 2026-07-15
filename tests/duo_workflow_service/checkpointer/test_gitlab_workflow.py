@@ -5,6 +5,7 @@ import zlib
 from asyncio import CancelledError
 from typing import Any, Optional, Sequence, TypedDict
 from unittest.mock import ANY, AsyncMock, Mock, call, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
@@ -3435,3 +3436,279 @@ def test_decode_graphql_latest_checkpoint_hydrates_current_thread_started_at(
     )
 
     assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
+
+
+def _make_gl_checkpoint(thread_ts, status):
+    """Build a compressed GitLab checkpoint dict whose channel_values carry the given status.
+
+    Deliberately unannotated: ``compress_checkpoint`` expects langgraph's full Checkpoint TypedDict, whose remaining
+    keys are irrelevant here — the same partial-dict convention other checkpoint-building helpers in this file use.
+    """
+    return {
+        "thread_ts": thread_ts,
+        "parent_ts": None,
+        "compressed_checkpoint": compress_checkpoint(
+            {"id": thread_ts, "channel_values": {"status": status}}
+        ),
+        "metadata": {},
+    }
+
+
+def _paginated_checkpoints_aget(pages: list[list[dict]]):
+    """Return an aget double serving `pages` (newest-first) with GitLab REST pagination headers.
+
+    Also returns the list of query-param dicts recorded per request, so tests can assert exactly which pages were
+    fetched (and that no extra requests happened).
+    """
+    requested_params: list[dict] = []
+
+    async def mock_aget(path, **_kwargs):
+        query = {k: v[0] for k, v in parse_qs(urlparse(path).query).items()}
+        requested_params.append(query)
+        page_index = int(query["page"]) - 1
+        if page_index >= len(pages):
+            return GitLabHttpResponse(status_code=404, body=[], headers={})
+        headers = {}
+        if page_index + 1 < len(pages):
+            headers["X-Next-Page"] = str(page_index + 2)
+        return GitLabHttpResponse(
+            status_code=200, body=pages[page_index], headers=headers
+        )
+
+    return mock_aget, requested_params
+
+
+@pytest.fixture(name="paginated_checkpoint_pages")
+def paginated_checkpoint_pages_fixture() -> list[list[dict]]:
+    """Two pages of checkpoints, newest-first, with the only INPUT_REQUIRED boundary on page one."""
+    return [
+        [
+            _make_gl_checkpoint("cp-4", WorkflowStatusEnum.EXECUTION),
+            _make_gl_checkpoint("cp-3", WorkflowStatusEnum.INPUT_REQUIRED),
+        ],
+        [
+            _make_gl_checkpoint("cp-2", WorkflowStatusEnum.PLANNING),
+            _make_gl_checkpoint("cp-1", WorkflowStatusEnum.NOT_STARTED),
+        ],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_stops_without_fetching_further_pages(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    page_iterator = gitlab_workflow._iter_checkpoint_pages()
+    first_page = await anext(page_iterator)
+    await page_iterator.aclose()
+
+    assert [cp["thread_ts"] for cp in first_page] == ["cp-4", "cp-3"]
+    assert len(requested_params) == 1, (
+        "X-Next-Page must only be followed if the consumer keeps iterating"
+    )
+    assert requested_params[0]["page"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_follows_next_page_header(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    collected = [
+        cp["thread_ts"]
+        async for page in gitlab_workflow._iter_checkpoint_pages(per_page=2)
+        for cp in page
+    ]
+
+    assert collected == ["cp-4", "cp-3", "cp-2", "cp-1"]
+    # Pages are requested in sequence via page/per_page params, stopping when
+    # X-Next-Page is absent.
+    assert [params["page"] for params in requested_params] == ["1", "2"]
+    assert all(params["per_page"] == "2" for params in requested_params)
+    assert all(params["accept_compressed"] == "true" for params in requested_params)
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_applies_predicate(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, _ = _paginated_checkpoints_aget(paginated_checkpoint_pages)
+    http_client.aget = mock_aget
+
+    matched = [
+        checkpoint_tuple
+        async for checkpoint_tuple in gitlab_workflow.checkpoints_reversed(
+            matches=lambda cv: (
+                cv.get("status")
+                in (WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.NOT_STARTED)
+            )
+        )
+    ]
+
+    assert [
+        checkpoint_tuple.config["configurable"]["checkpoint_id"]
+        for checkpoint_tuple in matched
+    ] == ["cp-3", "cp-1"]
+    assert all(isinstance(t, CheckpointTuple) for t in matched)
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_no_predicate_yields_all(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, _ = _paginated_checkpoints_aget(paginated_checkpoint_pages)
+    http_client.aget = mock_aget
+
+    results = [
+        checkpoint_tuple
+        async for checkpoint_tuple in gitlab_workflow.checkpoints_reversed()
+    ]
+
+    assert [
+        checkpoint_tuple.config["configurable"]["checkpoint_id"]
+        for checkpoint_tuple in results
+    ] == ["cp-4", "cp-3", "cp-2", "cp-1"]
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_stops_after_first_match_no_extra_requests(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    """Early-exit (as _resolve_stop_recovery does) must not request pages beyond the match."""
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    checkpoint_iterator = gitlab_workflow.checkpoints_reversed(
+        matches=lambda cv: cv.get("status") == WorkflowStatusEnum.INPUT_REQUIRED
+    )
+    boundary = await anext(checkpoint_iterator)
+    await checkpoint_iterator.aclose()
+
+    assert boundary.config["configurable"]["checkpoint_id"] == "cp-3"
+    assert len(requested_params) == 1, (
+        "no HTTP requests may be issued beyond the page containing the match"
+    )
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_stops_on_error_mid_pagination(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    """An HTTP error on page 2 must stop iteration after yielding page 1; no further requests are made."""
+    call_count = 0
+
+    async def mock_aget(path, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return GitLabHttpResponse(
+                status_code=200,
+                body=paginated_checkpoint_pages[0],
+                headers={"X-Next-Page": "2"},
+            )
+        return GitLabHttpResponse(status_code=500, body=None, headers={})
+
+    http_client.aget = mock_aget
+
+    pages = [page async for page in gitlab_workflow._iter_checkpoint_pages()]
+
+    assert len(pages) == 1
+    assert [cp["thread_ts"] for cp in pages[0]] == ["cp-4", "cp-3"]
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,body",
+    [
+        (404, [{"thread_ts": "cp-1"}]),
+        (200, None),
+        (200, []),
+    ],
+    ids=["non_success_status", "no_body", "empty_body"],
+)
+async def test_iter_checkpoint_pages_stops_on_failed_or_empty_response(
+    gitlab_workflow, http_client, status_code, body
+):
+    """_iter_checkpoint_pages must stop iteration when the response is not successful or has no body."""
+
+    async def mock_aget(path, **_kwargs):
+        return GitLabHttpResponse(status_code=status_code, body=body, headers={})
+
+    http_client.aget = mock_aget
+
+    pages = [page async for page in gitlab_workflow._iter_checkpoint_pages()]
+
+    assert pages == [], (
+        "no pages should be yielded when the response is not successful or has no body"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,body",
+    [
+        (404, []),
+        (200, None),
+        (200, []),
+    ],
+    ids=["non_success", "no_body", "empty_body"],
+)
+async def test_checkpoints_reversed_yields_nothing_on_failed_or_empty_response(
+    gitlab_workflow, http_client, status_code, body
+):
+    """checkpoints_reversed must yield nothing when the underlying HTTP response is non-success or empty."""
+
+    async def mock_aget(path, **_kwargs):
+        return GitLabHttpResponse(status_code=status_code, body=body, headers={})
+
+    http_client.aget = mock_aget
+
+    results = [t async for t in gitlab_workflow.checkpoints_reversed()]
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_skips_malformed_checkpoint_and_continues(
+    gitlab_workflow, http_client
+):
+    """A malformed checkpoint (uncompress_checkpoint raises ValueError) must be skipped and logged; iteration must
+    continue to yield the remaining valid checkpoints rather than aborting."""
+    valid_cp = _make_gl_checkpoint("cp-valid", WorkflowStatusEnum.EXECUTION)
+    malformed_cp = {
+        "thread_ts": "cp-malformed",
+        "parent_ts": None,
+        # Invalid base64/zlib data — uncompress_checkpoint will raise ValueError.
+        "compressed_checkpoint": "!!!not-valid-base64!!!",
+        "metadata": {},
+    }
+    pages = [[malformed_cp, valid_cp]]
+    mock_aget, _ = _paginated_checkpoints_aget(pages)
+    http_client.aget = mock_aget
+
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+    ) as mock_log_exception:
+        results = [
+            checkpoint_tuple
+            async for checkpoint_tuple in gitlab_workflow.checkpoints_reversed()
+        ]
+
+    assert [
+        checkpoint_tuple.config["configurable"]["checkpoint_id"]
+        for checkpoint_tuple in results
+    ] == ["cp-valid"], "only the valid checkpoint should be yielded"
+    mock_log_exception.assert_called_once()
+    _, kwargs = mock_log_exception.call_args
+    assert kwargs.get("extra", {}).get("context") == "Skipping malformed checkpoint"
