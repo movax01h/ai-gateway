@@ -1,10 +1,12 @@
 # pylint: disable=line-too-long,file-naming-for-tests
+import json
 from typing import Any, List, Optional
 from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
+from langchain_core.messages.ai import UsageMetadata
 from pydantic import AnyUrl
 
 from ai_gateway.api.v2 import api_router
@@ -19,6 +21,7 @@ from ai_gateway.model_selection.model_selection_config import (
 )
 from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
 from lib.context import TokenUsage
+from tests.conftest import FakeModel
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -28,9 +31,8 @@ def fast_api_router_fixture():
 
 @pytest.fixture(name="mock_get_usage_metadata")
 def mock_get_usage_metadata_fixture(token_usage: TokenUsage | None):
-    with patch(
-        "ai_gateway.api.v2.prompts.invoke.get_token_usage", return_value=token_usage
-    ) as mock:
+    with patch("ai_gateway.api.v2.prompts.invoke.token_usage") as mock:
+        mock.get.return_value = token_usage
         yield mock
 
 
@@ -289,6 +291,111 @@ class TestPrompt:
         assert response.status_code == 200
         assert response.json() == expected_response
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+
+class TestStreamingTokenUsage:
+    """Streaming through the real token-usage context variable (no `token_usage` mock).
+
+    Regression coverage for
+    https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2534:
+    usage metadata is only registered once the LLM finishes, so intermediate chunks
+    carry no usage and the final chunk must carry the accumulated counts.
+    """
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=["Hi John!"],
+            usage_metadata=UsageMetadata(
+                input_tokens=10, output_tokens=20, total_tokens=30
+            ),
+        )
+
+    def test_final_chunk_carries_usage(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+        chunks = [json.loads(line) for line in response.text.splitlines()]
+
+        assert len(chunks) > 1
+        assert "".join(chunk["content"] for chunk in chunks) == "Hi John!"
+
+        # Usage is only known once the LLM finishes; intermediate chunks omit it
+        assert all("usage" not in chunk for chunk in chunks[:-1])
+        assert chunks[-1]["usage"] == {
+            "fake-model": {"input_tokens": 10, "output_tokens": 20}
+        }
+
+
+class TestNonStreamedTokenUsage:
+    """Non-streamed responses through the real token-usage context variable."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=["Hi John!"],
+            usage_metadata=UsageMetadata(
+                input_tokens=10, output_tokens=20, total_tokens=30
+            ),
+        )
+
+    def test_response_carries_usage(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["content"] == "Hi John!"
+        assert body["usage"] == {
+            "fake-model": {"input_tokens": 10, "output_tokens": 20}
+        }
+
+
+class TestNonStreamedEmptyTokenUsage:
+    """The usage field is omitted when the model reports no usage metadata."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=["Hi John!"],
+        )
+
+    def test_response_omits_usage(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        assert "usage" not in response.json()
 
 
 class TestUnauthorizedScopes:

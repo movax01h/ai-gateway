@@ -11,7 +11,6 @@ from structlog.testing import capture_logs
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from lib.context import (
     get_llm_operations,
-    get_token_usage,
     init_llm_operations,
     init_token_usage,
     llm_operations,
@@ -55,13 +54,6 @@ def container_fixture(
         unit_primitive=unit_primitive,
         internal_event_client=internal_event_client,
     )
-
-
-def test_get_token_usage():
-    usage = {"test_model": {"input_tokens": 10, "output_tokens": 20}}
-    token_usage.set(usage)
-    assert get_token_usage() == usage
-    assert token_usage.get() is None  # Ensure the usage is reset after being retrieved
 
 
 def test_get_llm_operations():
