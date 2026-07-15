@@ -41,8 +41,12 @@ def check_aigw_endpoint(endpoint="localhost:5052"):
     raise RuntimeError(error_message)
 
 
-def check_provider_accessible(provider):
+def check_provider_accessible(provider, model_endpoint=None, api_key=None):
     # pylint: disable=direct-environment-variable-reference
+    if provider == "bedrock_mantle":
+        check_bedrock_mantle_accessible(model_endpoint, api_key)
+        return
+
     if not provider == "bedrock":
         return
 
@@ -75,6 +79,40 @@ def check_provider_accessible(provider):
             raise RuntimeError(error_message)
 
     print(f">> Provider {provider_name} is accessible ✔\n")
+
+
+def check_bedrock_mantle_accessible(
+    model_endpoint: str | None, api_key: str | None
+) -> None:
+    """Probe the Bedrock Mantle endpoint for reachability.
+
+    Sends an HTTP GET to the user-supplied endpoint (with the bearer token when provided). Any HTTP response — including
+    401 or 404 — means the endpoint is reachable, so only connection, TLS, or timeout errors are treated as an
+    accessibility problem.
+    """
+    print("Testing if provider Bedrock Mantle is accessible ...")
+
+    if not model_endpoint:
+        print(">> No model endpoint provided; skipping Bedrock Mantle probe.\n")
+        return
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        requests.get(model_endpoint, headers=headers, timeout=10)
+    except requests.RequestException as e:
+        error_message = f"""
+                >> An error occurred while contacting the Bedrock Mantle endpoint {model_endpoint}: {e}
+                >> Potential cause(s) are:
+                >> - The endpoint is incorrect. Expected form: https://bedrock-mantle.<region>.api.aws/v1
+                >> - Network issues:
+                >>   Verify if the server can reach the endpoint.
+                """
+        raise RuntimeError(error_message)
+
+    print(">> Provider Bedrock Mantle is accessible ✔\n")
 
 
 def check_general_env_variables():
@@ -250,6 +288,17 @@ def _dws_channel(endpoint: str, secure: bool) -> grpc.Channel | None:
 
 def check_provider_specific_env_variables(provider):
     # pylint: disable=direct-environment-variable-reference
+    if provider == "bedrock_mantle":
+        print("Testing specific environment variables for provider Bedrock Mantle ...")
+        if os.getenv("BEDROCK_MANTLE_API_KEY"):
+            print(">> BEDROCK_MANTLE_API_KEY is set ✔\n")
+        else:
+            print(
+                ">> BEDROCK_MANTLE_API_KEY is not set. Authentication will use the "
+                "per-model API key passed with --api-key; make sure one of them is provided.\n"
+            )
+        return
+
     if not provider == "bedrock":
         return
     provider_name = provider.capitalize()
@@ -379,7 +428,8 @@ def troubleshoot():
         "--model-identifier",
         required=False,
         help="Identifier of the model."
-        "Example: custom_openai/Mixtral-8x7B-Instruct-v0.1, bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+        "Example: custom_openai/Mixtral-8x7B-Instruct-v0.1, bedrock/anthropic.claude-sonnet-4-20250514-v1:0, "
+        "bedrock_mantle/openai.gpt-oss-120b",
     )
     parser.add_argument("--api-key", help="API key for the model.")
     parser.add_argument(
@@ -421,7 +471,7 @@ def troubleshoot():
     if model_family:
         if provider:
             check_provider_specific_env_variables(provider)
-            check_provider_accessible(provider)
+            check_provider_accessible(provider, model_endpoint, api_key)
 
         check_suggestions_model_access(
             endpoint, model_family, model_endpoint, api_key, model_identifier, provider
