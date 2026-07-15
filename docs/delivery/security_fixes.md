@@ -88,9 +88,21 @@ Once an eligible confidential security issue is assigned to an engineer:
    - Open new MR that targets `stable-18-4-ee` branch of the canonical repository from the `stable-18-4-ee` branch of the security repository.
    - And merge these MRs.
 1. Cut Git-Tags for backports by following [How to backport a fix](./release.md#how-to-backport-a-fix). This will release patched Docker images for self-hosted Duo customers.
-1. Done.
+1. In [the repository settings](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/settings/repository#js-push-remote-settings) (**Maintainer** role required to view this page), under **Mirroring repositories**, verify that mirroring between the security and canonical repositories succeeded.
+1. If the mirroring is failing with an error like `Some refs have diverged...`, use the below shell commands to bring the two repos into sync. Note that squash commits should not be enabled on the resulting MR.
+
+```shell
+# Example for <branch>, which could be 'main', 'stable-19-0-ee', etc
+git checkout -b <branch_name> origin/<branch>
+git merge security/<branch> -m "chore: sync security fork into canonical"
+git push origin <branch_name>
+```
 
 - **NOTE:**
+  - If a prior sync merged canonical into the security repo, merging would drag that pollution into canonical.
+    Instead, cherry-pick only the real fix commits onto canonical, then force-push canonical over the security
+    mirror as a last-resort reset. See [this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2153) for an example.
+    Related information can be found at [How to sync Security repository with Canonical repository](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/how_to_sync_security_with_canonical.md).
   - You could encounter a merge conflict at step 4 if the other developers have changed the same code.
     You need to manually fix the merge conflict and ask a maintainer to merge it.
   - The other developers could notice that their change is not deployed to production because of mirroring failure due to merge conflict.
