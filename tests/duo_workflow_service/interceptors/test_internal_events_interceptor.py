@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -604,6 +605,120 @@ async def test_interceptor_with_both_versions(
     assert event_context.instance_version == "16.11.0"
     assert "lsp_version" in event_context.extra
     assert event_context.extra["lsp_version"] == "7.43.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "header_value,expected_extra",
+    [
+        pytest.param(None, {}, id="absent_header"),
+        pytest.param(
+            '{"distribution": "npm", "execution_environment": "CI"}',
+            {"distribution": "npm", "execution_environment": "CI"},
+            id="valid_payload_all_keys_forwarded",
+        ),
+        pytest.param(
+            '{"distribution": "glab", "future_key": "value"}',
+            {"distribution": "glab", "future_key": "value"},
+            id="open_ended_keys_forwarded",
+        ),
+        pytest.param("not-json", {}, id="malformed_json_dropped"),
+        pytest.param('["not", "an", "object"]', {}, id="non_object_dropped"),
+        pytest.param('"a string"', {}, id="json_string_dropped"),
+        pytest.param("", {}, id="empty_string_dropped"),
+    ],
+)
+async def test_interceptor_parses_tracking_context_into_extra(
+    interceptor,
+    mock_continuation,
+    mock_user,
+    header_value,
+    expected_extra,
+):
+    """The x-gitlab-tracking-context header is parsed and merged into extra."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+    }
+    if header_value is not None:
+        metadata["x-gitlab-tracking-context"] = header_value
+
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
+    language_server_version.set(None)
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert current_event_context.get().extra == expected_extra
+
+
+@pytest.mark.asyncio
+async def test_interceptor_tracking_context_merges_with_lsp_version(
+    interceptor, mock_continuation, mock_user
+):
+    """Tracking context fields are merged alongside the existing lsp_version key."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+        "x-gitlab-tracking-context": '{"execution_environment": "local"}',
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
+    language_server_version.set(LanguageServerVersion.from_string("7.43.0"))
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    extra = current_event_context.get().extra
+    assert extra["lsp_version"] == "7.43.0"
+    assert extra["execution_environment"] == "local"
+
+
+@pytest.mark.asyncio
+async def test_interceptor_tracking_context_does_not_override_server_keys(
+    interceptor, mock_continuation, mock_user
+):
+    """Client-supplied tracking context must not override server-derived keys.
+
+    Runs the interceptor once to discover the keys the server writes into
+    ``extra`` (for example ``lsp_version``), then runs it again with a tracking
+    context that attempts to spoof every one of those keys, and asserts each
+    server-derived value is preserved.
+    """
+    base_metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+    }
+
+    # # First pass: no tracking context, capture the server-derived extra.
+    # current_user.set(mock_user)
+    # language_server_version.set(LanguageServerVersion.from_string("7.43.0"))
+    # await interceptor.intercept_service(
+    #     mock_continuation, create_handler_call_details(dict(base_metadata))
+    # )
+    server_extra = dict(current_event_context.get().extra)
+    # assert server_extra, "expected at least one server-derived extra key to guard"
+
+    # Second pass: tracking context tries to spoof every server-derived key.
+    spoofed = {key: f"spoofed-{key}" for key in server_extra}
+    metadata = {
+        **base_metadata,
+        "x-gitlab-tracking-context": json.dumps(spoofed),
+    }
+    current_user.set(mock_user)
+    language_server_version.set(LanguageServerVersion.from_string("7.43.0"))
+    await interceptor.intercept_service(
+        mock_continuation, create_handler_call_details(metadata)
+    )
+
+    extra = current_event_context.get().extra
+    for key, value in server_extra.items():
+        assert extra[key] == value
 
 
 @pytest.mark.asyncio

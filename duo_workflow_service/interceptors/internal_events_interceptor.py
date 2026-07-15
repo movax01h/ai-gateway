@@ -24,6 +24,7 @@ from duo_workflow_service.interceptors import (
     X_GITLAB_REALM_HEADER,
     X_GITLAB_ROOT_NAMESPACE_ID,
     X_GITLAB_SUBJECT_TYPE,
+    X_GITLAB_TRACKING_CONTEXT_HEADER,
     X_GITLAB_USER_ID_HEADER,
 )
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
@@ -32,6 +33,7 @@ from lib.context import gitlab_version, language_server_version
 from lib.internal_events import (
     EventContext,
     current_event_context,
+    parse_tracking_context,
     validate_event_context,
 )
 
@@ -85,6 +87,16 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
         extra = {}
         if lsp_version and hasattr(lsp_version, "version"):
             extra["lsp_version"] = str(lsp_version.version)
+
+        # Forward the optional, client-supplied Duo CLI tracking context
+        # (for example distribution / execution_environment) into extra so it is
+        # attached to Snowflake events. Best-effort: absent/malformed values are
+        # dropped by parse_tracking_context.
+        tracking_context = parse_tracking_context(
+            metadata.get(X_GITLAB_TRACKING_CONTEXT_HEADER)
+        )
+        if tracking_context:
+            extra = {**tracking_context, **extra}
 
         # Get GitLab instance version from context
         instance_version_value = gitlab_version.get()
