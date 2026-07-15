@@ -293,6 +293,25 @@ class TestModelMetadataToParams:
             "timeout": 10,
         }
 
+    def test_with_identifier_with_bedrock_mantle_provider(self):
+        model_metadata = create_model_metadata(
+            {
+                "name": "gitlab_model1",
+                "provider": "provider",
+                "endpoint": HttpUrl("https://api.example.com"),
+                "api_key": "abcde",
+                "identifier": "bedrock_mantle/openai.gpt-5.5",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://api.example.com",
+            "model": "openai.gpt-5.5",
+            "api_key": "abcde",
+            "custom_llm_provider": "bedrock_mantle",
+            "timeout": 10,
+        }
+
     def test_with_identifier_with_vertex_ai_provider(self):
         model_metadata = create_model_metadata(
             {
