@@ -1186,6 +1186,88 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 log_exception(e, extra={"context": "Skipping malformed checkpoint"})
                 continue
 
+    async def _iter_checkpoint_pages(
+        self,
+        *,
+        per_page: int = 20,
+        # `List`, not `list`: inside the class body the bare name `list` resolves
+        # to the `list()` checkpoint-saver method defined above, not the builtin.
+    ) -> AsyncIterator[List[Dict[str, Any]]]:
+        """Fetch raw checkpoint pages from Rails, newest-first, one HTTP request per page.
+
+        Stops requesting further pages as soon as the caller stops iterating (e.g. once a match is found downstream) —
+        this is the mechanism that makes the backwards walk cheap even for long checkpoint chains. Uses the same
+        ``checkpoints`` REST endpoint as ``alist()`` / ``_fetch_most_recent_checkpoint``, following the ``X-Next-Page``
+        pagination convention already used in ``duo_workflow_service/tools/duo_base_tool.py``.
+        """
+        page: str = "1"
+        while page:
+            endpoint = add_compression_param(
+                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
+                f"?per_page={per_page}&page={page}"
+            )
+            with duo_workflow_metrics.time_gitlab_response(
+                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
+                method="GET",
+            ):
+                response = await self._client.aget(
+                    path=endpoint, object_hook=checkpoint_decoder
+                )
+
+            if not response.is_success():
+                self._logger.error(
+                    "Failed to fetch checkpoint page",
+                    workflow_id=self._workflow_id,
+                    status_code=response.status_code,
+                    page=page,
+                )
+                return
+            if not response.body:
+                return
+
+            yield response.body
+            page = response.headers.get("X-Next-Page", "")
+
+    async def checkpoints_reversed(
+        self,
+        *,
+        matches: Callable[[Mapping[str, Any]], bool] = lambda _: True,
+        per_page: int = 20,
+    ) -> AsyncIterator[CheckpointTuple]:
+        """Yield checkpoints newest-first, optionally filtered, fetched page-by-page.
+
+        Public data-access primitive intentionally free of any "recovery" or "boundary" domain knowledge.
+        ``matches`` is applied to each checkpoint's ``channel_values`` purely as a predicate; what "matching"
+        means is entirely the caller's concern. Because fetching is paginated (see ``_iter_checkpoint_pages``),
+        a caller that stops iterating after the first match never requests pages beyond the one containing the match.
+
+        Args:
+            matches: Predicate applied to each checkpoint's ``channel_values``; only checkpoints for which
+                this returns ``True`` are yielded. Defaults to accepting all checkpoints.
+            per_page: Number of checkpoints to request per HTTP page. Defaults to 20.
+
+        Yields:
+            CheckpointTuple: Decompressed, converted checkpoints in newest-first order.
+        """
+        async for gl_checkpoints in self._iter_checkpoint_pages(per_page=per_page):
+            for gl_checkpoint in gl_checkpoints:
+                try:
+                    if "compressed_checkpoint" in gl_checkpoint:
+                        gl_checkpoint["checkpoint"] = uncompress_checkpoint(
+                            gl_checkpoint["compressed_checkpoint"]
+                        )
+                    checkpoint_tuple = (
+                        self._convert_gitlab_checkpoint_to_checkpoint_tuple(
+                            gl_checkpoint
+                        )
+                    )
+                except ValueError as e:
+                    log_exception(e, extra={"context": "Skipping malformed checkpoint"})
+                    continue
+                channel_values = checkpoint_tuple.checkpoint.get("channel_values", {})
+                if matches(channel_values):
+                    yield checkpoint_tuple
+
     @override
     async def aput(
         self,
