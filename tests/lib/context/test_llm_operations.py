@@ -4,7 +4,6 @@ import unittest
 
 from lib.context.llm_operations import (
     get_llm_operations,
-    get_token_usage,
     init_llm_operations,
     init_token_usage,
     llm_operations,
@@ -29,24 +28,6 @@ class TestTokenUsage(unittest.TestCase):
     def test_init_token_usage(self):
         init_token_usage()
         self.assertEqual(token_usage.get(), {})
-
-    def test_get_token_usage_returns_and_resets(self):
-        init_token_usage()
-        # Manually set some usage
-        current = token_usage.get()
-        current["model1"] = {"input_tokens": 100, "output_tokens": 50}
-        token_usage.set(current)
-
-        # Get should return the usage
-        result = get_token_usage()
-        self.assertEqual(result, {"model1": {"input_tokens": 100, "output_tokens": 50}})
-
-        # And reset to None
-        self.assertIsNone(token_usage.get())
-
-    def test_get_token_usage_when_not_initialized(self):
-        result = get_token_usage()
-        self.assertIsNone(result)
 
 
 class TestLlmOperations(unittest.TestCase):

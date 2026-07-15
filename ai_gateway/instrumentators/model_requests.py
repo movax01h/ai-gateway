@@ -22,7 +22,6 @@ from lib.context import (
     client_capabilities,
     client_type,
     get_llm_operations,
-    get_token_usage,
     gitlab_realm,
     gitlab_version,
     init_llm_operations,
@@ -469,6 +468,5 @@ __all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "llm_operations",
     "init_token_usage",
     "init_llm_operations",
-    "get_token_usage",
     "get_llm_operations",
 ]

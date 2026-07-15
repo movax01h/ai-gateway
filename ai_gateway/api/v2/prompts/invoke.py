@@ -10,8 +10,8 @@ from ai_gateway.api.v1.prompts.invoke import PromptRequest, _invoke
 from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.instrumentators.model_requests import (
     TokenUsage,
-    get_token_usage,
     init_token_usage,
+    token_usage,
 )
 from ai_gateway.prompts.base import BasePromptRegistry
 from lib.context import StarletteUser, get_current_user
@@ -30,7 +30,9 @@ router = APIRouter()
 def _process_chunk(chunk: BaseMessage):
     return PromptResponse(
         content=str(chunk.content),
-        usage=get_token_usage(),
+        # `or None` so an initialized-but-empty accumulator ({}) is omitted from the
+        # response rather than serialised as an empty object
+        usage=token_usage.get() or None,
     )
 
 

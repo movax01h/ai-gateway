@@ -9,7 +9,6 @@ from lib.context.llm_operations import (
     LlmOperations,
     TokenUsage,
     get_llm_operations,
-    get_token_usage,
     init_llm_operations,
     init_token_usage,
     llm_operations,
@@ -70,7 +69,6 @@ __all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "TokenUsage",
     "LlmOperations",
     "init_token_usage",
-    "get_token_usage",
     "init_llm_operations",
     "get_llm_operations",
     # tool_executions
