@@ -16,6 +16,7 @@ from langchain_core.runnables import RunnableConfig
 # https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/issues/78
 from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchain-imports
     BaseCheckpointSaver,
+    CheckpointTuple,
 )
 from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
     GraphRecursionError,
@@ -458,6 +459,24 @@ class AbstractWorkflow(ABC):
                         "" if checkpoint_tuple else WorkflowStatusEventEnum.START
                     )
 
+                if status_event == WorkflowStatusEventEnum.STOP_RECOVERY:
+                    # Resolve the DWS-internal STOP_RECOVERY signal into a concrete
+                    # event *before* get_graph_input runs, so get_graph_input never
+                    # sees STOP_RECOVERY. Dispatch is polymorphic: Flow overrides
+                    # _resolve_stop_recovery with the real boundary walk; legacy
+                    # subclasses keep the trivial (None, RETRY) default.
+                    # Note: only GitLabWorkflow ever reports STOP_RECOVERY (offline
+                    # mode yields a MemorySaver with no initial_status_event).
+                    boundary, status_event = await self._resolve_stop_recovery(
+                        checkpointer
+                    )
+                    if boundary is not None:
+                        # Pin LangGraph to the boundary checkpoint so it resumes
+                        # there, discarding all work done after the boundary.
+                        graph_config["configurable"]["checkpoint_id"] = boundary.config[
+                            "configurable"
+                        ]["checkpoint_id"]
+
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
                 # for more info.
@@ -575,6 +594,19 @@ class AbstractWorkflow(ABC):
             )
 
         raise TraceableException(e)
+
+    async def _resolve_stop_recovery(
+        self,
+        checkpointer: BaseCheckpointSaver,  # pylint: disable=unused-argument
+    ) -> tuple[Optional[CheckpointTuple], WorkflowStatusEventEnum]:
+        """Resolve a STOP_RECOVERY signal into a concrete status event.
+
+        Base implementation: legacy (non-Flow) workflow types don't support the checkpoint-boundary walk this
+        requires, so a stop-recovery is treated exactly as it was before this fix existed — as a plain RETRY, resuming
+        from the latest checkpoint with no input. Only ``Flow`` overrides this to perform the real boundary walk and
+        resolve to RESUME/START.
+        """
+        return None, WorkflowStatusEventEnum.RETRY
 
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any

@@ -30,6 +30,14 @@ class WorkflowStatusEventEnum(StrEnum):
     REQUIRE_INPUT = "require_input"
     REQUIRE_PLAN_APPROVAL = "require_plan_approval"
     REQUIRE_TOOL_CALL_APPROVAL = "require_tool_call_approval"
+    STOP_RECOVERY = "stop_recovery"  # DWS-internal only; never a valid Rails wire event
+
+
+# Rails never recognizes STOP_RECOVERY as a status_event string — it must be
+# translated to the one event Rails actually accepts leaving `stopped`.
+INTERNAL_TO_RAILS_STATUS_EVENT = {
+    WorkflowStatusEventEnum.STOP_RECOVERY: WorkflowStatusEventEnum.RETRY,
+}
 
 
 SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES = [
