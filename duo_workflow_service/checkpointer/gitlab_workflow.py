@@ -1032,12 +1032,25 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 },
             )
 
-    def _decode_graphql_latest_checkpoint(
+    def decode_graphql_checkpoint(
         self, checkpoint: GitLabCheckpoint
     ) -> Optional[CheckpointTuple]:
-        """Convert a latestCheckpoint GraphQL response to a CheckpointTuple.
+        """Decode a GraphQL-shaped GitLab checkpoint dict (e.g. from ``WorkflowConfig["latest_checkpoint"]``) into a
+        ``CheckpointTuple``.
 
-        Handles both compressed (19.0+) and uncompressed (< 19.0) payloads.
+        Handles both compressed (19.0+) and uncompressed (< 19.0) payloads. Public: intended for
+        cross-class callers (e.g. ``Flow._resolve_stop_recovery``) that need to inspect checkpoint
+        state without issuing additional HTTP requests, in addition to its internal use on the
+        ``aget_tuple`` cached-latest-checkpoint path.
+
+        **Side-effect free**: decoding never touches the incremental-checkpoint write cache
+        (``_prev_checkpoint_id`` / ``_prev_channel_values`` / ``_current_thread`` /
+        ``_current_thread_started_at``). Hydration of that cache is reserved for the ``aget_tuple``
+        fetch paths — the checkpoint LangGraph actually resumes from is the only valid delta
+        baseline, and an arbitrary decoded checkpoint (e.g. the pre-rollback tip during
+        stop-recovery) must never repoint it. Callers for whom the decoded checkpoint IS the resume
+        baseline (the ``aget_tuple`` cached-latest path) must call ``_hydrate_incremental_state``
+        explicitly afterwards.
         """
         if "compressedCheckpoint" in checkpoint:
             decoded_checkpoint = uncompress_checkpoint(
@@ -1050,7 +1063,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         decoded_metadata = json.loads(
             checkpoint["metadata"], object_hook=checkpoint_decoder
         )
-        self._hydrate_incremental_state(checkpoint, decoded_checkpoint)
         return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
             {
                 "thread_ts": checkpoint["threadTs"],
@@ -1149,7 +1161,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             if self._workflow_config.get("latest_checkpoint"):
                 checkpoint = self._workflow_config["latest_checkpoint"]
                 if checkpoint:
-                    return self._decode_graphql_latest_checkpoint(checkpoint)
+                    checkpoint_tuple = self.decode_graphql_checkpoint(checkpoint)
+                    if checkpoint_tuple:
+                        # LangGraph resumes from this checkpoint, so it is the
+                        # write-side delta baseline: hydrate explicitly here
+                        # (decoding itself is side-effect free).
+                        self._hydrate_incremental_state(
+                            checkpoint, checkpoint_tuple.checkpoint
+                        )
+                    return checkpoint_tuple
 
             # If the first checkpoint is None, it means that a flow just started and checkpoints are empty anyway
             if self._workflow_config.get("first_checkpoint") is None:
