@@ -5,12 +5,29 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import yaml
 
 from agent_tests.conftest import make_prompt_adapter_class
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    OptimizationResult,
+)
+
+
+def _make_passthrough_pipeline() -> HistoryOptimizerPipeline:
+    """Build a HistoryOptimizerPipeline mock that returns history unchanged."""
+    mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+
+    async def optimize(history):
+        return history, [OptimizationResult(messages=history, was_modified=False)]
+
+    mock_pipeline.optimize = AsyncMock(side_effect=optimize)
+    return mock_pipeline
 
 
 def pytest_collection_modifyitems(items):
@@ -131,6 +148,7 @@ def analytics_agent(
         tools_registry=mock_tools_registry,
         system_template_override=None,
         toolset=Toolset(pre_approved=set(), all_tools=tools_dict),
+        optimizer_pipeline=_make_passthrough_pipeline(),
     )
 
 
@@ -170,4 +188,5 @@ def analytics_agent_without_orbit(
         tools_registry=mock_tools_registry,
         system_template_override=None,
         toolset=Toolset(pre_approved=set(), all_tools=tools_dict),
+        optimizer_pipeline=_make_passthrough_pipeline(),
     )
