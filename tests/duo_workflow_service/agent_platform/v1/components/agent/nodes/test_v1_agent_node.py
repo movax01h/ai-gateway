@@ -197,6 +197,48 @@ class TestAgentNode:
         )
 
     @pytest.mark.asyncio
+    async def test_run_merges_prompt_template_inputs(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        base_flow_state,
+        prompt_variables,
+        mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Build-time `prompt_template_inputs` (e.g. `tools_enabled`) are merged into every prompt invocation so the
+        template can branch on them."""
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config={},
+            prompt_template_inputs={"tools_enabled": {"web_search": True}},
+        )
+
+        await node.run(base_flow_state)
+
+        mock_prompt.ainvoke.assert_called_once_with(
+            input={
+                "tools_enabled": {"web_search": True},
+                **prompt_variables,
+                "history": [],
+                **FAKE_RUNTIME_VARS,
+            },
+            config={},
+        )
+
+    @pytest.mark.asyncio
     async def test_run_success_with_existing_history(
         self,
         mock_prompt,

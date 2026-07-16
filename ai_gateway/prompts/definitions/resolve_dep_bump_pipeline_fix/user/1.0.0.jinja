@@ -1,32 +1,44 @@
 Investigate this failing pipeline caused by a dependency version bump, apply
-the required fixes by committing them to the MR's source branch, then post a
-short summary comment on the MR.
+the required fixes by committing them to the MR's source branch (or report and
+stop if the fix can't be established), then post a short summary comment on the MR.
 
 <pipeline>
   <pipeline_url>{{pipeline_url}}</pipeline_url>
 </pipeline>
 
-Procedure:
+Procedure (apply the guidelines above at each step):
 
-1. Use `get_pipeline_failing_jobs` and `get_job_logs` to gather errors, stack
-   traces, and failing test names with their `file:line` locations.
-2. Use `get_merge_request` to identify the MR for this pipeline and capture
-   its `source_branch` — you will commit to this branch.
-3. Use `list_merge_request_diffs` to see what the dep-bump MR changed.
-4. Use `find_files` + `read_file` to locate dependency manifest files
-   (requirements.txt, pyproject.toml, Gemfile, package.json, go.mod, pom.xml,
-   etc.) and extract the package name, ecosystem, and old/new versions.
-5. If vulnerability IDs are mentioned in the logs, use `list_vulnerabilities`
-   and `get_vulnerability_details` for CVE context.
-6. Use `grep` to find every reference to the bumped dependency (including
-   test files — a common miss); `read_file` each match to understand usage.
+1. `get_pipeline_failing_jobs` + `get_job_logs` — gather errors, stack traces, and
+   failing test names with their `file:line` locations.
+2. `get_merge_request` — identify the MR for this pipeline and capture its
+   `source_branch` (you will commit to this branch).
+3. `list_merge_request_diffs` — see what the dep-bump changed.
+4. `find_files` + `read_file` the manifest/lock files (requirements.txt,
+   pyproject.toml, Gemfile(.lock), package.json / package-lock.json, go.mod/go.sum,
+   pom.xml, etc.) and extract EVERY package whose version changed — bumps often
+   co-bump transitive deps — with its ecosystem and old/new versions.
+5. `grep` every reference to EACH changed dependency — its full API surface, not
+   just the symbol named in the error, including test files (a common miss) — and
+   `read_file` each match to understand usage.
+6. If the bump remediates a CVE, gather advisory context with
+   `list_vulnerabilities`/`get_vulnerability_details` and the advisory itself.
 7. For each breaking change, decide a concrete fix (old code → new code),
-   categorized (API removed, signature changed, import path moved, new
-   required parameter, type change, behavior change).
-8. `read_file` each file you'll modify to confirm current content (required
-   for `old_str` matching in the next step).
-9. Apply ALL fixes in a single `create_commit` call against `source_branch`
-   with a clear one-line commit message naming the dependency.
-10. Use `create_merge_request_note` to post a short comment on the MR with:
-    one sentence on what broke, the commit subject, and the list of files
-    changed.
+   categorized (API removed, signature changed, import path moved, new required
+   parameter, type change, behavior change), each backed by the evidence that
+   establishes it. If a mapping cannot be established from evidence, do not guess:
+   `create_merge_request_note` reporting what broke and that it could not be
+   confirmed, then stop.
+8. If the bump crosses a MAJOR version, also check the release/migration notes for
+   silent behavioral changes touching the code paths you are editing.
+9. `read_file` each file you'll modify to confirm current content (for exact
+   `old_str` matching).
+10. Before committing, critically review your planned changes against the
+    guidelines above: every mapping is evidence-backed (not name similarity), no
+    wrong-but-compiling substitution, no pin/revert of a fixable break, all
+    co-bumped dependencies handled, and any major-version behavioral / CVE risk
+    addressed. If a change does not hold up, revise it or report-and-stop instead
+    of committing.
+11. Apply ALL fixes in a single `create_commit` against `source_branch`, with a
+    clear one-line commit message naming the dependency.
+12. `create_merge_request_note` — one sentence on what broke, the commit subject,
+    the list of files changed, and the `Evidence:` line.

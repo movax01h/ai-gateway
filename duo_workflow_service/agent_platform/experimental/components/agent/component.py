@@ -66,12 +66,14 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
     create_conversation_compactor,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
 
 __all__ = ["AgentComponent", "AgentComponentBase", "RoutingError"]
@@ -137,6 +139,11 @@ class AgentComponentBase(BaseComponent):
 
     max_cycles: int = _DEFAULT_MAX_CYCLES
     max_wrap_up_retries: int = 3
+    # Opt-in (per flow config): bind the provider-native web-search tool so the
+    # agent can look up e.g. changelogs / migration guides. Still gated at runtime
+    # by the dependency_bump_web_search flag and the client's "web_search"
+    # capability, and only honored by native-Anthropic models (LiteLLM discards it).
+    enable_web_search: bool = False
 
     @field_validator("max_cycles")
     @classmethod
@@ -263,8 +270,28 @@ class AgentComponentBase(BaseComponent):
         """
         raise NotImplementedError
 
+    def _web_search_enabled(self) -> bool:
+        """Whether the provider-native web-search tool is active for this build.
+
+        Requires the per-flow opt-in AND the runtime feature flag AND the client's
+        `web_search` capability. Used both to bind the tool and to tell the prompt
+        (via `tools_enabled`) so it can branch its web-search guidance.
+        """
+        return (
+            self.enable_web_search
+            and is_feature_enabled(FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH)
+            and is_client_capable("web_search")
+        )
+
+    def _tools_enabled(self) -> dict[str, bool]:
+        """Map of optional tool/capability -> active, exposed to the prompt template."""
+        return {"web_search": self._web_search_enabled()}
+
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
+        extra_params: dict[str, Any] = {}
+        if self._web_search_enabled():
+            extra_params["bind_tools_params"] = {"web_search_options": {}}
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
@@ -277,6 +304,7 @@ class AgentComponentBase(BaseComponent):
                 "workflow_id": self.flow_id,
                 "workflow_type": self.flow_type.value,
             },
+            **extra_params,
         )
 
     def _agent_node_router(self, state: FlowState) -> str:
@@ -617,6 +645,7 @@ class AgentComponent(AgentComponentBase):
             max_cycles=self.max_cycles,
             cycle_count_key=self._cycle_count_key,
             max_wrap_up_retries=self.max_wrap_up_retries,
+            prompt_template_inputs={"tools_enabled": self._tools_enabled()},
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

@@ -12,6 +12,7 @@ components:
     type: AgentComponent
     prompt_id: "resolve_dep_bump_pipeline_fix"
     prompt_version: "^1.0.0"
+    enable_web_search: True
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
