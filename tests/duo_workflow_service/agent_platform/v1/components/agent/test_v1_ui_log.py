@@ -244,6 +244,35 @@ class TestUILogWriterAgentTools:
         assert args.record["component_name"] is None
         assert args.record["subsession_id"] is None
 
+    def test_log_reasoning_message_id_uses_supplied_value(self, mock_callback):
+        """Test that the reasoning entry reuses the originating AIMessage id.
+
+        This lets the client correlate/replace the streamed reasoning entry (keyed by the same id) instead of creating a
+        duplicate entry.
+        """
+        writer = UILogWriterAgentTools(mock_callback)
+        writer.warning(
+            "Some reasoning",
+            event=UILogEventsAgent.ON_AGENT_REASONING,
+            message_id="lc_run--019f65e8-b75a-7141-ae41-de3b46fae734",
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert (
+            args.record["message_id"] == "lc_run--019f65e8-b75a-7141-ae41-de3b46fae734"
+        )
+
+    def test_log_reasoning_message_id_defaults_to_uuid_when_absent(self, mock_callback):
+        """Test that a random id is generated when no message_id is supplied."""
+        writer = UILogWriterAgentTools(mock_callback)
+        writer.warning(
+            "Some reasoning",
+            event=UILogEventsAgent.ON_AGENT_REASONING,
+        )
+
+        args = mock_callback.call_args[0][0]
+        assert args.record["message_id"].startswith("agent-")
+
     def test_agent_tools_ui_log_writer_class_factory(self, mock_callback, mock_tool):
         """Test that agent_tools_ui_log_writer_class returns a factory that creates UILogWriterAgentTools."""
         factory_fn = agent_tools_ui_log_writer_class(component_name="my_agent")

@@ -153,7 +153,7 @@ class UILogWriterAgentTools(BaseUILogWriter):
             tool_info=None,
             additional_context=kwargs.get("context_elements", []),
             message_sub_type="reasoning",
-            message_id=f"agent-{uuid4()!s}",
+            message_id=kwargs.get("message_id") or f"agent-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )

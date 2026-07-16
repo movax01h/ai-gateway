@@ -128,6 +128,7 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 self._ui_history.log.warning(
                     message=reasoning_content,
                     event=UILogEventsOneOff.ON_AGENT_REASONING,
+                    message_id=getattr(last_message, "id", None),
                 )
 
         result: dict[str, Any] = {**self._ui_history.pop_state_updates()}
