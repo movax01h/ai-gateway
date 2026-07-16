@@ -3404,37 +3404,72 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
     assert val == ["new"]
 
 
-def test_decode_graphql_latest_checkpoint_hydrates(gitlab_workflow):
+# A GraphQL-format checkpoint dict as cached in WorkflowConfig["latest_checkpoint"].
+_GQL_LATEST_CHECKPOINT = {
+    "threadTs": "gql-ckpt",
+    "parentTs": None,
+    "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {"x": [1]}}),
+    "metadata": "{}",
+    "currentThread": 4,
+    "currentThreadStartedAt": "2026-07-08T10:00:00+00:00",
+}
+
+
+def test_decode_graphql_checkpoint_is_side_effect_free(gitlab_workflow):
+    """Decoding a checkpoint must never touch the incremental write cache.
+
+    Regression guard for the decode/hydration coupling: a caller decoding an arbitrary checkpoint (e.g. the
+    pre-rollback tip during stop-recovery) must not repoint the delta baseline — a wrong baseline whose id happens to
+    match the next aput's parent would silently emit wrong deltas / a rewound current_thread. Hydration is owned
+    exclusively by the ``aget_tuple`` fetch paths.
+    """
     gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
-    gitlab_workflow._decode_graphql_latest_checkpoint(
-        {
-            "threadTs": "gql-ckpt",
-            "parentTs": None,
-            "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {"x": [1]}}),
-            "metadata": "{}",
-            "currentThread": 4,
-        }
+    # Seed the cache with sentinels so the assertion is "unchanged", not merely "still default".
+    gitlab_workflow._prev_checkpoint_id = "sentinel-ckpt"
+    gitlab_workflow._prev_channel_values = {"sentinel": True}
+    gitlab_workflow._current_thread = 9
+    gitlab_workflow._current_thread_started_at = "2026-01-01T00:00:00+00:00"
+
+    result = gitlab_workflow.decode_graphql_checkpoint(dict(_GQL_LATEST_CHECKPOINT))
+
+    assert result is not None
+    assert result.checkpoint["channel_values"] == {"x": [1]}
+    assert gitlab_workflow._prev_checkpoint_id == "sentinel-ckpt"
+    assert gitlab_workflow._prev_channel_values == {"sentinel": True}
+    assert gitlab_workflow._current_thread == 9
+    assert gitlab_workflow._current_thread_started_at == "2026-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_hydrates_from_cached_latest_checkpoint(
+    http_client,
+    workflow_id,
+    workflow_type,
+    workflow_config,
+):
+    """Hydration must fire on the cached-latest-checkpoint path (no checkpoint_id; latest_checkpoint in config).
+
+    Decoding itself is side-effect free (see test_decode_graphql_checkpoint_is_side_effect_free), so this path — where the
+    decoded checkpoint IS the resume baseline — hydrates explicitly, with no HTTP fetch.
+    """
+    workflow_config["incremental_checkpoints_enabled"] = True
+    workflow_config["latest_checkpoint"] = dict(_GQL_LATEST_CHECKPOINT)
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
     )
 
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": workflow_id}}
+    )
+
+    assert result is not None
+    http_client.aget.assert_not_called()  # served from the session-start cache
     assert gitlab_workflow._current_thread == 4
     assert gitlab_workflow._prev_checkpoint_id == "gql-ckpt"
     assert gitlab_workflow._prev_channel_values == {"x": [1]}
-
-
-def test_decode_graphql_latest_checkpoint_hydrates_current_thread_started_at(
-    gitlab_workflow,
-):
-    gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
-    gitlab_workflow._decode_graphql_latest_checkpoint(
-        {
-            "threadTs": "gql-ckpt",
-            "parentTs": None,
-            "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {}}),
-            "metadata": "{}",
-            "currentThreadStartedAt": "2026-07-08T10:00:00+00:00",
-        }
-    )
-
     assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
 
 
