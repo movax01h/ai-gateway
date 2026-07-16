@@ -188,7 +188,7 @@ CHAT_UTILITY_TOOLS = ["clarification_question"]
 # Session context tool for retrieving context from previous agent sessions
 CHAT_SESSION_CONTEXT_TOOLS = ["get_previous_session_context"]
 
-# Generative-UI tools: the agent composes a declarative ui_spec of catalog
+# Generative-UI tools: the agent composes a declarative ui_tree of catalog
 # components. Paving the way only — `render_ui` is registered but intentionally
 # NOT offered to the agent this iteration. Tool approval is rendered from the
 # trusted backend (see ChatAgent._get_approvals), never model-composed, so the
