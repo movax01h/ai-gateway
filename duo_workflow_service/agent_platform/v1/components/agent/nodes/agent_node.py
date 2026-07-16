@@ -1,6 +1,6 @@
 from datetime import datetime
 from http import HTTPStatus
-from typing import ClassVar, Optional, Sequence, Type, cast
+from typing import Any, ClassVar, Optional, Sequence, Type, cast
 
 import structlog
 from anthropic import APIStatusError
@@ -167,6 +167,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         max_cycles: Optional[int] = None,
         cycle_count_key: Optional[RuntimeIOKey] = None,
         max_wrap_up_retries: int = 3,
+        prompt_template_inputs: Optional[dict[str, Any]] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -184,6 +185,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._max_cycles = max_cycles
         self._cycle_count_key = cycle_count_key
         self._max_wrap_up_retries = max_wrap_up_retries
+        # Build-time template variables (e.g. which optional tools/capabilities are
+        # active) that the prompt can branch on. Merged into every prompt invocation
+        # alongside the runtime variables below.
+        self._prompt_template_inputs = prompt_template_inputs or {}
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
@@ -336,6 +341,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     AIMessage,
                     await self._prompt.ainvoke(
                         input={
+                            **self._prompt_template_inputs,
                             **variables,
                             "history": history,
                             **self._predefined_runtime_variables(),

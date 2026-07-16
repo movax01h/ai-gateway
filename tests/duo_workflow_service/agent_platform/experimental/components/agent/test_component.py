@@ -33,6 +33,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from lib.feature_flags.context import FeatureFlag
 
 
 @pytest.fixture(name="prompt_id")
@@ -1690,3 +1691,75 @@ class TestAgentComponentMaxWrapUpRetries:
 
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["max_wrap_up_retries"] == 5
+
+
+class TestWebSearchBinding:
+    """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
+    dependency_bump_web_search flag AND the client's `web_search` capability are all present."""
+
+    _MODULE = (
+        "duo_workflow_service.agent_platform.experimental.components.agent.component"
+    )
+
+    @pytest.mark.parametrize(
+        ("enabled", "flag_on", "client_capable", "expect_bound"),
+        [
+            (True, True, True, True),  # all gates satisfied -> bound
+            (False, True, True, False),  # flow opt-in off
+            (True, False, True, False),  # dependency_bump_web_search flag off
+            (True, True, False, False),  # client lacks web_search capability
+        ],
+    )
+    def test_web_search_binding_is_gated(
+        self,
+        make_agent_component,
+        mock_prompt_registry,
+        enabled,
+        flag_on,
+        client_capable,
+        expect_bound,
+    ):
+        component = make_agent_component(enable_web_search=enabled)
+
+        with (
+            patch(
+                f"{self._MODULE}.is_feature_enabled", return_value=flag_on
+            ) as mock_is_feature_enabled,
+            patch(
+                f"{self._MODULE}.is_client_capable", return_value=client_capable
+            ) as mock_is_client_capable,
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
+        if expect_bound:
+            assert call_kwargs["bind_tools_params"] == {"web_search_options": {}}
+            # the gate must query the correct flag and capability identifiers
+            mock_is_feature_enabled.assert_called_once_with(
+                FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH
+            )
+            mock_is_client_capable.assert_called_once_with("web_search")
+        else:
+            assert "bind_tools_params" not in call_kwargs
+
+    @pytest.mark.parametrize(
+        ("enabled", "flag_on", "client_capable", "expected"),
+        [
+            (True, True, True, True),  # all gates satisfied
+            (False, True, True, False),  # flow opt-in off
+            (True, False, True, False),  # dependency_bump_web_search flag off
+            (True, True, False, False),  # client lacks web_search capability
+        ],
+    )
+    def test_tools_enabled_map_reflects_gate(
+        self, make_agent_component, enabled, flag_on, client_capable, expected
+    ):
+        """`_tools_enabled()` exposes the same gate to the prompt (as `tools_enabled`) that decides whether the tool is
+        bound, so the prompt can branch its guidance."""
+        component = make_agent_component(enable_web_search=enabled)
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=flag_on),
+            patch(f"{self._MODULE}.is_client_capable", return_value=client_capable),
+        ):
+            assert component._tools_enabled() == {"web_search": expected}
