@@ -539,7 +539,10 @@ class TestToolNodeWithErrorCorrectionRun:
             tracker=tracker,
         )
 
-        ai_message = AIMessage(content="I cannot determine the exact file path.")
+        ai_message = AIMessage(
+            content="I cannot determine the exact file path.",
+            id="lc_run--019f65e8-b75a-7141-ae41-de3b46fae734",
+        )
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [ai_message]}
 
@@ -549,6 +552,10 @@ class TestToolNodeWithErrorCorrectionRun:
         assert len(logs) == 1
         assert logs[0]["content"] == "I cannot determine the exact file path."
         assert logs[0]["message_sub_type"] == "reasoning"
+        # The reasoning entry must reuse the originating AIMessage's id so it
+        # is consistent with the id used by the streaming path, avoiding a
+        # duplicate entry on the client.
+        assert logs[0]["message_id"] == "lc_run--019f65e8-b75a-7141-ae41-de3b46fae734"
 
     @pytest.mark.asyncio
     async def test_run_empty_conversation_history(

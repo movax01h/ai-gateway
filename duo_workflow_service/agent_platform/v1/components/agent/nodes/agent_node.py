@@ -245,6 +245,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._ui_history.log.warning(
             text,
             event=UILogEventsAgent.ON_AGENT_REASONING,
+            message_id=completion.id,
         )
 
     @staticmethod

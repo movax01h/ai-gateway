@@ -969,6 +969,84 @@ class TestAgentNodeReasoning:
         )
 
     @pytest.mark.asyncio
+    async def test_reasoning_message_id_matches_completion_id(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that the reasoning log reuses the completion's AIMessage id.
+
+        This keeps the reasoning entry's id consistent with the id used by
+        the streaming path (``AIMessageChunk.id``), so the client can
+        correlate/replace the streamed entry instead of creating a duplicate.
+        """
+        mixed_message = AIMessage(
+            content="Now let me look at the existing schema to understand the structure:",
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "gitlab_api_get",
+                    "args": {"endpoint": "/api/v4/projects/123/repository/tree"},
+                }
+            ],
+            id="lc_run--019f65e8-b75a-7141-ae41-de3b46fae734",
+        )
+        mock_prompt.ainvoke = AsyncMock(return_value=mixed_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result[FlowStateKeys.UI_CHAT_LOG]
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 1
+        assert (
+            reasoning_logs[0]["message_id"]
+            == "lc_run--019f65e8-b75a-7141-ae41-de3b46fae734"
+        )
+
+    @pytest.mark.asyncio
+    async def test_reasoning_message_id_falls_back_to_uuid_when_completion_id_is_none(
+        self,
+        mock_prompt,
+        agent_node_with_ui_history,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+    ):
+        """Test that the reasoning log falls back to a random id when the completion has none.
+
+        Mirrors ``test_reasoning_message_id_matches_completion_id``, but for
+        an ``AIMessage`` with no ``id`` set (``id=None``), which should not be
+        propagated as a falsy ``message_id``.
+        """
+        mixed_message = AIMessage(
+            content="Now let me look at the existing schema to understand the structure:",
+            tool_calls=[
+                {
+                    "id": "toolu_01",
+                    "name": "gitlab_api_get",
+                    "args": {"endpoint": "/api/v4/projects/123/repository/tree"},
+                }
+            ],
+        )
+        mock_prompt.ainvoke = AsyncMock(return_value=mixed_message)
+
+        result = await agent_node_with_ui_history.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result[FlowStateKeys.UI_CHAT_LOG]
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 1
+        assert reasoning_logs[0]["message_id"].startswith("agent-")
+
+    @pytest.mark.asyncio
     async def test_no_reasoning_emitted_for_tool_calls_only(
         self,
         mock_prompt,

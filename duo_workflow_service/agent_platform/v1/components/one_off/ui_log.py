@@ -153,7 +153,15 @@ class UILogWriterOneOffTools(BaseUILogWriter):
         message: str,
         **kwargs,
     ) -> UiChatLog:
-        """Log agent reasoning when no tools are called."""
+        """Log agent reasoning when no tools are called.
+
+        Args:
+            message: The reasoning text extracted from the ``AIMessage``.
+            **kwargs: Optional keyword arguments:
+                - ``correlation_id``: Correlation ID for the log entry.
+                - ``message_id``: ID of the originating ``AIMessage``.
+                - ``subsession_id``: Active subsession ID (subagent mode only).
+        """
         return UiChatLog(
             message_type=MessageTypeEnum.AGENT,
             content=message,
@@ -163,7 +171,7 @@ class UILogWriterOneOffTools(BaseUILogWriter):
             tool_info=None,
             additional_context=kwargs.get("context_elements", []),
             message_sub_type="reasoning",
-            message_id=f"agent-{uuid4()!s}",
+            message_id=kwargs.get("message_id") or f"agent-{uuid4()!s}",
             component_name=self._component_name,
             subsession_id=kwargs.get("subsession_id"),
         )

@@ -277,6 +277,31 @@ class TestUILogWriterOneOffTools:  # pylint: disable=too-many-public-methods
 
         assert result["subsession_id"] == "sub-999"
 
+    def test_log_warning_message_id_uses_supplied_value(
+        self, ui_log_writer_with_component_name
+    ):
+        """Test that _log_warning reuses the originating AIMessage id.
+
+        This lets the client correlate/replace the streamed reasoning entry (keyed by the same id) instead of creating a
+        duplicate entry.
+        """
+        result = ui_log_writer_with_component_name._log_warning(
+            message="No tools called.",
+            message_id="lc_run--019f65e8-b75a-7141-ae41-de3b46fae734",
+        )
+
+        assert result["message_id"] == "lc_run--019f65e8-b75a-7141-ae41-de3b46fae734"
+
+    def test_log_warning_message_id_defaults_to_uuid_when_absent(
+        self, ui_log_writer_with_component_name
+    ):
+        """Test that a random id is generated when no message_id is supplied."""
+        result = ui_log_writer_with_component_name._log_warning(
+            message="No tools called.",
+        )
+
+        assert result["message_id"].startswith("agent-")
+
     def test_log_tool_call_input_with_custom_message(self, ui_log_writer, mock_tool):
         """Test _log_tool_call_input with custom message."""
         tool_call_args = {"param1": "value1"}
