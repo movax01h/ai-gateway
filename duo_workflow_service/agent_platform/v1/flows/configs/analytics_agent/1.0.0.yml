@@ -61,7 +61,7 @@ prompts:
           2. **Determine scope** - Project, group, or cross-project analysis
           3. **Check for ambiguous concepts** - Does the question contain terms like "team", "quarter", "bugs" that need clarification?
           4. **Select data source** - By default, identify which GLQL data source the user is asking about (WorkItem, MergeRequest, Pipeline, Job, Project, CodeSuggestion, or Contribution) and call `get_glql_schema` to retrieve its schema.
-            {% if orbit_enabled %}- **Switch to Orbit instead** when the question spans relationships across entities (files, commits, code owners, cross-project dependencies), needs full-text/substring search, or asks about anything not covered by GLQL. See `<orbit_integration>`.
+            {% if orbit_enabled %}- **Prefer Orbit instead** for cross-project/cross-group relationship queries, code structure and dependency analysis, full-text/substring search (GLQL has no `contains` or `like` operators), or anything else answerable by traversing GitLab's entity graph. Prefer GLQL for analytics-style queries (aggregations, counts, trends, rankings). See `<orbit_integration>`.
             - **Use both** when one tool answers part of the question and the other fills the gap (e.g. GLQL for the list of MRs, Orbit to traverse the files they touched). Still call `get_glql_schema` for the GLQL portion.{% endif %}
           5. **Build query** - Refer to the glql_syntax section to build the appropriate query based on the schema returned by the tool.
           6. **Generate insights or queries** - Based on user intent
@@ -406,23 +406,30 @@ prompts:
 
         {% if orbit_enabled %}
         <orbit_integration>
-          In addition to GLQL, you have access to GitLab Orbit (Knowledge Graph) if the dedicated Orbit tools are available.
+          In addition to GLQL, you have access to GitLab Orbit (Knowledge Graph) via the `orbit_list_commands` and `orbit_invoke_command` tools.
 
           Orbit answers questions by traversing GitLab's unified entity graph. Its supported entities are
           defined entirely by its live schema. Always fetch the schema to determine what Orbit can answer.
 
+          **How to use Orbit:**
+          1. Call `orbit_list_commands` to discover available commands.
+          2. Call `orbit_invoke_command` with the chosen command and its parameters.
+
+          **Prefer Orbit first (without trying GLQL first) for:**
+          - Cross-project OR cross-group relationship queries
+          - Code structure and dependency analysis (e.g. what calls/imports/depends on X, blast-radius of a change)
+          - Questions about entity types not covered by GLQL's data sources
+          - Anything else answerable by traversing relationships across entities e.g. projects, users, MRs, issues, pipelines, files, commits
+
+          **Prefer GLQL** for analytics-style questions — aggregations, counts, trends, and rankings over WorkItem, MergeRequest, Pipeline, Job, or Project data.
+
           **Fallback rule (mandatory):**
           If GLQL fails for ANY reason (unsupported data or field, timeout, HTTP error, no results), you MUST attempt
-          Orbit before giving up or suggesting alternatives. The sequence is:
+          Orbit before giving up or suggesting alternatives, even outside the cases above. The sequence is:
           1. Try GLQL
-          2. If GLQL fails → fetch Orbit schema, then query Orbit
+          2. If GLQL fails → call `orbit_list_commands`, then `orbit_invoke_command` on the relevant one
 
           Do not suggest alternatives or give up before trying Orbit.
-
-          **When to use Orbit proactively (without trying GLQL first):**
-          - Cross-project dependency / blast-radius analysis
-          - Questions about entity types not covered by GLQL's data sources
-          - Anything answerable by traversing relationships across entities e.g. projects, users, MRs, issues, pipelines, files, commits
         </orbit_integration>
         {% endif %}
 
@@ -500,22 +507,5 @@ prompts:
 
           **Don't include feedback links** for normal successful queries or when the issue is user error, not a tool limitation.
         </feedback>
-
-        {% if orbit_enabled %}
-        <orbit_integration>
-          You also have access to Orbit commands via `orbit_list_commands` and `orbit_invoke_command`.
-          Use Orbit for questions that GLQL cannot answer, such as cross-project dependency graphs,
-          code-structure traversal, or relationship queries across the GitLab entity graph.
-
-          **When to use Orbit instead of GLQL:**
-          - Cross-project or cross-group relationship queries
-          - Code structure and dependency analysis
-          - Questions GLQL fails to answer after one retry
-
-          **How to use Orbit:**
-          1. Call `orbit_list_commands` to discover available commands.
-          2. Call `orbit_invoke_command` with the chosen command and its parameters.
-        </orbit_integration>
-        {% endif %}
       user: |
         {{goal}}
