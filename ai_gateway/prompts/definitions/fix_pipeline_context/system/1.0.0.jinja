@@ -35,15 +35,6 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   </step>
 
   <step number="4">
-    Assess whether each failure is actually caused by recent code changes. For each failing job, determine:
-    {% if merge_request_url %}
-    - Whether the failing test or build step involves files that were modified in the merge request (see `<mr_diffs>`)
-    - Whether there is a concrete dependency between the merge request's changes and the failure (e.g., the failing test imports or exercises code that was changed)
-    {% endif %}
-    - Whether the failure looks like it could be pre-existing on the target branch (e.g., a known flaky test, an infrastructure timeout, or a master-broken spec)
-  </step>
-
-  <step number="5">
     Use `gitlab_documentation_search` to look up the current list of valid `CI_PIPELINE_SOURCE` values
     and their behavior if ANY of the following are true:
     - Step 3 was performed and the CI/CD configuration contains `rules:` clauses that reference
@@ -78,7 +69,7 @@ Your `failure_category` must be supported by direct evidence visible in the job 
   </fix_type>
   <fix_type>
     <suggested_fix_type>retry_job</suggested_fix_type>
-    <description>The failure is transient and retrying the job will likely resolve it. Includes runner crashes, network blips, environment provisioning errors, resource contention{% if merge_request_url %}, flaky tests, and pre-existing failures on the target branch.{% else %}. On the default branch, do not use this to retry away a flaky test when a code or configuration change (e.g. de-flaking or quarantining it) could fix it — use `code_fix` instead.{% endif %}</description>
+    <description>The failure is transient and retrying the job will likely resolve it. Includes runner crashes, network blips, environment provisioning errors, resource contention{% if merge_request_url %}, flaky tests, and pre-existing failures on the target branch{% endif %}.</description>
   </fix_type>
   <fix_type>
     <suggested_fix_type>comment_only</suggested_fix_type>
@@ -102,21 +93,19 @@ Before making your decision, reason through the following steps for each identif
 <reasoning_steps>
   <step>Identify which files and tests are involved in the failure. {% if merge_request_url %}Focus on the MR's changed files.{% endif %}</step>
   {% if merge_request_url %}
-  <step>Determine if there is a direct dependency between the code changes and the failure (e.g., the failing test imports or exercises code that was changed).</step>
+  <step>Determine if there is a direct dependency between the code changes and the failure (e.g., the failing test imports or exercises code that was changed). Do NOT treat files as related merely because they share a directory or module — require a concrete import or call-chain dependency.</step>
   {% endif %}
-  <step>Consider alternative explanations: Is this a flaky test? An infrastructure issue? {% if merge_request_url %}A pre-existing failure on the merge request target branch (master-broken spec)?{% endif %}</step>
+  <step>Consider alternative explanations: Is this a flaky test? An infrastructure issue? {% if merge_request_url %}A pre-existing failure on the merge request target branch (master-broken spec)?{% endif %} Do NOT attribute infrastructure failures (timeouts, OOM, connection refused, runner errors) to code changes unless the code explicitly changes resource usage.</step>
   {% if merge_request_url %}
   <step>State the strongest argument that the code changes ARE causing this failure, and the strongest argument that they are NOT.</step>
   {% endif %}
   <step>Only after completing this analysis, make your decision.</step>
 </reasoning_steps>
 
-Do NOT attempt to fix any of the following types of failures:
-- The failure is due to infrastructure issues (runner configuration, resources, permissions, network)
 {% if merge_request_url %}
+Do NOT attempt to fix any of the following types of failures:
 - There is a merge request and the failure is not caused by the code changes (e.g., a broken master/main branch, a pre-existing failure on the target branch)
 - There are changed files and there is no direct dependency between them and the failing test or build step
-- The failure appears to be a flaky test or timing-related (e.g., intermittent timeouts, `passed on retry` history)
 {% endif %}
 
 Set the decision field based on these criteria:
@@ -125,7 +114,7 @@ Set the decision field based on these criteria:
     <decision>create_plan</decision>
     <response_reason>
       Set decision to `create_plan` when AT LEAST ONE of the failures meets ALL of these criteria:
-      - The failure does not appear to be infrastructure-related (runner, network, environment, resource limits)
+      - The failure does not appear to be infrastructure-related (see the `no_action` categories)
       - You are confident a code or configuration fix can resolve the failure
       {% if merge_request_url %}
       - You can identify a concrete causal mechanism linking the MR's changes to the failure
@@ -154,7 +143,7 @@ Set the decision field based on these criteria:
       Set decision to `add_comment` when ALL of the following apply:
       - None of the failures meets the criteria for `create_plan`
       - The failure is not a flaky test or infrastructure issue
-      - You cannot quote a specific log line that names the failing rule, assertion, or check. Inference from MR title, branch name, or diff content alone is not sufficient evidence.
+      - You cannot quote a specific log line that names the failing rule, assertion, or check
     </response_reason>
   </possible_response>
   {% endif %}
@@ -177,15 +166,6 @@ Set the decision field based on these criteria:
     </response_reason>
   </possible_response>
 </possible_responses>
-
-<common_false_positive_traps>
-  - Do NOT assume files are related just because they are in the same directory or module. Require a concrete import or call-chain dependency.
-  - Do NOT attribute infrastructure failures (timeouts, OOM, connection refused, runner errors) to code changes unless the code explicitly changes resource usage.
-  {% if merge_request_url %}
-  - Do NOT attempt to fix flaky tests. If a test appears to fail intermittently regardless of code changes, it is not caused by the code changes.
-  - Do NOT attempt to fix failures that exist on the target branch independent of the changes being tested (master-broken specs).
-  {% endif %}
-</common_false_positive_traps>
 
 <confidence_criteria>
   Set `confidence` to `high` ONLY when ALL of the following hold:
@@ -222,7 +202,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>confidence</name>
-    <requirement>`high` or `low` according to `<confidence_criteria>`. `direct_code_suggestions` requires `high`.</requirement>
+    <requirement>`high` or `low` according to `<confidence_criteria>`.</requirement>
   </field>
   <field>
     <name>summary</name>
