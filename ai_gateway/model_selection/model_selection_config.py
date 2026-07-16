@@ -68,6 +68,7 @@ class BaseLLMDefinition(BaseModel):
     # Some reasoning models (e.g. Qwen) leak <think>...</think> reasoning into responses.
     # When true, the ReAct parser strips that block before it reaches the user.
     strip_reasoning: bool = False
+    requires_single_system_message: bool = False
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):
