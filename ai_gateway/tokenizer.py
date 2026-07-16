@@ -1,9 +1,9 @@
 import os
 
-from transformers import AutoTokenizer, PreTrainedTokenizerFast
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 
-def init_tokenizer() -> PreTrainedTokenizerFast:
+def init_tokenizer() -> PreTrainedTokenizerBase:
     # T5Tokenizer ignores new lines, tabs and multiple spaces used a lot in coding.
     # When the T5Tokenizer is applied, the output differs from input.
     # We're switching to the Salesforce Codegen tokenizer temporarily.

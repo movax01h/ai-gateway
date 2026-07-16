@@ -1,6 +1,6 @@
-from typing import override
+from typing import cast, override
 
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from ai_gateway.code_suggestions.processing.typing import CodeContent, TokenStrategyBase
 
@@ -10,7 +10,7 @@ __all__ = [
 
 
 class TokenizerTokenStrategy(TokenStrategyBase):
-    def __init__(self, tokenizer: PreTrainedTokenizer):
+    def __init__(self, tokenizer: PreTrainedTokenizerBase):
         self.tokenizer = tokenizer
 
     @override
@@ -27,7 +27,9 @@ class TokenizerTokenStrategy(TokenStrategyBase):
             add_special_tokens=False,
         )
 
-        decoded = self.tokenizer.decode(tokens["input_ids"])
+        # Decoding a single sequence returns a `str`; `decode` is typed as
+        # `str | list[str]` to also cover batch decoding.
+        decoded = cast(str, self.tokenizer.decode(tokens["input_ids"]))
 
         return CodeContent(
             text=decoded,
