@@ -885,6 +885,7 @@ models:
     max_context_tokens: 262_144
     model_class_provider: litellm
     strip_reasoning: true
+    requires_single_system_message: true
     family:
       - qwen
     params:

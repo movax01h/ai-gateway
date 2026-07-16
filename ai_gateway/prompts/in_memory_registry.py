@@ -88,6 +88,12 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             raise ValueError(f"Model config not provided for prompt {prompt_id}")
 
         unit_primitives = raw_data.get("unit_primitives")
+        prompt_template = raw_data["prompt_template"]
+        if (
+            model_metadata
+            and model_metadata.llm_definition.requires_single_system_message
+        ):
+            prompt_template = self._join_system_messages(prompt_template)
         prompt_config = PromptConfig(
             name=prompt_id,
             model=ModelConfig(params=model_params),  # type: ignore[arg-type]
@@ -96,7 +102,7 @@ class InMemoryPromptRegistry(BasePromptRegistry):
                 if unit_primitives
                 else GitLabUnitPrimitive.DUO_AGENT_PLATFORM
             ),
-            prompt_template=raw_data["prompt_template"],
+            prompt_template=prompt_template,
             params=raw_data.get("params"),
         )
 
@@ -108,6 +114,17 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             tools=tools,
             **kwargs,
         )
+
+    @staticmethod
+    def _join_system_messages(
+        prompt_template: dict[str, str | list[str]],
+    ) -> dict[str, str | list[str]]:
+        system = prompt_template.get("system", "")
+        if isinstance(system, list):
+            joined_system = "\n".join(system)
+            return {**prompt_template, "system": joined_system}
+        else:
+            return prompt_template
 
     @override
     def get_required_variables(
