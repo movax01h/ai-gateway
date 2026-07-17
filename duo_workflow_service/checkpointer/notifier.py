@@ -19,6 +19,7 @@ from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
+    ToolInfo,
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
@@ -365,6 +366,8 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             )
             self.ui_chat_log.append(last_ui_message)
 
+        self._sync_streaming_tool_call_ui_chat_log(component_name)
+
     def _find_ui_chat_log_entry(
         self,
         message_id: Optional[str],
@@ -386,6 +389,68 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             return entry
 
         return None
+
+    def _sync_streaming_tool_call_ui_chat_log(
+        self, component_name: Optional[str] = None
+    ) -> None:
+        """Create/update PENDING TOOL entries for tool calls as they stream in.
+
+        Reads ``self.latest_ai_message.tool_calls``, which langchain keeps
+        incrementally reconstructed (via best-effort partial-JSON parsing of
+        ``tool_call_chunks``) as more of the tool call is streamed. Each tool call
+        is upserted into the UI chat log, keyed by its (stable, provider-assigned)
+        ``id`` so repeated calls for the same tool call update the same entry
+        in place instead of appending duplicates.
+
+        Tool calls without a name or id yet (not enough has streamed in to
+        identify them) are skipped until that information is available.
+        """
+        if not is_client_capable("tool_call_streaming"):
+            return
+
+        if self.latest_ai_message is None:
+            return
+
+        tool_calls = getattr(self.latest_ai_message, "tool_calls", None)
+
+        if not tool_calls:
+            return
+
+        for tool_call in tool_calls:
+            tool_call_id = tool_call.get("id")
+            tool_name = tool_call.get("name")
+            if not tool_call_id or not tool_name:
+                continue
+
+            safe_args = redact_secrets_for_ui(
+                tool_call.get("args") or {}, tool_name=tool_name
+            )
+            args_str = ", ".join(f"{key}={value}" for key, value in safe_args.items())
+            content = (
+                f"Using {tool_name}: {args_str}" if args_str else f"Using {tool_name}"
+            )
+
+            entry = self._find_ui_chat_log_entry(
+                tool_call_id, message_type=MessageTypeEnum.TOOL
+            )
+            if entry is not None:
+                entry["content"] = content
+                entry["tool_info"] = ToolInfo(name=tool_name, args=safe_args)
+            else:
+                self.ui_chat_log.append(
+                    UiChatLog(
+                        message_id=tool_call_id,
+                        status=ToolStatus.PENDING,
+                        correlation_id=None,
+                        message_type=MessageTypeEnum.TOOL,
+                        message_sub_type=tool_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        content=content,
+                        tool_info=ToolInfo(name=tool_name, args=safe_args),
+                        additional_context=None,
+                        component_name=component_name,
+                    )
+                )
 
     # OpenAI's response API returns the message start, and values with a resp_... ID
     #  instead of the LangChain ID. All streamed messages still contain a LangChain ID.

@@ -480,7 +480,7 @@ class TestToolsApprovalComponent:
             chat_log = response["ui_chat_log"][0]
             assert chat_log["correlation_id"] is None
             assert chat_log["message_type"] == MessageTypeEnum.REQUEST
-            assert chat_log["message_id"].startswith("request-")
+            assert chat_log["message_id"] == "1"
             assert "Using mock tool1: {'arg1': 'value1'}" in chat_log["content"]
             assert chat_log["timestamp"] is not None
             assert chat_log["status"] == ToolStatus.SUCCESS
@@ -580,7 +580,7 @@ class TestToolsApprovalComponent:
             tool1_log = response["ui_chat_log"][0]
             assert tool1_log["correlation_id"] is None
             assert tool1_log["message_type"] == MessageTypeEnum.REQUEST
-            assert tool1_log["message_id"] == "request-tool-call-1"
+            assert tool1_log["message_id"] == "tool-call-1"
             assert tool1_log["content"] == "Using mock tool1: {'arg1': 'value1'}"
             assert tool1_log["timestamp"] is not None
             assert tool1_log["status"] == ToolStatus.SUCCESS
@@ -592,7 +592,7 @@ class TestToolsApprovalComponent:
             tool2_log = response["ui_chat_log"][1]
             assert tool2_log["correlation_id"] is None
             assert tool2_log["message_type"] == MessageTypeEnum.REQUEST
-            assert tool2_log["message_id"] == "request-tool-call-2"
+            assert tool2_log["message_id"] == "tool-call-2"
             assert tool2_log["content"] == "Using mock tool2: {'arg2': 'value2'}"
             assert tool2_log["timestamp"] is not None
             assert tool2_log["status"] == ToolStatus.SUCCESS

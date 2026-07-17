@@ -42,7 +42,7 @@ def checkpoint_notifier_fixture(
     outbox,
     gl_version_18_7,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
 ):
-    client_capabilities.set({"incremental_streaming"})
+    client_capabilities.set({"incremental_streaming", "tool_call_streaming"})
     return UserInterface(outbox=outbox, goal="test_goal")
 
 
@@ -1346,25 +1346,23 @@ class TestAppendChunkIdentityLookup:
         assert other_entry in checkpoint_notifier.ui_chat_log
         assert other_entry["content"] == "unrelated"
 
-    def test_continuation_silently_skips_when_agent_entry_removed(
+    def test_continuation_silently_drops_update_when_agent_entry_missing(
         self, checkpoint_notifier
     ):
-        # Establish the first chunk so latest_ai_message is set.
+        # If the AGENT entry backing latest_ai_message is no longer in
+        # ui_chat_log (e.g. removed by a state reset in between chunks),
+        # _find_ui_chat_log_entry returns None and the content update is
+        # dropped rather than raising or recreating the entry.
         first_chunk = AIMessageChunk(id="run-1", content="Hello")
         checkpoint_notifier._append_chunk_to_ui_chat_log(first_chunk)
 
-        # Simulate the AGENT entry being removed from ui_chat_log between
-        # chunks (e.g. a state reset).  _find_ui_chat_log_entry will return
-        # None for the continuation chunk, and the update must be silently
-        # dropped rather than raising an exception.
-        checkpoint_notifier.ui_chat_log.clear()
+        checkpoint_notifier.ui_chat_log = []
 
         second_chunk = AIMessageChunk(id="run-1", content=" world")
-        # Must not raise.
         checkpoint_notifier._append_chunk_to_ui_chat_log(second_chunk)
 
-        # The log remains empty — the silent-drop behavior is intentional.
         assert checkpoint_notifier.ui_chat_log == []
+        assert checkpoint_notifier.latest_ai_message.text() == "Hello world"
 
 
 # ---------------------------------------------------------------------------
@@ -1402,6 +1400,18 @@ class TestMergeUiChatLog:
         checkpoint_notifier.ui_chat_log = [stale_entry]
 
         assert checkpoint_notifier._merge_ui_chat_log([]) == []
+
+    def test_pending_entry_without_message_id_is_not_carried_over(
+        self, checkpoint_notifier
+    ):
+        # Regression test: a PENDING entry with no message_id must not be
+        # carried over on every merge just because `None` is never in
+        # known_ids (known_ids only ever contains truthy ids).
+        pending_entry_without_id = {"message_id": None, "status": ToolStatus.PENDING}
+        checkpoint_notifier.ui_chat_log = [pending_entry_without_id]
+        new_log = [{"message_id": "msg-1", "status": None}]
+
+        assert checkpoint_notifier._merge_ui_chat_log(new_log) == new_log
 
     def test_pending_entry_already_reflected_in_new_log_is_not_duplicated(
         self, checkpoint_notifier
@@ -1488,3 +1498,350 @@ class TestPopRecentUiChatLogChangesCursor:
         )
         assert entry_1_resent is not None
         assert entry_1_resent["content"] == "v2"
+
+
+# ---------------------------------------------------------------------------
+# Tests for streaming client-executed tool calls as UI chat log entries
+# ---------------------------------------------------------------------------
+
+
+def _tool_call_chunk(name, args, call_id, index=0):
+    return AIMessageChunk(
+        id="run-1",
+        content="",
+        tool_call_chunks=[{"name": name, "args": args, "id": call_id, "index": index}],
+    )
+
+
+class TestStreamingToolCallUiChatLog:
+    """Tests for converting streamed partial tool_calls into PENDING UI entries."""
+
+    def test_partial_tool_call_creates_pending_entry(self, checkpoint_notifier):
+        chunk = _tool_call_chunk("read_file", '{"file_path": "foo.py"}', "call_1")
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        tool_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        ]
+        assert len(tool_entries) == 1
+        entry = tool_entries[0]
+        assert entry["message_id"] == "call_1"
+        assert entry["status"] == ToolStatus.PENDING
+        assert entry["message_sub_type"] == "read_file"
+        assert entry["tool_info"] == {
+            "name": "read_file",
+            "args": {"file_path": "foo.py"},
+        }
+        assert entry["content"] == "Using read_file: file_path=foo.py"
+
+    def test_tool_call_with_no_arguments_creates_pending_entry(
+        self, checkpoint_notifier
+    ):
+        chunk = _tool_call_chunk("list_dir", "{}", "call_1")
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        tool_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        ]
+        assert len(tool_entries) == 1
+        entry = tool_entries[0]
+        assert entry["message_id"] == "call_1"
+        assert entry["status"] == ToolStatus.PENDING
+        assert entry["tool_info"] == {"name": "list_dir", "args": {}}
+        # No trailing ": " when the tool takes no arguments.
+        assert entry["content"] == "Using list_dir"
+
+    def test_noop_without_tool_call_streaming_capability(self, checkpoint_notifier):
+        client_capabilities.set({"incremental_streaming"})
+
+        chunk = _tool_call_chunk("read_file", '{"file_path": "foo.py"}', "call_1")
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        assert not any(
+            entry["message_type"] == MessageTypeEnum.TOOL
+            for entry in checkpoint_notifier.ui_chat_log
+        )
+
+    def test_tool_call_args_update_in_place_as_they_stream(self, checkpoint_notifier):
+        first = _tool_call_chunk("read_file", '{"file_path": "foo', "call_1")
+        second = _tool_call_chunk(None, '.py"}', None)
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(first)
+        checkpoint_notifier._append_chunk_to_ui_chat_log(second)
+
+        tool_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        ]
+        # The same tool call is updated in place, never duplicated.
+        assert len(tool_entries) == 1
+        entry = tool_entries[0]
+        assert entry["message_id"] == "call_1"
+        assert entry["status"] == ToolStatus.PENDING
+        assert entry["tool_info"]["args"] == {"file_path": "foo.py"}
+        assert entry["content"] == "Using read_file: file_path=foo.py"
+
+    def test_tool_call_without_name_or_id_yet_is_skipped(self, checkpoint_notifier):
+        # First chunk of a tool call sometimes doesn't include enough information
+        # to identify it yet; no entry should be created until it does.
+        chunk = AIMessageChunk(
+            id="run-1",
+            content="",
+            tool_call_chunks=[
+                {"name": None, "args": "{", "id": None, "index": 0},
+            ],
+        )
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        assert not any(
+            entry["message_type"] == MessageTypeEnum.TOOL
+            for entry in checkpoint_notifier.ui_chat_log
+        )
+
+    def test_parallel_tool_calls_get_separate_entries(self, checkpoint_notifier):
+        chunk = AIMessageChunk(
+            id="run-1",
+            content="",
+            tool_call_chunks=[
+                {
+                    "name": "read_file",
+                    "args": '{"file_path": "a.py"}',
+                    "id": "call_1",
+                    "index": 0,
+                },
+                {
+                    "name": "read_file",
+                    "args": '{"file_path": "b.py"}',
+                    "id": "call_2",
+                    "index": 1,
+                },
+            ],
+        )
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        tool_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        ]
+        assert [entry["message_id"] for entry in tool_entries] == [
+            "call_1",
+            "call_2",
+        ]
+        assert all(entry["status"] == ToolStatus.PENDING for entry in tool_entries)
+
+    @pytest.mark.asyncio
+    async def test_values_event_preserves_pending_tool_entries_not_yet_in_state(
+        self, checkpoint_notifier
+    ):
+        """Regression test for a bug where a "values" event wholesale-replaced ui_chat_log with the authoritative graph
+        state, silently erasing any PENDING TOOL entries streamed locally (from tool_call_chunks) that hadn't been
+        written back into graph state yet -- which happens for every PENDING entry, since only the tool's eventual
+        SUCCESS/FAILURE entry is ever written to graph state, never the PENDING placeholder.
+
+        In the field, this meant a "values" tick firing right after the agent
+        node finished generating tool calls (but before the tool node ran)
+        would wipe out in-flight PENDING entries for concurrent tool calls,
+        so the client would never see a "Building tool..." card for them at
+        all -- the tool would jump straight from nothing to its completed
+        result once the tool node eventually ran.
+        """
+        parallel_chunks = AIMessageChunk(
+            id="run-1",
+            content="",
+            tool_call_chunks=[
+                {
+                    "name": "run_command",
+                    "args": '{"command": "date"}',
+                    "id": "call_1",
+                    "index": 0,
+                },
+                {
+                    "name": "run_command",
+                    "args": '{"command": "sleep 4 && date"}',
+                    "id": "call_2",
+                    "index": 1,
+                },
+            ],
+        )
+        checkpoint_notifier._append_chunk_to_ui_chat_log(parallel_chunks)
+
+        pending_ids = {
+            entry["message_id"]
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        }
+        assert pending_ids == {"call_1", "call_2"}
+
+        # A "values" tick fires (e.g. the agent node completing) with graph
+        # state that only reflects the USER/AGENT entries -- neither PENDING
+        # tool entry has been written back to graph state yet.
+        state = {
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [
+                {
+                    "content": "",
+                    "message_type": MessageTypeEnum.AGENT,
+                    "message_sub_type": None,
+                    "timestamp": "2023-01-01T00:00:00+00:00",
+                    "status": None,
+                    "correlation_id": None,
+                    "tool_info": None,
+                    "additional_context": None,
+                    "message_id": "run-1",
+                }
+            ],
+            "plan": {},
+        }
+        await checkpoint_notifier.send_event("values", state, False)
+
+        tool_entries_after = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        ]
+        assert {entry["message_id"] for entry in tool_entries_after} == {
+            "call_1",
+            "call_2",
+        }, (
+            "PENDING tool entries not yet reflected in graph state were "
+            "dropped by the 'values' event"
+        )
+        assert all(
+            entry["status"] == ToolStatus.PENDING for entry in tool_entries_after
+        )
+
+    @pytest.mark.asyncio
+    async def test_values_event_pending_entry_superseded_once_tool_completes(
+        self, checkpoint_notifier
+    ):
+        """Once the tool node actually runs and its completed entry appears in graph state, the locally-synthesized
+        PENDING placeholder for that same tool call id must not linger as a duplicate."""
+        chunk = _tool_call_chunk("run_command", '{"command": "date"}', "call_1")
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        assert any(
+            entry["message_id"] == "call_1" and entry["status"] == ToolStatus.PENDING
+            for entry in checkpoint_notifier.ui_chat_log
+        )
+
+        state = {
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [
+                {
+                    "content": "",
+                    "message_type": MessageTypeEnum.AGENT,
+                    "message_sub_type": None,
+                    "timestamp": "2023-01-01T00:00:00+00:00",
+                    "status": None,
+                    "correlation_id": None,
+                    "tool_info": None,
+                    "additional_context": None,
+                    "message_id": "run-1",
+                },
+                {
+                    "content": "Run shell command: date Exit code: 0",
+                    "message_type": MessageTypeEnum.TOOL,
+                    "message_sub_type": "run_command",
+                    "timestamp": "2023-01-01T00:00:01+00:00",
+                    "status": ToolStatus.SUCCESS,
+                    "correlation_id": None,
+                    "tool_info": None,
+                    "additional_context": None,
+                    "message_id": "call_1",
+                },
+            ],
+            "plan": {},
+        }
+        await checkpoint_notifier.send_event("values", state, False)
+
+        call_1_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_id"] == "call_1"
+        ]
+        assert len(call_1_entries) == 1
+        assert call_1_entries[0]["status"] == ToolStatus.SUCCESS
+
+    def test_agent_text_after_tool_call_entry_updates_correct_entry(
+        self, checkpoint_notifier
+    ):
+        # Reasoning text may continue to stream in after a tool-call entry has
+        # been appended, so the AGENT entry must be located by id rather than by
+        # assuming it is the last item in the log.
+        text_chunk = AIMessageChunk(id="run-1", content="Reading the file")
+        tool_chunk = _tool_call_chunk("read_file", '{"file_path": "a.py"}', "call_1")
+        more_text_chunk = AIMessageChunk(id="run-1", content=" now")
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(text_chunk)
+        checkpoint_notifier._append_chunk_to_ui_chat_log(tool_chunk)
+        checkpoint_notifier._append_chunk_to_ui_chat_log(more_text_chunk)
+
+        agent_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(agent_entries) == 1
+        assert agent_entries[0]["content"] == "Reading the file now"
+
+        tool_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        ]
+        assert len(tool_entries) == 1
+        assert tool_entries[0]["status"] == ToolStatus.PENDING
+
+    def test_component_name_stamped_on_pending_tool_entry(self, checkpoint_notifier):
+        chunk = _tool_call_chunk("read_file", '{"file_path": "a.py"}', "call_1")
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(
+            chunk, component_name="researcher"
+        )
+
+        tool_entry = next(
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        )
+        assert tool_entry["component_name"] == "researcher"
+
+    def test_secrets_in_tool_call_args_are_redacted(self, checkpoint_notifier):
+        # Built from concatenated fragments (rather than a single literal) so this
+        # doesn't read as a real credential -- it just needs to match the
+        # GitHub-token pattern detect-secrets scans for.
+        fake_token = "gh" + "p_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+        args_json = dumps({"command": f'curl -H "Authorization: token {fake_token}"'})
+        chunk = _tool_call_chunk("run_command", args_json, "call_1")
+
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+        tool_entry = next(
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.TOOL
+        )
+        assert fake_token not in tool_entry["content"]
+        assert fake_token not in tool_entry["tool_info"]["args"]["command"]
+        assert "[REDACTED]" in tool_entry["content"]
+        assert "[REDACTED]" in tool_entry["tool_info"]["args"]["command"]
+
+    def test_noop_without_a_latest_ai_message(self, checkpoint_notifier):
+        # Guards direct/defensive invocation (e.g. called outside of
+        # _append_chunk_to_ui_chat_log, which always sets latest_ai_message
+        # first) so it can't blow up on a stale or absent AI message.
+        assert checkpoint_notifier.latest_ai_message is None
+
+        checkpoint_notifier._sync_streaming_tool_call_ui_chat_log()
+
+        assert not checkpoint_notifier.ui_chat_log
