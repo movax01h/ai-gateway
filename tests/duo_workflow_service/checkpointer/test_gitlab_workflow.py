@@ -1539,8 +1539,40 @@ async def test_aput_includes_model_metadata_json_when_context_is_set(
 
     assert "model_metadata_json" in post_call_body
     assert post_call_body["model_metadata_json"] == model_metadata.model_dump_json(
-        exclude={"llm_definition", "friendly_name"}
+        exclude={"llm_definition", "friendly_name", "api_key"}
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id")
+async def test_aput_excludes_api_key_from_model_metadata_json(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    model_metadata,
+):
+    """api_key must never be persisted: GitLab Rails stores this JSON verbatim and later
+    echoes it back as a gRPC header for provider-stickiness replay, so it must not carry a
+    live secret."""
+    current_model_metadata_context.set(
+        model_metadata.model_copy(update={"api_key": "super-secret-key"})
+    )
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    persisted_metadata = json.loads(post_call_body["model_metadata_json"])
+    assert "api_key" not in persisted_metadata
+    assert "super-secret-key" not in post_call_body["model_metadata_json"]
 
 
 @pytest.mark.asyncio
