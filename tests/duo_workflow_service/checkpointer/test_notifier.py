@@ -14,7 +14,11 @@ from duo_workflow_service.checkpointer.notifier import (
     UserInterface,
     _agent_token_totals,
 )
-from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
+from duo_workflow_service.entities.state import (
+    MessageTypeEnum,
+    ToolStatus,
+    WorkflowStatusEnum,
+)
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import client_capabilities, gitlab_version
@@ -1252,3 +1256,235 @@ class TestStreamingSecretRedaction:
 
         assert len(notifier.ui_chat_log) == 1
         assert notifier.ui_chat_log[0]["content"] == safe_content
+
+
+# ---------------------------------------------------------------------------
+# Tests for _find_ui_chat_log_entry
+# ---------------------------------------------------------------------------
+
+
+class TestFindUiChatLogEntry:
+    """Tests for looking up UI chat log entries by identity rather than position."""
+
+    def test_returns_none_when_message_id_is_falsy(self, checkpoint_notifier):
+        checkpoint_notifier.ui_chat_log = [{"message_id": "msg-1"}]
+
+        assert checkpoint_notifier._find_ui_chat_log_entry(None) is None
+        assert checkpoint_notifier._find_ui_chat_log_entry("") is None
+
+    def test_returns_none_when_no_entry_matches(self, checkpoint_notifier):
+        checkpoint_notifier.ui_chat_log = [{"message_id": "msg-1"}]
+
+        assert checkpoint_notifier._find_ui_chat_log_entry("missing") is None
+
+    def test_finds_entry_by_id_regardless_of_position(self, checkpoint_notifier):
+        target = {"message_id": "msg-1", "message_type": MessageTypeEnum.AGENT}
+        checkpoint_notifier.ui_chat_log = [
+            target,
+            {"message_id": "msg-2", "message_type": MessageTypeEnum.TOOL},
+        ]
+
+        assert checkpoint_notifier._find_ui_chat_log_entry("msg-1") is target
+
+    def test_message_type_filter_excludes_mismatched_type(self, checkpoint_notifier):
+        checkpoint_notifier.ui_chat_log = [
+            {"message_id": "msg-1", "message_type": MessageTypeEnum.TOOL},
+        ]
+
+        assert (
+            checkpoint_notifier._find_ui_chat_log_entry(
+                "msg-1", message_type=MessageTypeEnum.AGENT
+            )
+            is None
+        )
+
+    def test_returns_most_recent_match_when_ids_repeat(self, checkpoint_notifier):
+        # Ids aren't expected to repeat in practice, but the lookup scans from
+        # the end, so if they ever did, the most recent one wins.
+        older = {"message_id": "msg-1", "message_type": MessageTypeEnum.AGENT}
+        newer = {"message_id": "msg-1", "message_type": MessageTypeEnum.AGENT}
+        checkpoint_notifier.ui_chat_log = [older, newer]
+
+        assert checkpoint_notifier._find_ui_chat_log_entry("msg-1") is newer
+
+
+# ---------------------------------------------------------------------------
+# Tests for identity-based lookup in _append_chunk_to_ui_chat_log
+# ---------------------------------------------------------------------------
+
+
+class TestAppendChunkIdentityLookup:
+    """The AGENT entry being streamed into is located by id, not by assuming it is the last item in the log, since other
+    entries may be appended after it in between chunks of the same message."""
+
+    def test_continuation_updates_agent_entry_even_if_not_last(
+        self, checkpoint_notifier
+    ):
+        first_chunk = AIMessageChunk(id="run-1", content="Hello")
+        checkpoint_notifier._append_chunk_to_ui_chat_log(first_chunk)
+
+        # Something else (e.g. a tool card from another code path) gets
+        # appended after the AGENT entry before the next chunk arrives.
+        other_entry = {
+            "message_id": "other-id",
+            "message_type": MessageTypeEnum.TOOL,
+            "content": "unrelated",
+        }
+        checkpoint_notifier.ui_chat_log.append(other_entry)
+
+        second_chunk = AIMessageChunk(id="run-1", content=" world")
+        checkpoint_notifier._append_chunk_to_ui_chat_log(second_chunk)
+
+        agent_entries = [
+            entry
+            for entry in checkpoint_notifier.ui_chat_log
+            if entry["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(agent_entries) == 1
+        assert agent_entries[0]["content"] == "Hello world"
+        # The unrelated entry appended in between is untouched.
+        assert other_entry in checkpoint_notifier.ui_chat_log
+        assert other_entry["content"] == "unrelated"
+
+    def test_continuation_silently_skips_when_agent_entry_removed(
+        self, checkpoint_notifier
+    ):
+        # Establish the first chunk so latest_ai_message is set.
+        first_chunk = AIMessageChunk(id="run-1", content="Hello")
+        checkpoint_notifier._append_chunk_to_ui_chat_log(first_chunk)
+
+        # Simulate the AGENT entry being removed from ui_chat_log between
+        # chunks (e.g. a state reset).  _find_ui_chat_log_entry will return
+        # None for the continuation chunk, and the update must be silently
+        # dropped rather than raising an exception.
+        checkpoint_notifier.ui_chat_log.clear()
+
+        second_chunk = AIMessageChunk(id="run-1", content=" world")
+        # Must not raise.
+        checkpoint_notifier._append_chunk_to_ui_chat_log(second_chunk)
+
+        # The log remains empty — the silent-drop behavior is intentional.
+        assert checkpoint_notifier.ui_chat_log == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for _merge_ui_chat_log
+# ---------------------------------------------------------------------------
+
+
+class TestMergeUiChatLog:
+    """Tests for merging the authoritative graph-state log with local PENDING entries not yet reflected in state."""
+
+    def test_new_log_is_returned_unchanged_when_nothing_pending_locally(
+        self, checkpoint_notifier
+    ):
+        new_log = [{"message_id": "msg-1", "status": None}]
+        checkpoint_notifier.ui_chat_log = list(new_log)
+
+        assert checkpoint_notifier._merge_ui_chat_log(new_log) == new_log
+
+    def test_pending_entry_missing_from_new_log_is_preserved(self, checkpoint_notifier):
+        pending_entry = {"message_id": "call-1", "status": ToolStatus.PENDING}
+        checkpoint_notifier.ui_chat_log = [pending_entry]
+        new_log = [{"message_id": "msg-1", "status": None}]
+
+        merged = checkpoint_notifier._merge_ui_chat_log(new_log)
+
+        assert merged == [{"message_id": "msg-1", "status": None}, pending_entry]
+
+    def test_non_pending_entry_missing_from_new_log_is_not_resurrected(
+        self, checkpoint_notifier
+    ):
+        # Regression test: entries deliberately removed from authoritative
+        # state (e.g. a reset to an empty log) must not be brought back just
+        # because they aren't PENDING placeholders.
+        stale_entry = {"message_id": "msg-1", "status": None}
+        checkpoint_notifier.ui_chat_log = [stale_entry]
+
+        assert checkpoint_notifier._merge_ui_chat_log([]) == []
+
+    def test_pending_entry_already_reflected_in_new_log_is_not_duplicated(
+        self, checkpoint_notifier
+    ):
+        checkpoint_notifier.ui_chat_log = [
+            {"message_id": "call-1", "status": ToolStatus.PENDING}
+        ]
+        new_log = [{"message_id": "call-1", "status": ToolStatus.SUCCESS}]
+
+        merged = checkpoint_notifier._merge_ui_chat_log(new_log)
+
+        assert merged == new_log
+
+    def test_merge_with_no_local_state_returns_new_log_unchanged(
+        self, checkpoint_notifier
+    ):
+        new_log = [{"message_id": "msg-1", "status": None}]
+
+        assert checkpoint_notifier._merge_ui_chat_log(new_log) == new_log
+
+
+# ---------------------------------------------------------------------------
+# Tests for the incremental-send cursor in _pop_recent_ui_chat_log_changes
+# ---------------------------------------------------------------------------
+
+
+class TestPopRecentUiChatLogChangesCursor:
+    """Tests that the incremental-send cursor tracks the entry that might still receive further updates, rather than
+    whatever is last in the list."""
+
+    def test_falls_back_to_last_entry_id_when_not_streaming(self, checkpoint_notifier):
+        # Plain "values" updates never set latest_ai_message; the cursor must
+        # still advance to the last entry, exactly as before this was
+        # generalized to consider latest_ai_message.
+        checkpoint_notifier.ui_chat_log = [
+            {"message_id": "msg-1"},
+            {"message_id": "msg-2"},
+        ]
+
+        checkpoint_notifier._pop_recent_ui_chat_log_changes()
+
+        assert checkpoint_notifier.last_sent_ui_message_id == "msg-2"
+
+    def test_tracks_latest_ai_message_id_while_streaming(self, checkpoint_notifier):
+        # While streaming, entries appended after the current AI message's
+        # entry (e.g. by another component) must still be resent on the next
+        # call, so the cursor tracks the AI message's id rather than the
+        # position of the last entry in the list.
+        checkpoint_notifier.latest_ai_message = AIMessageChunk(
+            id="run-1", content="hello"
+        )
+        checkpoint_notifier.ui_chat_log = [
+            {"message_id": "run-1"},
+            {"message_id": "other-id"},
+        ]
+
+        checkpoint_notifier._pop_recent_ui_chat_log_changes()
+
+        assert checkpoint_notifier.last_sent_ui_message_id == "run-1"
+
+    def test_entry_updated_after_cursor_moved_past_it_is_still_resent(
+        self, checkpoint_notifier
+    ):
+        # Regression test: previously the cursor was always set to the last
+        # entry's id, so once a later entry had been sent, an earlier entry
+        # that kept changing would never be included in a future checkpoint.
+        checkpoint_notifier.latest_ai_message = AIMessageChunk(
+            id="run-1", content="hello"
+        )
+        entry_1 = {"message_id": "run-1", "content": "v1"}
+        entry_2 = {"message_id": "other-id", "content": "unchanged"}
+        checkpoint_notifier.ui_chat_log = [entry_1, entry_2]
+
+        first_sent = checkpoint_notifier._pop_recent_ui_chat_log_changes()
+        assert [e["message_id"] for e in first_sent] == ["run-1", "other-id"]
+
+        # entry_1 keeps changing even though entry_2 (positioned after it)
+        # was already sent.
+        entry_1["content"] = "v2"
+
+        second_sent = checkpoint_notifier._pop_recent_ui_chat_log_changes()
+        entry_1_resent = next(
+            (e for e in second_sent if e["message_id"] == "run-1"), None
+        )
+        assert entry_1_resent is not None
+        assert entry_1_resent["content"] == "v2"
