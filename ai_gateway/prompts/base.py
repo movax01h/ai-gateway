@@ -860,6 +860,10 @@ class BasePromptRegistry(ABC):
                     "codestral_2501_fireworks",
                     "codestral_2508_fireworks",
                     "text_embedding_005_vertex",
+                    "glm_5_1_fireworks",
+                    "glm_5_2_fireworks",
+                    "kimi_k2_6_fireworks",
+                    "minimax_m2_7_fireworks",
                 }
             )
 

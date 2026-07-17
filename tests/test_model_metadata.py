@@ -710,11 +710,25 @@ class TestFriendlyName:
 
 
 class TestCreateModelMetadataByTag:
+    @pytest.fixture
+    def fireworks_tag_model(self):
+        return ChatLiteLLMDefinition(
+            gitlab_identifier="kimi_k2_6_fireworks",
+            name="Kimi K2.6 - Fireworks",
+            max_context_tokens=256000,
+            family=["kimi"],
+            params={
+                "model": "accounts/gitlab/deployments/z6hbhxrt",
+                "custom_llm_provider": "fireworks_ai",
+            },
+        )
+
     @pytest.fixture(autouse=True)
-    def setup_config(self, gitlab_model1, gitlab_model2):
+    def setup_config(self, gitlab_model1, gitlab_model2, fireworks_tag_model):
         mock_models = {
             "gitlab_model1": gitlab_model1,
             "gitlab_model2": gitlab_model2,
+            "kimi_k2_6_fireworks": fireworks_tag_model,
         }
         mock_definitions = {
             "duo_chat": UnitPrimitiveConfig(
@@ -741,11 +755,24 @@ class TestCreateModelMetadataByTag:
                     "large": "model_that_does_not_exist",
                 },
             ),
+            "fireworks_tag_feature": UnitPrimitiveConfig(
+                feature_setting="fireworks_tag_feature",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                default_models=["gitlab_model1"],
+                models_for_tags={"fast": "kimi_k2_6_fireworks"},
+            ),
         }
+
+        def _get_model(name):
+            if name in mock_models:
+                return mock_models[name]
+            raise ValueError(f"Model {name} not found")
+
         with patch.multiple(
             ModelSelectionConfig,
             get_llm_definitions=mock.Mock(return_value=mock_models),
             get_unit_primitive_config_map=mock.Mock(return_value=mock_definitions),
+            get_model=mock.Mock(side_effect=_get_model),
         ):
             yield
 
@@ -792,6 +819,26 @@ class TestCreateModelMetadataByTag:
         assert result.default.llm_definition == gitlab_model1
         assert result.by_tag["small"].llm_definition == gitlab_model2
         assert "large" not in result.by_tag
+
+    def test_fireworks_tag_gets_provider_key(self, fireworks_tag_model):
+        # Regression test: a models_for_tags entry pointing at a Fireworks-backed model
+        # must resolve to FireworksModelMetadata with its API key wired in, not a bare
+        # gitlab-provider ModelMetadata with no key.
+        data = {
+            "provider": "gitlab",
+            "feature_setting": "fireworks_tag_feature",
+            "provider_keys": {"fireworks_provider_api_key": "fw"},
+            "fireworks_api_base_url": "https://api.fireworks.ai/inference/v1",
+        }
+
+        result = create_model_metadata_by_tag(data)
+
+        tag_metadata = result.by_tag["fast"]
+        assert isinstance(tag_metadata, FireworksModelMetadata)
+        assert tag_metadata.llm_definition == fireworks_tag_model
+        params = tag_metadata.to_params()
+        assert params["api_key"] == "fw"
+        assert params["api_base"] == "https://api.fireworks.ai/inference/v1"
 
 
 class TestModelMetadataByTagGet:

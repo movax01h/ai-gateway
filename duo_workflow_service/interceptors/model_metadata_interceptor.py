@@ -33,18 +33,18 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
         try:
             data = json.loads(raw_metadata)
 
+            config = get_config()
+            model_keys = (
+                config.model_keys.model_dump()
+                if hasattr(config.model_keys, "model_dump")
+                else dict(config.model_keys)
+            )
+
             if (
                 isinstance(data, dict)
                 and data.get("provider") == "gitlab"
                 and (data.get("identifier") or data.get("feature_setting"))
             ):
-                config = get_config()
-                model_keys = (
-                    config.model_keys.model_dump()
-                    if hasattr(config.model_keys, "model_dump")
-                    else dict(config.model_keys)
-                )
-
                 default = build_default_feature_setting_metadata(
                     feature_setting=data.get("feature_setting"),
                     identifier=data.get("identifier") or None,
@@ -58,11 +58,29 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
                 # gitlab-provider requests (the standard Duo Agent Platform path).
                 # Without this, by_tag stays empty and every tag falls back to
                 # the default model.
-                by_tag = build_model_metadata_by_tag(data.get("feature_setting"))
+                by_tag = build_model_metadata_by_tag(
+                    data.get("feature_setting"),
+                    provider_keys=model_keys,
+                    fireworks_api_base_url=config.fireworks_api_base_url,
+                )
                 model_metadata_by_tag = ModelMetadataByTag(
                     default=default, by_tag=by_tag
                 )
             else:
+                # `data` may be a "provider stickiness" replay of previously checkpointed
+                # metadata — GitLab Rails echoes it back verbatim on workflow resume. That
+                # checkpoint blob serializes the resolved model as flat `api_key`/`endpoint`
+                # fields, not the `provider_keys`/`fireworks_api_base_url` shape this parser
+                # reads, so a replayed Fireworks/Mistral model never carries a usable key or
+                # endpoint on its own. Backfill both from server config whenever the request
+                # doesn't supply its own, so stickiness replay still authenticates. Genuine
+                # client-supplied values (e.g. self-hosted BYO key) always win.
+                if isinstance(data, dict):
+                    if not data.get("provider_keys"):
+                        data["provider_keys"] = model_keys
+                    if not data.get("fireworks_api_base_url"):
+                        data["fireworks_api_base_url"] = config.fireworks_api_base_url
+
                 model_metadata_by_tag = create_model_metadata_by_tag(data)
 
             model_metadata_by_tag.add_user(current_user_context_var.get())
