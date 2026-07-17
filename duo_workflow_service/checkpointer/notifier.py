@@ -19,6 +19,7 @@ from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
+    ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
     get_current_model_max_context_token_limit,
@@ -92,7 +93,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         if type == "values" and isinstance(state, dict):
             self.status = state["status"]
             self.steps = state.get("plan", {}).get("steps", [])
-            self.ui_chat_log = deepcopy(state["ui_chat_log"])
+            self.ui_chat_log = self._merge_ui_chat_log(deepcopy(state["ui_chat_log"]))
             self._agent_token_totals = _agent_token_totals(
                 state.get("conversation_history") or {}
             )
@@ -223,6 +224,31 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         return checkpoint
 
+    def _merge_ui_chat_log(self, new_log: list[UiChatLog]) -> list[UiChatLog]:
+        """Merge the authoritative graph-state log with in-flight PENDING entries.
+
+        ``self.ui_chat_log`` can contain PENDING entries (e.g. tool-call cards
+        synthesized locally while streaming) that graph state doesn't know
+        about yet, since only their eventual resolved entry ever gets written
+        back to state, never the placeholder. Naively replacing the log with
+        ``new_log`` would erase them until state catches up, so any PENDING
+        entry missing from ``new_log`` (matched by ``message_id``) is carried
+        over.
+
+        Only PENDING entries are carried over: anything else missing from
+        ``new_log`` was deliberately removed by the authoritative state (e.g.
+        a reset) and must not be resurrected.
+        """
+        known_ids = {msg.get("message_id") for msg in new_log if msg.get("message_id")}
+        pending_only = [
+            msg
+            for msg in self.ui_chat_log
+            if msg.get("message_id")
+            and msg.get("message_id") not in known_ids
+            and msg.get("status") == ToolStatus.PENDING
+        ]
+        return new_log + pending_only
+
     def _pop_recent_ui_chat_log_changes(self) -> list[UiChatLog]:
         """Extract UI chat log messages that need to be sent or re-rendered.
 
@@ -259,7 +285,11 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         else:
             ui_chat_log_diff_idx = 0
 
-        self.last_sent_ui_message_id = self.ui_chat_log[-1].get("message_id", None)
+        self.last_sent_ui_message_id = (
+            self.latest_ai_message.id
+            if self.latest_ai_message is not None
+            else self.ui_chat_log[-1].get("message_id")
+        )
 
         return self.ui_chat_log[ui_chat_log_diff_idx:]
 
@@ -313,7 +343,11 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             safe_content = redact_secrets_for_ui(
                 self.latest_ai_message.text(), tool_name="streaming"
             )
-            self.ui_chat_log[-1]["content"] = safe_content
+            agent_entry = self._find_ui_chat_log_entry(
+                message.id, message_type=MessageTypeEnum.AGENT
+            )
+            if agent_entry is not None:
+                agent_entry["content"] = safe_content
         else:
             self.latest_ai_message = message
             safe_content = redact_secrets_for_ui(message.text(), tool_name="streaming")
@@ -330,6 +364,28 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 component_name=component_name,
             )
             self.ui_chat_log.append(last_ui_message)
+
+    def _find_ui_chat_log_entry(
+        self,
+        message_id: Optional[str],
+        message_type: Optional[MessageTypeEnum] = None,
+    ) -> Optional[UiChatLog]:
+        """Find the most recent UI chat log entry matching an id (and optionally type).
+
+        Entries are looked up by identity rather than assuming position (e.g. the last item), since other entries can be
+        appended after an AGENT entry that is still being updated with more text.
+        """
+        if not message_id:
+            return None
+
+        for entry in reversed(self.ui_chat_log):
+            if entry.get("message_id") != message_id:
+                continue
+            if message_type is not None and entry.get("message_type") != message_type:
+                continue
+            return entry
+
+        return None
 
     # OpenAI's response API returns the message start, and values with a resp_... ID
     #  instead of the LangChain ID. All streamed messages still contain a LangChain ID.
