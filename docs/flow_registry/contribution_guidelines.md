@@ -281,6 +281,42 @@ components:
 
 The component processes these inputs using the IOKey system, ensuring type safety and validation. The `BaseComponent` class implements `build_base_component` as a Pydantic validator that handles conversion of string representations into `IOKey` instances.
 
+#### Implicit Default Inputs
+
+In addition to the explicit inputs configured by flow authors, components may implement **implicit default inputs**: inputs that read from a predefined state path without any flow-config declaration.
+
+Default inputs follow these rules:
+
+1. **Predefined path**: When the flow author declares nothing, the default input reads from a path fixed by the component (e.g. `context:inputs.cancelled_turn`).
+1. **Overridable — latest one wins**: A flow author overrides a default input by declaring an input whose *template variable name* (its `as` alias, or the last subkey of its path) matches the default input's name. When several declarations match, the latest one in the `inputs` list wins.
+1. **Optional by design**: Default inputs typically point at data that may or may not be present (e.g. engine-written context envelopes). Declare them with `optional=True` so a missing value resolves to `None` instead of raising.
+1. **Declare cleanup writes**: If the component consumes the value destructively (e.g. clears it after use), declare the write in `_outputs` like any other state mutation.
+
+Example — a component-level default with override resolution:
+
+```python
+class MyComponent(BaseComponent):
+    # Implicit default input; flow authors can override it by naming an
+    # input "cancelled_turn" (latest one wins).
+    _cancelled_turn_default_input: ClassVar[IOKey] = IOKey(
+        target="context",
+        subkeys=["inputs", "cancelled_turn"],
+        optional=True,
+    )
+
+    @property
+    def _cancelled_turn_input(self) -> IOKey | RuntimeIOKey:
+        default = self._cancelled_turn_default_input
+        overrides = [
+            inp
+            for inp in self.inputs
+            if inp.template_variable_name == default.template_variable_name
+        ]
+        return overrides[-1] if overrides else default
+```
+
+There is currently no framework-level (`BaseComponent`) mechanism for default inputs — the resolution logic lives in each implementing component (see `HumanInputComponent` for the reference implementation). If you add a second component with default inputs, consider hoisting the resolution helper into `BaseComponent`.
+
 #### Output Generation
 
 Components write outputs to state locations declared in their `_outputs` attribute. Use `IOKeyTemplate` to generate component-scoped output paths:

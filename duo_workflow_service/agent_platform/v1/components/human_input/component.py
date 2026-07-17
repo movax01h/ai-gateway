@@ -24,6 +24,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     IOKey,
     IOKeyTemplate,
+    RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 
@@ -53,7 +54,24 @@ class HumanInputComponent(BaseComponent):
     UI Log Events (both enabled by default):
     - on_user_input_prompt: Agent's prompt/question to user, includes information about request type in message_sub_type
     - on_user_response: User's response/input
+
+    Implicit default inputs:
+    - cancelled_turn: Reads the cancelled-turn context envelope written by the
+    engine during stop-recovery (``context:inputs.cancelled_turn``). Optional —
+    the value is absent unless a stop-recovery rollback discarded a turn. Flow
+    authors can override it by declaring an input whose template variable name
+    is ``cancelled_turn`` (the latest declaration wins).
     """
+
+    # Implicit default input for the engine-level ``cancelled_turn`` context
+    # envelope (see ``CANCELLED_TURN_CATEGORY`` in
+    # ``duo_workflow_service.agent_platform.v1.flows.inputs``; the subkey is
+    # spelled literally here to avoid a components -> flows circular import).
+    _cancelled_turn_default_input: ClassVar[IOKey] = IOKey(
+        target="context",
+        subkeys=["inputs", "cancelled_turn"],
+        optional=True,
+    )
 
     _sends_response_to_component: ClassVar[IOKeyTemplate] = IOKeyTemplate(
         target="conversation_history",
@@ -67,10 +85,18 @@ class HumanInputComponent(BaseComponent):
 
     _status: ClassVar[IOKeyTemplate] = IOKeyTemplate(target="status")
 
+    # Declares the consume-once cleanup write of the cancelled-turn context
+    # (FetchNode clears the location after injecting it into the user message).
+    _cancelled_turn_cleanup: ClassVar[IOKeyTemplate] = IOKeyTemplate(
+        target="context",
+        subkeys=["inputs", "cancelled_turn"],
+    )
+
     _outputs: ClassVar[tuple[IOKeyTemplate, ...]] = (
         _sends_response_to_component,
         _user_approval,
         _status,
+        _cancelled_turn_cleanup,
     )
 
     required_ui_log_events: ClassVar[set[UILogEventsHumanInput]] = {
@@ -148,6 +174,23 @@ class HumanInputComponent(BaseComponent):
             }
         )
 
+    @property
+    def _cancelled_turn_input(self) -> IOKey | RuntimeIOKey:
+        """Resolve the effective ``cancelled_turn`` input.
+
+        Flow-author inputs override the implicit default when their template
+        variable name matches ``cancelled_turn``; the latest declaration wins.
+        Falls back to the default (``context:inputs.cancelled_turn``) when no
+        override is present.
+        """
+        default = self._cancelled_turn_default_input
+        overrides = [
+            inp
+            for inp in self.inputs
+            if inp.template_variable_name == default.template_variable_name
+        ]
+        return overrides[-1] if overrides else default
+
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         ui_history = UIHistory(
@@ -180,6 +223,7 @@ class HumanInputComponent(BaseComponent):
             conversation_history_key=self._conversation_history_input,
             ui_history=user_response_ui_history,
             status_key=self._status_output,
+            cancelled_turn_key=self._cancelled_turn_input,
         )
 
         # Add nodes to graph
