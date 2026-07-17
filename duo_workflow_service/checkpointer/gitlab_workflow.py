@@ -1389,8 +1389,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             )
 
         if (model_metadata := current_model_metadata_context.get()) is not None:
+            # Exclude `api_key`: this JSON is persisted by GitLab Rails and later
+            # echoed back verbatim as a gRPC header for provider-stickiness replay
+            # (see ModelMetadataInterceptor), so it must never carry a live secret.
             payload["model_metadata_json"] = model_metadata.model_dump_json(
-                exclude={"llm_definition", "friendly_name"}
+                exclude={"llm_definition", "friendly_name", "api_key"}
             )
 
         with duo_workflow_metrics.time_gitlab_response(
