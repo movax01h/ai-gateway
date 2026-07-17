@@ -32,9 +32,14 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     load_component_class,
 )
+from duo_workflow_service.agent_platform.v1.flows.inputs import (
+    CANCELLED_TURN_CATEGORY,
+    cancelled_turn_context,
+)
 from duo_workflow_service.agent_platform.v1.routers import Router
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
+from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -159,6 +164,9 @@ class Flow(AbstractWorkflow):
     _config: FlowConfig
     _flow_prompt_registry: BasePromptRegistry
     _flow_schema_registry: BaseResponseSchemaRegistry
+    # Set by _resolve_stop_recovery during stop-recovery; read by get_graph_input.
+    # Absent on non-stop-recovery paths (get_graph_input uses getattr with default []).
+    _discarded_ui_chat_log: list[UiChatLog]
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -240,7 +248,11 @@ class Flow(AbstractWorkflow):
                         )
 
     @override
-    def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]
+    def get_workflow_state(  # type: ignore[override]
+        self,
+        goal: str,
+        discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
+    ) -> FlowState:
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             content=f"Starting Flow: {goal}",
@@ -292,7 +304,8 @@ class Flow(AbstractWorkflow):
                 "workflow_id": self._workflow_id,
                 "session_url": self._session_url,
                 "inputs": self._process_additional_context(
-                    self._additional_context or []
+                    self._additional_context or [],
+                    discarded_ui_chat_log=discarded_ui_chat_log,
                 ),
                 **gitlab_service_context,
             },
@@ -368,9 +381,11 @@ class Flow(AbstractWorkflow):
             raise ValueError(f"Invalid JSON in input item, {e}")
 
     def _process_additional_context(
-        self, additional_context: list[AdditionalContext]
+        self,
+        additional_context: list[AdditionalContext],
+        discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
     ) -> Dict:
-        processed_additional_context = {}
+        processed_additional_context: Dict[str, Any] = {}
 
         jsonschemas_by_category = self._config.input_json_schemas_by_category()
         version_constraints_by_category = self._config.version_constraints_by_category()
@@ -411,9 +426,23 @@ class Flow(AbstractWorkflow):
                 category, envelopes, schema, constraint
             )
 
+        # Inject the cancelled-turn context as a built-in engine-level envelope.
+        # This is handled like executor-context categories: no flow-config
+        # declaration is required, and the value is the raw list of UiChatLog
+        # entries (not a versioned JSON envelope) because it is produced
+        # internally by the engine, not sent by an external caller.
+        if discarded_ui_chat_log:
+            processed_additional_context[CANCELLED_TURN_CATEGORY] = (
+                discarded_ui_chat_log
+            )
+
         return processed_additional_context
 
-    def _resume_command(self, goal: str) -> Command:
+    def _resume_command(
+        self,
+        goal: str,
+        discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
+    ) -> Command:
         # `context.inputs` is populated once, at workflow START
         # (`get_workflow_state`). Re-process the additional context sent with
         # this turn so per-turn inputs (e.g. `plan_context.plan_enabled` from the
@@ -422,7 +451,8 @@ class Flow(AbstractWorkflow):
         # and leaves the rest of the context intact.
         state_update: dict[str, Any] = {}
         refreshed_inputs = self._process_additional_context(
-            self._additional_context or []
+            self._additional_context or [],
+            discarded_ui_chat_log=discarded_ui_chat_log,
         )
         if refreshed_inputs:
             state_update["context"] = {"inputs": refreshed_inputs}
@@ -477,6 +507,29 @@ class Flow(AbstractWorkflow):
             state_update["ui_chat_log"] = ui_chat_log_update
         return Command(resume=event, update=state_update or None)
 
+    def _decode_tip_checkpoint(
+        self, checkpointer: BaseCheckpointSaver
+    ) -> Optional[CheckpointTuple]:
+        """Decode the cached ``latest_checkpoint`` into a ``CheckpointTuple``.
+
+        Returns the ``CheckpointTuple`` or ``None`` when no cached checkpoint is
+        available, the checkpointer is not a ``GitLabWorkflow``, or decoding fails.
+        Failures are logged as warnings so the caller can degrade gracefully.
+        """
+        if not isinstance(checkpointer, GitLabWorkflow):
+            return None
+        raw_latest = self._workflow_config.get("latest_checkpoint")
+        if not raw_latest:
+            return None
+        try:
+            return checkpointer.decode_graphql_checkpoint(raw_latest)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.log.warning(
+                "cancelled_turn: failed to decode latest_checkpoint for tip; delta will be empty",
+                exc_info=exc,
+            )
+            return None
+
     @override
     async def _resolve_stop_recovery(
         self, checkpointer: BaseCheckpointSaver
@@ -489,11 +542,16 @@ class Flow(AbstractWorkflow):
         when the boundary is an ``interrupt()`` pause (INPUT_REQUIRED), START otherwise — the stopped session's work
         is discarded and the goal starts a fresh chain.
 
-        When ``checkpointer`` does not expose ``checkpoints_reversed`` (e.g. a ``MemorySaver`` used in offline mode),
-        the boundary walk is not possible and the method falls back to the base-class behaviour: treat the
-        stop-recovery as a plain RETRY.
+        Also collects the ``ui_chat_log`` delta between the pre-rollback tip and the boundary checkpoint and stores it
+        on ``self._discarded_ui_chat_log`` so that ``get_graph_input`` can surface it as a ``cancelled_turn`` context
+        envelope for the model.  The delta is the human-visible transcript of exactly what was cancelled — the
+        antecedent for references like "it" in the user's follow-up message.
         """
-        if not hasattr(checkpointer, "checkpoints_reversed"):
+
+        # When the checkpointer is not a ``GitLabWorkflow`` (e.g. a ``MemorySaver`` used in offline mode),
+        # the boundary walk is not possible and the method falls back to the base-class behaviour: treat the
+        # stop-recovery as a plain RETRY.
+        if not isinstance(checkpointer, GitLabWorkflow):
             return None, WorkflowStatusEventEnum.RETRY
 
         boundary = None
@@ -502,6 +560,13 @@ class Flow(AbstractWorkflow):
         ):
             boundary = candidate
             break
+
+        tip_tuple = self._decode_tip_checkpoint(checkpointer)
+        self._discarded_ui_chat_log = cancelled_turn_context(
+            latest=tip_tuple,
+            boundary=boundary,
+            log=self.log,
+        )
 
         boundary_status = (
             boundary.checkpoint["channel_values"]["status"]
@@ -519,11 +584,12 @@ class Flow(AbstractWorkflow):
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any
     ) -> Any:
+        discarded = getattr(self, "_discarded_ui_chat_log", None) or []
         match status_event:
             case WorkflowStatusEventEnum.START:
-                return self.get_workflow_state(goal)
+                return self.get_workflow_state(goal, discarded_ui_chat_log=discarded)
             case WorkflowStatusEventEnum.RESUME:
-                return self._resume_command(goal)
+                return self._resume_command(goal, discarded_ui_chat_log=discarded)
             case WorkflowStatusEventEnum.RETRY:
                 if checkpoint_tuple is None:
                     return self.get_workflow_state(
