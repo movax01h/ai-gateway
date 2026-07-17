@@ -1279,6 +1279,29 @@ class TestIOKeyLiteralField:
 
         assert result == {"my_var": "custom_literal_value"}
 
+    def test_iokey_literal_value_from_state(self):
+        """value_from_state on a literal key returns its text without reading state.
+
+        Literal keys have no state location; their value is the literal text — the same contract
+        template_variable_from_state has always applied.
+        """
+        io_key = IOKey(target="custom_literal_value", literal=True, alias="my_var")
+
+        # An empty dict would raise on any state access, pinning that the
+        # literal path never touches state.
+        assert io_key.value_from_state({}) == "custom_literal_value"
+
+    def test_iokey_literal_to_nested_dict_raises(self):
+        """to_nested_dict on a literal key raises: no state location to write to."""
+        io_key = IOKey(target="custom_literal_value", literal=True, alias="my_var")
+
+        with pytest.raises(ValueError) as exc_info:
+            io_key.to_nested_dict("anything")
+
+        assert "Literal IOKeys have no state location to write to" in str(
+            exc_info.value
+        )
+
     def test_iokey_literal_with_complex_string_values(self):
         """Test literal field with various complex string values."""
         complex_values = [

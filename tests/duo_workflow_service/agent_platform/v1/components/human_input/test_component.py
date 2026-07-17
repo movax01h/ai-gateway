@@ -43,7 +43,7 @@ class TestHumanInputComponent:
         """Test that IOKeyTemplate correctly replaces SENDS_RESPONSE_TO_COMPONENT_NAME_TEMPLATE."""
         outputs = human_input_component.outputs
 
-        assert len(outputs) == 3
+        assert len(outputs) == 4
 
         # First output should be conversation_history
         conversation_output = outputs[0]
@@ -62,6 +62,12 @@ class TestHumanInputComponent:
         assert isinstance(status_output, IOKey)
         assert status_output.target == "status"
         assert status_output.subkeys is None
+
+        # Fourth output should be the cancelled-turn consume-once cleanup
+        cancelled_turn_output = outputs[3]
+        assert isinstance(cancelled_turn_output, IOKey)
+        assert cancelled_turn_output.target == "context"
+        assert cancelled_turn_output.subkeys == ["inputs", "cancelled_turn"]
 
     def test_entry_hook_returns_correct_node_name(self, human_input_component):
         """Test that __entry_hook__ returns the component's request node name."""
@@ -118,6 +124,7 @@ class TestHumanInputComponent:
                 conversation_history_key=human_input_component._conversation_history_input,
                 ui_history=mock_fetch_node.call_args[1]["ui_history"],
                 status_key=human_input_component._status_output,
+                cancelled_turn_key=human_input_component._cancelled_turn_input,
             )
 
             # Verify graph received calls to add_node, add_edge and add_conditional_edges with correct arguments
@@ -131,6 +138,100 @@ class TestHumanInputComponent:
             graph.add_conditional_edges.assert_called_once_with(
                 "test_human_input#fetch", router.route
             )
+
+    def test_attach_passes_default_cancelled_turn_key(
+        self, user, flow_type: GLReportingEventContext
+    ):
+        """Without an author override, FetchNode receives the implicit default input."""
+        component = HumanInputComponent(
+            name="test_human_input",
+            sends_response_to="awesome_agent",
+            flow_id="test_flow",
+            flow_type=flow_type,
+            user=user,
+            message_template="Test message",
+        )
+        graph = StateGraph(FlowState)
+        graph.add_node = Mock()
+        graph.add_edge = Mock()
+        graph.add_conditional_edges = Mock()
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.human_input.component.FetchNode"
+        ) as mock_fetch_node:
+            mock_fetch_node.return_value = Mock(name="test_human_input#fetch")
+            component.attach(graph, Mock())
+
+        cancelled_turn_key = mock_fetch_node.call_args[1]["cancelled_turn_key"]
+        assert cancelled_turn_key == IOKey(
+            target="context",
+            subkeys=["inputs", "cancelled_turn"],
+            optional=True,
+        )
+
+    @pytest.mark.parametrize(
+        "inputs,expected_key",
+        [
+            (
+                # Override via alias
+                [
+                    "context:goal",
+                    {"from": "context:custom.discarded", "as": "cancelled_turn"},
+                ],
+                IOKey(
+                    target="context",
+                    subkeys=["custom", "discarded"],
+                    alias="cancelled_turn",
+                ),
+            ),
+            (
+                # Override via last subkey (no alias needed)
+                ["context:custom.cancelled_turn"],
+                IOKey(target="context", subkeys=["custom", "cancelled_turn"]),
+            ),
+            (
+                # Multiple overrides: the latest declaration wins
+                [
+                    {"from": "context:first.discarded", "as": "cancelled_turn"},
+                    {"from": "context:second.discarded", "as": "cancelled_turn"},
+                ],
+                IOKey(
+                    target="context",
+                    subkeys=["second", "discarded"],
+                    alias="cancelled_turn",
+                ),
+            ),
+        ],
+    )
+    def test_attach_cancelled_turn_override_latest_wins(
+        self,
+        user,
+        flow_type: GLReportingEventContext,
+        inputs,
+        expected_key,
+    ):
+        """Flow-author inputs named cancelled_turn override the default; latest wins."""
+        component = HumanInputComponent(
+            name="test_human_input",
+            sends_response_to="awesome_agent",
+            flow_id="test_flow",
+            flow_type=flow_type,
+            user=user,
+            message_template="Test message",
+            inputs=inputs,
+        )
+        graph = StateGraph(FlowState)
+        graph.add_node = Mock()
+        graph.add_edge = Mock()
+        graph.add_conditional_edges = Mock()
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.human_input.component.FetchNode"
+        ) as mock_fetch_node:
+            mock_fetch_node.return_value = Mock(name="test_human_input#fetch")
+            component.attach(graph, Mock())
+
+        assert mock_fetch_node.call_args[1]["cancelled_turn_key"] == expected_key
 
     def test_default_ui_log_events(self, user, flow_type: GLReportingEventContext):
         """Test that ui_log_events defaults to both ON_USER_INPUT_PROMPT and ON_USER_RESPONSE."""

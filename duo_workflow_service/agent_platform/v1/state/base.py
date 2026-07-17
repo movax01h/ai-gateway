@@ -309,12 +309,15 @@ class IOKey(BaseIOKey):
         return self.target
 
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
-        # self.target presence in state is validated in parse_valid_target
-        # thereby state[self.target] will always succeed
-        value = self.target if self.literal else self.value_from_state(state)
-        return {self.template_variable_name: value}
+        return {self.template_variable_name: self.value_from_state(state)}
 
     def value_from_state(self, state: FlowState) -> Any:
+        # A literal key's value is its text; it has no state location to read.
+        # This mirrors the treatment template_variable_from_state has always
+        # applied and defines the previously-unspecified direct-read contract.
+        if self.literal:
+            return self.target
+
         # self.target presence in state is validated in parse_valid_target
         # thereby state[self.target] will always succeed
         current = state[self.target]  # type: ignore[literal-required]
@@ -337,6 +340,12 @@ class IOKey(BaseIOKey):
         Returns:
             A nested dictionary with the structure matching target and subkeys
 
+        Raises:
+            ValueError: When the key is literal — literal keys carry static
+                text instead of a state location, so there is nothing to
+                write to (the result would fabricate a top-level state
+                channel named after the literal text).
+
         Examples:
             IOKey(target="context", subkeys=["project", "name"]).to_nested_dict("test")
             # Returns: {"context": {"project": {"name": "test"}}}
@@ -344,6 +353,12 @@ class IOKey(BaseIOKey):
             IOKey(target="status").to_nested_dict("active")
             # Returns: {"status": "active"}
         """
+        if self.literal:
+            raise ValueError(
+                "Literal IOKeys have no state location to write to; "
+                "to_nested_dict is not supported for literal keys."
+            )
+
         if self.subkeys:
             # Create nested structure: target -> subkeys -> value
             keys = [self.target] + self.subkeys

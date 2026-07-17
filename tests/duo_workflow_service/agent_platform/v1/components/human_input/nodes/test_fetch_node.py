@@ -16,7 +16,13 @@ from duo_workflow_service.agent_platform.v1.components.human_input.ui_log import
     UILogEventsHumanInput,
     user_log_writer_class,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys, IOKey
+from duo_workflow_service.agent_platform.v1.state import (
+    FlowState,
+    FlowStateKeys,
+    IOKey,
+    NoneIOKey,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.v1.state.base import FlowEventType
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
@@ -252,6 +258,365 @@ class TestFetchNode:
             with pytest.raises(NotifiableAgentException) as exc_info:
                 await fetch_node.run(sample_state)
             assert "unexpected event type was received" in exc_info.value.ui_message
+
+
+class TestFetchNodeCancelledTurn:
+    """Test suite for cancelled-turn context injection in FetchNode.
+
+    After a stop-recovery rollback, ``Flow`` stores the discarded ``ui_chat_log``
+    delta at ``context.inputs.cancelled_turn``. FetchNode prepends it to the
+    model-facing HumanMessage between ``<cancelled-turn>`` meta tags and clears
+    the location (consume-once). The UI log keeps the clean user message.
+    """
+
+    @pytest.fixture
+    def cancelled_turn_key(self):
+        return IOKey(
+            target="context",
+            subkeys=["inputs", "cancelled_turn"],
+            optional=True,
+        )
+
+    @pytest.fixture
+    def fetch_node(self, cancelled_turn_key):
+        """FetchNode wired with the cancelled_turn key (as HumanInputComponent does)."""
+        ui_history = UIHistory(
+            events=[UILogEventsHumanInput.ON_USER_RESPONSE],
+            writer_class=user_log_writer_class(component_name="test_component"),
+        )
+        return FetchNode(
+            name="test_component#fetch",
+            component_name="test_component",
+            output=IOKey(target="context", subkeys=["test_component", "approval"]),
+            conversation_history_key=IOKey(
+                target="conversation_history", subkeys=["target_agent"]
+            ),
+            ui_history=ui_history,
+            status_key=IOKey(target="status"),
+            cancelled_turn_key=cancelled_turn_key,
+        )
+
+    @pytest.fixture
+    def cancelled_entries(self):
+        return [
+            {"message_type": "user", "content": "Create an http server in java"},
+            {"message_type": "agent", "content": "I'll create the server in Java..."},
+            {"content": "entry without a message type"},
+        ]
+
+    @pytest.fixture
+    def state_with_cancelled_turn(self, cancelled_entries):
+        return {
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "conversation_history": {"target_agent": []},
+            "ui_chat_log": [],
+            "context": {"inputs": {"cancelled_turn": cancelled_entries}},
+        }
+
+    @staticmethod
+    def _patch_interrupt(event):
+        return patch(
+            "duo_workflow_service.agent_platform.v1.components.human_input.nodes.fetch_node.interrupt",
+            return_value=event,
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_event_injects_cancelled_turn_block(
+        self, fetch_node, state_with_cancelled_turn
+    ):
+        """RESPONSE event prepends the transcript in meta tags to the HumanMessage."""
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "actually create it in python",
+        }
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state_with_cancelled_turn)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert isinstance(message, HumanMessage)
+        assert message.content.startswith("<cancelled-turn>\n")
+        assert "USER: Create an http server in java" in message.content
+        assert "AGENT: I'll create the server in Java..." in message.content
+        assert "UNKNOWN: entry without a message type" in message.content
+        assert message.content.endswith(
+            "</cancelled-turn>\nactually create it in python"
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_event_clears_cancelled_turn_after_injection(
+        self, fetch_node, state_with_cancelled_turn
+    ):
+        """Consume-once: the state location is cleared alongside the injection."""
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "actually create it in python",
+        }
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state_with_cancelled_turn)
+
+        assert result["context"]["inputs"]["cancelled_turn"] is None
+
+    @pytest.mark.asyncio
+    async def test_response_event_ui_log_shows_clean_message(
+        self, fetch_node, state_with_cancelled_turn
+    ):
+        """The UI chat log shows the user's message without the meta-tag block."""
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "actually create it in python",
+        }
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state_with_cancelled_turn)
+
+        ui_logs = result[FlowStateKeys.UI_CHAT_LOG]
+        assert len(ui_logs) == 1
+        assert ui_logs[0]["content"] == "actually create it in python"
+
+    @pytest.mark.asyncio
+    async def test_modify_event_injects_cancelled_turn_block(
+        self, fetch_node, state_with_cancelled_turn
+    ):
+        """MODIFY events build a HumanMessage too, so they inject and clean up as well."""
+        event = {
+            "event_type": FlowEventType.MODIFY,
+            "message": "change of plans",
+        }
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state_with_cancelled_turn)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content.startswith("<cancelled-turn>\n")
+        assert message.content.endswith("</cancelled-turn>\nchange of plans")
+        assert result["context"]["inputs"]["cancelled_turn"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "context",
+        [
+            {},  # inputs path absent entirely (optional key resolves to None)
+            {"inputs": {}},  # inputs present, no cancelled_turn
+            {"inputs": {"cancelled_turn": []}},  # empty delta
+        ],
+    )
+    async def test_response_event_without_cancelled_turn_is_clean(
+        self, fetch_node, context
+    ):
+        """No cancelled-turn context -> clean message, no cleanup write."""
+        state = {
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "conversation_history": {"target_agent": []},
+            "ui_chat_log": [],
+            "context": context,
+        }
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "plain follow-up",
+        }
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content == "plain follow-up"
+        assert "context" not in result or "inputs" not in result.get("context", {})
+
+    @pytest.mark.asyncio
+    async def test_entries_without_content_are_skipped(self, fetch_node):
+        """Entries with empty content are dropped; all-empty deltas skip injection."""
+        state = {
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "conversation_history": {"target_agent": []},
+            "ui_chat_log": [],
+            "context": {
+                "inputs": {"cancelled_turn": [{"message_type": "user", "content": ""}]}
+            },
+        }
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "plain follow-up",
+        }
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content == "plain follow-up"
+        # No cleanup write when injection was skipped
+        assert "context" not in result or "inputs" not in result.get("context", {})
+
+    @pytest.mark.asyncio
+    async def test_reject_event_does_not_consume_cancelled_turn(
+        self, fetch_node, state_with_cancelled_turn
+    ):
+        """REJECT builds a canned message: no injection, and the context stays available.
+
+        Rejections cannot coexist with stop-recovery (approval pauses are not
+        stable rollback boundaries), so this pins the degenerate behaviour.
+        """
+        event = {"event_type": FlowEventType.REJECT}
+
+        with self._patch_interrupt(event):
+            result = await fetch_node.run(state_with_cancelled_turn)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert "<cancelled-turn>" not in message.content
+        assert "cancelled_turn" not in result["context"].get("inputs", {})
+
+    @pytest.mark.asyncio
+    async def test_runtime_iokey_cancelled_turn_key(self, state_with_cancelled_turn):
+        """A RuntimeIOKey resolves its location from state for both read and cleanup."""
+        ui_history = UIHistory(
+            events=[UILogEventsHumanInput.ON_USER_RESPONSE],
+            writer_class=user_log_writer_class(component_name="test_component"),
+        )
+        runtime_key = RuntimeIOKey(
+            alias="cancelled_turn",
+            factory=lambda _state: IOKey(
+                target="context",
+                subkeys=["inputs", "cancelled_turn"],
+                optional=True,
+            ),
+        )
+        node = FetchNode(
+            name="test_component#fetch",
+            component_name="test_component",
+            output=IOKey(target="context", subkeys=["test_component", "approval"]),
+            conversation_history_key=IOKey(
+                target="conversation_history", subkeys=["target_agent"]
+            ),
+            ui_history=ui_history,
+            status_key=IOKey(target="status"),
+            cancelled_turn_key=runtime_key,
+        )
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "actually create it in python",
+        }
+
+        with self._patch_interrupt(event):
+            result = await node.run(state_with_cancelled_turn)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content.startswith("<cancelled-turn>\n")
+        assert result["context"]["inputs"]["cancelled_turn"] is None
+
+    @pytest.mark.asyncio
+    async def test_literal_cancelled_turn_key_is_ignored(
+        self, state_with_cancelled_turn
+    ):
+        """A literal override resolves to its static text, not a ui_chat_log list.
+
+        The shape check therefore skips injection entirely (and cleanup with it, so the literal key is never written
+        back to).
+        """
+        ui_history = UIHistory(
+            events=[UILogEventsHumanInput.ON_USER_RESPONSE],
+            writer_class=user_log_writer_class(component_name="test_component"),
+        )
+        node = FetchNode(
+            name="test_component#fetch",
+            component_name="test_component",
+            output=IOKey(target="context", subkeys=["test_component", "approval"]),
+            conversation_history_key=IOKey(
+                target="conversation_history", subkeys=["target_agent"]
+            ),
+            ui_history=ui_history,
+            status_key=IOKey(target="status"),
+            cancelled_turn_key=IOKey(
+                target="some literal value", literal=True, alias="cancelled_turn"
+            ),
+        )
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "plain follow-up",
+        }
+
+        with self._patch_interrupt(event):
+            result = await node.run(state_with_cancelled_turn)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content == "plain follow-up"
+
+    @pytest.mark.asyncio
+    async def test_non_list_cancelled_turn_value_is_ignored(self):
+        """An override pointing at a non-list state value fails the shape check."""
+        ui_history = UIHistory(
+            events=[UILogEventsHumanInput.ON_USER_RESPONSE],
+            writer_class=user_log_writer_class(component_name="test_component"),
+        )
+        node = FetchNode(
+            name="test_component#fetch",
+            component_name="test_component",
+            output=IOKey(target="context", subkeys=["test_component", "approval"]),
+            conversation_history_key=IOKey(
+                target="conversation_history", subkeys=["target_agent"]
+            ),
+            ui_history=ui_history,
+            status_key=IOKey(target="status"),
+            cancelled_turn_key=IOKey(
+                target="context", subkeys=["goal"], alias="cancelled_turn"
+            ),
+        )
+        state = {
+            "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "conversation_history": {"target_agent": []},
+            "ui_chat_log": [],
+            "context": {"goal": "a plain string, not a ui_chat_log delta"},
+        }
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "plain follow-up",
+        }
+
+        with self._patch_interrupt(event):
+            result = await node.run(state)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content == "plain follow-up"
+
+    def test_cleanup_without_backing_location_is_noop(self, fetch_node):
+        """Keys without a backing state location produce no cleanup write.
+
+        Pins the ``_cancelled_turn_cleanup`` guard for key types that cannot be
+        written back to (e.g. ``NoneIOKey``); ``run`` never reaches cleanup for
+        such keys because no value can be read from them in the first place.
+        """
+        fetch_node._cancelled_turn_key = NoneIOKey(alias="cancelled_turn")
+        assert fetch_node._cancelled_turn_cleanup({}) == {}
+
+    @pytest.mark.asyncio
+    async def test_default_none_iokey_ignores_cancelled_turn_state(
+        self, state_with_cancelled_turn
+    ):
+        """A FetchNode built without cancelled_turn_key (backwards compat) never injects."""
+        ui_history = UIHistory(
+            events=[UILogEventsHumanInput.ON_USER_RESPONSE],
+            writer_class=user_log_writer_class(component_name="test_component"),
+        )
+        node = FetchNode(
+            name="test_component#fetch",
+            component_name="test_component",
+            output=IOKey(target="context", subkeys=["test_component", "approval"]),
+            conversation_history_key=IOKey(
+                target="conversation_history", subkeys=["target_agent"]
+            ),
+            ui_history=ui_history,
+            status_key=IOKey(target="status"),
+        )
+        event = {
+            "event_type": FlowEventType.RESPONSE,
+            "message": "plain follow-up",
+        }
+
+        with self._patch_interrupt(event):
+            result = await node.run(state_with_cancelled_turn)
+
+        message = result[FlowStateKeys.CONVERSATION_HISTORY]["target_agent"][0]
+        assert message.content == "plain follow-up"
 
 
 def _build_resume_integration_graph():
