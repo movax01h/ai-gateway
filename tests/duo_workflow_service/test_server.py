@@ -3349,6 +3349,17 @@ async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
             None,  # non-empty fallback; checked separately below
             id="invalid_json_falls_back_to_non_empty_string",
         ),
+        pytest.param(
+            (
+                "litellm.BadRequestError: BedrockException - "
+                '{"message":"1 validation error detected: Value at '
+                "'messages.2.member.content.1.member.toolUse.name' failed to satisfy "
+                "constraint: Member must satisfy regular expression pattern: "
+                '[a-zA-Z0-9_-]+"}'
+            ),
+            "BedrockException",
+            id="bedrock_validation_error_collapses_to_stable_label",
+        ),
     ],
 )
 def test_extract_error_message_litellm_bad_request(message, expected):

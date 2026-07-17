@@ -175,16 +175,27 @@ def _extract_error_message(error: BaseException) -> str:
     """
     if isinstance(error, LiteLLMBadRequestError):
         raw = (error.message or "").removeprefix("litellm.BadRequestError: ")
-        # Find the JSON bytes repr anywhere in the string, e.g.:
-        # "Vertex_aiException BadRequestError - b'{...}'"
-        match = re.search(r"b'(\{.*\})'|b\"(\{.*\})\"", raw)
-        if match:
-            raw = match.group(1) or match.group(2)
-        try:
-            body = json.loads(raw)
-            message = body.get("error", {}).get("message") or raw
-        except (json.JSONDecodeError, AttributeError):
-            message = raw or str(error)
+        # Bedrock validation errors embed a per-request, position-dependent payload,
+        # e.g. "BedrockException - {\"message\":\"1 validation error detected: Value at
+        # 'messages.2.member.content.1.member.toolUse.name' ...\"}".  The embedded
+        # message/index varies per request and fragments SLO grouping, so strip the
+        # "BedrockException - {...}" payload and keep only the stable "BedrockException"
+        # label.  Match anywhere (not anchored) because LiteLLM may leave one or more
+        # "litellm.BadRequestError: " wrappers in front.  For non-Bedrock errors the
+        # regex won't match and we fall through.
+        if re.search(r"BedrockException - \{.*\}", raw, flags=re.DOTALL):
+            message = "BedrockException"
+        else:
+            # Find the JSON bytes repr anywhere in the string, e.g.:
+            # "Vertex_aiException BadRequestError - b'{...}'"
+            match = re.search(r"b'(\{.*\})'|b\"(\{.*\})\"", raw)
+            if match:
+                raw = match.group(1) or match.group(2)
+            try:
+                body = json.loads(raw)
+                message = body.get("error", {}).get("message") or raw
+            except (json.JSONDecodeError, AttributeError):
+                message = raw or str(error)
     elif isinstance(error, LiteLLMAPIConnectionError):
         # Strip the variable BedrockException payload so that per-request ARN/action/resource
         # values don't fragment SLO grouping.  str(error) looks like:
