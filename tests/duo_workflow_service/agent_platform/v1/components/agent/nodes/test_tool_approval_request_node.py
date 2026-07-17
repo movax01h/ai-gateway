@@ -125,7 +125,7 @@ class TestToolApprovalRequestNodeValidCalls:
             assert ui_log["content"] == "Execute test_tool with param=value"
             assert ui_log["status"] == ToolStatus.SUCCESS
             assert ui_log["tool_info"]["name"] == "test_tool"
-            assert ui_log["message_id"] == "request-call_123"
+            assert ui_log["message_id"] == "call_123"
 
             # Should set status to TOOL_CALL_APPROVAL_REQUIRED (nested dict)
             assert "status" in result
@@ -161,8 +161,8 @@ class TestToolApprovalRequestNodeValidCalls:
 
             # Should have 2 UI logs
             assert len(result["ui_chat_log"]) == 2
-            assert result["ui_chat_log"][0]["message_id"] == "request-call_1"
-            assert result["ui_chat_log"][1]["message_id"] == "request-call_2"
+            assert result["ui_chat_log"][0]["message_id"] == "call_1"
+            assert result["ui_chat_log"][1]["message_id"] == "call_2"
 
     @pytest.mark.asyncio
     async def test_tool_with_none_display_message_skipped(
@@ -193,7 +193,7 @@ class TestToolApprovalRequestNodeValidCalls:
 
             # Should only have 1 UI log (second one)
             assert len(result["ui_chat_log"]) == 1
-            assert result["ui_chat_log"][0]["message_id"] == "request-call_2"
+            assert result["ui_chat_log"][0]["message_id"] == "call_2"
 
 
 class TestToolApprovalRequestNodeInvalidCalls:

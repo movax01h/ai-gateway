@@ -1071,7 +1071,7 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
     assert result["ui_chat_log"][0]["content"] == "I'll create the file for you"
     assert result["ui_chat_log"][0]["message_id"] == "ai-msg-approval-test"
     assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
-    assert result["ui_chat_log"][1]["message_id"] == "request-toolu_approval_id"
+    assert result["ui_chat_log"][1]["message_id"] == "toolu_approval_id"
     assert "requires approval" in result["ui_chat_log"][1]["content"]
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
 
@@ -1512,7 +1512,7 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     assert result["ui_chat_log"][0]["message_id"] == "ai-msg-approval-required"
     assert "requires approval" in result["ui_chat_log"][1]["content"]
     assert result["ui_chat_log"][1]["message_type"] == MessageTypeEnum.REQUEST
-    assert result["ui_chat_log"][1]["message_id"] == "request-toolu_approval_id"
+    assert result["ui_chat_log"][1]["message_id"] == "toolu_approval_id"
     assert result["ui_chat_log"][1]["tool_info"]["name"] == "create_file_with_contents"
     assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
 
