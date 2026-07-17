@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
@@ -38,7 +39,17 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
 
     continuation = AsyncMock(return_value="mocked_response")
 
+    fake_model_keys = MagicMock()
+    fake_model_keys.model_dump.return_value = {"fireworks_provider_api_key": "fw"}
+    fake_config = MagicMock()
+    fake_config.model_keys = fake_model_keys
+    fake_config.fireworks_api_base_url = "https://fw"
+
     with (
+        patch(
+            "duo_workflow_service.interceptors.model_metadata_interceptor.get_config",
+            return_value=fake_config,
+        ),
         patch(
             "duo_workflow_service.interceptors.model_metadata_interceptor.create_model_metadata_by_tag"
         ) as mock_create,
@@ -54,11 +65,15 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
 
         result = await interceptor.intercept_service(continuation, handler_call_details)
 
+        # provider_keys/fireworks_api_base_url are backfilled from server config since
+        # this payload didn't supply its own (see the "provider stickiness" fix).
         mock_create.assert_called_once_with(
             {
                 "model": "claude-3-5-sonnet-20240620",
                 "version": "1.0",
                 "provider": "anthropic",
+                "provider_keys": {"fireworks_provider_api_key": "fw"},
+                "fireworks_api_base_url": "https://fw",
             }
         )
         mock_context.set.assert_called_once_with(mock_metadata_by_size.default)
@@ -227,7 +242,11 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
             fireworks_api_base_url="https://fw",
             user=mock_user,
         )
-        mock_build_by_tag.assert_called_once_with("duo_agent_platform_agentic_chat")
+        mock_build_by_tag.assert_called_once_with(
+            "duo_agent_platform_agentic_chat",
+            provider_keys={"fireworks_provider_api_key": "fw"},
+            fireworks_api_base_url="https://fw",
+        )
         mock_by_size_cls.assert_called_once_with(
             default=fake_default, by_tag=fake_by_tag
         )
@@ -265,3 +284,82 @@ async def test_gitlab_provider_without_identifier_or_feature_setting_falls_throu
 
         mock_build.assert_not_called()
         mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stickiness_replay_of_fireworks_model_still_gets_a_working_key(mock_user):
+    """Regression test for provider-stickiness replay.
+
+    GitLab Rails echoes back a previously checkpointed model_metadata blob verbatim on
+    workflow resume. That blob has `provider: "fireworks_ai"` directly (not
+    `provider: "gitlab"` + identifier) and, per the checkpoint fix, carries no `api_key`/
+    `provider_keys` at all. Without the backfill, this would resolve to a
+    FireworksModelMetadata with no API key and fail Fireworks auth with a 401 on every
+    resumed turn. The interceptor must backfill provider_keys/fireworks_api_base_url from
+    server config so the replayed model still authenticates.
+    """
+    current_user.set(mock_user)
+    interceptor = ModelMetadataInterceptor()
+
+    # Shape of a real checkpoint replay: no provider_keys, no api_key, no endpoint —
+    # exactly what a FireworksModelMetadata serializes to after excluding api_key.
+    handler_call_details = MagicMock()
+    handler_call_details.invocation_metadata = [
+        (
+            "x-gitlab-agent-platform-model-metadata",
+            json.dumps(
+                {
+                    "provider": "fireworks_ai",
+                    "name": "kimi_k2_6_fireworks",
+                    "model_identifier": "accounts/gitlab/deployments/z6hbhxrt",
+                }
+            ),
+        ),
+    ]
+
+    continuation = AsyncMock(return_value="ok")
+
+    fireworks_def = ChatLiteLLMDefinition(
+        gitlab_identifier="kimi_k2_6_fireworks",
+        name="Kimi K2.6 - Fireworks",
+        max_context_tokens=256000,
+        family=["kimi"],
+        params={
+            "model": "accounts/gitlab/deployments/z6hbhxrt",
+            "custom_llm_provider": "fireworks_ai",
+        },
+    )
+
+    fake_model_keys = MagicMock()
+    fake_model_keys.model_dump.return_value = {"fireworks_provider_api_key": "fw"}
+    fake_config = MagicMock()
+    fake_config.model_keys = fake_model_keys
+    fake_config.fireworks_api_base_url = "https://api.fireworks.ai/inference/v1"
+
+    with (
+        patch(
+            "duo_workflow_service.interceptors.model_metadata_interceptor.get_config",
+            return_value=fake_config,
+        ),
+        patch(
+            "ai_gateway.model_selection.ModelSelectionConfig.instance"
+        ) as mock_instance,
+        patch(
+            "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_context"
+        ) as mock_context,
+        patch(
+            "duo_workflow_service.interceptors.model_metadata_interceptor.current_model_metadata_with_size_context"
+        ),
+    ):
+        mock_instance.return_value.get_model.return_value = fireworks_def
+
+        result = await interceptor.intercept_service(continuation, handler_call_details)
+
+        resolved = mock_context.set.call_args[0][0]
+        assert resolved.provider == "fireworks_ai"
+        assert resolved.to_params()["api_key"] == "fw"
+        assert (
+            resolved.to_params()["api_base"] == "https://api.fireworks.ai/inference/v1"
+        )
+        continuation.assert_called_once_with(handler_call_details)
+        assert result == "ok"

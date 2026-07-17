@@ -165,15 +165,23 @@ ModelMetadataBySize = ModelMetadataByTag
 
 
 def build_model_metadata_by_tag(
-    feature_setting: str | None, mock_model_responses: bool = False
+    feature_setting: str | None,
+    mock_model_responses: bool = False,
+    provider_keys: Optional[Dict[str, Any]] = None,
+    fireworks_api_base_url: str = "",
 ) -> Dict[str, TypeModelMetadata]:
-    """Build the tag -> ModelMetadata map for a feature setting from its ``models_for_tags`` config.
+    """Build the tag -> ModelMetadata map for a feature setting from its `models_for_tags` config.
 
-    Returns an empty dict when ``feature_setting`` is ``None`` or has no ``models_for_tags`` entry,
-    in which case tag lookups fall back to the ``default`` model.
+    Returns an empty dict when `feature_setting` is `None` or has no `models_for_tags` entry,
+    in which case tag lookups fall back to the `default` model.
+
+    Each tag's model is resolved through `_resolve_provider_aware_metadata` - the same
+    provider-detection logic used for the default model - so a tag pointing at a Fireworks- or
+    Mistral-backed model gets its API key wired in instead of silently being treated as a
+    gitlab-provider model.
 
     A tag whose configured model cannot be resolved is skipped (and logged) rather than raising, so
-    one bad ``models_for_tags`` entry can never drop the whole model-metadata context — callers still
+    one bad `models_for_tags` entry can never drop the whole model-metadata context - callers still
     get the default and every other resolvable tag.
     """
     by_tag: Dict[str, TypeModelMetadata] = {}
@@ -184,9 +192,14 @@ def build_model_metadata_by_tag(
     unit_primitive_config = configs.get_unit_primitive_config_map().get(feature_setting)
     if unit_primitive_config:
         for tag, model_id in unit_primitive_config.models_for_tags.items():
-            tag_data: Dict[str, Any] = {"provider": "gitlab", "name": model_id}
             try:
-                by_tag[tag] = create_model_metadata(tag_data, mock_model_responses)
+                llm_def = configs.get_model(model_id)
+                by_tag[tag] = _resolve_provider_aware_metadata(
+                    llm_def,
+                    provider_keys=provider_keys or {},
+                    fireworks_api_base_url=fireworks_api_base_url,
+                    mock_model_responses=mock_model_responses,
+                )
             except ValueError as err:
                 log.warning(
                     "Skipping unresolvable model tag",
@@ -210,12 +223,19 @@ def create_model_metadata_by_tag(
     if not data or "provider" not in data:
         raise ValueError("Argument error: provider must be present.")
 
-    # Read feature_setting before create_model_metadata pops it from data
+    # Read these before create_model_metadata pops feature_setting from data.
     feature_setting = data.get("feature_setting")
+    provider_keys = data.get("provider_keys")
+    fireworks_api_base_url = data.get("fireworks_api_base_url", "")
 
     default_metadata = create_model_metadata(data, mock_model_responses)
 
-    by_tag = build_model_metadata_by_tag(feature_setting, mock_model_responses)
+    by_tag = build_model_metadata_by_tag(
+        feature_setting,
+        mock_model_responses,
+        provider_keys=provider_keys,
+        fireworks_api_base_url=fireworks_api_base_url,
+    )
 
     return ModelMetadataByTag(default=default_metadata, by_tag=by_tag)
 
@@ -316,6 +336,48 @@ def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
     )
 
 
+def _resolve_provider_aware_metadata(
+    llm_def: LLMDefinition,
+    provider_keys: Dict[str, Any],
+    fireworks_api_base_url: str,
+    mock_model_responses: bool = False,
+    session_id: Optional[str] = None,
+) -> TypeModelMetadata:
+    """Build metadata for an already-resolved LLM definition, dispatching by its actual provider.
+
+    Shared by every caller that resolves a model server-side (default model or a ``model_tags``
+    entry) so Fireworks-/Mistral-backed models always get their provider key injected, instead of
+    each caller re-implementing (and potentially forgetting) the same provider check.
+    """
+    custom_llm_provider = getattr(llm_def.params, "custom_llm_provider", None)
+
+    if custom_llm_provider == "fireworks_ai":
+        return _create_fireworks_metadata(
+            {
+                "name": llm_def.gitlab_identifier,
+                "fireworks_api_base_url": fireworks_api_base_url,
+                "provider_keys": provider_keys,
+                "session_id": session_id,
+            },
+            mock_model_responses,
+        )
+
+    if custom_llm_provider == "mistral":
+        return _create_mistral_metadata(
+            {
+                "name": llm_def.gitlab_identifier,
+                "provider_keys": provider_keys,
+            }
+        )
+
+    return ModelMetadata(
+        llm_definition=llm_def,
+        friendly_name=llm_def.name,
+        provider="gitlab",
+        name=llm_def.gitlab_identifier,
+    )
+
+
 def create_model_metadata(
     data: dict[str, Any] | None, mock_model_responses: bool = False
 ) -> TypeModelMetadata:
@@ -408,34 +470,13 @@ def build_default_feature_setting_metadata(
     else:
         raise ValueError("Either identifier or feature_setting must be provided.")
 
-    custom_llm_provider = getattr(llm_def.params, "custom_llm_provider", None)
-
-    if custom_llm_provider == "fireworks_ai":
-        return _create_fireworks_metadata(
-            {
-                "name": llm_def.gitlab_identifier,
-                "fireworks_api_base_url": fireworks_api_base_url,
-                "provider_keys": model_keys,
-                "session_id": user.global_user_id if user else None,
-            },
-            mock_model_responses,
-        )
-
-    if custom_llm_provider == "mistral":
-        return _create_mistral_metadata(
-            {
-                "name": llm_def.gitlab_identifier,
-                "provider_keys": model_keys,
-            }
-        )
-
-    # Non-Fireworks/Mistral: preserve original resolution semantics.
-    gitlab_payload: dict[str, Any] = {"provider": "gitlab"}
-    if identifier:
-        gitlab_payload["identifier"] = identifier
-    else:
-        gitlab_payload["feature_setting"] = feature_setting
-    return _create_gitlab_metadata(gitlab_payload)
+    return _resolve_provider_aware_metadata(
+        llm_def,
+        provider_keys=model_keys,
+        fireworks_api_base_url=fireworks_api_base_url,
+        mock_model_responses=mock_model_responses,
+        session_id=user.global_user_id if user else None,
+    )
 
 
 _COMPLETION_CONTEXT_CAPPED_PROVIDERS = frozenset({"fireworks_ai", "vertex_ai"})
