@@ -45,6 +45,7 @@ components:
         optional: True
     toolset:
       - "read_file"
+      - "read_files"
       - "find_files"
       - "list_dir"
       - "grep"
