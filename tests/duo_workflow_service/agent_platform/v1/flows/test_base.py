@@ -29,9 +29,13 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfigInput,
     FlowConfigMetadata,
 )
+from duo_workflow_service.agent_platform.v1.flows.inputs import CANCELLED_TURN_CATEGORY
 from duo_workflow_service.agent_platform.v1.routers.router import Router
 from duo_workflow_service.agent_platform.v1.state.base import FlowEventType
-from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
+from duo_workflow_service.checkpointer.gitlab_workflow import (
+    GitLabWorkflow,
+    WorkflowStatusEventEnum,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -129,7 +133,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
     @pytest.fixture(name="mock_checkpointer")
     def mock_checkpointer_fixture(self):
-        mock_checkpointer = Mock()
+        mock_checkpointer = Mock(spec=GitLabWorkflow)
         mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.START
         mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
         mock_gitlab_workflow = AsyncMock()
@@ -2254,6 +2258,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             (RESUME), ``dict`` for any other boundary or no boundary (START).
         - ``config["configurable"]["checkpoint_id"]`` is pinned to the boundary checkpoint
             when one is found, and absent when no boundary exists.
+        - ``cancelled_turn_context`` is called with the decoded tip and boundary checkpoints,
+            and its return value is forwarded into ``context.inputs[_CANCELLED_TURN_CATEGORY]``.
         """
         goal = "test goal"
         mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
@@ -2273,8 +2279,15 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     yield ct
 
         mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+        fake_cancelled_turn = [
+            {"message_type": MessageTypeEnum.USER, "content": "do it"}
+        ]
 
-        await flow_instance.run(goal)
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=fake_cancelled_turn,
+        ) as mock_cancelled_turn_context:
+            await flow_instance.run(goal)
 
         call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
         graph_input = call_kwargs.get("input")
@@ -2286,6 +2299,18 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         else:
             assert graph_config["configurable"]["checkpoint_id"] == expected_boundary_id
 
+        # cancelled_turn_context is called once and its return value is forwarded
+        # into context.inputs — the content of latest/boundary args is the
+        # responsibility of _decode_tip_checkpoint and cancelled_turn_context
+        # themselves, tested in test_inputs.py.
+        mock_cancelled_turn_context.assert_called_once()
+        if isinstance(graph_input, Command):
+            assert graph_input.update is not None
+            inputs = graph_input.update["context"]["inputs"]
+        else:
+            inputs = graph_input["context"]["inputs"]
+        assert inputs[CANCELLED_TURN_CATEGORY] == fake_cancelled_turn
+
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
     async def test_flow_resolve_stop_recovery_without_checkpoints_reversed(
@@ -2294,15 +2319,26 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_checkpointer,
         mock_state_graph,
     ):
-        """When the checkpointer has no ``checkpoints_reversed`` (e.g. offline MemorySaver mode), _resolve_stop_recovery
-        falls back to RETRY so the run continues from the latest checkpoint without attempting the boundary walk."""
+        """When the checkpointer is not a GitLabWorkflow (e.g. offline MemorySaver mode), _resolve_stop_recovery falls
+        back to RETRY so the run continues from the latest checkpoint without attempting the boundary walk."""
         goal = "test goal"
         mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
-        # Ensure the mock has no checkpoints_reversed attribute, simulating offline mode.
-        if hasattr(mock_checkpointer, "checkpoints_reversed"):
-            del mock_checkpointer.checkpoints_reversed
-
-        await flow_instance.run(goal)
+        # Swap in a plain Mock (no GitLabWorkflow spec) to simulate a non-GitLabWorkflow checkpointer.
+        non_gitlab_checkpointer = Mock()
+        non_gitlab_checkpointer.initial_status_event = (
+            WorkflowStatusEventEnum.STOP_RECOVERY
+        )
+        non_gitlab_checkpointer.aget_tuple = AsyncMock(return_value=None)
+        mock_gitlab_workflow = AsyncMock()
+        mock_gitlab_workflow.__aenter__ = AsyncMock(
+            return_value=non_gitlab_checkpointer
+        )
+        mock_gitlab_workflow.__aexit__ = AsyncMock(return_value=None)
+        with patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow",
+            return_value=mock_gitlab_workflow,
+        ):
+            await flow_instance.run(goal)
 
         call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
         graph_input = call_kwargs.get("input")
@@ -2349,6 +2385,70 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "test goal", WorkflowStatusEventEnum.STOP_RECOVERY, checkpoint_tuple
         )
         assert stop_recovery_input is None
+
+    @pytest.mark.asyncio
+    async def test_flow_resolve_stop_recovery_decode_failure_degrades_gracefully(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+        mock_fetch_workflow_and_container_data,
+    ):
+        """When decode_graphql_checkpoint raises, _decode_tip_checkpoint logs a warning and the run continues without a
+        cancelled_turn envelope — no crash, no silent data loss."""
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        boundary_tuple = self._checkpoint_tuple_with_status(
+            "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
+        )
+
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+            if matches(boundary_tuple.checkpoint.get("channel_values", {})):
+                yield boundary_tuple
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+        mock_checkpointer.decode_graphql_checkpoint = Mock(
+            side_effect=RuntimeError("simulated decode failure")
+        )
+        # Inject a truthy latest_checkpoint so _decode_tip_checkpoint reaches the decode call.
+        project, namespace, workflow_config = (
+            mock_fetch_workflow_and_container_data.return_value
+        )
+        mock_fetch_workflow_and_container_data.return_value = (
+            project,
+            namespace,
+            {**workflow_config, "latest_checkpoint": {"raw": "sentinel"}},
+        )
+
+        with capture_logs() as cap_logs:
+            await flow_instance.run("test goal")
+
+        warning_events = [
+            log
+            for log in cap_logs
+            if log.get("log_level") == "warning"
+            and "cancelled_turn" in log.get("event", "")
+        ]
+        assert warning_events, "Expected a warning about decode failure"
+
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        graph_input = call_kwargs.get("input")
+        # Boundary was INPUT_REQUIRED → RESUME → Command; run completed despite decode failure.
+        assert isinstance(graph_input, Command)
+        assert CANCELLED_TURN_CATEGORY not in (graph_input.update or {}).get(
+            "context", {}
+        ).get("inputs", {})
+
+    def test_decode_tip_checkpoint_returns_none_for_non_gitlab_workflow_checkpointer(
+        self,
+        flow_instance: Flow,
+    ):
+        """_decode_tip_checkpoint returns None without attempting a decode when the checkpointer is not a GitLabWorkflow
+        (e.g. a MemorySaver used in offline mode)."""
+        non_gitlab_checkpointer = Mock()
+
+        result = flow_instance._decode_tip_checkpoint(non_gitlab_checkpointer)
+
+        assert result is None
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
