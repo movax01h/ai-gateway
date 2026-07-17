@@ -43,6 +43,9 @@ components:
       - from: "context:inputs.plan_context.plan_enabled"
         as: "plan_enabled"
         optional: True
+      - from: "context:inputs.cancelled_turn"
+        as: "cancelled_turn"
+        optional: True
     toolset:
       - "read_file"
       - "read_files"
@@ -139,4 +142,12 @@ prompts:
           {%- endif %}
         {%- endblock %}
       user: |
+        {%- if cancelled_turn -%}
+        <cancelled-turn>
+        The user stopped the previous turn before it completed. The following exchange was discarded by the rollback and is provided for reference only:
+        {% for entry in cancelled_turn if entry.content -%}
+        {{ entry.message_type | upper }}: {{ entry.content }}
+        {% endfor -%}
+        </cancelled-turn>
+        {% endif -%}
         {{ goal }}

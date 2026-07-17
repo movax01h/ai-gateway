@@ -2220,7 +2220,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     ("cp-1", WorkflowStatusEnum.EXECUTION),
                     ("cp-0", WorkflowStatusEnum.PLANNING),
                 ],
-                None,
+                "cp-0",
                 dict,
             ),
             (
@@ -2231,11 +2231,32 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "cp-0",
                 dict,
             ),
+            (
+                # First-turn stop: components never wrote EXECUTION, so every
+                # checkpoint still carries NOT_STARTED. The walk must fall
+                # through to the OLDEST checkpoint (session start), not stop at
+                # the newest mid-turn one.
+                [
+                    ("cp-2", WorkflowStatusEnum.NOT_STARTED),
+                    ("cp-1", WorkflowStatusEnum.NOT_STARTED),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-0",
+                dict,
+            ),
+            (
+                # Empty chain: no checkpoints at all → no boundary to pin.
+                [],
+                None,
+                dict,
+            ),
         ],
         ids=[
             "input_required_boundary_resolves_to_resume",
-            "no_boundary_resolves_to_start",
-            "not_started_boundary_resolves_to_start",
+            "no_pause_falls_back_to_oldest_checkpoint",
+            "not_started_chain_resolves_to_session_start",
+            "mid_turn_not_started_does_not_short_circuit",
+            "empty_chain_resolves_to_start_without_pinning",
         ],
     )
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
@@ -2255,11 +2276,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         ``config`` kwargs forwarded to the compiled graph's ``astream`` call:
 
         - ``input`` reflects the resolved event: ``Command`` for an INPUT_REQUIRED boundary
-            (RESUME), ``dict`` for any other boundary or no boundary (START).
-        - ``config["configurable"]["checkpoint_id"]`` is pinned to the boundary checkpoint
-            when one is found, and absent when no boundary exists.
-        - ``cancelled_turn_context`` is called with the decoded tip and boundary checkpoints,
-            and its return value is forwarded into ``context.inputs[_CANCELLED_TURN_CATEGORY]``.
+            (RESUME), ``dict`` otherwise (START).
+        - ``config["configurable"]["checkpoint_id"]`` is pinned to the boundary checkpoint —
+            the newest INPUT_REQUIRED pause, or the oldest checkpoint (session start) when no
+            pause exists — and absent only when the chain is empty.
+        - ``cancelled_turn_context`` receives the boundary as the delta baseline on RESUME,
+            and an empty baseline (``None``) on START — the whole visible exchange, including
+            the cancelled instruction in the session-start checkpoint, is the cancelled turn.
+            Its return value is forwarded into ``context.inputs[_CANCELLED_TURN_CATEGORY]``.
         """
         goal = "test goal"
         mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
@@ -2300,10 +2324,22 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert graph_config["configurable"]["checkpoint_id"] == expected_boundary_id
 
         # cancelled_turn_context is called once and its return value is forwarded
-        # into context.inputs — the content of latest/boundary args is the
-        # responsibility of _decode_tip_checkpoint and cancelled_turn_context
-        # themselves, tested in test_inputs.py.
+        # into context.inputs — the content of the latest arg is the
+        # responsibility of _decode_tip_checkpoint, tested separately. The
+        # boundary arg (delta baseline) is this method's decision: the boundary
+        # checkpoint on RESUME, an empty baseline on START (rollback anchor and
+        # delta baseline are two different questions).
         mock_cancelled_turn_context.assert_called_once()
+        delta_boundary = mock_cancelled_turn_context.call_args.kwargs["boundary"]
+        if expected_input_type is Command:
+            assert delta_boundary is not None
+            assert (
+                delta_boundary.config["configurable"]["checkpoint_id"]
+                == expected_boundary_id
+            )
+        else:
+            assert delta_boundary is None
+
         if isinstance(graph_input, Command):
             assert graph_input.update is not None
             inputs = graph_input.update["context"]["inputs"]

@@ -82,12 +82,6 @@ _EXECUTOR_CONTEXT = [
     "user_rule",
 ]
 
-# Checkpoint statuses that represent a stable conversational boundary a stopped
-# flow can safely be rolled back to (see Flow._resolve_stop_recovery).
-_STABLE_BOUNDARY_STATUSES = frozenset(
-    {WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.NOT_STARTED}
-)
-
 
 class UserDecision(StrEnum):
     APPROVE = "approval"
@@ -537,13 +531,19 @@ class Flow(AbstractWorkflow):
         """Walk the checkpoint chain backwards to the nearest stable boundary and resolve what kind of resume this stop-
         recovery actually is.
 
-        Returns the boundary CheckpointTuple (or None if no boundary checkpoint exists anywhere in the chain — the
-        flow was stopped before its first pause point) alongside the WorkflowStatusEventEnum it resolves to: RESUME
-        when the boundary is an ``interrupt()`` pause (INPUT_REQUIRED), START otherwise — the stopped session's work
-        is discarded and the goal starts a fresh chain.
+        The walk looks for the newest ``interrupt()`` pause (INPUT_REQUIRED) and resolves to RESUME at that
+        checkpoint. When no pause exists anywhere in the chain, the boundary falls back to the **oldest**
+        checkpoint — the session start — and resolves to START: the stopped session's work is discarded and the
+        goal starts a fresh chain from there. Checkpoint statuses other than INPUT_REQUIRED are deliberately not
+        trusted as boundary markers: components do not consistently write EXECUTION while working, so every
+        checkpoint of a first turn still carries NOT_STARTED and a status-based match would stop at the newest
+        mid-turn checkpoint instead of the session start.
 
-        Also collects the ``ui_chat_log`` delta between the pre-rollback tip and the boundary checkpoint and stores it
-        on ``self._discarded_ui_chat_log`` so that ``get_graph_input`` can surface it as a ``cancelled_turn`` context
+        Returns the boundary CheckpointTuple (or None when the chain is empty) alongside the resolved
+        WorkflowStatusEventEnum.
+
+        Also collects the ``ui_chat_log`` delta between the pre-rollback tip and the boundary and stores it on
+        ``self._discarded_ui_chat_log`` so that ``get_graph_input`` can surface it as a ``cancelled_turn`` context
         envelope for the model.  The delta is the human-visible transcript of exactly what was cancelled — the
         antecedent for references like "it" in the user's follow-up message.
         """
@@ -554,30 +554,43 @@ class Flow(AbstractWorkflow):
         if not isinstance(checkpointer, GitLabWorkflow):
             return None, WorkflowStatusEventEnum.RETRY
 
-        boundary = None
-        async for candidate in checkpointer.checkpoints_reversed(
-            matches=lambda cv: cv.get("status") in _STABLE_BOUNDARY_STATUSES
-        ):
-            boundary = candidate
-            break
+        boundary: Optional[CheckpointTuple] = None
+        oldest: Optional[CheckpointTuple] = None
+        async for candidate in checkpointer.checkpoints_reversed():
+            status = candidate.checkpoint.get("channel_values", {}).get("status")
+            if status == WorkflowStatusEnum.INPUT_REQUIRED:
+                boundary = candidate
+                break
+            # Track the last checkpoint yielded: when the walk exhausts the
+            # chain without finding a pause, this is the oldest checkpoint —
+            # the session start. The full iteration only happens for chains
+            # without a single pause, i.e. first-turn stops, which are short.
+            oldest = candidate
+
+        resolved_event = (
+            WorkflowStatusEventEnum.RESUME
+            if boundary is not None
+            else WorkflowStatusEventEnum.START
+        )
+        if boundary is None:
+            boundary = oldest
 
         tip_tuple = self._decode_tip_checkpoint(checkpointer)
+        # Rollback anchor and delta baseline are two different questions: in
+        # the START resolution the whole visible exchange is the cancelled turn
+        # — including the cancelled instruction itself, which lives in the
+        # session-start checkpoint's ui_chat_log (the chat-env USER goal
+        # entry). Feeding that checkpoint as the delta baseline would exclude
+        # the instruction from the envelope, so the baseline is empty instead.
+        delta_boundary = (
+            boundary if resolved_event == WorkflowStatusEventEnum.RESUME else None
+        )
         self._discarded_ui_chat_log = cancelled_turn_context(
             latest=tip_tuple,
-            boundary=boundary,
+            boundary=delta_boundary,
             log=self.log,
         )
 
-        boundary_status = (
-            boundary.checkpoint["channel_values"]["status"]
-            if boundary
-            else WorkflowStatusEnum.NOT_STARTED
-        )
-        resolved_event = (
-            WorkflowStatusEventEnum.RESUME
-            if boundary_status == WorkflowStatusEnum.INPUT_REQUIRED
-            else WorkflowStatusEventEnum.START
-        )
         return boundary, resolved_event
 
     @override
