@@ -255,6 +255,7 @@ components:
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
         optional: True
+    max_cycles: 25
     toolset:
       - create_file_with_contents
       - edit_file
