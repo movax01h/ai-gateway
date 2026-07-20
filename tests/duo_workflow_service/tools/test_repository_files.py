@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+import asyncio
 import base64
 import json
 from unittest.mock import AsyncMock
@@ -12,8 +13,10 @@ from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.repository_files import (
     GetRepositoryFile,
+    GetRepositoryFiles,
     ListRepositoryTree,
     RepositoryFileResourceInput,
+    RepositoryFilesResourceInput,
     RepositoryTreeResourceInput,
 )
 
@@ -1508,3 +1511,826 @@ class TestListRepositoryTreeWithExclusion:
 
         # All files should be included when no project
         assert response["tree"] == mock_content
+
+
+# ---------------------------------------------------------------------------
+# GetRepositoryFiles tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(name="bulk_tool")
+def bulk_tool_fixture(metadata):
+    """GetRepositoryFiles tool with no project (no exclusion policy)."""
+    return GetRepositoryFiles(metadata=metadata)
+
+
+@pytest.fixture(name="bulk_tool_with_project")
+def bulk_tool_with_project_fixture(metadata_with_project):
+    """GetRepositoryFiles tool with exclusion rules."""
+    return GetRepositoryFiles(metadata=metadata_with_project)
+
+
+def _make_file_response(content: str) -> GitLabHttpResponse:
+    """Build a mock GitLab file API response for the given text content."""
+    encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    return GitLabHttpResponse(
+        status_code=200,
+        body={"content": encoded},
+        headers={"content-type": "application/json"},
+    )
+
+
+def _make_tree_response(paths: list) -> GitLabHttpResponse:
+    """Build a mock GitLab tree API response for the given list of blob paths.
+
+    Note: _paginate_get uses parse_json=False so body must be a JSON string.
+    """
+    body = [
+        {"id": str(i), "name": p.split("/")[-1], "type": "blob", "path": p}
+        for i, p in enumerate(paths)
+    ]
+    return GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(body),
+        headers={"content-type": "application/json", "X-Next-Page": ""},
+    )
+
+
+class TestGetRepositoryFilesExplicitPaths:
+    """Explicit-paths-only: tree endpoint must never be called."""
+
+    @pytest.mark.asyncio
+    async def test_explicit_paths_no_tree_call(self, bulk_tool, gitlab_client_mock):
+        """Tree endpoint is never called when all paths are explicit."""
+        gitlab_client_mock.aget.return_value = _make_file_response("hello")
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "src/main.py"],
+        )
+
+        response = json.loads(result)
+        assert "README.md" in response
+        assert "src/main.py" in response
+        assert response["README.md"] == {"content": "hello"}
+
+        # Verify only file-content calls were made (no tree call)
+        for call in gitlab_client_mock.aget.call_args_list:
+            assert "/repository/tree" not in call.kwargs.get("path", "")
+
+    @pytest.mark.asyncio
+    async def test_explicit_paths_missing_ref_raises(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Missing ref raises ToolException."""
+        with pytest.raises(ToolException, match="'ref' is required"):
+            await bulk_tool._arun(
+                project_id="org/repo",
+                file_paths=["README.md"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_explicit_paths_missing_project_id_raises(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Missing project_id raises ToolException."""
+        with pytest.raises(ToolException, match="'project_id' must be provided"):
+            await bulk_tool._arun(
+                ref="main",
+                file_paths=["README.md"],
+            )
+
+
+def _make_tree_response_from_entries(entries: list) -> GitLabHttpResponse:
+    """Build a mock GitLab tree API response (JSON string body) from raw entries."""
+    return GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(entries),
+        headers={"content-type": "application/json", "X-Next-Page": ""},
+    )
+
+
+class TestGetRepositoryFilesGlobPatterns:
+    """Pure glob pattern(s): tree listing invoked with recursive=true."""
+
+    @pytest.mark.asyncio
+    async def test_glob_triggers_tree_call(self, bulk_tool, gitlab_client_mock):
+        """A glob pattern triggers a recursive tree listing."""
+        tree_paths = ["src/main.py", "src/utils.py", "README.md"]
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response(tree_paths)
+            # File content call
+            return _make_file_response("py content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["src/*.py"],
+        )
+
+        response = json.loads(result)
+        # Only .py files in src/ should be matched
+        assert "src/main.py" in response
+        assert "src/utils.py" in response
+        assert "README.md" not in response
+
+        # Verify tree was called with recursive=true
+        tree_calls = [
+            c
+            for c in gitlab_client_mock.aget.call_args_list
+            if "/repository/tree" in c.kwargs.get("path", "")
+        ]
+        assert len(tree_calls) >= 1
+        tree_params = tree_calls[0].kwargs.get("params", {})
+        assert tree_params.get("recursive") == "true"
+
+    @pytest.mark.asyncio
+    async def test_glob_matches_nested_paths_via_single_star(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Fnmatch with * matches nested paths (e.g. src/*.py matches src/sub/file.py)."""
+        tree_paths = ["src/a.py", "src/sub/b.py", "other/c.py"]
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response(tree_paths)
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["src/*.py"],
+        )
+
+        response = json.loads(result)
+        # fnmatch * matches / so src/*.py matches src/sub/b.py
+        assert "src/a.py" in response
+        assert "src/sub/b.py" in response
+        assert "other/c.py" not in response
+
+    @pytest.mark.asyncio
+    async def test_glob_no_matches_returns_empty(self, bulk_tool, gitlab_client_mock):
+        """Glob pattern with no matches returns empty result (no truncation marker)."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response(["README.md"])
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["*.py"],
+        )
+
+        response = json.loads(result)
+        assert response == {}
+
+    @pytest.mark.asyncio
+    async def test_tree_entries_with_type_tree_are_excluded(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Tree entries with type='tree' (directories) are not fetched."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response_from_entries(
+                    [
+                        {"id": "1", "name": "src", "type": "tree", "path": "src"},
+                        {
+                            "id": "2",
+                            "name": "main.py",
+                            "type": "blob",
+                            "path": "src/main.py",
+                        },
+                    ]
+                )
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["src*"],
+        )
+
+        response = json.loads(result)
+        assert "src" not in response
+        assert "src/main.py" in response
+
+
+class TestGetRepositoryFilesMixedPaths:
+    """Mixed explicit + glob entries: correct union/dedupe/order."""
+
+    @pytest.mark.asyncio
+    async def test_mixed_explicit_and_glob(self, bulk_tool, gitlab_client_mock):
+        """Explicit paths and glob patterns are merged with explicit paths first."""
+        tree_paths = ["src/main.py", "src/utils.py"]
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response(tree_paths)
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "src/*.py"],
+        )
+
+        response = json.loads(result)
+        assert "README.md" in response
+        assert "src/main.py" in response
+        assert "src/utils.py" in response
+
+    @pytest.mark.asyncio
+    async def test_deduplication_explicit_and_glob_overlap(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """A path appearing in both explicit list and glob matches is returned once."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response(["src/main.py"])
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["src/main.py", "src/*.py"],
+        )
+
+        response = json.loads(result)
+        # src/main.py should appear exactly once
+        assert list(response.keys()).count("src/main.py") == 1
+        assert "src/main.py" in response
+
+    @pytest.mark.asyncio
+    async def test_explicit_paths_appear_before_glob_matches(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Explicit paths come before glob-matched paths in the result."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response(["a.py", "b.py"])
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "*.py"],
+        )
+
+        response = json.loads(result)
+        keys = list(response.keys())
+        assert keys.index("README.md") < keys.index("a.py")
+        assert keys.index("README.md") < keys.index("b.py")
+
+
+class TestGetRepositoryFilesPerPageTruncation:
+    """per_page truncation: default 20, custom value, truncation marker."""
+
+    @pytest.mark.asyncio
+    async def test_default_per_page_is_20(self, bulk_tool, gitlab_client_mock):
+        """Default per_page caps results at 20."""
+        # 25 explicit paths
+        paths = [f"file{i}.txt" for i in range(25)]
+        gitlab_client_mock.aget.return_value = _make_file_response("content")
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=paths,
+        )
+
+        response = json.loads(result)
+        # 20 file results + __truncated__ marker
+        file_results = {k: v for k, v in response.items() if k != "__truncated__"}
+        assert len(file_results) == 20
+        assert "__truncated__" in response
+        assert response["__truncated__"]["total_matched"] == 25
+        assert response["__truncated__"]["returned"] == 20
+
+    @pytest.mark.asyncio
+    async def test_custom_per_page(self, bulk_tool, gitlab_client_mock):
+        """Custom per_page value is respected."""
+        paths = [f"file{i}.txt" for i in range(10)]
+        gitlab_client_mock.aget.return_value = _make_file_response("content")
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=paths,
+            per_page=5,
+        )
+
+        response = json.loads(result)
+        file_results = {k: v for k, v in response.items() if k != "__truncated__"}
+        assert len(file_results) == 5
+        assert "__truncated__" in response
+
+    @pytest.mark.asyncio
+    async def test_no_truncation_marker_when_within_limit(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """No __truncated__ key when results fit within per_page."""
+        paths = ["README.md", "src/main.py"]
+        gitlab_client_mock.aget.return_value = _make_file_response("content")
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=paths,
+            per_page=10,
+        )
+
+        response = json.loads(result)
+        assert "__truncated__" not in response
+        assert len(response) == 2
+
+    @pytest.mark.asyncio
+    async def test_truncation_marker_contains_helpful_message(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Truncation marker includes total_matched, returned, and a message."""
+        paths = [f"file{i}.txt" for i in range(30)]
+        gitlab_client_mock.aget.return_value = _make_file_response("content")
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=paths,
+            per_page=10,
+        )
+
+        response = json.loads(result)
+        marker = response["__truncated__"]
+        assert marker["total_matched"] == 30
+        assert marker["returned"] == 10
+        assert "message" in marker
+        assert "30" in marker["message"]
+        assert "10" in marker["message"]
+
+    def test_per_page_max_50_validation(self):
+        """per_page > 50 is rejected by Pydantic validation."""
+        with pytest.raises(ValidationError):
+            RepositoryFilesResourceInput(
+                project_id="org/repo",
+                ref="main",
+                file_paths=["README.md"],
+                per_page=51,
+            )
+
+    def test_per_page_min_1_validation(self):
+        """per_page < 1 is rejected by Pydantic validation."""
+        with pytest.raises(ValidationError):
+            RepositoryFilesResourceInput(
+                project_id="org/repo",
+                ref="main",
+                file_paths=["README.md"],
+                per_page=0,
+            )
+
+    def test_per_page_50_is_valid(self):
+        """per_page=50 is the maximum valid value."""
+        schema = RepositoryFilesResourceInput(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md"],
+            per_page=50,
+        )
+        assert schema.per_page == 50
+
+
+class TestGetRepositoryFilesExclusionPolicy:
+    """Exclusion policy applied to both explicit and glob-matched paths."""
+
+    @pytest.mark.asyncio
+    async def test_excluded_explicit_path_returns_error(
+        self, bulk_tool_with_project, gitlab_client_mock
+    ):
+        """Excluded explicit paths appear in result with error, not content."""
+        gitlab_client_mock.aget.return_value = _make_file_response("content")
+
+        result = await bulk_tool_with_project._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "debug.log"],  # debug.log excluded by *.log
+        )
+
+        response = json.loads(result)
+        assert "content" in response["README.md"]
+        assert "error" in response["debug.log"]
+        assert "excluded" in response["debug.log"]["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_excluded_glob_matched_path_returns_error(
+        self, bulk_tool_with_project, gitlab_client_mock
+    ):
+        """Glob-matched paths that are excluded appear with error."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return _make_tree_response_from_entries(
+                    [
+                        {
+                            "id": "1",
+                            "name": "main.py",
+                            "type": "blob",
+                            "path": "src/main.py",
+                        },
+                        {
+                            "id": "2",
+                            "name": "debug.log",
+                            "type": "blob",
+                            "path": "debug.log",
+                        },
+                    ]
+                )
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool_with_project._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["*"],
+        )
+
+        response = json.loads(result)
+        assert "content" in response["src/main.py"]
+        assert "error" in response["debug.log"]
+
+    @pytest.mark.asyncio
+    async def test_all_paths_excluded(self, bulk_tool_with_project, gitlab_client_mock):
+        """When all paths are excluded, result contains only error entries."""
+        result = await bulk_tool_with_project._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["debug.log", "app.log"],
+        )
+
+        response = json.loads(result)
+        assert "error" in response["debug.log"]
+        assert "error" in response["app.log"]
+        # No content fetches should have been made
+        gitlab_client_mock.aget.assert_not_called()
+
+
+class TestGetRepositoryFilesConcurrency:
+    """Concurrency cap: no more than 4 concurrent file-content fetches."""
+
+    @pytest.mark.asyncio
+    async def test_concurrency_cap_respected(self, bulk_tool, gitlab_client_mock):
+        """At most DEFAULT_REPOSITORY_FILES_CONCURRENCY fetches run concurrently."""
+        max_concurrent = 0
+        current_concurrent = 0
+
+        async def slow_fetch(**kwargs):
+            nonlocal max_concurrent, current_concurrent
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps([]),
+                    headers={"X-Next-Page": ""},
+                )
+            current_concurrent += 1
+            max_concurrent = max(max_concurrent, current_concurrent)
+            await asyncio.sleep(0)  # yield to allow other coroutines to start
+            current_concurrent -= 1
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = slow_fetch
+
+        paths = [f"file{i}.txt" for i in range(10)]
+        await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=paths,
+        )
+
+        assert max_concurrent <= 4
+
+    @pytest.mark.asyncio
+    async def test_tree_listing_not_throttled_by_semaphore(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Tree listing calls are not subject to the content-fetch semaphore."""
+        tree_call_count = 0
+
+        async def side_effect(**kwargs):
+            nonlocal tree_call_count
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                tree_call_count += 1
+                return _make_tree_response(["a.py"])
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["*.py"],
+        )
+
+        # Tree was called (not blocked by semaphore)
+        assert tree_call_count >= 1
+
+
+class TestGetRepositoryFilesPartialFailure:
+    """Partial failure: one file errors, others still return content."""
+
+    @pytest.mark.asyncio
+    async def test_404_file_returns_error_others_succeed(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """A 404 on one file returns error for that file; others succeed."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "missing.py" in path:
+                return GitLabHttpResponse(
+                    status_code=404,
+                    body={"message": "404 File Not Found"},
+                    headers={"content-type": "application/json"},
+                )
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "missing.py", "src/main.py"],
+        )
+
+        response = json.loads(result)
+        assert "content" in response["README.md"]
+        assert "error" in response["missing.py"]
+        assert "content" in response["src/main.py"]
+
+    @pytest.mark.asyncio
+    async def test_no_exception_raised_on_partial_failure(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """A single file failure does not raise ToolException for the whole call."""
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "bad.py" in path:
+                raise Exception("Network error")
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        # Should not raise
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "bad.py"],
+        )
+
+        response = json.loads(result)
+        assert "content" in response["README.md"]
+        assert "error" in response["bad.py"]
+
+    @pytest.mark.asyncio
+    async def test_decode_error_returns_error_entry(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """A UnicodeDecodeError on one file returns error for that file."""
+        binary_content = base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("latin-1")
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "image.png" in path:
+                return GitLabHttpResponse(
+                    status_code=200,
+                    body={"content": binary_content},
+                    headers={"content-type": "application/json"},
+                )
+            return _make_file_response("text content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "image.png"],
+        )
+
+        response = json.loads(result)
+        assert "content" in response["README.md"]
+        assert "error" in response["image.png"]
+
+
+class TestGetRepositoryFilesFormatDisplayMessage:
+    """format_display_message assertions covering truncation/pattern-count messaging."""
+
+    def test_explicit_paths_only_message(self, bulk_tool):
+        """Display message for explicit paths only."""
+        args = RepositoryFilesResourceInput(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "src/main.py"],
+        )
+        msg = bulk_tool.format_display_message(args)
+        assert "2 explicit path(s)" in msg
+        assert "org/repo" in msg
+        assert "main" in msg
+
+    def test_glob_patterns_only_message(self, bulk_tool):
+        """Display message for glob patterns only."""
+        args = RepositoryFilesResourceInput(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["*.py", "src/*.md"],
+        )
+        msg = bulk_tool.format_display_message(args)
+        assert "2 glob pattern(s)" in msg
+        assert "`*.py`" in msg
+        assert "`src/*.md`" in msg
+
+    def test_mixed_paths_message(self, bulk_tool):
+        """Display message for mixed explicit + glob."""
+        args = RepositoryFilesResourceInput(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md", "*.py"],
+        )
+        msg = bulk_tool.format_display_message(args)
+        assert "1 explicit path(s)" in msg
+        assert "1 glob pattern(s)" in msg
+
+    def test_per_page_shown_in_message(self, bulk_tool):
+        """Display message includes per_page limit."""
+        args = RepositoryFilesResourceInput(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["README.md"],
+            per_page=5,
+        )
+        msg = bulk_tool.format_display_message(args)
+        assert "5" in msg
+
+    def test_url_shown_in_message(self, bulk_tool):
+        """Display message uses URL when provided."""
+        args = RepositoryFilesResourceInput(
+            url="https://gitlab.com/org/repo/-/blob/main/README.md",
+            file_paths=["README.md"],
+        )
+        msg = bulk_tool.format_display_message(args)
+        assert "https://gitlab.com/org/repo" in msg
+
+
+class TestGetRepositoryFilesInputValidation:
+    """Input schema validation tests."""
+
+    @pytest.mark.asyncio
+    async def test_empty_file_paths_returns_empty_result(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Empty file_paths returns empty JSON object."""
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=[],
+        )
+        response = json.loads(result)
+        assert response == {}
+
+
+class TestGetRepositoryFilesEdgeCases:
+    """Edge-case coverage for GetRepositoryFiles branches."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_url_raises_tool_exception(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """An unparsable URL causes ToolException with the URL error message."""
+        with pytest.raises(ToolException, match="Failed to parse URL"):
+            await bulk_tool._arun(
+                url="https://not-gitlab.com/invalid",
+                file_paths=["README.md"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_resolve_glob_skips_non_dict_tree_entries(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Non-dict entries in the tree response are silently skipped."""
+        # Mix a string (non-dict) entry with a valid blob entry
+        entries = [
+            "this-is-not-a-dict",
+            {"id": "1", "name": "main.py", "type": "blob", "path": "src/main.py"},
+        ]
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(entries),
+                    headers={"content-type": "application/json", "X-Next-Page": ""},
+                )
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["*.py"],
+        )
+
+        response = json.loads(result)
+        # Only the valid blob entry should be matched; the string entry is skipped
+        assert "src/main.py" in response
+        assert len([k for k in response if k != "__truncated__"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_resolve_glob_skips_entries_with_empty_path(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Tree entries with an empty or missing path are silently skipped."""
+        entries = [
+            {"id": "1", "name": "no-path", "type": "blob", "path": ""},
+            {"id": "2", "name": "main.py", "type": "blob", "path": "src/main.py"},
+        ]
+
+        async def side_effect(**kwargs):
+            path = kwargs.get("path", "")
+            if "/repository/tree" in path:
+                return GitLabHttpResponse(
+                    status_code=200,
+                    body=json.dumps(entries),
+                    headers={"content-type": "application/json", "X-Next-Page": ""},
+                )
+            return _make_file_response("content")
+
+        gitlab_client_mock.aget.side_effect = side_effect
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["*.py"],
+        )
+
+        response = json.loads(result)
+        # The entry with empty path is skipped; only the valid one is returned
+        assert "src/main.py" in response
+        assert "" not in response
+
+    @pytest.mark.asyncio
+    async def test_fetch_file_content_truncates_large_file(
+        self, bulk_tool, gitlab_client_mock
+    ):
+        """Files with >= 2000 newlines are truncated via GetRepositoryFile._paginate."""
+        # Build a file with exactly DEFAULT_GET_REPOSITORY_FILE_LIMIT lines (2000 newlines)
+        large_content = "\n".join(f"line {i}" for i in range(2001))
+        encoded = base64.b64encode(large_content.encode("utf-8")).decode("utf-8")
+        mock_response = GitLabHttpResponse(
+            status_code=200,
+            body={"content": encoded},
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.aget.return_value = mock_response
+
+        result = await bulk_tool._arun(
+            project_id="org/repo",
+            ref="main",
+            file_paths=["big_file.txt"],
+        )
+
+        response = json.loads(result)
+        content = response["big_file.txt"]["content"]
+        # The content should be truncated with a pagination hint
+        assert "Use offset=" in content
+        assert "Showing lines" in content

@@ -1,6 +1,8 @@
+import asyncio
 import base64
+import fnmatch
 import json
-from typing import Any, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 from urllib.parse import quote
 
 import structlog
@@ -17,6 +19,9 @@ from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInpu
 log = structlog.stdlib.get_logger(__name__)
 
 DEFAULT_GET_REPOSITORY_FILE_LIMIT = 2000
+DEFAULT_REPOSITORY_FILES_CONCURRENCY = 4
+
+_GLOB_METACHARACTERS = frozenset("*?[]")
 
 
 class RepositoryFileResourceInput(ProjectResourceInput):
@@ -356,3 +361,265 @@ class ListRepositoryTree(DuoBaseTool):
         if args.url:
             return f"List repository tree{recursive_str}{path_str}{ref_str} from {args.url}"
         return f"List repository tree{recursive_str}{path_str}{ref_str} in project {args.project_id}"
+
+
+def _is_glob_pattern(path: str) -> bool:
+    """Return True if *path* contains any fnmatch glob metacharacter.
+
+    Args:
+        path: A file path or glob pattern string.
+
+    Returns:
+        True when the path contains ``*``, ``?``, ``[``, or ``]``; False otherwise.
+    """
+    return bool(_GLOB_METACHARACTERS.intersection(path))
+
+
+class RepositoryFilesResourceInput(ProjectResourceInput):
+    """Input schema for GetRepositoryFiles tool."""
+
+    file_paths: List[str] = Field(
+        description=(
+            "List of file paths or fnmatch-style glob patterns (e.g. '*.py', 'src/*.py'). "
+            "Explicit paths and glob patterns may be mixed freely."
+        ),
+    )
+    ref: Optional[str] = Field(
+        default=None,
+        description="The name of branch, tag or commit. Use HEAD to automatically use the default branch.",
+    )
+    url: Optional[str] = Field(
+        default=None,
+        description="GitLab URL for the project. If provided, project_id is not required.",
+    )
+    per_page: Optional[int] = Field(
+        default=20,
+        ge=1,
+        le=50,
+        description="Maximum number of files to return (default 20, max 50).",
+    )
+
+
+class GetRepositoryFiles(RepositoryFileBaseTool):
+    """Bulk-read multiple files from a remote GitLab repository.
+
+    Accepts a mix of explicit paths and fnmatch-style glob patterns.  Glob
+    patterns trigger a recursive tree listing to discover matching blobs;
+    explicit paths are fetched directly without any tree call.  Content
+    fetches are parallelised with a concurrency cap of
+    ``DEFAULT_REPOSITORY_FILES_CONCURRENCY``.
+    """
+
+    name: str = "get_repository_files"
+
+    # editorconfig-checker-disable
+    description: str = """Get the contents of multiple files from a remote GitLab repository in a single call.
+
+    Accepts a mix of explicit file paths and fnmatch-style glob patterns (e.g. '*.py', 'src/*.py').
+    Glob patterns trigger a recursive tree listing to discover matching blobs; explicit paths are
+    fetched directly without any tree call.
+
+    To identify a project you must provide either:
+    - project_id and ref parameters, or
+    - A GitLab SaaS URL like:
+      - https://gitlab.com/namespace/project/-/blob/master/README.md
+    - A self-managed GitLab URL like:
+      - https://gitlab.example.com/namespace/project/-/blob/master/README.md
+
+    Parameters:
+    - file_paths: list of explicit paths and/or glob patterns (e.g. ['README.md', 'src/*.py'])
+    - ref: branch, tag, or commit SHA (required when project_id is used)
+    - per_page: maximum number of files to return (default 20, max 50)
+
+    Returns a JSON object mapping each resolved file path to either:
+    - {"content": "..."} on success
+    - {"error": "..."} on failure (404, decode error, exclusion policy, etc.)
+
+    When the number of matched files exceeds per_page, a "__truncated__" key is added to the
+    result indicating how many total matches were found vs. returned.
+    """
+    # editorconfig-checker-enable
+
+    args_schema: Type[BaseModel] = RepositoryFilesResourceInput
+    trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
+
+    async def _execute(self, **kwargs: Any) -> str:
+        """Execute the bulk file read.
+
+        Args:
+            **kwargs: Keyword arguments matching RepositoryFilesResourceInput fields.
+
+        Returns:
+            JSON string mapping file paths to their content or error.
+
+        Raises:
+            ToolException: When project/ref resolution fails or the tree listing fails.
+        """
+        url = kwargs.get("url")
+        project_id = kwargs.get("project_id")
+        ref = kwargs.get("ref")
+        file_paths: List[str] = kwargs["file_paths"]
+        per_page: int = kwargs.get("per_page") or 20
+
+        project_id, url_errors = self._validate_project_url(url, project_id)
+        if url_errors:
+            raise ToolException("; ".join(url_errors))
+
+        if not project_id:
+            raise ToolException("'project_id' is required")
+        if not ref:
+            raise ToolException("'ref' is required")
+
+        explicit_paths = [p for p in file_paths if not _is_glob_pattern(p)]
+        glob_patterns = [p for p in file_paths if _is_glob_pattern(p)]
+
+        glob_matched: List[str] = []
+        if glob_patterns:
+            glob_matched = await self._resolve_glob_patterns(
+                project_id, ref, glob_patterns
+            )
+
+        seen: Dict[str, None] = {}
+        for path in explicit_paths + glob_matched:
+            seen[path] = None
+        combined = list(seen.keys())
+
+        policy = FileExclusionPolicy(self.project)
+        allowed_paths, excluded_paths = policy.filter_allowed(combined)
+
+        total_matched = len(allowed_paths)
+        truncated = total_matched > per_page
+        paths_to_fetch = allowed_paths[:per_page]
+
+        results: Dict[str, Any] = {}
+        semaphore = asyncio.Semaphore(DEFAULT_REPOSITORY_FILES_CONCURRENCY)
+
+        async def fetch_one(path: str) -> Tuple[str, Dict[str, str]]:
+            async with semaphore:
+                return path, await self._fetch_file_content(project_id, ref, path)
+
+        fetch_tasks = [fetch_one(p) for p in paths_to_fetch]
+        fetch_results = await asyncio.gather(*fetch_tasks)
+        for path, result in fetch_results:
+            results[path] = result
+
+        for path in excluded_paths:
+            results[path] = {
+                "error": FileExclusionPolicy.format_llm_exclusion_message([path])
+            }
+
+        if truncated:
+            results["__truncated__"] = {
+                "total_matched": total_matched,
+                "returned": per_page,
+                "message": (
+                    f"Results truncated: {total_matched} files matched but only {per_page} returned. "
+                    f"Refine your glob pattern or pass explicit paths for the remainder."
+                ),
+            }
+
+        return json.dumps(results, indent=2)
+
+    async def _resolve_glob_patterns(
+        self, project_id: str, ref: str, patterns: List[str]
+    ) -> List[str]:
+        """Enumerate all blob paths in the repository tree and filter by glob patterns.
+
+        Args:
+            project_id: The GitLab project ID or path.
+            ref: The branch, tag, or commit SHA.
+            patterns: List of fnmatch-style glob patterns to match against.
+
+        Returns:
+            Ordered list of blob paths that match at least one pattern.
+
+        Raises:
+            ToolException: If the tree listing API call fails.
+        """
+        tree_entries = await self._paginate_get(
+            f"/api/v4/projects/{project_id}/repository/tree",
+            per_page=100,
+            extra_params={"ref": ref, "recursive": "true"},
+        )
+
+        matched: List[str] = []
+        for entry in tree_entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") != "blob":
+                continue
+            entry_path = entry.get("path", "")
+            if not entry_path:
+                continue
+            if any(fnmatch.fnmatch(entry_path, pattern) for pattern in patterns):
+                matched.append(entry_path)
+
+        return matched
+
+    async def _fetch_file_content(
+        self, project_id: str, ref: str, file_path: str
+    ) -> Dict[str, str]:
+        """Fetch and decode the content of a single file.
+
+        Args:
+            project_id: The GitLab project ID or path.
+            ref: The branch, tag, or commit SHA.
+            file_path: The path of the file to fetch.
+
+        Returns:
+            Dict with ``"content"`` key on success, or ``"error"`` key on failure.
+        """
+        encoded_path = quote(file_path, safe="")
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/repository/files/{encoded_path}",
+                params={"ref": ref},
+                parse_json=True,
+            )
+            body = self._process_http_response("Get repository file", response, log)
+            content = base64.b64decode(body["content"]).decode("utf-8")
+            if content.count("\n") >= DEFAULT_GET_REPOSITORY_FILE_LIMIT:
+                content = GetRepositoryFile._paginate(content, None, None)
+            return {"content": content}
+        except ToolException as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # pylint: disable=broad-except
+            log.warning(
+                "Unexpected error fetching file content",
+                file_path=file_path,
+                exc_info=exc,
+            )
+            return {"error": str(exc)}
+
+    def format_display_message(
+        self, args: RepositoryFilesResourceInput, _tool_response: Any = None
+    ) -> str:
+        """Return a human-readable summary of the tool invocation.
+
+        Args:
+            args: The validated input arguments.
+            _tool_response: Unused tool response (reserved for future use).
+
+        Returns:
+            A summary string describing what was requested.
+        """
+        explicit_paths = [p for p in args.file_paths if not _is_glob_pattern(p)]
+        glob_patterns = [p for p in args.file_paths if _is_glob_pattern(p)]
+        per_page = args.per_page or 20
+
+        parts: List[str] = []
+        if explicit_paths:
+            parts.append(f"{len(explicit_paths)} explicit path(s)")
+        if glob_patterns:
+            pattern_list = ", ".join(f"`{p}`" for p in glob_patterns)
+            parts.append(f"{len(glob_patterns)} glob pattern(s): {pattern_list}")
+
+        summary = "Get repository files: " + (", ".join(parts) if parts else "no paths")
+
+        if args.url:
+            summary += f" from {args.url}"
+        else:
+            summary += f" from project {args.project_id} at ref {args.ref}"
+
+        summary += f" (up to {per_page} files)"
+        return summary
