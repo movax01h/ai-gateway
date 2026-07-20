@@ -112,6 +112,7 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetIssueNote,
     tools.GetRepositoryFile,
     tools.ListRepositoryTree,
+    tools.GetRepositoryFiles,
     tools.ListEpicNotes,
     tools.GetCommit,
     tools.ListCommits,
