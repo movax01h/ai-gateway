@@ -4,7 +4,7 @@ import html
 import json
 import re
 from typing import Any, Dict, List, Optional, Type
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import structlog
 import yaml
@@ -266,9 +266,18 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         diff_file_paths: List[str],
     ) -> List[Dict[str, Any]]:
         if supports_group_level_custom_instructions():
-            return await self._fetch_all_custom_instructions(
-                project_id, merge_request_iid
-            )
+            try:
+                return await self._fetch_all_custom_instructions(
+                    project_id, merge_request_iid
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch custom instructions, continuing review without them",
+                    project_id=project_id,
+                    merge_request_iid=merge_request_iid,
+                    exc_info=True,
+                )
+                return []
 
         default_branch = self.project.get("default_branch")
         if not default_branch:
@@ -299,7 +308,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         response = await self.gitlab_client.aget(
             "/api/v4/ai/duo_workflows/code_review/custom_instructions",
             params={
-                "project_id": project_id,
+                # project_id may be an already-URL-encoded path ("group%2Fproject")
+                # when the tool was invoked via URL; decode it so the client's own
+                # param encoding doesn't double-encode it into a 404. Safe on
+                # never-encoded values: "%" is not a legal character in GitLab
+                # namespace/project paths (Gitlab::PathRegex) and numeric ids have
+                # none, so unquote() is a no-op for them.
+                "project_id": unquote(str(project_id)),
                 "merge_request_iid": merge_request_iid,
             },
             parse_json=False,
