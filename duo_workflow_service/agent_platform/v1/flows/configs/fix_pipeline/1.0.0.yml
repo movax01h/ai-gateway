@@ -8,19 +8,6 @@ version: "v1"
 environment: ambient
 
 components:
-  - name: "fetch_failing_jobs"
-    type: DeterministicStepComponent
-    tool_name: "get_pipeline_failing_jobs"
-    inputs:
-      - from: "context:goal"
-        as: "url"
-      - from: "true"
-        as: "exclude_allow_failure"
-        literal: True
-    ui_log_events:
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
-
   - name: "fetch_failing_bridge_jobs"
     type: DeterministicStepComponent
     tool_name: "get_failing_bridge_jobs"
@@ -57,8 +44,6 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-      - from: "context:fetch_failing_jobs.tool_responses"
-        as: "failing_jobs"
       - from: "context:fetch_failing_bridge_jobs.tool_responses"
         as: "failing_bridge_jobs"
         optional: True
@@ -72,10 +57,9 @@ components:
         as: "workspace_agent_skills"
         optional: True
     toolset:
-      - get_pipeline_failing_jobs:
-          exclude_allow_failure: true
       - get_failing_bridge_jobs
       - get_job_logs
+      - run_command
       - read_file
       - find_files
       - list_dir
@@ -359,8 +343,6 @@ components:
       - "on_tool_execution_failed"
 
 routers:
-  - from: "fetch_failing_jobs"
-    to: "fetch_failing_bridge_jobs"
   - from: "fetch_failing_bridge_jobs"
     condition:
       input: "context:inputs.merge_request.url"
@@ -426,7 +408,7 @@ routers:
     to: "end"
 
 flow:
-  entry_point: "fetch_failing_jobs"
+  entry_point: "fetch_failing_bridge_jobs"
   inputs:
     - category: merge_request
       version_constraint: "^1.0.0"

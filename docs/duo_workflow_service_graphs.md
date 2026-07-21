@@ -502,8 +502,7 @@ config:
 graph TD;
     __start__(__start__):::first;
     __end__(__end__):::last;
-    __start__ --> fetch_failing_jobs;
-    fetch_failing_jobs(fetch_failing_jobs<br>#91;DeterministicStepComponent#93;);
+    __start__ --> fetch_failing_bridge_jobs;
     fetch_failing_bridge_jobs(fetch_failing_bridge_jobs<br>#91;DeterministicStepComponent#93;);
     fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_context(fix_pipeline_context<br>#91;AgentComponent#93;);
@@ -519,7 +518,6 @@ graph TD;
     git_fetch_unshallow(git_fetch_unshallow<br>#91;DeterministicStepComponent#93;);
     git_push_branch(git_push_branch<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_create_new_mr(fix_pipeline_create_new_mr<br>#91;OneOffComponent#93;);
-    fetch_failing_jobs --> fetch_failing_bridge_jobs;
     fetch_failing_bridge_jobs -.->|(empty)| fix_pipeline_context;
     fetch_failing_bridge_jobs -.->|default_route| fetch_mr_diffs;
     fetch_mr_diffs --> fix_pipeline_context;
