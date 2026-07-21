@@ -927,3 +927,77 @@ class TestFormatDiffLinks:
         assert result.count("<file ") == 2
         for path in diffs:
             assert f'path="{path}"' in result
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.code_review.build_review_merge_request_context"
+    ".supports_group_level_custom_instructions",
+    return_value=True,
+)
+async def test_group_level_custom_instructions_decodes_encoded_project_path(
+    _mock_supports,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    original_file_content = {
+        "content": base64.b64encode(b"original content").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps({"instructions": []})),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    instructions_calls = [
+        call
+        for call in gitlab_client_mock.aget.call_args_list
+        if "/custom_instructions" in _aget_path(call)
+    ]
+    assert len(instructions_calls) == 1
+    instructions_call = instructions_calls[0]
+    assert (
+        _aget_path(instructions_call)
+        == "/api/v4/ai/duo_workflows/code_review/custom_instructions"
+    )
+    assert instructions_call.kwargs["params"]["project_id"] == "test/project"
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.code_review.build_review_merge_request_context"
+    ".supports_group_level_custom_instructions",
+    return_value=True,
+)
+async def test_group_level_custom_instructions_failure_is_not_fatal(
+    _mock_supports,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+):
+    original_file_content = {
+        "content": base64.b64encode(b"original content").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=404, body='{"message":"404 Project Not Found"}'
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id="test%2Fproject", merge_request_iid=123)
+
+    assert '<file_diff filename="calculator.rb">' in response
+    assert "Tool runtime exception" not in response
