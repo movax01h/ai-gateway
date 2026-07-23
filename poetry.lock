@@ -293,22 +293,21 @@ zookeeper = ["kazoo"]
 
 [[package]]
 name = "asgi-correlation-id"
-version = "4.3.4"
+version = "5.0.1"
 description = "Middleware correlating project logs to individual requests"
 optional = false
-python-versions = "<4.0,>=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "asgi_correlation_id-4.3.4-py3-none-any.whl", hash = "sha256:36ce69b06c7d96b4acb89c7556a4c4f01a972463d3d49c675026cbbd08e9a0a2"},
-    {file = "asgi_correlation_id-4.3.4.tar.gz", hash = "sha256:ea6bc310380373cb9f731dc2e8b2b6fb978a76afe33f7a2384f697b8d6cd811d"},
+    {file = "asgi_correlation_id-5.0.1-py3-none-any.whl", hash = "sha256:dfea97c1fc41e8eadc3e518a311427cba6e7e79d9ddb6a6c7ea8879f2408d91d"},
+    {file = "asgi_correlation_id-5.0.1.tar.gz", hash = "sha256:ad54374a300f000b8bef3b39738768842394de0a3c528a6f77ef3ca053eb89a1"},
 ]
 
 [package.dependencies]
-packaging = "*"
 starlette = ">=0.18"
 
 [package.extras]
-celery = ["celery"]
+sentry = ["sentry-sdk (>=2.12.0)"]
 
 [[package]]
 name = "ast-serialize"
@@ -7963,4 +7962,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "8e9593fd11eea2d55fe7ed291f2897c37a9e9e874e7ec487f34530f84c1b98d8"
+content-hash = "edc243fe5852fa6a9d3d6268611748e1f430432564b9322a36f2f3cc405ef41e"
