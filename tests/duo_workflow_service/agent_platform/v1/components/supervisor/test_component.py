@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponentBase,
+    MaxCyclesConfig,
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
@@ -711,6 +712,70 @@ class TestSupervisorMaxCycles:
         """max_cycles must be >= 1; zero or negative values raise ValidationError."""
         with pytest.raises(ValidationError, match="max_cycles must be at least 1"):
             make_supervisor(max_cycles=max_cycles)
+
+    @pytest.mark.usefixtures(
+        "mock_tool_node_cls",
+        "mock_final_response_node_cls",
+        "mock_delegation_node_cls",
+        "mock_subagent_return_node_cls",
+    )
+    def test_iteration_warning_offset_passed_to_agent_node(
+        self,
+        mock_agent_node_cls,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+    ):
+        """Attach() forwards the resolved iteration_warning_offset to AgentNode, same as max_cycles."""
+        supervisor = make_supervisor(
+            max_cycles=MaxCyclesConfig(threshold=7, iteration_warning_offset=2)
+        )
+        supervisor.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["max_cycles"] == 7
+        assert call_kwargs["iteration_warning_offset"] == 2
+
+    @pytest.mark.usefixtures(
+        "mock_tool_node_cls",
+        "mock_final_response_node_cls",
+        "mock_delegation_node_cls",
+        "mock_subagent_return_node_cls",
+    )
+    def test_iteration_warning_offset_defaults_to_ten_when_max_cycles_is_plain_int(
+        self,
+        mock_agent_node_cls,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+    ):
+        """The legacy plain-int max_cycles form still forwards the default offset (10) when threshold is large
+        enough."""
+        supervisor = make_supervisor(max_cycles=50)
+        supervisor.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["iteration_warning_offset"] == 10
+
+    @pytest.mark.usefixtures(
+        "mock_tool_node_cls",
+        "mock_final_response_node_cls",
+        "mock_delegation_node_cls",
+        "mock_subagent_return_node_cls",
+    )
+    def test_iteration_warning_offset_clamped_for_small_plain_int_max_cycles(
+        self,
+        mock_agent_node_cls,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+    ):
+        """The legacy plain-int max_cycles form clamps the default offset to min(10, threshold - 1)."""
+        supervisor = make_supervisor(max_cycles=7)
+        supervisor.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["iteration_warning_offset"] == 6
 
 
 class TestSupervisorMaxWrapUpRetries:

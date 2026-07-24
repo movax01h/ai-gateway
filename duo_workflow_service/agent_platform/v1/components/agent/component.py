@@ -15,7 +15,13 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import StateGraph
-from pydantic import Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
@@ -72,11 +78,70 @@ from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
 
-__all__ = ["AgentComponent", "AgentComponentBase", "RoutingError"]
+__all__ = [
+    "AgentComponent",
+    "AgentComponentBase",
+    "MaxCyclesConfig",
+    "RoutingError",
+]
+
+# Default number of cycles before `max_cycles` at which the agent is warned that it
+# is approaching the soft limit. Shared by the legacy plain-int `max_cycles` form
+# (see `AgentComponentBase.resolve_max_cycles`) and `MaxCyclesConfig`'s own field
+# default, so both forms warn 10 cycles out unless explicitly overridden.
+_DEFAULT_ITERATION_WARNING_OFFSET: int = 10
 
 
 class RoutingError(Exception):
     """Exception raised when edge routers encounter unexpected conditions."""
+
+
+class MaxCyclesConfig(BaseModel):
+    """Configuration for the `max_cycles` soft limit, including the approaching-limit warning.
+
+    Nested form of `max_cycles`, allowing explicit control over the iteration-warning offset in addition to the
+    threshold. The plain-int form (`max_cycles: 280`) remains supported and resolves to this same behavior with the
+    default `iteration_warning_offset`.
+
+    When `iteration_warning_offset` is omitted, it auto-clamps to `min(_DEFAULT_ITERATION_WARNING_OFFSET, threshold -
+    1)` so small thresholds (e.g. a 4-cycle budget) still get a warning instead of the offset silently exceeding the
+    threshold. When it is explicitly set to a value `>= threshold`, this is treated as a deliberate misconfiguration
+    and raises a `ValueError` — the caller should either lower it or set it to `null` to disable the warning.
+    """
+
+    threshold: int
+    iteration_warning_offset: Optional[int] = _DEFAULT_ITERATION_WARNING_OFFSET
+
+    @field_validator("iteration_warning_offset")
+    @classmethod
+    def validate_iteration_warning_offset(cls, v: Optional[int]) -> Optional[int]:
+        """Validate that iteration_warning_offset is non-negative when set."""
+        if v is not None and v < 0:
+            raise ValueError("iteration_warning_offset must be >= 0.")
+        return v
+
+    @model_validator(mode="after")
+    def resolve_or_validate_offset(self) -> Self:
+        """Auto-clamp the offset when omitted, or validate it against threshold when explicitly set.
+
+        `model_fields_set` distinguishes "not provided" (auto-clamp, mirroring the legacy plain-int form's smart
+        default) from "explicitly provided" (validate strictly — the caller chose both values together, so an
+        offset `>= threshold` is a clear misconfiguration worth a hard error rather than a silent no-op).
+        """
+        if "iteration_warning_offset" not in self.model_fields_set:
+            self.iteration_warning_offset = min(
+                _DEFAULT_ITERATION_WARNING_OFFSET, self.threshold - 1
+            )
+        elif (
+            self.iteration_warning_offset is not None
+            and self.iteration_warning_offset >= self.threshold
+        ):
+            raise ValueError(
+                f"iteration_warning_offset ({self.iteration_warning_offset}) must be less "
+                f"than threshold ({self.threshold}); set it to null to disable the warning "
+                "instead."
+            )
+        return self
 
 
 class AgentComponentBase(BaseComponent):
@@ -139,7 +204,7 @@ class AgentComponentBase(BaseComponent):
         1, RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET
     )
 
-    max_cycles: int = _DEFAULT_MAX_CYCLES
+    max_cycles: Union[int, MaxCyclesConfig] = _DEFAULT_MAX_CYCLES
     max_wrap_up_retries: int = 3
 
     prompt_registry: BasePromptRegistry = Provide[
@@ -157,6 +222,8 @@ class AgentComponentBase(BaseComponent):
     _response_schema: Optional[Type[BaseAgentOutput]] = PrivateAttr()
     _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
     _cycle_count_key: RuntimeIOKey = PrivateAttr()
+    _max_cycles_threshold: int = PrivateAttr()
+    _iteration_warning_offset: Optional[int] = PrivateAttr()
 
     @model_validator(mode="after")
     def initialize_tool_approval_decision_key(self) -> Self:
@@ -191,11 +258,33 @@ class AgentComponentBase(BaseComponent):
 
     @field_validator("max_cycles")
     @classmethod
-    def validate_max_cycles(cls, v: int) -> int:
-        """Validate that max_cycles is at least 1."""
-        if v < 1:
+    def validate_max_cycles(
+        cls, v: Union[int, MaxCyclesConfig]
+    ) -> Union[int, MaxCyclesConfig]:
+        """Validate that the max_cycles threshold is at least 1, for either the plain-int or nested form."""
+        threshold = v.threshold if isinstance(v, MaxCyclesConfig) else v
+        if threshold < 1:
             raise ValueError("max_cycles must be at least 1.")
         return v
+
+    @model_validator(mode="after")
+    def resolve_max_cycles(self) -> Self:
+        """Resolve `max_cycles` (plain int or `MaxCyclesConfig`) into the threshold/offset used by `AgentNode`.
+
+        The plain-int form always warns before the threshold (i.e. the warning is on by default), clamped to
+        `min(_DEFAULT_ITERATION_WARNING_OFFSET, threshold - 1)` so small thresholds (e.g. a 4-cycle budget) still get
+        a warning — on the very first cycle, in that case — rather than the offset silently exceeding the threshold.
+        The nested form allows overriding or disabling it entirely (`iteration_warning_offset: null`).
+        """
+        if isinstance(self.max_cycles, MaxCyclesConfig):
+            self._max_cycles_threshold = self.max_cycles.threshold
+            self._iteration_warning_offset = self.max_cycles.iteration_warning_offset
+        else:
+            self._max_cycles_threshold = self.max_cycles
+            self._iteration_warning_offset = min(
+                _DEFAULT_ITERATION_WARNING_OFFSET, self.max_cycles - 1
+            )
+        return self
 
     @field_validator("max_wrap_up_retries")
     @classmethod
@@ -732,9 +821,10 @@ class AgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
-            max_cycles=self.max_cycles,
+            max_cycles=self._max_cycles_threshold,
             cycle_count_key=self._cycle_count_key,
             max_wrap_up_retries=self.max_wrap_up_retries,
+            iteration_warning_offset=self._iteration_warning_offset,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

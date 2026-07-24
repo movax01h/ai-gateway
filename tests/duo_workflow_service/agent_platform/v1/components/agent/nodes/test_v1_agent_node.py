@@ -1541,6 +1541,145 @@ class TestAgentNodeMaxCycles:
             assert "max_cycles" in str(call_kwargs)
 
 
+class TestAgentNodeIterationWarning:
+    """Test suite for AgentNode approaching-soft-limit warning (iteration_warning_offset)."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "stored_cycle_count, expected",
+        [
+            (1, "warning"),  # incremented cycle_count=2 == max_cycles(3) - offset(1)
+            (0, "none"),  # incremented cycle_count=1, below the warning threshold
+            (2, "wrap_up"),  # incremented cycle_count=3 hits the wrap-up threshold
+        ],
+    )
+    async def test_warning_injected_only_at_threshold(
+        self,
+        stored_cycle_count,
+        expected,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        prompt_variables,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Warning HumanMessage is injected only when cycle_count == max_cycles - offset.
+
+        `_check_and_increment_cycle_count` increments the stored value by 1 before comparing,
+        so `stored_cycle_count` here is one less than the cycle_count used for the check.
+
+        max_cycles=3, iteration_warning_offset=1 -> warning fires at cycle_count=2 only.
+        cycle_count=3 hits the wrap-up threshold instead, not the approaching-limit warning
+        (mutually exclusive — the `if`/`elif` in AgentNode.run() means wrap-up always wins).
+        """
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            state = copy.deepcopy(base_flow_state)
+            state["context"].setdefault(component_name, {})["cycle_count"] = (
+                stored_cycle_count
+            )
+
+            await make_agent_node(iteration_warning_offset=1).run(state)
+
+            call_history = mock_prompt.ainvoke.call_args[1]["input"]["history"]
+            human_messages = [m for m in call_history if isinstance(m, HumanMessage)]
+            if expected == "warning":
+                assert len(human_messages) == 1
+                assert "approaching the maximum number of iterations" in (
+                    human_messages[0].content
+                )
+                assert "no longer be able to make any tool calls" in (
+                    human_messages[0].content
+                )
+            elif expected == "wrap_up":
+                assert len(human_messages) == 1
+                assert "You have reached the maximum number of iterations" in (
+                    human_messages[0].content
+                )
+            else:
+                assert not human_messages
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_offset_not_set(
+        self,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        prompt_variables,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """No warning is injected when iteration_warning_offset is None (default constructor arg)."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            # Incremented cycle_count=2, which would hit the warning threshold if offset
+            # were set — but it isn't, so no HumanMessage should be injected at all.
+            state = copy.deepcopy(base_flow_state)
+            state["context"].setdefault(component_name, {})["cycle_count"] = 1
+
+            await make_agent_node().run(state)
+
+            call_history = mock_prompt.ainvoke.call_args[1]["input"]["history"]
+            assert not [m for m in call_history if isinstance(m, HumanMessage)]
+
+    @pytest.mark.asyncio
+    async def test_wrap_up_takes_priority_over_warning_when_offset_zero(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        prompt_variables,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When iteration_warning_offset=0 coincides with the wrap-up threshold, only the wrap-up message fires."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            await make_agent_node(iteration_warning_offset=0).run(state_at_limit)
+
+            call_history = mock_prompt.ainvoke.call_args[1]["input"]["history"]
+            human_messages = [m for m in call_history if isinstance(m, HumanMessage)]
+            assert len(human_messages) == 1
+            assert "maximum number of iterations for this task. You must now" in (
+                human_messages[0].content
+            )
+
+    @pytest.mark.asyncio
+    async def test_warning_logged_with_cycles_remaining(
+        self,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Approaching the soft limit emits a structlog warning including cycles_remaining."""
+        state = copy.deepcopy(base_flow_state)
+        # Incremented cycle_count=2 == max_cycles(3) - offset(1).
+        state["context"].setdefault(component_name, {})["cycle_count"] = 1
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            await make_agent_node(iteration_warning_offset=1).run(state)
+            mock_log.warning.assert_called_once()
+            call_kwargs = mock_log.warning.call_args
+            assert "cycles_remaining" in str(call_kwargs)
+
+
 class TestAgentNodeWrapUpRetries:
     """Test suite for AgentNode wrap-up retry behavior after max_cycles is reached."""
 

@@ -22,6 +22,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
+    MaxCyclesConfig,
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
@@ -2454,6 +2455,114 @@ class TestAgentComponentMaxCycles:
         subkeys = list(resolved.subkeys or [])
         assert component_name in subkeys
         assert "cycle_count" in subkeys
+
+
+class TestAgentComponentMaxCyclesWarningOffset:
+    """Test suite for the `iteration_warning_offset` sub-field of `max_cycles` (nested MaxCyclesConfig form)."""
+
+    def test_plain_int_form_defaults_to_offset_ten(self, make_agent_component):
+        """The legacy plain-int max_cycles form resolves _iteration_warning_offset to the shared default (10)."""
+        component = make_agent_component(max_cycles=50)
+        assert component._max_cycles_threshold == 50
+        assert component._iteration_warning_offset == 10
+
+    @pytest.mark.parametrize(
+        "max_cycles, expected_offset",
+        [
+            (4, 3),  # matches fix_pipeline's checkout step config
+            (1, 0),
+            (11, 10),  # boundary: last value still clamped
+            (12, 10),  # boundary: first value not clamped
+        ],
+    )
+    def test_plain_int_form_clamps_offset_for_small_thresholds(
+        self, make_agent_component, max_cycles, expected_offset
+    ):
+        """The legacy plain-int form clamps the default offset to min(10, threshold - 1) for small thresholds."""
+        component = make_agent_component(max_cycles=max_cycles)
+        assert component._max_cycles_threshold == max_cycles
+        assert component._iteration_warning_offset == expected_offset
+
+    def test_nested_form_default_offset(self, make_agent_component):
+        """MaxCyclesConfig without iteration_warning_offset also defaults to 10."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=50))
+        assert component._max_cycles_threshold == 50
+        assert component._iteration_warning_offset == 10
+
+    def test_nested_form_clamps_omitted_offset_for_small_threshold(
+        self, make_agent_component
+    ):
+        """MaxCyclesConfig with iteration_warning_offset omitted also clamps for small thresholds, like the plain-int
+        form."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=4))
+        assert component._max_cycles_threshold == 4
+        assert component._iteration_warning_offset == 3
+
+    @pytest.mark.parametrize("iteration_warning_offset", [4, 5, 10])
+    def test_nested_form_rejects_explicit_offset_at_or_above_threshold(
+        self, iteration_warning_offset
+    ):
+        """MaxCyclesConfig raises when iteration_warning_offset is explicitly set >= threshold.
+
+        Unlike an omitted offset (auto-clamped), an explicitly chosen value that doesn't fit is treated as a deliberate
+        misconfiguration.
+        """
+        with pytest.raises(ValidationError, match="must be less than threshold"):
+            MaxCyclesConfig(
+                threshold=4, iteration_warning_offset=iteration_warning_offset
+            )
+
+    def test_nested_form_explicit_null_disables_regardless_of_threshold(self):
+        """Explicitly setting iteration_warning_offset to null disables the warning, even for a small threshold."""
+        config = MaxCyclesConfig(threshold=4, iteration_warning_offset=None)
+        assert config.iteration_warning_offset is None
+
+    def test_nested_form_overrides_offset(self, make_agent_component):
+        """MaxCyclesConfig can override the warning offset."""
+        component = make_agent_component(
+            max_cycles=MaxCyclesConfig(threshold=50, iteration_warning_offset=5)
+        )
+        assert component._max_cycles_threshold == 50
+        assert component._iteration_warning_offset == 5
+
+    def test_nested_form_can_disable_warning(self, make_agent_component):
+        """Setting iteration_warning_offset to None disables the warning entirely."""
+        component = make_agent_component(
+            max_cycles=MaxCyclesConfig(threshold=50, iteration_warning_offset=None)
+        )
+        assert component._iteration_warning_offset is None
+
+    @pytest.mark.parametrize("iteration_warning_offset", [-1, -10])
+    def test_negative_offset_rejected(
+        self, make_agent_component, iteration_warning_offset
+    ):
+        """iteration_warning_offset must be >= 0."""
+        with pytest.raises(
+            ValidationError, match="iteration_warning_offset must be >= 0"
+        ):
+            make_agent_component(
+                max_cycles=MaxCyclesConfig(
+                    threshold=50, iteration_warning_offset=iteration_warning_offset
+                )
+            )
+
+    @pytest.mark.usefixtures("mock_final_response_node_cls", "mock_tool_node_cls")
+    def test_attach_forwards_resolved_threshold_and_offset_to_agent_node(
+        self,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+        make_agent_component,
+    ):
+        """Attach() passes the resolved threshold/offset (not the raw max_cycles field) to AgentNode."""
+        component = make_agent_component(
+            max_cycles=MaxCyclesConfig(threshold=50, iteration_warning_offset=5)
+        )
+        component.attach(mock_state_graph, mock_router)
+
+        agent_call_kwargs = mock_agent_node_cls.call_args[1]
+        assert agent_call_kwargs["max_cycles"] == 50
+        assert agent_call_kwargs["iteration_warning_offset"] == 5
 
 
 class TestAgentComponentMaxWrapUpRetries:

@@ -128,6 +128,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             agent's conversation-history slot) so checkpoints can report per-agent
             context utilisation.  When ``None``, no limit is stamped and the
             notifier falls back to the global context-window limit.
+        iteration_warning_offset: Number of cycles before ``max_cycles`` at which a
+            one-time warning ``HumanMessage`` is injected, telling the agent it is
+            approaching the soft limit. ``None`` disables the warning. Ignored when
+            ``max_cycles`` is ``None``.
     """
 
     name: str
@@ -149,6 +153,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _max_cycles: Optional[int]
     _cycle_count_key: Optional[RuntimeIOKey]
     _max_wrap_up_retries: int
+    _iteration_warning_offset: Optional[int]
 
     def __init__(
         self,
@@ -167,6 +172,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         max_cycles: Optional[int] = None,
         cycle_count_key: Optional[RuntimeIOKey] = None,
         max_wrap_up_retries: int = 3,
+        iteration_warning_offset: Optional[int] = None,
         prompt_template_inputs: Optional[dict[str, Any]] = None,
     ):
         self._flow_id = flow_id
@@ -185,6 +191,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._max_cycles = max_cycles
         self._cycle_count_key = cycle_count_key
         self._max_wrap_up_retries = max_wrap_up_retries
+        self._iteration_warning_offset = iteration_warning_offset
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
@@ -198,6 +205,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _MAX_CYCLES_REACHED_MESSAGE = (
         "You have reached the maximum number of iterations for this task. "
         "You must now {instruction}."
+    )
+
+    _ITERATION_WARNING_MESSAGE = (
+        "You are approaching the maximum number of iterations for this task "
+        "({cycles_remaining} remaining). Once you reach that limit, you will "
+        "no longer be able to make any tool calls and must provide your final "
+        "answer immediately. Start wrapping up your work now."
     )
 
     _MAX_TRUNCATION_RETRIES: int = 5
@@ -292,6 +306,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             )
         return self._MAX_CYCLES_REACHED_MESSAGE.format(instruction=instruction)
 
+    def _iteration_warning_message(self, cycles_remaining: int) -> str:
+        """Return the approaching-soft-limit warning message."""
+        return self._ITERATION_WARNING_MESSAGE.format(cycles_remaining=cycles_remaining)
+
     def _completion_has_non_final_tool_calls(self, completion: AIMessage) -> bool:
         """Return True if the completion contains tool calls other than the final response tool.
 
@@ -331,6 +349,23 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 max_cycles=self._max_cycles,
             )
             history = [*history, HumanMessage(content=self._wrap_up_message())]
+        elif (
+            self._max_cycles is not None
+            and self._iteration_warning_offset is not None
+            and cycle_count == self._max_cycles - self._iteration_warning_offset
+        ):
+            cycles_remaining = self._max_cycles - cycle_count
+            log.warning(
+                "Agent approaching max_cycles soft limit; injecting warning",
+                agent=self.name,
+                cycle_count=cycle_count,
+                max_cycles=self._max_cycles,
+                cycles_remaining=cycles_remaining,
+            )
+            history = [
+                *history,
+                HumanMessage(content=self._iteration_warning_message(cycles_remaining)),
+            ]
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
