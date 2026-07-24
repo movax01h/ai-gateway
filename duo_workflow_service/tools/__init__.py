@@ -23,7 +23,6 @@ from .merge_request import *
 from .merge_request_notes import *
 from .pipeline import *
 from .planner import *
-from .previous_context import *
 from .project import *
 from .render_ui import *
 from .repository_files import *
@@ -32,6 +31,7 @@ from .run_glql_query import *
 from .search import *
 from .search_system import *
 from .security import *
+from .session_context import *
 from .start_flow import *
 from .testing import *
 from .todo_write import *

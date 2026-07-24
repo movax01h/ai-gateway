@@ -2,7 +2,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from duo_workflow_service.gitlab.gitlab_workflow_params import fetch_workflow_config
+from duo_workflow_service.gitlab.gitlab_workflow_params import (
+    WorkflowConfigFetchError,
+    fetch_workflow_config,
+)
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
@@ -45,3 +48,30 @@ async def test_fetch_workflow_config_success():
     assert workflow["workflow_definition"] == "software_development"
     assert workflow["status"] == "finished"
     assert workflow["allow_agent_to_request_user"] is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_workflow_config_raises_on_non_success_response():
+    gitlab_client = AsyncMock()
+    mock_response = GitLabHttpResponse(
+        status_code=403,
+        body={"message": "403 Forbidden"},
+    )
+    gitlab_client.aget = AsyncMock(return_value=mock_response)
+
+    with pytest.raises(WorkflowConfigFetchError, match="HTTP 403"):
+        await fetch_workflow_config(gitlab_client, "999")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [[], None, "not-an-object", 42])
+async def test_fetch_workflow_config_raises_on_non_dict_success_body(body):
+    gitlab_client = AsyncMock()
+    mock_response = GitLabHttpResponse(
+        status_code=200,
+        body=body,
+    )
+    gitlab_client.aget = AsyncMock(return_value=mock_response)
+
+    with pytest.raises(WorkflowConfigFetchError, match="expected object"):
+        await fetch_workflow_config(gitlab_client, "999")

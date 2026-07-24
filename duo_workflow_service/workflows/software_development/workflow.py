@@ -115,7 +115,7 @@ _PLAN_MANAGEMENT_TOOLS = [
 CONTEXT_BUILDER_TOOLS = [
     *_GITLAB_READ_TOOLS,
     *_FILE_SYSTEM_READ_TOOLS,
-    "get_previous_session_context",
+    "get_session_context",
     "handover_tool",
 ]
 
@@ -130,7 +130,7 @@ EXECUTOR_TOOLS = [
 ]
 
 PLANNER_TOOLS = [
-    "get_previous_session_context",
+    "get_session_context",
     "get_plan",
     "add_new_task",
     "remove_task",
