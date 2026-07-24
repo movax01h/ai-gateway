@@ -1676,7 +1676,8 @@ def test_aput_with_no_status_update_and_human_input(
 @pytest.mark.parametrize(
     "status,expected_event",
     [
-        (WorkflowStatusEnum.COMPLETED, WorkflowStatusEventEnum.FINISH),
+        # COMPLETED -> FINISH is deferred (see test_aput_writes_defers_finish),
+        # so it is intentionally excluded from this immediate-PATCH case.
         (WorkflowStatusEnum.ERROR, WorkflowStatusEventEnum.DROP),
         (WorkflowStatusEnum.CANCELLED, WorkflowStatusEventEnum.STOP),
         (WorkflowStatusEnum.PAUSED, WorkflowStatusEventEnum.PAUSE),
@@ -1779,6 +1780,157 @@ async def test_aput_writes_with_interrupt(gitlab_workflow, http_client):
             }
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_aput_writes_defers_finish(gitlab_workflow, workflow_id):
+    """FINISH must not PATCH inside aput_writes; it is deferred until the terminal checkpoint is persisted (see gitlab-
+    org/gitlab#605913)."""
+    gitlab_workflow._status_handler = AsyncMock()
+    config: RunnableConfig = {
+        "configurable": {"checkpoint_id": "test-id", "thread_id": workflow_id}
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.COMPLETED)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    gitlab_workflow._status_handler.update_workflow_status.assert_not_called()
+    assert gitlab_workflow._pending_finish is True
+
+
+@pytest.mark.asyncio
+async def test_handle_online_mode_completion_fires_deferred_finish(
+    gitlab_workflow, workflow_id
+):
+    """A deferred FINISH is fired on completion, after the graph loop (and its terminal checkpoint) has drained."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    # Patch _track_workflow_completion to isolate the deferred-FINISH behaviour
+    # from the billing/internal-event path (which swallows exceptions).
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        await gitlab_workflow._handle_online_mode_completion()
+
+    status_handler.update_workflow_status.assert_awaited_once_with(
+        workflow_id, WorkflowStatusEventEnum.FINISH
+    )
+    assert gitlab_workflow._pending_finish is False
+
+
+@pytest.mark.asyncio
+async def test_handle_online_mode_completion_without_deferred_finish(
+    gitlab_workflow, workflow_id
+):
+    """No spurious FINISH when the workflow did not complete (e.g. interrupt)."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "input_required"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = False
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        await gitlab_workflow._handle_online_mode_completion()
+
+    status_handler.update_workflow_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_online_mode_completion_finish_error_propagates(
+    gitlab_workflow,
+):
+    """If the deferred FINISH PATCH raises, the error propagates (not swallowed)."""
+    status_handler = AsyncMock()
+    status_handler.update_workflow_status.side_effect = RuntimeError("boom")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        with pytest.raises(RuntimeError, match="boom"):
+            await gitlab_workflow._handle_online_mode_completion()
+
+
+@pytest.mark.asyncio
+async def test_aexit_clean_success_fires_deferred_finish(gitlab_workflow, workflow_id):
+    """A clean completion (no teardown exception) fires the deferred FINISH via the online-mode completion branch, not
+    the teardown-error path."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        result = await gitlab_workflow.__aexit__(None, None, None)
+
+    assert result is True
+    status_handler.update_workflow_status.assert_awaited_once_with(
+        workflow_id, WorkflowStatusEventEnum.FINISH
+    )
+    assert gitlab_workflow._pending_finish is False
+
+
+@pytest.mark.asyncio
+async def test_aexit_finishes_completed_workflow_despite_teardown_error(
+    gitlab_workflow, workflow_id
+):
+    """A completed workflow (pending FINISH) is finished, not dropped, even when __aexit__ receives a teardown
+    exception; the exception is suppressed."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        suppressed = await gitlab_workflow.__aexit__(
+            RuntimeError, RuntimeError("stream closed"), None
+        )
+
+    assert suppressed is True
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.FINISH in calls
+    assert WorkflowStatusEventEnum.DROP not in calls
+
+
+@pytest.mark.asyncio
+async def test_aexit_teardown_error_path_survives_finish_patch_failure(
+    gitlab_workflow, workflow_id
+):
+    """If the deferred FINISH PATCH raises during the teardown-error path, the FINISH failure is logged rather than
+    surfaced, and the original teardown exception's handling (suppression) is preserved."""
+    status_handler = AsyncMock()
+    status_handler.update_workflow_status.side_effect = RuntimeError("rails down")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        result = await gitlab_workflow.__aexit__(
+            RuntimeError, RuntimeError("stream closed"), None
+        )
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_aexit_completed_workflow_reraises_cancellation(
+    gitlab_workflow, workflow_id
+):
+    """Cancellation is never swallowed: a completed workflow is still finished,
+    but the CancelledError propagates (not suppressed)."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        suppressed = await gitlab_workflow.__aexit__(
+            asyncio.CancelledError, asyncio.CancelledError(), None
+        )
+
+    assert suppressed is False
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.FINISH in calls
+    assert WorkflowStatusEventEnum.STOP not in calls
+    assert WorkflowStatusEventEnum.DROP not in calls
 
 
 @pytest.mark.asyncio
