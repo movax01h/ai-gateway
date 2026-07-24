@@ -46,6 +46,16 @@ def test_importing_module_applies_empty_text_patch():
     assert result["content"] == ""
 
 
+def test_request_timeout_reaches_litellm_as_timeout_not_force_timeout():
+    """Litellm ignores the deprecated `force_timeout` kwarg, so ChatLiteLLM must surface request_timeout as
+    `timeout`."""
+    chat = ChatLiteLLM(model="claude-sonnet-4-5", request_timeout=42.0)
+
+    for params in (chat._default_params, chat._client_params):
+        assert params["timeout"] == 42.0
+        assert "force_timeout" not in params
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "acompletion_response_fixture", ["acompletion_stream_response"]

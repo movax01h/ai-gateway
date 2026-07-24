@@ -84,3 +84,23 @@ def test_duo_workflow_caching_proxy_url_via_container(duo_workflow_dict, expecte
     )
 
     assert container._duo_workflow().caching_proxy_url() == expected_url
+
+
+def test_lite_llm_chat_uses_configured_request_timeout():
+    """The DWS ChatLiteLLM factory must set request_timeout from duo_chat config so litellm enforces a real deadline
+    instead of falling back to its default (~600s) timeout."""
+    container = ContainerModels()
+    container.config.from_dict(
+        {
+            "custom_models": {"enabled": False},
+            "bedrock_guardrail_config": None,
+            "fireworks_api_base_url": "",
+            "duo_chat": {"model_request_timeout": 45.0},
+            "mock_model_responses": False,
+            "use_agentic_mock": False,
+        }
+    )
+
+    model = container.lite_llm_chat_fn(model="claude-sonnet-4-5")
+
+    assert model.request_timeout == 45.0
