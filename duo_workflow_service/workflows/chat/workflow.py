@@ -185,8 +185,8 @@ CHAT_FLOW_TOOLS = ["start_flow"]
 
 CHAT_UTILITY_TOOLS = ["clarification_question"]
 
-# Session context tool for retrieving context from previous agent sessions
-CHAT_SESSION_CONTEXT_TOOLS = ["get_previous_session_context"]
+# Session context tool for retrieving context from other agent sessions
+CHAT_SESSION_CONTEXT_TOOLS = ["get_session_context"]
 
 # Generative-UI tools: the agent composes a declarative ui_tree of catalog
 # components. Paving the way only — `render_ui` is registered but intentionally

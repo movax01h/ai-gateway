@@ -1396,10 +1396,10 @@ class TestMcpServerToolsFiltering:
         assert "gitlab_documentation_search" in tools
 
     @pytest.mark.asyncio
-    async def test_get_previous_session_context_requested_regardless_of_flags(
+    async def test_get_session_context_requested_regardless_of_flags(
         self, workflow_with_project
     ):
-        """Requests get_previous_session_context regardless of feature flags.
+        """Requests get_session_context regardless of feature flags.
 
         This asserts the tool name is in the list returned by ``_get_tools()``.
         Whether it resolves in the compiled toolset depends on the session
@@ -1411,7 +1411,7 @@ class TestMcpServerToolsFiltering:
 
         tools = workflow_with_project._get_tools()
 
-        assert "get_previous_session_context" in tools
+        assert "get_session_context" in tools
 
 
 @pytest.mark.asyncio
