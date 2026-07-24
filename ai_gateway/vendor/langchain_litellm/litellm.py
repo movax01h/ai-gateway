@@ -416,7 +416,9 @@ class ChatLiteLLM(BaseChatModel):
             set_model_value = self.model_name
         params = {
             "model": set_model_value,
-            "force_timeout": self.request_timeout,
+            # litellm ignores the deprecated `force_timeout` kwarg; only `timeout`
+            # reaches the HTTP layer.
+            "timeout": self.request_timeout,
             "max_tokens": self.max_tokens,
             "stream": self.streaming,
             "n": self.n,
@@ -456,7 +458,7 @@ class ChatLiteLLM(BaseChatModel):
         self.client.organization = self.organization
         creds: Dict[str, Any] = {
             "model": set_model_value,
-            "force_timeout": self.request_timeout,
+            # `timeout` is provided by `_default_params` (merged below).
             "api_base": self.api_base,
         }
         # Forward any extra headers to the client and include in params

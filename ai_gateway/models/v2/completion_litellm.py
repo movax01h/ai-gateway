@@ -123,7 +123,9 @@ class CompletionLiteLLM(BaseChatModel):
         # Note: 'model' is intentionally excluded here as it's set in _build_completion_args
         # to allow model_identifier from FireworksModelMetadata to override
         params: Dict[str, Any] = {
-            "force_timeout": self.request_timeout,
+            # litellm ignores the deprecated `force_timeout` kwarg; only `timeout`
+            # reaches the HTTP layer.
+            "timeout": self.request_timeout,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,

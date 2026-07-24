@@ -121,6 +121,9 @@ class ContainerModels(containers.DeclarativeContainer):
             custom_models_enabled=config.custom_models.enabled,
             bedrock_guardrail_config=config.bedrock_guardrail_config,
             allowed_api_bases=_fireworks_allowed_api_bases,
+            # Without this, litellm falls back to its default (~600s) timeout instead
+            # of failing fast when a connection stalls.
+            request_timeout=config.duo_chat.model_request_timeout,
         ),
         mocked=providers.Factory(mock.FakeModel),
         agentic=providers.Factory(
