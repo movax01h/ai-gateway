@@ -370,6 +370,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._internal_event_client = internal_event_client
         self._billing_event_service = billing_event_service
         self._orbit_called = False
+        # Set when a checkpoint carries FINISH; fired later by
+        # _handle_online_mode_completion, once the answer checkpoint is persisted.
+        self._pending_finish = False
         self.serde = CheckpointSerializer()
         self._prev_channel_values: Dict[str, Any] = {}
         self._prev_checkpoint_id: Optional[str] = None
@@ -705,6 +708,36 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         Returns:
             bool: True if workflow completed successfully, False otherwise
         """
+        # A completed workflow (answer already checkpointed) must still be
+        # finished even if teardown raised afterwards -- e.g. a stream/send error
+        # to a disconnected executor. FINISH has no monolith backstop, so a
+        # post-completion error must not downgrade a finished workflow to failed.
+        # See gitlab-org/gitlab#605913.
+        if self._pending_finish and exc_type is not None:
+            # May be a genuine persistence failure, not just a benign disconnect,
+            # and it is suppressed below -- so log it.
+            self._logger.warning(
+                "Finishing workflow despite post-completion teardown error",
+                workflow_id=self._workflow_id,
+                error=str(exc_value),
+            )
+            self._capture_audit_session_ended(None, None)
+            if not self._offline_mode:
+                try:
+                    await self._handle_online_mode_completion()
+                except Exception as finish_error:
+                    # The deferred FINISH itself failed (e.g. the PATCH to Rails
+                    # errored). Log it and fall through to the return below so we
+                    # preserve the original teardown exception's handling rather
+                    # than surfacing the FINISH failure in its place.
+                    log_exception(
+                        finish_error,
+                        extra={"workflow_id": self._workflow_id, "source": __name__},
+                    )
+            # Suppress a benign teardown error, but never swallow task
+            # cancellation -- re-raise it after finishing.
+            return not isinstance(exc_value, asyncio.exceptions.CancelledError)
+
         self._capture_audit_session_ended(exc_type, exc_value)
 
         # In case of exception in async context manager,
@@ -764,6 +797,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
     async def _handle_online_mode_completion(self) -> Optional[bool]:
         """Handle workflow completion in online mode."""
+        # Fire the deferred FINISH now that the graph loop has drained and its
+        # terminal checkpoint (the final answer) is persisted, so listeners on
+        # the finished transition see the answer in Rails.
+        if self._pending_finish:
+            self._logger.debug("Firing deferred FINISH workflow status")
+            await self._update_workflow_status(WorkflowStatusEventEnum.FINISH)
+            self._pending_finish = False
+
         status = await self._status_handler.get_workflow_status(
             workflow_id=self._workflow_id
         )
@@ -1433,7 +1474,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
         status = self._get_workflow_status_event(writes)
-        if status:
+        if status == WorkflowStatusEventEnum.FINISH:
+            # aput_writes runs before this super-step's checkpoint is saved, so
+            # firing FINISH here would race the answer checkpoint POST; defer it
+            # to _handle_online_mode_completion.
+            self._pending_finish = True
+        elif status:
             self._logger.debug(
                 f"Updating workflow status from checkpoints, with status {status.value}"
             )
