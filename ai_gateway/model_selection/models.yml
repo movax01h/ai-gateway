@@ -352,6 +352,38 @@ models:
       model: "claude-opus-5"
       max_tokens: 128_000
 
+  - name: "Claude Opus 5"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "claude_opus_5_vertex"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: "claude-opus-5"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 128_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
+  - name: "Claude Opus 5"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_opus_5_bedrock"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-5
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: bedrock/global.anthropic.claude-opus-5
+      custom_llm_provider: bedrock
+      max_tokens: 128_000
+      max_retries: 1
+
   - name: "Claude Opus 4.6"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_6_bedrock"
