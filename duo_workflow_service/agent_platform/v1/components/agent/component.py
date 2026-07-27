@@ -28,10 +28,7 @@ from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
-from duo_workflow_service.agent_platform.constants import (
-    NODE_ROLE_SEPARATOR,
-    RECURSION_LIMIT,
-)
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -199,10 +196,14 @@ class AgentComponentBase(BaseComponent):
     response_schema_tracking_context: dict[str, str] = Field(default_factory=dict)
     require_tool_approval: bool = False
     pre_approved_tools: list[str] = Field(default_factory=list)
-    _DEFAULT_SOFT_LIMIT_OFFSET: ClassVar[int] = 20
-    _DEFAULT_MAX_CYCLES: ClassVar[int] = max(
-        1, RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET
-    )
+    # Deliberately a fixed number, not derived from RECURSION_LIMIT: max_cycles
+    # counts AgentComponent cycles (2 graph-node executions each, or 4 with
+    # require_tool_approval), while RECURSION_LIMIT counts every graph-node
+    # execution flow-wide, so the two don't scale together. See
+    # gitlab-org/modelops/applied-ml/code-suggestions/ai-assist#2590. Components
+    # with require_tool_approval enabled should set a lower max_cycles explicitly
+    # in their flow config.
+    _DEFAULT_MAX_CYCLES: ClassVar[int] = 280
 
     max_cycles: Union[int, MaxCyclesConfig] = _DEFAULT_MAX_CYCLES
     max_wrap_up_retries: int = 3

@@ -15,7 +15,6 @@ from ai_gateway.response_schemas import (
 )
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
-from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -2420,17 +2419,10 @@ class TestAgentNodeInvokeConfig:
 class TestAgentComponentMaxCycles:
     """Test suite for AgentComponentBase max_cycles field and validator."""
 
-    def test_max_cycles_default_derived_from_recursion_limit(
-        self, make_agent_component
-    ):
-        """max_cycles defaults to RECURSION_LIMIT - _DEFAULT_SOFT_LIMIT_OFFSET, always-on."""
+    def test_max_cycles_default_is_fixed(self, make_agent_component):
+        """max_cycles defaults to a fixed value, independent of RECURSION_LIMIT."""
         component = make_agent_component()
         assert component.max_cycles == AgentComponentBase._DEFAULT_MAX_CYCLES
-        # Clamped to >= 1 regardless of RECURSION_LIMIT value
-        assert component.max_cycles >= 1
-        assert component.max_cycles == max(
-            1, RECURSION_LIMIT - AgentComponentBase._DEFAULT_SOFT_LIMIT_OFFSET
-        )
 
     @pytest.mark.parametrize("max_cycles", [1, 5, 280])
     def test_max_cycles_valid_values(self, make_agent_component, max_cycles):
