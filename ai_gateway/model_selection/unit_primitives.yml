@@ -244,7 +244,6 @@ configurable_unit_primitives:
         - "gemini_3_1_pro_preview_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
-        - "glm_5_1_fireworks"
         - "glm_5_2_fireworks"
 
   - feature_setting: "duo_agent_platform_agentic_chat"
@@ -302,7 +301,6 @@ configurable_unit_primitives:
         - "gemini_3_1_pro_preview_vertex"
         - "kimi_k2_6_fireworks"
         - "minimax_m2_7_fireworks"
-        - "glm_5_1_fireworks"
         - "glm_5_2_fireworks"
 
   - feature_setting: "categorize_question"
