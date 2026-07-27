@@ -21,6 +21,7 @@ from ai_gateway.async_dependency_resolver import (
 from ai_gateway.chat.agents import (
     AgentStep,
     AgentToolAction,
+    AgentUsage,
     Message,
     ReActAgentInputs,
     ReActParserConfig,
@@ -32,7 +33,13 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models import Role
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
-from lib.context import StarletteUser, current_model_metadata_context, get_current_user
+from lib.context import (
+    StarletteUser,
+    current_model_metadata_context,
+    get_current_user,
+    init_token_usage,
+    token_usage,
+)
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
@@ -224,9 +231,16 @@ async def chat(
 
     authorize_additional_context(current_user, agent_request, internal_event_client)
 
+    init_token_usage()
+
     async def _stream_handler(stream_events: AsyncIterator[TypeAgentEvent]):
         async for event in stream_events:
             yield f"{event.dump_as_response()}\n"
+
+        # Usage metadata is only registered once each LLM call finishes, so it can
+        # only be read after the event stream is exhausted.
+        if usage := token_usage.get():
+            yield f"{AgentUsage(usage=usage).dump_as_response()}\n"
 
     last_message = agent_request.messages[-1]
 
