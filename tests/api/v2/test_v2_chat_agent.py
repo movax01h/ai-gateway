@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import AsyncIterator, Type
 from unittest.mock import Mock, PropertyMock, call, patch
 
+import httpx
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langchain_core.messages.ai import UsageMetadata
 from pydantic import AnyUrl
 from starlette.testclient import TestClient
 
@@ -39,6 +41,7 @@ from ai_gateway.model_selection.model_selection_config import (
 )
 from ai_gateway.models.base_chat import Role
 from ai_gateway.prompts.typing import Model
+from lib.context import token_usage
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -1126,3 +1129,158 @@ class TestChatAgent:
             "request_duo_classic_chat",
             category="ai_gateway.api.v2.chat.agent",
         )
+
+
+class TestChatUsage:
+    """Token usage on the agent stream, exercised through the real ReAct agent.
+
+    Coverage for
+    https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2535:
+    the model reports usage metadata at the end of its stream; the endpoint must emit it
+    as a single terminal `usage` event so clients can attribute the request's token
+    consumption.
+    """
+
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return "thought\nFinal Answer: answer\n"
+
+    @pytest.fixture(name="usage_metadata")
+    def usage_metadata_fixture(self):
+        return UsageMetadata(input_tokens=8, output_tokens=12, total_tokens=20)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_model", "mocked_tools", "mock_track_internal_event")
+    async def test_usage_event_terminates_stream(self, mock_client: TestClient):
+        response = mock_client.post(
+            "/chat/agent",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "messages": [
+                    Message(role=Role.USER, content="Basic request").model_dump(
+                        mode="json"
+                    ),
+                    Message(
+                        role=Role.ASSISTANT, content=None, agent_scratchpad=[]
+                    ).model_dump(mode="json"),
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = [json.loads(chunk) for chunk in response.text.strip().split("\n")]
+
+        assert events[-1] == {
+            "type": "usage",
+            "data": {"usage": {"fake-model": {"input_tokens": 8, "output_tokens": 12}}},
+        }
+        # All preceding events are unchanged final-answer deltas
+        assert {event["type"] for event in events[:-1]} == {"final_answer_delta"}
+        assert "".join(event["data"]["text"] for event in events[:-1]) == "answer"
+
+
+class TestChatNoUsage:
+    """No `usage` event when the model reports no usage metadata."""
+
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return "thought\nFinal Answer: answer\n"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_model", "mocked_tools", "mock_track_internal_event")
+    async def test_no_usage_event(self, mock_client: TestClient):
+        response = mock_client.post(
+            "/chat/agent",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "messages": [
+                    Message(role=Role.USER, content="Basic request").model_dump(
+                        mode="json"
+                    ),
+                    Message(
+                        role=Role.ASSISTANT, content=None, agent_scratchpad=[]
+                    ).model_dump(mode="json"),
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = [json.loads(chunk) for chunk in response.text.strip().split("\n")]
+        assert {event["type"] for event in events} == {"final_answer_delta"}
+
+
+class TestChatUsageOnError:
+    """No `usage` event when the stream fails, even with usage already recorded."""
+
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return "thought\nFinal Answer: answer\n"
+
+    @pytest.fixture(name="model_error")
+    def model_error_fixture(self):
+        return ValueError("overloaded")
+
+    @pytest.fixture(name="seeded_token_usage")
+    def seeded_token_usage_fixture(self):
+        # A model error fires on_llm_error, so nothing ever reaches the usage
+        # callback in this scenario. Seed the accumulator at request entry to
+        # simulate usage registered before the failure: the only thing keeping
+        # these counts off the wire is that the emit is skipped when the stream
+        # loop raises.
+        def seed():
+            token_usage.set({"claude": {"input_tokens": 5, "output_tokens": 7}})
+
+        with patch(
+            "ai_gateway.api.v2.chat.agent.init_token_usage", side_effect=seed
+        ) as mock:
+            yield mock
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_model", "mocked_tools", "mock_track_internal_event", "seeded_token_usage"
+    )
+    async def test_no_usage_event_after_error(self, mock_client: TestClient):
+        # TestClient discards the body of a stream that raises mid-response, so read
+        # the truncated stream through the raw ASGI transport instead
+        transport = httpx.ASGITransport(app=mock_client.app, raise_app_exceptions=False)
+
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            response = await client.post(
+                "/chat/agent",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                },
+                json={
+                    "messages": [
+                        Message(role=Role.USER, content="Basic request").model_dump(
+                            mode="json"
+                        ),
+                        Message(
+                            role=Role.ASSISTANT, content=None, agent_scratchpad=[]
+                        ).model_dump(mode="json"),
+                    ],
+                },
+            )
+
+        assert response.status_code == 200
+
+        events = [
+            json.loads(line) for line in response.text.strip().split("\n") if line
+        ]
+
+        # The agent surfaces the error event and re-raises; the usage emit after the
+        # stream loop is skipped, so the recorded usage never reaches the wire
+        assert events
+        assert events[-1]["type"] == "error"
+        assert all(event["type"] != "usage" for event in events)

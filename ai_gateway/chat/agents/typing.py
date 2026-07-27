@@ -8,6 +8,7 @@ from pydantic import BaseModel, model_validator
 from ai_gateway.chat.context.current_page import CurrentPageContext
 from ai_gateway.chat.tools.base import BaseTool
 from ai_gateway.models.base_chat import Role
+from lib.context import TokenUsage
 
 __all__ = [
     "AdditionalContext",
@@ -18,6 +19,7 @@ __all__ = [
     "AgentStep",
     "AgentToolAction",
     "AgentUnknownAction",
+    "AgentUsage",
     "CurrentFile",
     "Message",
     "ReActAgentInputs",
@@ -56,6 +58,19 @@ class AgentError(AgentBaseEvent):
     type: str = "error"
     message: str
     retryable: bool
+
+
+class AgentUsage(AgentBaseEvent):
+    """Per-model token usage for the request, emitted once as the final stream event.
+
+    The map has the same shape other endpoints return (`{"<model>": {"input_tokens": N, "output_tokens": M}}`); counts
+    are reported per model rather than summed because token counts across models are not equivalent and carry different
+    cost implications. The endpoint emits this event after the agent's stream is exhausted; the agent itself never
+    yields it.
+    """
+
+    type: str = "usage"
+    usage: TokenUsage
 
 
 AgentEventType = Union[
