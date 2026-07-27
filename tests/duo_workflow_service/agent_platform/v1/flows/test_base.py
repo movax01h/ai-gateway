@@ -11,6 +11,7 @@ from langgraph.types import Command
 from structlog.testing import capture_logs
 
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -1686,14 +1687,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             pytest.raises(TraceableException) as exc_info,
         ):
             await flow_instance._handle_compile_and_run_exception(
-                GraphRecursionError("Recursion limit of 300 reached"),
+                GraphRecursionError(f"Recursion limit of {RECURSION_LIMIT} reached"),
                 compiled_graph,
                 {},
             )
 
         wrapped = exc_info.value.original_exception
         assert isinstance(wrapped, NotifiableAgentException)
-        assert "300" in wrapped.internal_detail
+        assert str(RECURSION_LIMIT) in wrapped.internal_detail
         assert (
             wrapped.ui_message
             == "The workflow reached its maximum step limit and could not complete. "
