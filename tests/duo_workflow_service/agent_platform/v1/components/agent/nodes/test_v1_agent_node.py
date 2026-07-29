@@ -1540,6 +1540,71 @@ class TestAgentNodeMaxCycles:
             call_kwargs = mock_log.warning.call_args
             assert "max_cycles" in str(call_kwargs)
 
+    @pytest.mark.asyncio
+    async def test_soft_limit_tags_langsmith_run_tree(
+        self,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """Reaching max_cycles attaches 'soft_limit_reached' tag and metadata to the LangSmith run tree."""
+        # id == trace_id: this run tree is its own trace root, so no extra API call to tag a separate root.
+        mock_run_tree = Mock(id="run-id", trace_id="run-id", tags=[])
+        with patch(
+            "duo_workflow_service.tracking.langsmith_tags.get_current_run_tree",
+            return_value=mock_run_tree,
+        ):
+            await make_agent_node().run(state_at_limit)
+
+        mock_run_tree.add_tags.assert_called_once_with(["soft_limit_reached"])
+        mock_run_tree.add_metadata.assert_called_once_with(
+            {
+                "agent_name": "test_agent_node",
+                "cycle_count": 4,  # state_at_limit has cycle_count=3, incremented to 4
+                "max_cycles": 3,
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_soft_limit_no_langsmith_tag_when_run_tree_is_none(
+        self,
+        make_agent_node,
+        state_at_limit,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When LangSmith tracing is disabled (run tree is None), tagging is a no-op."""
+        with patch(
+            "duo_workflow_service.tracking.langsmith_tags.get_current_run_tree",
+            return_value=None,
+        ):
+            # Should not raise even when run tree is None
+            await make_agent_node().run(state_at_limit)
+
+    @pytest.mark.asyncio
+    async def test_no_langsmith_tag_when_below_max_cycles(
+        self,
+        make_agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_maybe_compact_history,
+        _mock_predefined_runtime_variables,
+    ):
+        """When below max_cycles, no LangSmith tag is attached."""
+        mock_run_tree = Mock()
+        with patch(
+            "duo_workflow_service.tracking.langsmith_tags.get_current_run_tree",
+            return_value=mock_run_tree,
+        ):
+            await make_agent_node().run(base_flow_state)
+
+        mock_run_tree.add_tags.assert_not_called()
+        mock_run_tree.add_metadata.assert_not_called()
+
 
 class TestAgentNodeIterationWarning:
     """Test suite for AgentNode approaching-soft-limit warning (iteration_warning_offset)."""

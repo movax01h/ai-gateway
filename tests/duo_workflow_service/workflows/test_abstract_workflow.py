@@ -822,6 +822,36 @@ async def test_compile_and_run_graph_with_exception(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize(
+    "error",
+    [Exception("Test exception"), GraphRecursionError("Recursion limit reached")],
+    ids=["other_error", "graph_recursion_error"],
+)
+async def test_compile_and_run_graph_recursion_limit_handling(
+    mock_tools_registry,
+    _mock_gitlab_workflow,
+    mock_fetch_workflow_and_container_data,
+    workflow,
+    error,
+):
+    """Hard-limit logging/tagging only triggers for GraphRecursionError, not other exceptions."""
+    mock_tools_registry.side_effect = error
+
+    with (
+        patch.object(workflow, "_handle_graph_recursion_limit") as mock_handle,
+        pytest.raises(TraceableException),
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    if isinstance(error, GraphRecursionError):
+        mock_handle.assert_called_once_with(error)
+    else:
+        mock_handle.assert_not_called()
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
 async def test_compile_and_run_graph_with_cancellation_during_fetch(
     mock_user_interface,
@@ -1376,31 +1406,79 @@ async def test_handle_compile_and_run_exception_logs_warning_when_checkpoint_not
 
 
 @pytest.mark.asyncio
-async def test_handle_compile_and_run_exception_logs_error_on_graph_recursion_error(
+async def test_handle_graph_recursion_limit_logs_error_on_graph_recursion_error(
     user,
 ):
-    """GraphRecursionError is logged as an error with recursion_limit and workflow_id before normal handling."""
+    """GraphRecursionError is logged as an error with recursion_limit.
+
+    `_handle_graph_recursion_limit` is called directly here (rather than going
+    through `_compile_and_run_graph`'s except block) because every real
+    workflow subclass overrides `_handle_compile_and_run_exception` to
+    translate `GraphRecursionError` into a `NotifiableAgentException` before
+    calling `super()` — so this detection has to happen earlier, on the
+    original exception, which is exactly what this method is for.
+    """
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
     )
-    workflow.checkpoint_notifier = AsyncMock()
-    workflow.checkpoint_notifier.send_event = AsyncMock()
-
     error = GraphRecursionError("Recursion limit reached")
 
     with patch.object(workflow, "log") as mock_log:
-        with pytest.raises(TraceableException):
-            await workflow._handle_compile_and_run_exception(
-                error, compiled_graph=None, graph_config={}
-            )
+        await workflow._handle_graph_recursion_limit(error)
 
     mock_log.error.assert_called_once_with(
         "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated",
         recursion_limit=RECURSION_LIMIT,
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_graph_recursion_limit_tags_langsmith(user):
+    """GraphRecursionError attaches 'hard_limit_reached' tag and metadata to the LangSmith run tree."""
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    error = GraphRecursionError("Recursion limit reached")
+    # id == trace_id: this is the workflow's own @traceable root run, so no extra API call is needed.
+    mock_run_tree = Mock(id="run-id", trace_id="run-id", tags=[])
+
+    with patch(
+        "duo_workflow_service.tracking.langsmith_tags.get_current_run_tree",
+        return_value=mock_run_tree,
+    ):
+        await workflow._handle_graph_recursion_limit(error)
+
+    mock_run_tree.add_tags.assert_called_once_with(["hard_limit_reached"])
+    mock_run_tree.add_metadata.assert_called_once_with(
+        {"recursion_limit": RECURSION_LIMIT}
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_graph_recursion_limit_no_langsmith_tag_when_run_tree_is_none(
+    user,
+):
+    """When LangSmith tracing is disabled (run tree is None), hard-limit tagging is a no-op."""
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    error = GraphRecursionError("Recursion limit reached")
+
+    with patch(
+        "duo_workflow_service.tracking.langsmith_tags.get_current_run_tree",
+        return_value=None,
+    ):
+        # Should not raise even when run tree is None.
+        await workflow._handle_graph_recursion_limit(error)
 
 
 def _boundary_checkpoint_tuple(checkpoint_id):

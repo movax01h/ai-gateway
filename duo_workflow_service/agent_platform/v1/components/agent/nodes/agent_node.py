@@ -34,6 +34,7 @@ from duo_workflow_service.errors.error_handler import (
     ModelErrorHandler,
     ModelErrorType,
 )
+from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
@@ -306,6 +307,23 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             )
         return self._MAX_CYCLES_REACHED_MESSAGE.format(instruction=instruction)
 
+    async def _tag_langsmith_soft_limit(self, cycle_count: int) -> None:
+        """Attach a LangSmith tag and metadata to the current trace when the soft cycle limit is reached.
+
+        This is a no-op when LangSmith tracing is disabled or no active run tree exists.
+
+        Args:
+            cycle_count: The cycle count at which the soft limit was triggered.
+        """
+        await tag_current_run(
+            "soft_limit_reached",
+            {
+                "agent_name": self.name,
+                "cycle_count": cycle_count,
+                "max_cycles": self._max_cycles,
+            },
+        )
+
     def _iteration_warning_message(self, cycles_remaining: int) -> str:
         """Return the approaching-soft-limit warning message."""
         return self._ITERATION_WARNING_MESSAGE.format(cycles_remaining=cycles_remaining)
@@ -348,6 +366,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 cycle_count=cycle_count,
                 max_cycles=self._max_cycles,
             )
+            await self._tag_langsmith_soft_limit(cycle_count)
             history = [*history, HumanMessage(content=self._wrap_up_message())]
         elif (
             self._max_cycles is not None
