@@ -78,6 +78,7 @@ from duo_workflow_service.tracking import (
     MonitoringContext,
     current_monitoring_context,
     log_exception,
+    tag_current_run,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
@@ -267,6 +268,16 @@ class AbstractWorkflow(ABC):
 
     def _recursion_limit(self):
         return RECURSION_LIMIT
+
+    async def _tag_langsmith_hard_limit(self) -> None:
+        """Attach a LangSmith tag and metadata to the current trace when the hard recursion limit is hit.
+
+        This is a no-op when LangSmith tracing is disabled or no active run tree exists.
+        """
+        await tag_current_run(
+            "hard_limit_reached",
+            {"recursion_limit": self._recursion_limit()},
+        )
 
     def _record_first_response_metric(self):
         """Record the time to first response ready metric."""
@@ -504,6 +515,14 @@ class AbstractWorkflow(ABC):
 
                 return self._extract_trace_output(last_state)
         except BaseException as e:
+            # Detect the hard recursion limit on the *original* exception, here,
+            # before dispatching to _handle_compile_and_run_exception: every real
+            # workflow subclass overrides that method to translate
+            # GraphRecursionError into a user-facing NotifiableAgentException
+            # before calling super(), so by the time it would reach this class's
+            # own isinstance check the type information is already gone.
+            if isinstance(e, GraphRecursionError):
+                await self._handle_graph_recursion_limit(e)
             await self._handle_compile_and_run_exception(
                 e, compiled_graph, graph_config
             )
@@ -511,6 +530,14 @@ class AbstractWorkflow(ABC):
             self.is_done = True
             if audit_collector:
                 await audit_collector.close()
+
+    async def _handle_graph_recursion_limit(self, e: GraphRecursionError) -> None:
+        """Log and tag the hard `RECURSION_LIMIT` being hit."""
+        self.log.error(
+            "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated",
+            recursion_limit=RECURSION_LIMIT,
+        )
+        await self._tag_langsmith_hard_limit()
 
     async def _handle_compile_and_run_exception(
         self,
@@ -522,10 +549,6 @@ class AbstractWorkflow(ABC):
         is_notifiable_agent = isinstance(e, NotifiableAgentException)
         is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
         is_invalid_request = isinstance(e, InvalidRequestException)
-
-        if isinstance(e, GraphRecursionError):
-            msg = "Workflow hit hard recursion limit (RECURSION_LIMIT); session terminated"
-            self.log.error(msg, recursion_limit=RECURSION_LIMIT)  # fmt: skip
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
 
