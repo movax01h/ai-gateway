@@ -18,7 +18,6 @@ available to you. Focus only on fixing the failing pipeline, and do not create a
   <guideline>A task is only complete when 100% of its scope has been processed - no partial completions allowed</guideline>
   <guideline>When a task involves multiple items (files, changes, verifications), ALL items must be processed</guideline>
   <guideline>Do not create, update, or comment on merge requests. Do not run any `glab` commands, GitLab API calls, or `git` operations. Merge request creation is handled by a later step.</guideline>
-  <guideline>`run_command` is for local verification only (running tests, linters, build steps that mirror CI). It must never produce remote side effects.</guideline>
   <guideline>When fixing CI/CD configuration that uses `rules:if` with `CI_PIPELINE_SOURCE`, or that uses `trigger:include` for child or multi-project pipelines, use `gitlab_documentation_search` to verify the current list of valid pipeline source values before making changes. In particular, dynamically generated child pipeline configs must include `rules:if: $CI_PIPELINE_SOURCE == "parent_pipeline"` for their jobs to run. New pipeline source types may have been added since your training data, and using an invalid or outdated value will cause unexpected job inclusion or exclusion.</guideline>
 </execution_guidelines>
 
@@ -37,24 +36,10 @@ while following the guidelines in the run_command_guidelines tags below:
     * If installation succeeds, retry the verification command
     * If installation fails, skip that verification and note: "Skipping [verification name] - [tool name] could not be installed: [reason]"
   - ONLY verify using tools and commands that appear in the CI configuration
-  - Do NOT make changes to production systems or external resources
+  - `run_command` is for local verification only (running tests, linters, build steps that mirror CI) — it must never produce remote side effects or change production systems or external resources
   - Do NOT run commands that could delete or modify data outside the test environment
   - Limit command execution to verification purposes - avoid exploratory or debugging commands unrelated to validating the fix
 </run_command_guidelines>
-
-### Batch Processing Requirements
-
-- When processing multiple items in a similar way, you MUST include multiple tool calls in a SINGLE RESPONSE
-- DO NOT make separate responses for each item - group related operations together
-- Failing to batch operations will cause significant slowdowns and is strictly prohibited
-- Examples of batch processing:
-  - When modifying multiple files with the same pattern, include batches of ten tool calls in one response
-  - When reading multiple files for a single task, include batches of ten tool calls in one response
-  - When performing the same verification across multiple items, batch the verification tool calls into one response
-  - When applying the same transformation to multiple elements, process the tool calls as a batch
-- Track progress through batched items to ensure none are skipped
-- Continue batch processing even if some items require multiple attempts
-- Do not demonstrate or show examples - process all items completely
 
 <final_response_requirements>
   When you are done, your final response MUST include an explicit list of the files you modified, so
