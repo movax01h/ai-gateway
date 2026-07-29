@@ -1,3 +1,6 @@
+import hashlib
+from typing import Any
+
 import pytest
 
 from lib.billing_events.context import BillingEventContext, UsageQuotaEventContext
@@ -158,18 +161,110 @@ class TestUsageQuotaContext:
             user_id="user_123",
             global_user_id="gid://gitlab/User/123",
             correlation_id="correlation_id",
+            event_type="ai_gateway_proxy_use",
+            model_id="claude-opus-4-8",
         )
-        expected_key = (
-            "production:saas:user_123:gid://gitlab/User/123:123:"
-            "00000000-1111-2222-3333-000000000000:duo_pro:sast_fp_detection/v1"
+        # sha256 of the JSON-encoded CACHE_KEY_FIELDS payload (field order + values).
+        expected_payload = (
+            '["production","saas","user_123","gid://gitlab/User/123",123,'
+            '"00000000-1111-2222-3333-000000000000","duo_pro","sast_fp_detection/v1",'
+            '"ai_gateway_proxy_use","claude-opus-4-8"]'
         )
+        expected_key = hashlib.sha256(expected_payload.encode("utf-8")).hexdigest()
         assert context.to_cache_key() == expected_key
 
-    def test_to_cache_key_excludes_none_fields(self) -> None:
+    def test_to_cache_key_encodes_none_fields_as_json_null(self) -> None:
         context = UsageQuotaEventContext(
             environment="prod",
             user_id="123",
             feature_enablement_type="beta",
         )
 
-        assert context.to_cache_key() == "prod:123:beta"
+        # Every CACHE_KEY_FIELDS entry keeps its slot; None -> JSON null.
+        expected_payload = '["prod",null,"123",null,null,null,"beta",null,null,null]'
+        expected_key = hashlib.sha256(expected_payload.encode("utf-8")).hexdigest()
+        assert context.to_cache_key() == expected_key
+
+    def test_to_cache_key_no_collision_across_field_boundaries(self) -> None:
+        """A None field must not let an adjacent field's value shift into its slot.
+
+        ``event_type=None, model_id="X"`` and ``event_type="X", model_id=None``
+        must produce distinct keys; otherwise the model/event-type scoping is void.
+        """
+        base_kwargs: dict[str, Any] = {
+            "environment": "production",
+            "realm": "saas",
+            "user_id": "user_123",
+            "feature_qualified_name": "ai_gateway_proxy_use",
+        }
+        context_a = UsageQuotaEventContext(
+            **base_kwargs, event_type=None, model_id="ai_gateway_proxy_use"
+        )
+        context_b = UsageQuotaEventContext(
+            **base_kwargs, event_type="ai_gateway_proxy_use", model_id=None
+        )
+
+        assert context_a.to_cache_key() != context_b.to_cache_key()
+
+    @pytest.mark.parametrize(
+        "model_id_a,model_id_b",
+        [
+            ("text-embedding-005", "claude-opus-4-8"),
+            ("claude-opus-4-8", "claude-3-5-sonnet-20241022"),
+            ("text-embedding-005", None),
+        ],
+    )
+    def test_to_cache_key_differs_when_model_id_changes(
+        self, model_id_a: str | None, model_id_b: str | None
+    ):
+        """Cache keys must differ when model_id differs to prevent cross-model cache hits."""
+        base_kwargs: dict[str, Any] = {
+            "environment": "production",
+            "realm": "saas",
+            "user_id": "user_123",
+            "feature_qualified_name": "ai_gateway_proxy_use",
+            "event_type": "ai_gateway_proxy_use",
+        }
+        context_a = UsageQuotaEventContext(**base_kwargs, model_id=model_id_a)
+        context_b = UsageQuotaEventContext(**base_kwargs, model_id=model_id_b)
+
+        assert context_a.to_cache_key() != context_b.to_cache_key()
+
+    @pytest.mark.parametrize(
+        "event_type_a,event_type_b",
+        [
+            ("ai_gateway_proxy_use", "code_suggestions"),
+            ("ai_gateway_proxy_use", None),
+            ("code_suggestions", "duo_chat"),
+        ],
+    )
+    def test_to_cache_key_differs_when_event_type_changes(
+        self, event_type_a: str | None, event_type_b: str | None
+    ):
+        """Cache keys must differ when event_type differs to prevent cross-event cache hits."""
+        base_kwargs: dict[str, Any] = {
+            "environment": "production",
+            "realm": "saas",
+            "user_id": "user_123",
+            "feature_qualified_name": "ai_gateway_proxy_use",
+            "model_id": "text-embedding-005",
+        }
+        context_a = UsageQuotaEventContext(**base_kwargs, event_type=event_type_a)
+        context_b = UsageQuotaEventContext(**base_kwargs, event_type=event_type_b)
+
+        assert context_a.to_cache_key() != context_b.to_cache_key()
+
+    def test_to_cache_key_identical_for_same_event_and_model(self):
+        """Identical event/model contexts must produce the same cache key (cache reuse)."""
+        kwargs: dict[str, Any] = {
+            "environment": "production",
+            "realm": "saas",
+            "user_id": "user_123",
+            "feature_qualified_name": "ai_gateway_proxy_use",
+            "event_type": "ai_gateway_proxy_use",
+            "model_id": "claude-opus-4-8",
+        }
+        context_a = UsageQuotaEventContext(**kwargs)
+        context_b = UsageQuotaEventContext(**kwargs)
+
+        assert context_a.to_cache_key() == context_b.to_cache_key()

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import Any, ClassVar, Dict, Final, List, Optional, Self
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -52,6 +54,8 @@ class UsageQuotaEventContext(BaseModel):
         "unique_instance_id",
         "feature_enablement_type",
         "feature_qualified_name",
+        "event_type",
+        "model_id",
     )
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
@@ -97,16 +101,20 @@ class UsageQuotaEventContext(BaseModel):
         Fields like correlation_id, timestamp, etc. are excluded to ensure cache hits
         for the same user/namespace/instance combination.
 
-        Args:
-            context: The full usage quota context
+        Each ``CACHE_KEY_FIELDS`` value is JSON-encoded into its own array element,
+        so a client-supplied value (e.g. ``model_id`` = ``llama3:8b`` or a Bedrock
+        ARN) cannot inject a delimiter and shift bytes across a segment boundary;
+        ``None`` encodes as ``null``, keeping every field in a distinct slot. The
+        encoded payload is then hashed, yielding a fixed-length, charset-safe key
+        that stays valid across cache backends.
 
         Returns:
-            A string of the identifying fields that can be used as a cache key
+            A hex digest of the identifying fields, usable as a cache key
         """
 
-        data: dict[str, Any] = self.model_dump(exclude_none=True)
-        return ":".join(
-            str(data[field])
-            for field in UsageQuotaEventContext.CACHE_KEY_FIELDS
-            if field in data
+        data: dict[str, Any] = self.model_dump()
+        payload = json.dumps(
+            [data[field] for field in UsageQuotaEventContext.CACHE_KEY_FIELDS],
+            separators=(",", ":"),
         )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()

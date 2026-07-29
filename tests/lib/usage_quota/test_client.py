@@ -1,6 +1,7 @@
 """Unit tests for UsageQuotaClient."""
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -900,6 +901,95 @@ class TestCacheControlIntegration:
 
         assert result1 is True
         assert result2 is True
+        assert mock_http_client.head.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cached_allow_for_embedding_model_does_not_authorize_billable_model(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        mock_http_client: AsyncMock,
+    ):
+        """A cached allow for text-embedding-005 must not authorize claude-opus-4-8.
+
+        Regression test for the quota bypass described in #2439: an allow decision cached for a proxy model (text-
+        embedding-005) must not be reused for a different, billable model (claude-opus-4-8) even when all other context
+        fields are identical.
+        """
+        base_kwargs: dict[str, Any] = {
+            "environment": "production",
+            "realm": "saas",
+            "user_id": "user_123",
+            "global_user_id": "gid://gitlab/User/123",
+            "feature_qualified_name": "ai_gateway_proxy_use",
+            "event_type": "ai_gateway_proxy_use",
+            "feature_enablement_type": "duo_pro",
+        }
+        embedding_context = UsageQuotaEventContext(
+            **base_kwargs, model_id="text-embedding-005"
+        )
+        billable_context = UsageQuotaEventContext(
+            **base_kwargs, model_id="claude-opus-4-8"
+        )
+
+        # Seed the cache with an allow for the embedding model only.
+        embedding_key = embedding_context.to_cache_key()
+        await usage_quota_client.cache.set(embedding_key, True, ttl=600)
+
+        # The billable model must NOT get a cache hit from the embedding allow.
+        billable_key = billable_context.to_cache_key()
+        assert embedding_key != billable_key, (
+            "Cache keys must differ between models; fix CACHE_KEY_FIELDS"
+        )
+
+        # Simulate CustomersDot returning 402 for the billable model.
+        denied_response = _make_response(402, "max-age=300, private")
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=denied_response)
+            mock_client_class.return_value = mock_http_client
+
+            result = await usage_quota_client.check_quota_available(billable_context)
+
+        assert result is False, (
+            "Billable model must be denied; embedding allow must not bleed across models"
+        )
+        mock_http_client.head.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_same_event_and_model_context_reuses_cache(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        mock_http_client: AsyncMock,
+    ):
+        """Identical event/model contexts must reuse the quota cache entry."""
+        context_a = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            user_id="user_123",
+            feature_qualified_name="ai_gateway_proxy_use",
+            event_type="ai_gateway_proxy_use",
+            model_id="claude-opus-4-8",
+        )
+        # Construct a second instance with the same field values.
+        context_b = UsageQuotaEventContext(
+            environment="production",
+            realm="saas",
+            user_id="user_123",
+            feature_qualified_name="ai_gateway_proxy_use",
+            event_type="ai_gateway_proxy_use",
+            model_id="claude-opus-4-8",
+        )
+
+        response = _make_response(200, "max-age=1800, private")
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_http_client.head = AsyncMock(return_value=response)
+            mock_client_class.return_value = mock_http_client
+
+            result_a = await usage_quota_client.check_quota_available(context_a)
+            result_b = await usage_quota_client.check_quota_available(context_b)
+
+        assert result_a is True
+        assert result_b is True
+        # Only one HTTP call should have been made; the second hit the cache.
         assert mock_http_client.head.call_count == 1
 
 
