@@ -1,5 +1,6 @@
 __all__ = ["ToolApprovalRequestNode"]
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -34,9 +35,10 @@ class ToolApprovalRequestNode:
     This node:
     1. Reads last AIMessage from conversation history
     2. Validates tool calls exist and are well-formed
-    3. Filters pre-approved tools
+    3. Filters pre-approved and session-approved tool calls
     4. Generates UI chat log entries for approval
-    5. Sets workflow status to INPUT_REQUIRED
+    5. Sets workflow status to TOOL_CALL_APPROVAL_REQUIRED (or EXECUTION
+        when nothing needs approval)
 
     Args:
         name: Node name
@@ -112,9 +114,13 @@ class ToolApprovalRequestNode:
             )
             return {**history_dict, **status_dict}
 
-        # Filter out pre-approved tools
+        # Filter out pre-approved and session-approved tool calls. Checks may
+        # hit the GitLab instance, so run them concurrently across the batch.
+        skip_flags = await asyncio.gather(
+            *(self._should_skip_approval(call) for call in valid_calls)
+        )
         needs_approval = [
-            call for call in valid_calls if not self._should_skip_approval(call["name"])
+            call for call, skip in zip(valid_calls, skip_flags) if not skip
         ]
 
         # If all tools are pre-approved, skip approval entirely
@@ -160,20 +166,34 @@ class ToolApprovalRequestNode:
 
         return valid_calls, invalid_calls
 
-    def _should_skip_approval(self, tool_name: str) -> bool:
-        """Check if tool should skip approval.
+    async def _should_skip_approval(self, tool_call: dict) -> bool:
+        """Check if a tool call should skip approval.
 
-        A tool skips approval if:
-        1. It's in the component's pre_approved_tools list, OR
-        2. It's in the toolset's pre-approved list
+        A tool call skips approval if:
+        1. Its tool is in the component's pre_approved_tools list, OR
+        2. The toolset reports no approval is required for this exact call
+            (privilege-level pre-approval or a session approval persisted
+            on the GitLab instance)
         """
+        tool_name = tool_call["name"]
+
+        # Component-level pre-approval short-circuits before any network check
         if tool_name in self._pre_approved_tools:
+            log.debug(
+                "Tool call approval skipped: component pre_approved_tools",
+                tool_name=tool_name,
+            )
             return True
 
         try:
-            return self._toolset.approved(tool_name)
+            approval_needed = await self._toolset.approval_required(
+                tool_name, tool_call.get("args")
+            )
+            return not approval_needed
         except UnknownToolError:
-            # If tool doesn't exist, it will be caught by validation
+            # Defensive: unknown tools are already rejected by
+            # _filter_tool_calls before this point. Fail toward requiring
+            # approval anyway.
             return False
 
     def _build_approval_ui_logs(self, tool_calls: list) -> list[UiChatLog]:

@@ -453,6 +453,13 @@ class ToolsRegistry:
                 approved = nodes[0].get("toolCallApproved", False)
                 if approved:
                     self._approved_cache.add(cache_key)
+                    log.debug(
+                        "Tool call approved via session approval",
+                        extra={
+                            "tool_name": tool_name,
+                            "workflow_id": self._workflow_id,
+                        },
+                    )
                 return not approved
 
             log.warning(
@@ -520,4 +527,5 @@ class ToolsRegistry:
             pre_approved=pre_approved,
             all_tools=all_tools,
             tool_options=tool_options or {},
+            approval_policy=self,
         )

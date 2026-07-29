@@ -1,6 +1,6 @@
 """Test suite for v1 ToolApprovalRequestNode class."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -9,17 +9,18 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval
     ToolApprovalRequestNode,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
-from duo_workflow_service.agent_platform.v1.state.base import (
-    IOKey,
-    RuntimeIOKey,
-)
+from duo_workflow_service.agent_platform.v1.state.base import IOKey, RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import (
     MessageTypeEnum,
     ToolStatus,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.tools import MalformedToolCallError
+from duo_workflow_service.tools import (
+    MalformedToolCallError,
+    Toolset,
+    UnknownToolError,
+)
 
 
 @pytest.fixture(name="conversation_history_key")
@@ -37,20 +38,20 @@ def status_key_fixture():
 @pytest.fixture(name="mock_toolset")
 def mock_toolset_fixture():
     """Fixture for mock toolset."""
-    mock_toolset = Mock()
+    # spec keeps the mock in sync with the real Toolset API: renaming or
+    # removing a method on Toolset fails these tests instead of passing vacuously
+    mock_toolset = MagicMock(spec=Toolset)
 
     # Mock tool
     mock_tool = Mock()
     mock_tool.name = "test_tool"
 
     # Setup toolset to return tool by name
-    mock_toolset.__getitem__ = Mock(return_value=mock_tool)
+    mock_toolset.__getitem__.return_value = mock_tool
 
-    # validate_tool_call succeeds by default
-    mock_toolset.validate_tool_call = Mock()
-
-    # Tools are NOT pre-approved by default (require approval)
-    mock_toolset.approved = Mock(return_value=False)
+    # Tools are NOT pre-approved or session-approved by default (require approval).
+    # approval_required is async on Toolset, so the spec makes it an AsyncMock.
+    mock_toolset.approval_required.return_value = True
 
     return mock_toolset
 
@@ -392,6 +393,138 @@ class TestToolApprovalRequestNodePreApproved:
 
             # Should NOT include ui_chat_log
             assert "ui_chat_log" not in result
+
+
+class TestToolApprovalRequestNodeSessionApprovals:
+    """Test suite for session-approved tool call handling."""
+
+    @pytest.mark.asyncio
+    async def test_session_approved_call_skips_approval(
+        self,
+        tool_approval_request_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_ai_message_with_tool_calls,
+    ):
+        """Test that a session-approved tool call skips approval entirely."""
+        mock_toolset.approval_required.return_value = False
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_with_tool_calls]
+        }
+
+        result = await tool_approval_request_node.run(state)
+
+        mock_toolset.approval_required.assert_awaited_once_with(
+            "test_tool", {"param": "value"}
+        )
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        assert "ui_chat_log" not in result
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_prompts_only_for_unapproved_calls(
+        self,
+        tool_approval_request_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+    ):
+        """Test that same-tool calls with different args are evaluated independently."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "test_tool", "args": {"cmd": "approved"}},
+            {"id": "call_2", "name": "test_tool", "args": {"cmd": "unapproved"}},
+        ]
+
+        # Only the first call is session-approved
+        mock_toolset.approval_required.side_effect = lambda _name, args: (
+            args != {"cmd": "approved"}
+        )
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent."
+            "nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.return_value = "Execute test_tool"
+
+            result = await tool_approval_request_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["message_id"] == "call_2"
+        assert mock_toolset.approval_required.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_component_pre_approved_tools_skip_toolset_check(
+        self,
+        conversation_history_key,
+        status_key,
+        mock_toolset,
+        mock_ui_history,
+        base_flow_state,
+        component_name,
+    ):
+        """Test that component-level pre-approved tools never consult the toolset."""
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=["approved_tool"],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=mock_ui_history,
+        )
+
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "approved_tool", "args": {}},
+        ]
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        result = await node.run(state)
+
+        mock_toolset.approval_required.assert_not_awaited()
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        assert "ui_chat_log" not in result
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_in_approval_check_still_requires_approval(
+        self,
+        tool_approval_request_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_ai_message_with_tool_calls,
+    ):
+        """Test the defensive UnknownToolError path.
+
+        Unknown tools are rejected by _filter_tool_calls before the approval check runs, so this path should be
+        unreachable; if it is ever hit, the call must fail toward requiring approval.
+        """
+        mock_toolset.approval_required.side_effect = UnknownToolError("nope")
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_with_tool_calls]
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent."
+            "nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.return_value = "Execute test_tool"
+
+            result = await tool_approval_request_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
 
 
 class TestToolApprovalRequestNodeEdgeCases:

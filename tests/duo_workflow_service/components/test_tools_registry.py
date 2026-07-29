@@ -992,6 +992,7 @@ def test_toolset_method(
             pre_approved=expected_preapproved,
             all_tools=expected_all_tools,
             tool_options={},
+            approval_policy=registry,
         )
         assert toolset == mock_toolset
 
