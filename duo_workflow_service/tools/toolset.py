@@ -1,11 +1,22 @@
 import collections.abc
-from typing import Any, Optional, Type, Union, cast
+from typing import Any, Optional, Protocol, Type, Union, cast
 
+import structlog
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, ValidationError
 
+log = structlog.stdlib.get_logger(__name__)
+
 ToolType = Union[BaseTool, Type[BaseModel]]
+
+
+class ApprovalPolicy(Protocol):
+    """Policy that decides whether a specific tool call requires human approval."""
+
+    async def approval_required(
+        self, tool_name: str, tool_args: Optional[dict[Any, Any]] = None
+    ) -> bool: ...
 
 
 class UnknownToolError(Exception):
@@ -25,12 +36,14 @@ class Toolset(collections.abc.Mapping):
     _pre_approved: set[str]
     _executable_tools: dict[str, BaseTool]
     _tool_options: dict[str, dict[str, Any]]
+    _approval_policy: Optional[ApprovalPolicy]
 
     def __init__(
         self,
         pre_approved: set[str],
         all_tools: dict[str, ToolType],
         tool_options: Optional[dict[str, dict[str, Any]]] = None,
+        approval_policy: Optional[ApprovalPolicy] = None,
     ):
         """Initialize a Toolset with pre-approved tools and all available tools.
 
@@ -38,10 +51,13 @@ class Toolset(collections.abc.Mapping):
             pre_approved: A list of tool names that are pre-approved for use.
             all_tools: A lists of all enabled tools.
             tool_options: Optional dict mapping tool names to their option overrides.
+            approval_policy: Optional policy consulted for per-call approval
+                decisions (e.g. session approvals persisted on the GitLab instance).
         """
         self._all_tools = all_tools
         self._pre_approved = pre_approved
         self._tool_options = tool_options or {}
+        self._approval_policy = approval_policy
 
         # Validate and apply tool options to each tool instance.
         # Tools with options should already be cloned by ToolsRegistry.toolset()
@@ -95,6 +111,14 @@ class Toolset(collections.abc.Mapping):
     def approved(self, tool_name: str) -> bool:
         """Check if a tool is pre-approved for use.
 
+        This only checks static privilege-level pre-approval by name. Use
+        `approval_required` for the full per-call decision, which also
+        consults session approvals via the approval policy.
+
+        Deprecated: new callers should use `approval_required`. This method
+        is slated for removal together with `ToolsApprovalComponent`, its
+        last production caller.
+
         Args:
             tool_name: The name of the tool to check.
 
@@ -108,6 +132,44 @@ class Toolset(collections.abc.Mapping):
             raise UnknownToolError(f"Tool '{tool_name}' does not exist")
 
         return tool_name in self._pre_approved
+
+    async def approval_required(
+        self, tool_name: str, tool_args: Optional[dict[Any, Any]] = None
+    ) -> bool:
+        """Check if a specific tool call requires human approval.
+
+        Pre-approved tools never require approval. Other tools are checked
+        against the approval policy, which may consult session approvals
+        persisted on the GitLab instance. See `approved` for the name-only
+        pre-approval check.
+
+        Args:
+            tool_name: The name of the tool to check.
+            tool_args: The arguments passed to the tool.
+
+        Returns:
+            False if the tool call is approved, True if approval is required.
+
+        Raises:
+            UnknownToolError: If the tool is not found in all_tools.
+        """
+        if tool_name not in self._all_tools:
+            raise UnknownToolError(f"Tool '{tool_name}' does not exist")
+
+        # Pre-approval is decided here so it holds even without a policy;
+        # the policy (ToolsRegistry) re-checking it is redundant, not a
+        # separate approval layer.
+        if tool_name in self._pre_approved:
+            log.debug(
+                "Tool call approval skipped: privilege pre-approval",
+                tool_name=tool_name,
+            )
+            return False
+
+        if self._approval_policy is None:
+            return True
+
+        return await self._approval_policy.approval_required(tool_name, tool_args)
 
     @staticmethod
     def _validate_tool_options(

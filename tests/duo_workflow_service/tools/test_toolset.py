@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, Mock
+
 import pytest
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
@@ -264,6 +266,51 @@ class TestToolset:
         # Test UnknownToolError for nonexistent tool
         with pytest.raises(UnknownToolError):
             toolset.approved("nonexistent_tool")
+
+    @pytest.mark.asyncio
+    async def test_approval_required_unknown_tool_raises(self, toolset):
+        """Test that approval_required raises UnknownToolError for nonexistent tools."""
+        with pytest.raises(UnknownToolError):
+            await toolset.approval_required("nonexistent_tool")
+
+    @pytest.mark.asyncio
+    async def test_approval_required_pre_approved_skips_policy(
+        self, mock_all_tools, mock_pre_approved
+    ):
+        """Test that pre-approved tools never require approval or consult the policy."""
+        policy = Mock()
+        policy.approval_required = AsyncMock(return_value=True)
+        toolset = Toolset(
+            pre_approved=mock_pre_approved,
+            all_tools=mock_all_tools,
+            approval_policy=policy,
+        )
+
+        assert await toolset.approval_required("mock_tool_pre_approved") is False
+        policy.approval_required.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_approval_required_without_policy(self, toolset):
+        """Test that non-pre-approved tools require approval when no policy is set."""
+        assert await toolset.approval_required("mock_tool") is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("policy_result", [True, False])
+    async def test_approval_required_delegates_to_policy(
+        self, mock_all_tools, mock_pre_approved, policy_result
+    ):
+        """Test that non-pre-approved tools delegate to the approval policy."""
+        policy = Mock()
+        policy.approval_required = AsyncMock(return_value=policy_result)
+        toolset = Toolset(
+            pre_approved=mock_pre_approved,
+            all_tools=mock_all_tools,
+            approval_policy=policy,
+        )
+        tool_args = {"param": "value"}
+
+        assert await toolset.approval_required("mock_tool", tool_args) is policy_result
+        policy.approval_required.assert_awaited_once_with("mock_tool", tool_args)
 
     def test_validate_tool_call_base_tool(self, toolset):
         """Test that validate_tool_call works correctly with BaseTool instances."""
