@@ -205,7 +205,10 @@ In YAML, compaction is enabled with these defaults unless you set `compaction: f
 1. **Summarization**: An LLM call generates a summary of the messages to be compacted
 1. **Replacement**: The conversation history is replaced with: leading context + summary message + recent messages
 
-Note: Compaction is not currently surfaced in the user-facing chat UI. The process happens transparently without user notification.
+When compaction runs, a **compaction tool card** is emitted to the user-facing chat UI so the user can see that their conversation history was summarized. This card appears in the session view (for example, `/-/automate/agent-sessions/<id>`) and in the Duo CLI. The card is surfaced by:
+
+- **Legacy Chat Workflow** (`ChatAgent`): via `_append_optimizer_ui_logs`, which appends the `CompactionResult.ui_chat_logs` entries after the agent's response entries.
+- **Flow Registry flows** (`AgentNode`): via the `compaction_result.ui_chat_logs` entries returned by `maybe_compact_history`, which are appended to the `ui_chat_log` state key after any existing entries (reasoning logs, etc.).
 
 ### State Management
 

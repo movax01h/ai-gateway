@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 )
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
+    FlowStateKeys,
     IOKey,
     RuntimeIOKey,
     get_vars_from_state,
@@ -348,7 +349,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
 
-        history, _ = await maybe_compact_history(
+        history, compaction_result = await maybe_compact_history(
             compactor=self._compactor, history=history, agent_name=self.name
         )
         history = restore_message_consistency(history)
@@ -471,6 +472,23 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 ui_updates = (
                     self._ui_history.pop_state_updates() if self._ui_history else {}
                 )
+                # Surface the compaction tool card when auto-compaction ran and
+                # produced UI entries.  Entries are appended *after* the base
+                # ui_chat_log entries (reasoning logs, etc.) so the front end
+                # renders them in the correct order.  Prepending causes the
+                # compaction card to be silently dropped by the client — see
+                # ChatAgent._append_optimizer_ui_logs for the same convention.
+                compaction_ui_logs = (
+                    list(compaction_result.ui_chat_logs)
+                    if compaction_result is not None and compaction_result.ui_chat_logs
+                    else []
+                )
+                if compaction_ui_logs:
+                    base_logs: list = ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
+                    ui_updates = {
+                        **ui_updates,
+                        FlowStateKeys.UI_CHAT_LOG: [*base_logs, *compaction_ui_logs],
+                    }
                 state_update = merge_nested_dict(
                     ui_updates,
                     history_iokey.to_nested_dict(history + [completion]),
