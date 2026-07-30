@@ -488,11 +488,12 @@ def test_build_agent_with_compaction_config_uses_compaction_optimizer(
     )
 
     optimizers = agent.optimizer_pipeline.optimizers
-    assert len(optimizers) == 1
+    assert len(optimizers) == 2
     assert isinstance(optimizers[0], CompactionOptimizer)
     assert optimizers[0]._config is compaction_config
     assert optimizers[0]._agent_name == "test_agent"
     assert optimizers[0]._workflow_id == "workflow_123"
+    assert isinstance(optimizers[1], LegacyTrimOptimizer)
 
 
 def test_build_agent_without_compaction_config_uses_legacy_trim(

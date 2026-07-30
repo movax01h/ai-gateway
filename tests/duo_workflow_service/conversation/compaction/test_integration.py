@@ -60,13 +60,25 @@ class TestMaybeCompactHistory:
         "duo_workflow_service.conversation.history_optimizer.optimizers."
         "legacy_trim.apply_token_based_trim"
     )
-    async def test_compactor_present_uses_compaction(
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit"
+    )
+    async def test_compactor_present_uses_compaction_then_trim(
         self,
+        mock_get_max_context,
         mock_trim,
     ):
-        """When a compactor is provided, should use compaction unconditionally."""
+        """When a compactor is provided, compaction runs first, then LegacyTrimOptimizer runs as the terminal safety net
+        (no-op when history is within budget)."""
         messages = [HumanMessage(content="test")]
         compacted_messages = [HumanMessage(content="compacted")]
+
+        mock_get_max_context.return_value = 400_000
+        # Trim is a no-op because compacted history is within budget
+        mock_trim.return_value = TrimResult(
+            messages=compacted_messages, was_trimmed=False
+        )
 
         compaction_result_obj = CompactionResult(
             messages=compacted_messages,
@@ -85,12 +97,31 @@ class TestMaybeCompactHistory:
         assert result == compacted_messages
         assert returned_result is compaction_result_obj
         mock_compactor.optimize.assert_called_once_with(messages)
-        mock_trim.assert_not_called()
+        # Terminal LegacyTrimOptimizer always runs; here it is a no-op
+        mock_trim.assert_called_once_with(
+            messages=compacted_messages,
+            component_name="test_agent",
+            max_context_tokens=400_000,
+        )
 
     @pytest.mark.asyncio
-    async def test_compaction_returns_original_when_not_compacted(self):
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.apply_token_based_trim"
+    )
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit"
+    )
+    async def test_compaction_returns_original_when_not_compacted(
+        self,
+        mock_get_max_context,
+        mock_trim,
+    ):
         """When compaction decides not to compact, should return original messages and the no-op result."""
         messages = [HumanMessage(content="test")]
+        mock_get_max_context.return_value = 400_000
+        mock_trim.return_value = TrimResult(messages=messages, was_trimmed=False)
 
         noop_result = CompactionResult(messages=messages, was_modified=False)
         mock_compactor = MagicMock()
@@ -235,13 +266,24 @@ class TestMaybeCompactHistory:
         "duo_workflow_service.conversation.history_optimizer.optimizers."
         "legacy_trim.apply_token_based_trim"
     )
-    async def test_no_event_when_compactor_present(
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit"
+    )
+    async def test_no_trim_event_when_compactor_present_and_trim_is_noop(
         self,
+        mock_get_max_context,
         mock_trim,
     ):
-        """No legacy-trim event fires when compactor is present (compaction path)."""
+        """No legacy-trim event fires when compactor is present and trim is a no-op (compacted history is within
+        budget)."""
         messages = [HumanMessage(content="test")]
         compacted_messages = [HumanMessage(content="compacted")]
+
+        mock_get_max_context.return_value = 400_000
+        mock_trim.return_value = TrimResult(
+            messages=compacted_messages, was_trimmed=False
+        )
 
         mock_compactor = MagicMock()
         mock_compactor.optimize = AsyncMock(
@@ -262,8 +304,120 @@ class TestMaybeCompactHistory:
         assert result == compacted_messages
         assert compaction_result is not None
         assert compaction_result.was_compacted is True
-        mock_trim.assert_not_called()
+        # Trim ran but was a no-op, so no event was fired
+        mock_trim.assert_called_once()
         mock_events_client.track_event.assert_not_called()
+
+
+class TestMaybeCompactHistoryBehavioral:
+    """Behavioral tests for the two safety-net scenarios the terminal LegacyTrimOptimizer covers."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.apply_token_based_trim"
+    )
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit"
+    )
+    async def test_over_budget_below_message_gate_still_trimmed(
+        self,
+        mock_get_max_context,
+        mock_trim,
+    ):
+        """Scenario (a): compaction is a no-op (below message-count gate) but history is over-budget.
+
+        The terminal LegacyTrimOptimizer must trim it.
+        """
+        messages = [HumanMessage(content="test")]
+        trimmed_messages = [HumanMessage(content="trimmed")]
+
+        mock_get_max_context.return_value = 400_000
+        mock_trim.return_value = TrimResult(
+            messages=trimmed_messages,
+            was_trimmed=True,
+            tokens_before=300_000,
+            tokens_after=200_000,
+        )
+
+        # Compaction is a no-op (e.g. should_compact() returned False)
+        noop_result = CompactionResult(messages=messages, was_modified=False)
+        mock_compactor = MagicMock()
+        mock_compactor.optimize = AsyncMock(return_value=noop_result)
+
+        result, returned_result = await maybe_compact_history(
+            compactor=mock_compactor,
+            history=messages,
+            agent_name="test_agent",
+            internal_events_client=MagicMock(),
+        )
+
+        # Terminal trim must have caught the over-budget history
+        assert result == trimmed_messages
+        mock_trim.assert_called_once_with(
+            messages=messages,
+            component_name="test_agent",
+            max_context_tokens=400_000,
+        )
+        # CompactionResult is still returned (no-op result)
+        assert returned_result is noop_result
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.apply_token_based_trim"
+    )
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit"
+    )
+    async def test_compaction_failure_falls_back_to_trim(
+        self,
+        mock_get_max_context,
+        mock_trim,
+    ):
+        """Scenario (b): compaction summarizer raises an exception; compact() catches it and returns history unchanged
+        (was_modified=False, error set).
+
+        The terminal LegacyTrimOptimizer must then trim the over-budget history.
+        """
+        messages = [HumanMessage(content="test")]
+        trimmed_messages = [HumanMessage(content="trimmed after compaction failure")]
+
+        mock_get_max_context.return_value = 400_000
+        mock_trim.return_value = TrimResult(
+            messages=trimmed_messages,
+            was_trimmed=True,
+            tokens_before=350_000,
+            tokens_after=200_000,
+        )
+
+        # Simulate compact() catching an exception and returning history unchanged
+        error_result = CompactionResult(
+            messages=messages,
+            was_modified=False,
+            error=RuntimeError("LLM call failed"),
+        )
+        mock_compactor = MagicMock()
+        mock_compactor.optimize = AsyncMock(return_value=error_result)
+
+        result, returned_result = await maybe_compact_history(
+            compactor=mock_compactor,
+            history=messages,
+            agent_name="test_agent",
+            internal_events_client=MagicMock(),
+        )
+
+        # Terminal trim must have caught the over-budget history
+        assert result == trimmed_messages
+        mock_trim.assert_called_once_with(
+            messages=messages,
+            component_name="test_agent",
+            max_context_tokens=400_000,
+        )
+        # The CompactionResult (with error) is still returned
+        assert returned_result is error_result
 
 
 class TestMaybeCompactHistorySelfHosted:
@@ -279,10 +433,21 @@ class TestMaybeCompactHistorySelfHosted:
         "duo_workflow_service.conversation.history_optimizer.optimizers."
         "legacy_trim.apply_token_based_trim"
     )
-    async def test_compactor_provided_runs_compaction(self, mock_trim):
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit"
+    )
+    async def test_compactor_provided_runs_compaction(
+        self, mock_get_max_context, mock_trim
+    ):
         """When a compactor is provided, compaction runs unconditionally."""
         messages = [HumanMessage(content="test")]
         compacted_messages = [HumanMessage(content="compacted")]
+
+        mock_get_max_context.return_value = 400_000
+        mock_trim.return_value = TrimResult(
+            messages=compacted_messages, was_trimmed=False
+        )
 
         mock_compactor = MagicMock()
         mock_compactor.optimize = AsyncMock(
@@ -302,4 +467,3 @@ class TestMaybeCompactHistorySelfHosted:
         assert result == compacted_messages
         assert compaction_result is not None
         mock_compactor.optimize.assert_called_once_with(messages)
-        mock_trim.assert_not_called()

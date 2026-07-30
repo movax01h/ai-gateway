@@ -90,7 +90,7 @@ class OneOffComponent(BaseComponent):
     prompt_id: str
     prompt_version: Optional[str] = None
     toolset: Toolset
-    compaction: Union[CompactionConfig, bool] = False
+    compaction: Union[CompactionConfig, bool] = True
     max_correction_attempts: int = 3
 
     prompt_registry: BasePromptRegistry = Provide[

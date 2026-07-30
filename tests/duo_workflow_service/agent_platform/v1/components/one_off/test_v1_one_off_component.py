@@ -778,7 +778,7 @@ class TestPromptVariableValidation:
 class TestOneOffComponentCompaction:
     """Test suite for OneOffComponent compaction configuration."""
 
-    def test_compaction_default_is_false(
+    def test_compaction_default_is_true(
         self,
         component_name,
         flow_id,
@@ -789,7 +789,7 @@ class TestOneOffComponentCompaction:
         mock_prompt_registry,
         mock_internal_event_client,
     ):
-        """Test that compaction defaults to False."""
+        """Test that compaction defaults to True."""
         component = OneOffComponent(
             name=component_name,
             flow_id=flow_id,
@@ -800,7 +800,7 @@ class TestOneOffComponentCompaction:
             prompt_registry=mock_prompt_registry,
             internal_event_client=mock_internal_event_client,
         )
-        assert component.compaction is False
+        assert component.compaction is True
 
     def test_compaction_accepts_bool_true(
         self,

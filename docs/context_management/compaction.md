@@ -45,10 +45,10 @@ Compaction is being integrated incrementally across workflow implementations:
 |---------------|---------|---------------------|
 | Legacy Chat Workflow | Yes | Enabled by default via `create_agent()` factory |
 | Legacy Software Development Workflow | Yes | Enabled via `CompactionConfig` in workflow setup |
-| Flow Registry Experimental (AgentComponent) | Yes | YAML configuration |
-| Flow Registry Experimental (OneOffComponent) | Yes | YAML configuration |
-| Flow Registry v1 (AgentComponent) | Yes | YAML configuration |
-| Flow Registry v1 (OneOffComponent) | Yes | YAML configuration |
+| Flow Registry Experimental (AgentComponent) | Yes | Enabled by default; YAML configuration |
+| Flow Registry Experimental (OneOffComponent) | Yes | Enabled by default; YAML configuration |
+| Flow Registry v1 (AgentComponent) | Yes | Enabled by default; YAML configuration |
+| Flow Registry v1 (OneOffComponent) | Yes | Enabled by default; YAML configuration |
 | Flow Registry (DeterministicStepComponent) | No | No conversation history |
 
 ## Configuration
@@ -124,13 +124,13 @@ planner_component = PlannerComponent(
 
 ### Flow Registry (Experimental & v1)
 
-For flows built with Flow Registry (both Experimental and v1 versions), configure compaction in the YAML flow configuration. The configuration is identical for both versions.
+For flows built with Flow Registry (both Experimental and v1 versions), compaction is **enabled by default** with default settings for `AgentComponent` and `OneOffComponent`. Customize or disable it in the YAML flow configuration. The configuration is identical for both versions.
 
 The `compaction` field accepts either a boolean (`true`/`false`) or a `CompactionConfig` object.
 
 #### Basic Configuration (AgentComponent)
 
-Enable compaction with default settings:
+No configuration is needed: omitting the `compaction` field uses the default settings. Setting `compaction: true` explicitly is equivalent:
 
 ```yaml
 components:
@@ -171,16 +171,10 @@ components:
 
 #### Disabling Compaction
 
-Either omit the `compaction` field entirely, or explicitly set to `false`:
+Explicitly set `compaction: false`:
 
 ```yaml
 components:
-  - name: "simple_agent"
-    type: AgentComponent
-    prompt_id: "simple_prompt"
-    toolset: ["read_file"]
-    # No compaction field = disabled (default is false)
-
   - name: "another_agent"
     type: AgentComponent
     prompt_id: "another_prompt"
@@ -196,7 +190,7 @@ components:
 | `recent_messages_token_budget` | int | 40000 | Token budget for the recent messages section when determining which messages to keep |
 | `trim_threshold` | float | 0.7 | Ratio of model's max context limit that triggers compaction (0.0-1.0) |
 
-In YAML, set `compaction: true` to use defaults, or provide a config object with custom parameters. In Python code, pass `CompactionConfig()` to enable or `False` to disable.
+In YAML, compaction is enabled with these defaults unless you set `compaction: false`; provide a config object to customize parameters. In Python code, pass `CompactionConfig()` to customize or `False` to disable.
 
 ## How It Works
 
@@ -241,9 +235,35 @@ The `operation_type` value is sourced from the prompt's YAML definition (`operat
 
 ## Enabling Compaction
 
-Compaction runs whenever a workflow declares a `compaction` block in its
-configuration (which causes the call site to construct a
-`ConversationCompactor` and pass it to `maybe_compact_history()`).
-Workflows that do not declare `compaction` continue to fall back to
-legacy token-based trimming and emit the `duo_workflow_legacy_trim_executed`
-internal event when trimming actually alters the history.
+For Flow Registry components (`AgentComponent`, `OneOffComponent`), compaction
+is enabled by default: a `ConversationCompactor` is constructed and passed to
+`maybe_compact_history()` unless the component sets `compaction: false`.
+Other workflow types run compaction whenever they declare a `compaction` block
+in their configuration. Workflows with compaction disabled continue to fall
+back to legacy token-based trimming and emit the
+`duo_workflow_legacy_trim_executed` internal event when trimming actually
+alters the history.
+
+## Legacy Token-Based Trim as a Terminal Safety Net
+
+Regardless of whether compaction is enabled, **`LegacyTrimOptimizer` always
+runs as the final stage** of the optimizer pipeline. When compaction is
+disabled it is the sole optimizer; when compaction is enabled it follows
+`CompactionOptimizer` as a self-guarded safety net.
+
+This terminal trim stage catches two failure modes that compaction alone cannot
+handle:
+
+1. **Histories below the compaction message-count gate**: `should_compact()`
+   returns `False` when the message count is at or below `max_recent_messages`
+   (default: 10), even if the total token count is over budget. In this case
+   compaction is a no-op and the terminal trim provides the only overflow
+   protection.
+
+1. **Compaction failures**: `compact()` catches all exceptions and returns the
+   history unchanged (`was_modified=False`). Without the terminal trim, a
+   failed compaction would leave an over-budget history with no fallback.
+
+`apply_token_based_trim` is self-guarded (it short-circuits when the history
+is already within the token budget), so the terminal trim stage adds no
+overhead after a successful compaction.
