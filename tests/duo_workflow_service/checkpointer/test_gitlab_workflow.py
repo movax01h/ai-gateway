@@ -41,6 +41,10 @@ from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
+from duo_workflow_service.tracking.monitoring_context import (
+    MonitoringContext,
+    current_monitoring_context,
+)
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.billing_events.service import LLMOperation
 from lib.context import current_model_metadata_context, llm_operations
@@ -1600,6 +1604,108 @@ async def test_aput_omits_model_metadata_json_when_context_is_not_set(
     post_call_body = json.loads(http_client.apost.call_args[1]["body"])
 
     assert "model_metadata_json" not in post_call_body
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id")
+async def test_aput_includes_flow_metadata_json_for_registry_flow(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Registry flows carry a resolved flow_version, so flow_metadata_json is included in the payload."""
+    current_monitoring_context.set(
+        MonitoringContext(
+            flow_version="2.1.0",
+            schema_version="v1",
+            flow_id="software_development",
+        )
+    )
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "flow_metadata_json" in post_call_body
+    assert post_call_body["flow_metadata_json"] == json.dumps(
+        {
+            "flow_id": "software_development",
+            "flow_version": "2.1.0",
+            "schema_version": "v1",
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("workflow_id")
+async def test_aput_includes_flow_metadata_json_for_inline_catalog_flow(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Inline AI catalog flows carry no resolved flow_version, but must still persist flow_metadata_json."""
+    current_monitoring_context.set(
+        MonitoringContext(
+            schema_version="experimental",
+        )
+    )
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "flow_metadata_json" in post_call_body
+    assert post_call_body["flow_metadata_json"] == json.dumps(
+        {
+            "schema_version": "experimental",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_aput_omits_flow_metadata_json_when_no_flow_identity(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Legacy flows carry no flow identity fields, so flow_metadata_json is omitted from the payload."""
+    current_monitoring_context.set(MonitoringContext())
+
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["status"] = WorkflowStatusEnum.COMPLETED
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "flow_metadata_json" not in post_call_body
 
 
 @pytest.mark.usefixtures("checkpoint_data", "checkpoint_metadata")

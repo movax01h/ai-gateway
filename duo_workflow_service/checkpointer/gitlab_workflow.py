@@ -62,9 +62,7 @@ from duo_workflow_service.errors.typing import (
     NotifiableException,
 )
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
-from duo_workflow_service.gitlab.gitlab_api import (
-    WorkflowConfig,
-)
+from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import (
     GitlabHttpClient,
     GitLabHttpResponse,
@@ -83,6 +81,7 @@ from duo_workflow_service.tracking.duo_workflow_metrics import (
     session_type_context,
 )
 from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.monitoring_context import current_monitoring_context
 from duo_workflow_service.tracking.response_schema_tracking_context import (
     response_schema_tracking_results,
 )
@@ -1456,6 +1455,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             payload["model_metadata_json"] = model_metadata.model_dump_json(
                 exclude={"llm_definition", "friendly_name", "api_key"}
             )
+
+        if flow_metadata := current_monitoring_context.get().flow_versioning_fields():
+            payload["flow_metadata_json"] = json.dumps(flow_metadata)
 
         with duo_workflow_metrics.time_gitlab_response(
             endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints", method="POST"
