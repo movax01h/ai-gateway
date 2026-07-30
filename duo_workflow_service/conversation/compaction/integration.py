@@ -49,7 +49,21 @@ async def maybe_compact_history(
     exactly so existing call sites work unchanged.
     """
     if compactor is not None:
-        pipeline = HistoryOptimizerPipeline([compactor])
+        # LegacyTrimOptimizer is appended as a terminal safety net that catches:
+        # (a) over-budget histories below the compaction message-count gate
+        #     (should_compact() won't trigger, so compaction is a no-op), and
+        # (b) compaction failures (compact() returns history unchanged on error).
+        # apply_token_based_trim is self-guarded, so trim is a no-op when the
+        # history is already within budget after successful compaction.
+        pipeline = HistoryOptimizerPipeline(
+            [
+                compactor,
+                LegacyTrimOptimizer(
+                    agent_name=agent_name,
+                    internal_events_client=internal_events_client,
+                ),
+            ]
+        )
     else:
         pipeline = HistoryOptimizerPipeline(
             [

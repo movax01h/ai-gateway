@@ -125,7 +125,7 @@ class AgentComponentBase(BaseComponent):
     prompt_id: str
     prompt_version: Optional[str] = None
     toolset: Toolset
-    compaction: Union[CompactionConfig, bool] = False
+    compaction: Union[CompactionConfig, bool] = True
     response_schema_id: Optional[str] = None
     response_schema_version: Optional[str] = None
     response_schema_tracking: bool = False

@@ -1685,6 +1685,20 @@ class TestAgentComponentMaxWrapUpRetries:
         assert call_kwargs["max_wrap_up_retries"] == 5
 
 
+class TestAgentComponentCompaction:
+    """Test suite for AgentComponent compaction configuration."""
+
+    def test_compaction_default_is_true(self, make_agent_component):
+        """Test that compaction defaults to True."""
+        component = make_agent_component()
+        assert component.compaction is True
+
+    def test_compaction_accepts_explicit_false(self, make_agent_component):
+        """Test that compaction can be explicitly disabled."""
+        component = make_agent_component(compaction=False)
+        assert component.compaction is False
+
+
 class TestWebSearchBinding:
     """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
     dependency_bump_web_search flag AND the client's `web_search` capability are all present."""

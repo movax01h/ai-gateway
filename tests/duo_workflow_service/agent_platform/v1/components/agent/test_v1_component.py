@@ -1517,7 +1517,7 @@ class TestPromptVariableValidation:
 class TestAgentComponentCompaction:
     """Test suite for AgentComponent compaction configuration."""
 
-    def test_compaction_default_is_false(
+    def test_compaction_default_is_true(
         self,
         component_name,
         flow_id,
@@ -1528,7 +1528,7 @@ class TestAgentComponentCompaction:
         mock_prompt_registry,
         mock_internal_event_client,
     ):
-        """Test that compaction defaults to False."""
+        """Test that compaction defaults to True."""
         component = AgentComponent(
             name=component_name,
             flow_id=flow_id,
@@ -1539,7 +1539,7 @@ class TestAgentComponentCompaction:
             prompt_registry=mock_prompt_registry,
             internal_event_client=mock_internal_event_client,
         )
-        assert component.compaction is False
+        assert component.compaction is True
 
     def test_compaction_accepts_bool_true(
         self,

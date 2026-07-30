@@ -52,10 +52,23 @@ def build_history_optimizer_pipeline(
 ) -> HistoryOptimizerPipeline:
     """Construct a ``HistoryOptimizerPipeline`` from typed opt-in flags.
 
-    Framework-enforced invariant: the main optimizer is compaction if enabled,
-    otherwise the legacy trim safety net. Order between future pre-main
-    optimizers (e.g., tool-result pruning) is encoded structurally in this
-    function's body -- flow authors do not choose order.
+    Framework-enforced invariant: ``LegacyTrimOptimizer`` is always the
+    terminal stage of the pipeline, regardless of whether compaction is
+    enabled. When compaction is enabled, ``CompactionOptimizer`` runs first;
+    ``LegacyTrimOptimizer`` follows as a self-guarded safety net that catches:
+
+    (a) Histories with fewer than ``max_recent_messages`` messages that are
+        over-budget -- ``should_compact()`` won't trigger for these, so
+        compaction is a no-op and trim provides the only overflow protection.
+    (b) Compaction failures -- ``compact()`` catches all exceptions and
+        returns the history unchanged; trim then handles the over-budget
+        history that compaction left behind.
+
+    ``apply_token_based_trim`` is self-guarded (no-op when under budget), so
+    the terminal trim stage adds no overhead for histories that are already
+    within limits. Order between future pre-main optimizers (e.g.,
+    tool-result pruning) is encoded structurally in this function's body --
+    flow authors do not choose order.
     """
     optimizers: list[HistoryOptimizer] = []
 
@@ -83,12 +96,15 @@ def build_history_optimizer_pipeline(
                 internal_events_client=internal_events_client,
             )
         )
-    else:
-        optimizers.append(
-            LegacyTrimOptimizer(
-                agent_name=agent_name,
-                internal_events_client=internal_events_client,
-            )
+
+    # LegacyTrimOptimizer is always appended as the terminal safety net.
+    # When compaction is disabled it is the sole optimizer; when compaction
+    # is enabled it catches the two failure modes described in the docstring.
+    optimizers.append(
+        LegacyTrimOptimizer(
+            agent_name=agent_name,
+            internal_events_client=internal_events_client,
         )
+    )
 
     return HistoryOptimizerPipeline(optimizers)
