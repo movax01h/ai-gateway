@@ -135,8 +135,15 @@ class TestEditorContentCompletionNonStream:
 
         assert body["metadata"]["model"]["engine"] == mock_suggestions_engine
         assert body["metadata"]["model"]["name"] == mock_suggestions_model
+        assert body["metadata"]["model"]["lang"] == "python"
+        assert body["metadata"]["timestamp"] > 0
 
-        assert "model" not in body
+        assert body["model"] == body["metadata"]["model"]
+        assert body["model"] == {
+            "engine": mock_suggestions_engine,
+            "name": mock_suggestions_model,
+            "lang": "python",
+        }
 
 
 class TestEditorContentGenerationStream:
@@ -228,6 +235,58 @@ class TestEditorContentGenerationStream:
             {"engine": "agent", "name": "Code Generations Agent"},
             {"flag_a", "flag_b"},
         )
+
+
+class TestEditorContentGenerationNonStream:
+    @pytest.mark.usefixtures("mock_generations")
+    def test_response_mirrors_model_metadata_at_top_level(
+        self,
+        mock_client: TestClient,
+        mock_suggestions_output_text: str,
+        mock_suggestions_model: str,
+        mock_suggestions_engine: str,
+        route: str,
+    ):
+        payload = {
+            "file_name": "main.py",
+            "content_above_cursor": "# Create a fast binary search\n",
+            "content_below_cursor": "\n",
+            "language_identifier": "python",
+            "model_provider": "anthropic",
+            "stream": False,
+        }
+
+        data = {
+            "prompt_components": [
+                {"type": "code_editor_generation", "payload": payload}
+            ],
+        }
+
+        response = mock_client.post(
+            route,
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "test-user-id",
+            },
+            json=data,
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+
+        assert body["choices"][0]["text"] == mock_suggestions_output_text
+
+        assert body["metadata"]["timestamp"] > 0
+
+        assert body["model"] == body["metadata"]["model"]
+        assert body["model"] == {
+            "engine": mock_suggestions_engine,
+            "name": mock_suggestions_model,
+            "lang": "python",
+        }
 
 
 def _assert_stream_sse_responses(
