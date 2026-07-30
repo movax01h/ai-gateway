@@ -48,6 +48,8 @@ models:
     model_class_provider: litellm
     strip_reasoning: true
     requires_single_system_message: true
+    family:
+      - qwen
     params:
       model: "accounts/gitlab/deployments/jc0k81hq"
       custom_llm_provider: "fireworks_ai"
