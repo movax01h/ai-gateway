@@ -27,8 +27,11 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
-from duo_workflow_service.conversation.compaction import ConversationCompactor
-from duo_workflow_service.entities import MessageTypeEnum
+from duo_workflow_service.conversation.compaction import (
+    CompactionResult,
+    ConversationCompactor,
+)
+from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -752,6 +755,156 @@ class TestAgentNodeCompaction:
             await agent_node.run(base_flow_state)
 
             mock_restore.assert_called_once_with([])
+
+    @pytest.fixture(name="compaction_ui_log")
+    def compaction_ui_log_fixture(self) -> UiChatLog:
+        """A minimal compaction tool-card UiChatLog entry."""
+        return UiChatLog(
+            message_type=MessageTypeEnum.TOOL,
+            message_sub_type="compaction",
+            content="Summarized 5 messages",
+            timestamp="2026-01-01T00:00:00+00:00",
+            status=ToolStatus.SUCCESS,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+            message_id="compaction-test-id",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "compaction_result,expect_compaction_log",
+        [
+            ("with_logs", True),
+            ("no_logs", False),
+            ("none_result", False),
+        ],
+    )
+    async def test_run_surfaces_compaction_ui_chat_logs(
+        self,
+        compaction_result,
+        expect_compaction_log,
+        agent_node_with_compactor,
+        base_flow_state,
+        mock_compactor,
+        compaction_ui_log,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Compaction ui_chat_logs are appended to the state update when present.
+
+        - ``with_logs``: CompactionResult with non-empty ui_chat_logs → card appears.
+        - ``no_logs``: CompactionResult with empty ui_chat_logs → no card.
+        - ``none_result``: maybe_compact_history returns None result → no card.
+        """
+        if compaction_result == "with_logs":
+            result_obj = CompactionResult(messages=[], was_modified=True)
+            result_obj.ui_chat_logs = [compaction_ui_log]
+            compact_return = ([], result_obj)
+        elif compaction_result == "no_logs":
+            result_obj = CompactionResult(messages=[], was_modified=False)
+            result_obj.ui_chat_logs = []
+            compact_return = ([], result_obj)
+        else:  # none_result
+            compact_return = ([], None)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
+            new_callable=AsyncMock,
+        ) as mock_compact:
+            mock_compact.return_value = compact_return
+
+            result = await agent_node_with_compactor.run(base_flow_state)
+
+        compaction_logs = [
+            entry
+            for entry in result.get(FlowStateKeys.UI_CHAT_LOG, [])
+            if entry.get("message_sub_type") == "compaction"
+        ]
+        if expect_compaction_log:
+            assert len(compaction_logs) == 1
+            assert compaction_logs[0]["content"] == "Summarized 5 messages"
+            assert compaction_logs[0]["message_id"] == "compaction-test-id"
+        else:
+            assert len(compaction_logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_run_compaction_logs_appended_after_base_ui_logs(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        mock_compactor,
+        base_flow_state,
+        compaction_ui_log,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Compaction tool card is appended *after* existing ui_chat_log entries.
+
+        The front end sorts by timestamp but silently drops compaction cards that are prepended — appending is the
+        required convention (see ChatAgent._append_optimizer_ui_logs).
+        """
+        from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+            UILogEventsAgent,
+            agent_tools_ui_log_writer_class,
+        )
+
+        ui_history = UIHistory(
+            events=[UILogEventsAgent.ON_AGENT_REASONING],
+            writer_class=agent_tools_ui_log_writer_class(component_name="test_agent"),
+        )
+        # Pre-populate the ui_history log so pop_state_updates returns the reasoning entry.
+        ui_history.log.warning(
+            "Reasoning text",
+            event=UILogEventsAgent.ON_AGENT_REASONING,
+            message_id="reasoning-id",
+        )
+
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config={},
+            compactor=mock_compactor,
+            ui_history=ui_history,
+        )
+
+        compaction_result_obj = CompactionResult(messages=[], was_modified=True)
+        compaction_result_obj.ui_chat_logs = [compaction_ui_log]
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
+            new_callable=AsyncMock,
+        ) as mock_compact:
+            mock_compact.return_value = ([], compaction_result_obj)
+
+            result = await node.run(base_flow_state)
+
+        ui_logs = result.get(FlowStateKeys.UI_CHAT_LOG, [])
+        assert len(ui_logs) >= 2
+        # Compaction card must appear after any base entries (reasoning logs, etc.)
+        compaction_indices = [
+            i
+            for i, entry in enumerate(ui_logs)
+            if entry.get("message_sub_type") == "compaction"
+        ]
+        assert len(compaction_indices) == 1
+        compaction_idx = compaction_indices[0]
+        # All non-compaction entries must come before the compaction card
+        for i, entry in enumerate(ui_logs):
+            if entry.get("message_sub_type") != "compaction":
+                assert i < compaction_idx, (
+                    f"Non-compaction entry at index {i} appears after compaction card at {compaction_idx}"
+                )
 
 
 class TestAgentNodeTruncation:
