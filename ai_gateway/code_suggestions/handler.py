@@ -87,6 +87,7 @@ class CompletionResponse(BaseModel):
 
     choices: list[Choice]
     metadata: Optional[ResponseMetadataBase] = None
+    model: Optional[ModelMetadata] = None
 
 
 class StreamSuggestionsResponse(StreamingResponse):
@@ -271,15 +272,18 @@ async def code_completion(
         stream_metadata = _get_stream_metadata(engine, snowplow_event_context)
         return await stream_handler(suggestions[0], stream_metadata)
 
+    model_meta = ModelMetadata(
+        engine=suggestions[0].model_metadata.engine,
+        name=suggestions[0].model_metadata.name,
+        lang=suggestions[0].lang,
+    )
+
     return CompletionResponse(
         choices=_completion_suggestion_choices(suggestions),
+        model=model_meta,
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
-            model=ModelMetadata(
-                engine=suggestions[0].model_metadata.engine,
-                name=suggestions[0].model_metadata.name,
-                lang=suggestions[0].lang,
-            ),
+            model=model_meta,
             enabled_feature_flags=current_feature_flag_context.get(),
         ),
     )
@@ -419,15 +423,18 @@ async def code_generation(
         [CompletionResponse.Choice(text=suggestion.text)] if suggestion.text else []
     )
 
+    model_meta = ModelMetadata(
+        engine=suggestion.model_metadata.engine,
+        name=suggestion.model_metadata.name,
+        lang=suggestion.lang,
+    )
+
     return CompletionResponse(
         choices=choices,
+        model=model_meta,
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
-            model=ModelMetadata(
-                engine=suggestion.model_metadata.engine,
-                name=suggestion.model_metadata.name,
-                lang=suggestion.lang,
-            ),
+            model=model_meta,
             enabled_feature_flags=current_feature_flag_context.get(),
         ),
     )
