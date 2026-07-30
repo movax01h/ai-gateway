@@ -205,7 +205,6 @@ class BillingEventsClient:
             metadata=metadata,
             subject=internal_context.user_id,
             global_user_id=internal_context.global_user_id,
-            seat_ids=["TODO"],  # TODO : We need to pass seatIDs from GitLab instance
             realm=mapped_realm,
             timestamp=datetime.now().isoformat(),
             instance_id=internal_context.instance_id,

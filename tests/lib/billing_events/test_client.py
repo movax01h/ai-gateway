@@ -31,7 +31,7 @@ BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "global_user_id": None,
     "root_namespace_id": None,
     "correlation_id": None,
-    "seat_ids": ["TODO"],
+    "seat_ids": None,
     "metadata": {},
     "deployment_type": None,
     "organization_id": None,
