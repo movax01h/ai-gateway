@@ -13,6 +13,19 @@ models:
       temperature: 0.0
       max_tokens: 32_768
 
+  - name: "Kimi K3"
+    provider: "Fireworks"
+    gitlab_identifier: "kimi_k3_fireworks"
+    description: "Open-source 2.8T MoE multimodal model with strong coding, visual reasoning, and agentic capabilities."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    params:
+      model: "accounts/gitlab/deployments/ymzmlgj5"
+      custom_llm_provider: "fireworks_ai"
+      temperature: 0.0
+      max_tokens: 32_768
+
   - name: "Minimax M2.7"
     provider: "Fireworks"
     gitlab_identifier: "minimax_m2_7_fireworks"
