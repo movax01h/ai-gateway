@@ -24,7 +24,7 @@ fetch-foundational-agents = "duo_workflow_service.scripts.fetch_foundational_age
 verify-pricing-multipliers = "scripts.verify_pricing_multipliers:main"
 
 [tool.poetry.dependencies]
-fastapi = "^0.139.0"
+fastapi = "^0.140.0"
 dependency-injector = "^4.41.0"
 uvicorn = {version = "^0.51.0", extras = ["standard"]}
 requests = "^2.32.3"
