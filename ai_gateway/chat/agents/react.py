@@ -154,6 +154,96 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
     def parse(self, text: str) -> Optional[AgentEventType]:
         return self.parse_result([Generation(text=text)])
 
+    @staticmethod
+    def _chunk_text_and_metadata(
+        chunk: Union[str, BaseMessage],
+    ) -> tuple[str, Optional[dict]]:
+        """Extract plain text and response metadata from a stream chunk.
+
+        Args:
+            chunk: A raw string or a LangChain ``BaseMessage`` chunk. Message
+                content may be a string or the Anthropic list-of-blocks format.
+
+        Returns:
+            A ``(text, response_metadata)`` tuple. ``response_metadata`` is
+            ``None`` for plain strings.
+        """
+        if isinstance(chunk, BaseMessage):
+            content = chunk.content
+            if isinstance(content, list):
+                text = "".join(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+            else:
+                text = content
+            return text, getattr(chunk, "response_metadata", None)
+        return chunk, None
+
+    def _final_answer_content_start(self, buffer: str) -> int:
+        """Absolute index in ``buffer`` where the Final Answer content begins.
+
+        Mirrors how ``re_final_answer`` locates the answer inside the stripped,
+        wrapped text, but computes the offset once so the streaming path can then
+        slice the answer instead of re-scanning the whole buffer on every chunk.
+        ``_strip_reasoning`` only ever removes a leading region, so its result is
+        a suffix of ``buffer`` and the offset is stable as the buffer grows.
+        """
+        stripped = self._strip_reasoning(buffer)
+        prefix_len = len(buffer) - len(stripped)
+        leading_ws = len(stripped) - len(stripped.lstrip())
+        marker = stripped.strip().find("Final Answer:")
+        if marker == -1:
+            raise ValueError("Final Answer: marker not found in buffer")
+        return prefix_len + leading_ws + marker + len("Final Answer:")
+
+    @override
+    async def _atransform(
+        self, input: AsyncIterator[Union[str, BaseMessage]]
+    ) -> AsyncIterator[AgentEventType]:
+        """Stream events in O(response length) instead of O(n^2).
+
+        While seeking a marker, defer to the cumulative ``parse_result`` so every
+        Thought/Action/Final Answer/unknown and ``_strip_reasoning`` behaviour is
+        byte-identical to the base parser. Once a Final Answer is confirmed, emit
+        the cumulative answer by slicing from a fixed offset, which avoids the
+        base parser's per-chunk full-buffer re-wrap and regex re-scan.
+        """
+        buffer = ""
+        finish_reason: Optional[str] = None
+        content_start: Optional[int] = None
+        prev_answer: Optional[str] = None
+        prev_reason: Optional[str] = None
+
+        async for chunk in input:
+            text, metadata = self._chunk_text_and_metadata(chunk)
+            buffer += text
+            reason = self.parse_finish_reason(metadata)
+            if reason:
+                finish_reason = reason
+
+            if content_start is None:
+                event = self.parse_result([Generation(text=buffer)], partial=True)
+                if isinstance(event, AgentFinalAnswer):
+                    event.finish_reason = finish_reason
+                    content_start = self._final_answer_content_start(buffer)
+                    prev_answer = event.text
+                    prev_reason = finish_reason
+                    yield event
+                elif event is not None:
+                    yield event
+            else:
+                answer = buffer[content_start:].strip()
+                # Re-emit when the text or the finish_reason changes. finish_reason
+                # often arrives on a trailing metadata-only chunk with no new text;
+                # emitting on that change keeps it (and the guardrail warning that
+                # ReActAgent.astream derives from it) from being dropped.
+                if answer != prev_answer or finish_reason != prev_reason:
+                    prev_answer = answer
+                    prev_reason = finish_reason
+                    yield AgentFinalAnswer(text=answer, finish_reason=finish_reason)
+
 
 class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
     def __init__(self, model_provider: ModelClassProvider, config: PromptConfig):

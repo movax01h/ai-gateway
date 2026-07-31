@@ -1,9 +1,12 @@
+import itertools
 from typing import Optional
+from unittest.mock import patch
 
 import fastapi
 import pytest
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage
 from langchain_core.outputs import Generation
+from langchain_core.runnables import RunnableBinding
 from starlette_context import context, request_cycle_context
 from structlog.testing import capture_logs
 
@@ -834,3 +837,168 @@ class TestAppendFinalMessageWarnings:
         else:
             assert isinstance(result, AgentFinalAnswer)
             assert result.text == expected_text
+
+
+class TestReActPlainTextParserStreaming:
+    """Cover the O(n) streaming path (_atransform).
+
+    The parser streams the full accumulated buffer to `parse_result` while
+    seeking a marker, then slices the Final Answer once confirmed. These tests
+    feed a full response in fixed-size chunks (including sizes that split the
+    `Final Answer:` marker across a chunk boundary) and assert the streamed
+    result converges to the non-streaming `parse()` of the same text.
+    """
+
+    @staticmethod
+    async def _chunks(text: str, size: int):
+        for i in range(0, len(text), size):
+            yield AIMessageChunk(content=text[i : i + size])
+
+    async def _events(self, text: str, size: int, strip_reasoning: bool = False):
+        parser = ReActPlainTextParser(
+            config=ReActParserConfig(strip_reasoning=strip_reasoning)
+        )
+        return [e async for e in parser.atransform(self._chunks(text, size))]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [1, 2, 3, 5, 7, 1000])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Thought: t\nFinal Answer: Hello world",
+            "Final Answer: A",
+            "Final Answer:\n  indented answer  ",
+            "Thought: reason\nFinal Answer: line1\n\nline2 with  spaces   ",
+        ],
+    )
+    async def test_streamed_final_answer_matches_parse(self, text: str, size: int):
+        parser = ReActPlainTextParser()
+        reference = parser.parse(text)
+        assert isinstance(reference, AgentFinalAnswer)
+
+        events = await self._events(text, size)
+        finals = [e for e in events if isinstance(e, AgentFinalAnswer)]
+
+        # Streamed cumulative answer converges to the non-streaming parse.
+        assert finals[-1].text == reference.text
+        # Cumulative texts only ever extend (each is a prefix of the next), so the
+        # deltas ReActAgent.astream emits never rewrite already-sent text.
+        texts = [e.text for e in finals]
+        for earlier, later in itertools.pairwise(texts):
+            assert later.startswith(earlier)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [1, 4, 1000])
+    async def test_streamed_strip_reasoning_final_answer(self, size: int):
+        text = "<think>long reasoning here</think>\n\nFinal Answer: Done"
+        parser = ReActPlainTextParser(config=ReActParserConfig(strip_reasoning=True))
+        reference = parser.parse(text)
+        assert isinstance(reference, AgentFinalAnswer)
+        assert reference.text == "Done"
+
+        events = await self._events(text, size, strip_reasoning=True)
+        finals = [e for e in events if isinstance(e, AgentFinalAnswer)]
+        assert finals[-1].text == "Done"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [1, 3, 1000])
+    async def test_streamed_unknown_action(self, size: int):
+        text = "I'm good. How about you?"
+        events = await self._events(text, size)
+        assert isinstance(events[-1], AgentUnknownAction)
+        assert events[-1].text == text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [1, 4, 1000])
+    async def test_streamed_tool_action(self, size: int):
+        text = "Thought: thinking\nAction: issue_reader\nAction Input: some input"
+        reference = ReActPlainTextParser().parse(text)
+        assert isinstance(reference, AgentToolAction)
+
+        events = await self._events(text, size)
+        tool_actions = [e for e in events if isinstance(e, AgentToolAction)]
+        assert tool_actions, "expected a tool action"
+        # Streamed tool action matches the non-streaming parse of the same text.
+        assert tool_actions[-1] == reference
+
+    @pytest.mark.asyncio
+    async def test_streamed_finish_reason_propagates(self):
+        parser = ReActPlainTextParser()
+
+        async def chunks():
+            yield AIMessageChunk(content="Final Answer: ")
+            yield AIMessageChunk(content="Hi")
+            yield AIMessageChunk(
+                content="!", response_metadata={"stop_reason": "end_turn"}
+            )
+
+        events = [e async for e in parser.atransform(chunks())]
+        finals = [e for e in events if isinstance(e, AgentFinalAnswer)]
+        assert finals[-1].text == "Hi!"
+        assert finals[-1].finish_reason == "end_turn"
+
+    @pytest.mark.asyncio
+    async def test_streamed_list_content_blocks(self):
+        # Anthropic streams content as a list of typed blocks; _chunk_text_and_metadata
+        # must concatenate the text blocks and ignore non-text ones.
+        parser = ReActPlainTextParser()
+
+        async def chunks():
+            yield AIMessageChunk(content=[{"type": "text", "text": "Final Answer: "}])
+            yield AIMessageChunk(
+                content=[
+                    {"type": "thinking", "thinking": "ignored"},
+                    {"type": "text", "text": "Hello"},
+                ]
+            )
+            yield AIMessageChunk(content=[{"type": "text", "text": " world"}])
+
+        events = [e async for e in parser.atransform(chunks())]
+        finals = [e for e in events if isinstance(e, AgentFinalAnswer)]
+        assert finals[-1].text == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_streamed_finish_reason_on_textless_trailing_chunk(self):
+        # finish_reason commonly arrives on a trailing metadata-only chunk with no
+        # new text. The answer text is unchanged there, so it must still re-emit to
+        # carry the reason (otherwise it is silently dropped).
+        parser = ReActPlainTextParser()
+
+        async def chunks():
+            yield AIMessageChunk(content="Final Answer: Hi")
+            yield AIMessageChunk(
+                content="", response_metadata={"stop_reason": "end_turn"}
+            )
+
+        events = [e async for e in parser.atransform(chunks())]
+        finals = [e for e in events if isinstance(e, AgentFinalAnswer)]
+        assert finals[-1].text == "Hi"
+        assert finals[-1].finish_reason == "end_turn"
+
+    @pytest.mark.asyncio
+    async def test_guardrail_warning_survives_textless_reason_chunk(
+        self, agent, inputs
+    ):
+        # The parser re-emits on a reason-only trailing chunk (fixed above); this
+        # confirms ReActAgent.astream then appends the guardrail warning derived
+        # from that finish_reason instead of losing it.
+        async def fake_stream(*_args, **_kwargs):
+            yield AgentFinalAnswer(text="Blocked answer", finish_reason=None)
+            yield AgentFinalAnswer(
+                text="Blocked answer", finish_reason="guardrail_intervened"
+            )
+
+        with patch.object(
+            RunnableBinding, "astream", lambda self, *a, **k: fake_stream()
+        ):
+            with request_cycle_context({}):
+                events = [e async for e in agent.astream(inputs)]
+
+        assert GUARDRAIL_INTERVENED_WARNING in events[-1].text
+
+    def test_chunk_text_and_metadata_plain_string(self):
+        assert ReActPlainTextParser._chunk_text_and_metadata("hi") == ("hi", None)
+
+    def test_final_answer_content_start_requires_marker(self):
+        with pytest.raises(ValueError):
+            ReActPlainTextParser()._final_answer_content_start("no marker here")
