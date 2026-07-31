@@ -277,9 +277,12 @@ test-undercoverage: install-test-deps
 	@poetry run diff-cover .test-reports/coverage.xml --compare-branch=$(UNDERCOVERAGE_COMPARE_BRANCH) --diff-range-notation=$(UNDERCOVERAGE_DIFF_RANGE_NOTATION) --show-uncovered --fail-under=100
 
 .PHONY: test-integration
+# `integration_tests/` drives a deployed AI Gateway over HTTP. The Duo Workflow Service tests instead run a
+# gRPC server in-process, so they live under `tests/` where the shared fixtures are and are named explicitly
+# here — pytest's `testpaths` covers them too, meaning `make test` runs them as well.
 test-integration: install-test-deps
 	@echo "Running integration tests..."
-	@poetry run pytest integration_tests/ -n auto
+	@poetry run pytest integration_tests/ tests/duo_workflow_service/integration/ -n auto
 
 .PHONY: test-agents
 test-agents: install-test-deps
