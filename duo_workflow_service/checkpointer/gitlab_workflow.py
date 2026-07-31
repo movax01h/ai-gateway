@@ -1165,30 +1165,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # specific checkpoint is being requested in `aget_state`
         # in both case grahp_config looks like: {'configurable': {'thread_id': '1', 'checkpoint_id': 'xyz'}}
         if checkpoint_id:
-            endpoint = add_compression_param(
-                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
-            )
-            with duo_workflow_metrics.time_gitlab_response(
-                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
-                method="GET",
+            # The Rails checkpoints endpoint is paginated (~20 per page, thread_ts DESC), so the
+            # requested checkpoint may sit outside the newest page. Page through until it is found;
+            # `_iter_checkpoint_pages` stops issuing requests as soon as we break out of the loop.
+            # Reporting a checkpoint that exists as absent makes LangGraph fall back to
+            # `empty_checkpoint()`, which silently discards all prior state (see gitlab-lsp#2775) —
+            # hence `raise_on_error`: a failed fetch must not be indistinguishable from "absent".
+            checkpoint: Any = None
+            async for gl_checkpoints in self._iter_checkpoint_pages(
+                raise_on_error=True
             ):
-                response = await self._client.aget(
-                    path=endpoint,
-                    object_hook=checkpoint_decoder,
+                checkpoint = next(
+                    (c for c in gl_checkpoints if c["thread_ts"] == checkpoint_id), None
                 )
+                if checkpoint:
+                    break
 
-                if not response.is_success():
-                    self._logger.error(
-                        "Failed to fetch checkpoints",
-                        workflow_id=self._workflow_id,
-                        status_code=response.status_code,
-                        response_body=response.body,
-                    )
-
-                gl_checkpoints = response.body
-            checkpoint = next(
-                (c for c in gl_checkpoints if c["thread_ts"] == checkpoint_id), None
-            )
             if checkpoint:
                 if "compressed_checkpoint" in checkpoint:
                     checkpoint["checkpoint"] = uncompress_checkpoint(
@@ -1271,6 +1263,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self,
         *,
         per_page: int = 20,
+        raise_on_error: bool = False,
         # `List`, not `list`: inside the class body the bare name `list` resolves
         # to the `list()` checkpoint-saver method defined above, not the builtin.
     ) -> AsyncIterator[List[Dict[str, Any]]]:
@@ -1280,6 +1273,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         this is the mechanism that makes the backwards walk cheap even for long checkpoint chains. Uses the same
         ``checkpoints`` REST endpoint as ``alist()`` / ``_fetch_most_recent_checkpoint``, following the ``X-Next-Page``
         pagination convention already used in ``duo_workflow_service/tools/duo_base_tool.py``.
+
+        On a failed request the walk stops early: callers that treat a short walk as "nothing more to see"
+        (best-effort scans) get that for free, while callers for which an incomplete walk would be a wrong
+        answer pass ``raise_on_error=True`` and get an exception instead of a truncated iteration.
         """
         page: str = "1"
         while page:
@@ -1302,6 +1299,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     status_code=response.status_code,
                     page=page,
                 )
+                if raise_on_error:
+                    # Same contract as _fetch_most_recent_checkpoint: callers that cannot tell
+                    # "fetch failed" from "nothing there" must not be handed an empty result.
+                    raise Exception(f"Failed to fetch checkpoints: {response.body}")
                 return
             if not response.body:
                 return
