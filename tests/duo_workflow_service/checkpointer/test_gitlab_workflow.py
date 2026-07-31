@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import ToolException
 from langgraph.checkpoint.base import (
     ChannelVersions,
     CheckpointMetadata,
@@ -4080,6 +4081,117 @@ async def test_iter_checkpoint_pages_stops_on_failed_or_empty_response(
     assert pages == [], (
         "no pages should be yielded when the response is not successful or has no body"
     )
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_shrinks_per_page_on_size_limit_error(
+    gitlab_workflow, http_client
+):
+    """A Workhorse response-size-limit ToolException (the action response can't fit in a single gRPC message; see
+    `ActionResponseBodyLimit` in workhorse's duoworkflow package) must trigger a retry of the same page with a smaller
+    per_page, rather than propagating and aborting the whole checkpoint walk."""
+    requested_per_page: list[str] = []
+
+    async def mock_aget(path, **_kwargs):
+        query = {k: v[0] for k, v in parse_qs(urlparse(path).query).items()}
+        requested_per_page.append(query["per_page"])
+        if query["per_page"] != "1":
+            raise ToolException(
+                "HTTP action error: response body exceeded size limit (4190208 bytes)"
+            )
+        return GitLabHttpResponse(
+            status_code=200,
+            body=[_make_gl_checkpoint("cp-1", WorkflowStatusEnum.NOT_STARTED)],
+            headers={},
+        )
+
+    http_client.aget = mock_aget
+
+    pages = [page async for page in gitlab_workflow._iter_checkpoint_pages(per_page=8)]
+
+    assert len(pages) == 1
+    assert [cp["thread_ts"] for cp in pages[0]] == ["cp-1"]
+    assert requested_per_page == ["8", "4", "2", "1"], (
+        "per_page must halve on each size-limit failure until the request succeeds"
+    )
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_gives_up_when_shrinking_cant_help(
+    gitlab_workflow, http_client
+):
+    """When even per_page=1 still exceeds the response size limit, iteration must end gracefully (yielding nothing)
+    instead of propagating the ToolException, matching the default (non-raising) behavior of other unrecoverable page
+    fetch failures."""
+
+    async def mock_aget(path, **_kwargs):
+        raise ToolException(
+            "HTTP action error: response body exceeded size limit (4190208 bytes)"
+        )
+
+    http_client.aget = mock_aget
+
+    pages = [page async for page in gitlab_workflow._iter_checkpoint_pages(per_page=2)]
+
+    assert pages == []
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_raises_when_shrinking_cant_help_and_raise_on_error(
+    gitlab_workflow, http_client
+):
+    """With raise_on_error=True, a size-limit failure that can't be resolved by shrinking per_page must raise instead of
+    silently ending the walk, matching raise_on_error's contract for any other unrecoverable page fetch failure."""
+
+    async def mock_aget(path, **_kwargs):
+        raise ToolException(
+            "HTTP action error: response body exceeded size limit (4190208 bytes)"
+        )
+
+    http_client.aget = mock_aget
+
+    with pytest.raises(Exception, match="Failed to fetch checkpoints"):
+        async for _ in gitlab_workflow._iter_checkpoint_pages(
+            per_page=2, raise_on_error=True
+        ):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_stops_on_non_size_limit_tool_exception(
+    gitlab_workflow, http_client
+):
+    """A ToolException unrelated to the response size limit must not trigger the shrink-and-retry behavior; it should
+    stop the iteration the same way other unrecoverable failures do."""
+
+    async def mock_aget(path, **_kwargs):
+        raise ToolException("HTTP action error: request timed out")
+
+    http_client.aget = mock_aget
+
+    pages = [page async for page in gitlab_workflow._iter_checkpoint_pages(per_page=8)]
+
+    assert pages == []
+
+
+@pytest.mark.asyncio
+async def test_iter_checkpoint_pages_raises_on_non_size_limit_tool_exception_and_raise_on_error(
+    gitlab_workflow, http_client
+):
+    """With raise_on_error=True, a ToolException unrelated to the response size limit must raise instead of silently
+    ending the walk, matching raise_on_error's contract for any other unrecoverable page fetch failure — the same
+    contract already covered for the size-limit-exhausted case above."""
+
+    async def mock_aget(path, **_kwargs):
+        raise ToolException("HTTP action error: request timed out")
+
+    http_client.aget = mock_aget
+
+    with pytest.raises(Exception, match="Failed to fetch checkpoints"):
+        async for _ in gitlab_workflow._iter_checkpoint_pages(
+            per_page=8, raise_on_error=True
+        ):
+            pass
 
 
 @pytest.mark.asyncio

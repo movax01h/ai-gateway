@@ -31,6 +31,7 @@ import uuid_utils
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import ToolException
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -104,6 +105,24 @@ from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPrope
 T = TypeVar("T", bound=callable)  # type: ignore
 
 _logger = structlog.stdlib.get_logger("workflow_checkpointer")
+
+# Substring of the ToolException raised when Workhorse aborts a `runHTTPRequest`
+# action because the upstream Rails response didn't fit within a single gRPC
+# message. See `ActionResponseBodyLimit` / `nullResponseWriter` in
+# workhorse/internal/ai_assist/duoworkflow/actions.go: Workhorse deliberately
+# aborts (rather than truncates) oversized responses, since gRPC itself caps
+# message size at 4MB. This is expected to surface for `checkpoints` list pages
+# on workflows with a long or large history, since page size is bounded by
+# checkpoint *count*, not by response *byte size*.
+_RESPONSE_SIZE_LIMIT_ERROR_MARKER = "exceeded size limit"
+
+# Floor for the adaptive page-size shrink in `_iter_checkpoint_pages`.
+_MIN_CHECKPOINT_PAGE_SIZE = 1
+
+
+def _is_response_size_limit_error(exc: BaseException) -> bool:
+    """Whether `exc` is Workhorse's oversized gRPC-message guard tripping."""
+    return _RESPONSE_SIZE_LIMIT_ERROR_MARKER in str(exc)
 
 
 def not_implemented_sync_method(func: T) -> T:
@@ -1277,20 +1296,56 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         On a failed request the walk stops early: callers that treat a short walk as "nothing more to see"
         (best-effort scans) get that for free, while callers for which an incomplete walk would be a wrong
         answer pass ``raise_on_error=True`` and get an exception instead of a truncated iteration.
+
+        A page's byte size isn't bounded — it grows with both ``per_page`` and how much state each
+        checkpoint carries — and Workhorse aborts (rather than truncates) any single action response
+        that can't fit in one gRPC message (see ``_is_response_size_limit_error``). When that happens,
+        this halves ``per_page`` and retries the same page instead of treating it as a failed request,
+        since on workflows with large checkpoints even the default ``per_page=20`` can exceed the limit.
+        Only once ``per_page`` can't shrink any further does it fall through to the same
+        stop-or-raise handling as any other unrecoverable page fetch failure.
         """
         page: str = "1"
+        current_per_page = per_page
         while page:
             endpoint = add_compression_param(
                 f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
-                f"?per_page={per_page}&page={page}"
+                f"?per_page={current_per_page}&page={page}"
             )
-            with duo_workflow_metrics.time_gitlab_response(
-                endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
-                method="GET",
-            ):
-                response = await self._client.aget(
-                    path=endpoint, object_hook=checkpoint_decoder
+            try:
+                with duo_workflow_metrics.time_gitlab_response(
+                    endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",
+                    method="GET",
+                ):
+                    response = await self._client.aget(
+                        path=endpoint, object_hook=checkpoint_decoder
+                    )
+            except ToolException as e:
+                if (
+                    _is_response_size_limit_error(e)
+                    and current_per_page > _MIN_CHECKPOINT_PAGE_SIZE
+                ):
+                    current_per_page = max(
+                        _MIN_CHECKPOINT_PAGE_SIZE, current_per_page // 2
+                    )
+                    self._logger.warning(
+                        "Checkpoint page exceeded the gRPC message size limit; "
+                        "retrying with a smaller page size",
+                        workflow_id=self._workflow_id,
+                        page=page,
+                        per_page=current_per_page,
+                    )
+                    continue
+                self._logger.error(
+                    "Failed to fetch checkpoint page",
+                    workflow_id=self._workflow_id,
+                    page=page,
+                    per_page=current_per_page,
+                    error=str(e),
                 )
+                if raise_on_error:
+                    raise Exception(f"Failed to fetch checkpoints: {e}") from e
+                return
 
             if not response.is_success():
                 self._logger.error(
