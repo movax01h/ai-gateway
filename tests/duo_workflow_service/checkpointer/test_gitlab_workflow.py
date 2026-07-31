@@ -3926,6 +3926,109 @@ async def test_checkpoints_reversed_stops_after_first_match_no_extra_requests(
 
 
 @pytest.mark.asyncio
+async def test_aget_tuple_finds_checkpoint_outside_first_page(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    """A requested checkpoint that exists but sits on a later page must still be found.
+
+    Regression test for gitlab-lsp#2775: the unpaginated fetch only searched the newest page, so resuming from an older
+    boundary checkpoint returned None and LangGraph silently fell back to an empty checkpoint, losing all prior state.
+    """
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    config: CustomRunnableConfig = {
+        "configurable": {"thread_id": "1234", "checkpoint_id": "cp-1"}
+    }
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert result.config["configurable"]["checkpoint_id"] == "cp-1"
+    assert result.checkpoint["channel_values"]["status"] == (
+        WorkflowStatusEnum.NOT_STARTED
+    )
+    assert [params["page"] for params in requested_params] == ["1", "2"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_stops_paginating_once_checkpoint_is_found(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    """A match on the first page must not trigger requests for later pages."""
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    config: CustomRunnableConfig = {
+        "configurable": {"thread_id": "1234", "checkpoint_id": "cp-3"}
+    }
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert result.config["configurable"]["checkpoint_id"] == "cp-3"
+    assert len(requested_params) == 1, (
+        "no HTTP requests may be issued beyond the page containing the match"
+    )
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_returns_none_when_checkpoint_id_is_absent_from_all_pages(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    config: CustomRunnableConfig = {
+        "configurable": {"thread_id": "1234", "checkpoint_id": "cp-does-not-exist"}
+    }
+
+    assert await gitlab_workflow.aget_tuple(config) is None
+    assert [params["page"] for params in requested_params] == ["1", "2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_page", [1, 2])
+async def test_aget_tuple_raises_when_a_checkpoint_page_fetch_fails(
+    gitlab_workflow, http_client, paginated_checkpoint_pages, failing_page
+):
+    """A failed fetch must not be reported as "checkpoint absent".
+
+    Returning None would send LangGraph down the empty-checkpoint path that gitlab-lsp#2775 is about, losing the
+    session's state because of a transient HTTP error. Matches _fetch_most_recent_checkpoint's contract.
+    """
+    call_count = 0
+
+    async def mock_aget(path, **_kwargs):  # pylint: disable=unused-argument
+        nonlocal call_count
+        call_count += 1
+        if call_count == failing_page:
+            return GitLabHttpResponse(
+                status_code=500, body={"message": "boom"}, headers={}
+            )
+        return GitLabHttpResponse(
+            status_code=200,
+            body=paginated_checkpoint_pages[call_count - 1],
+            headers={"X-Next-Page": "2"},
+        )
+
+    http_client.aget = mock_aget
+
+    config: CustomRunnableConfig = {
+        "configurable": {"thread_id": "1234", "checkpoint_id": "cp-1"}
+    }
+
+    with pytest.raises(Exception, match="Failed to fetch checkpoints"):
+        await gitlab_workflow.aget_tuple(config)
+
+    assert call_count == failing_page
+
+
+@pytest.mark.asyncio
 async def test_iter_checkpoint_pages_stops_on_error_mid_pagination(
     gitlab_workflow, http_client, paginated_checkpoint_pages
 ):
