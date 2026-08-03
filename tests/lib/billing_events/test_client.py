@@ -287,6 +287,17 @@ class TestBillingEventsClient:
 
         assert context.data["metadata"] == {}
 
+        # None metadata must also be forwarded as {} to the internal event client
+        client.internal_event_client.track_event.assert_called_once_with(
+            event_name="usage_billing_event",
+            category=__name__,
+            additional_properties=InternalEventAdditionalProperties(
+                property=BillingEvent.AIGW_PROXY_USE.value,
+                label="12345678-1234-5678-9012-123456789012",
+                metadata={},
+            ),
+        )
+
     def test_billing_event_context_creation_with_internal_context(
         self, client, user, mock_dependencies
     ):
@@ -358,6 +369,7 @@ class TestBillingEventsClient:
         """Test that internal_events_client.track_event is called with correct parameters."""
         event = BillingEvent.AIGW_PROXY_USE
         category = "test_category"
+        metadata = {"workflow_type": "code_review"}
 
         client.track_billing_event(
             user=user,
@@ -365,13 +377,16 @@ class TestBillingEventsClient:
             category=category,
             unit_of_measure="tokens",
             quantity=100.0,
+            metadata=metadata,
         )
 
         client.internal_event_client.track_event.assert_called_once_with(
             event_name="usage_billing_event",
             category=category,
             additional_properties=InternalEventAdditionalProperties(
-                property=event.value, label="12345678-1234-5678-9012-123456789012"
+                property=event.value,
+                label="12345678-1234-5678-9012-123456789012",
+                metadata=metadata,
             ),
         )
 
