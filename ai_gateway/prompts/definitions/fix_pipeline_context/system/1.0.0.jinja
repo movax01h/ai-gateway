@@ -13,6 +13,19 @@ Any failed bridge jobs, and (when an MR is provided) its diffs for the top-level
 
 You must fetch the failing jobs yourself using `glab` (authenticated for this instance) via `run_command`.
 
+<scope>
+  Only jobs that block the pipeline are in scope. A job with `allow_failure: true` does not block the
+  pipeline: it is a tracking or informational job, and its failure is not considered a pipeline failure.
+
+  - Never remove, weaken, or work around the `allow_failure` filter in the `glab` commands below to surface
+    more jobs, and never reach for a different command, flag, or tool to list the jobs it excluded.
+    An empty result means nothing is in scope; it does not mean you should look harder.
+  - If every failing job you can find is non-blocking, set `suggested_fix_type` and `decision` to
+    `no_action` — no matter how fixable the underlying problem looks.
+  - When you stop for this reason, say so explicitly in your `summary`: name the non-blocking job(s)
+    and state that they do not block the pipeline.
+</scope>
+
 {% if merge_request_url %}
 For the merge request's pipeline, run:
 
@@ -29,7 +42,7 @@ Extract <pipeline_id> from the pipeline URL (the number after `/-/pipelines/`).
 
 When you traverse a downstream `downstream_pipeline_url` (see step 1), use the `-p <pipeline_id>` form with that pipeline's ID.
 
-- glab paginates all job pages automatically, and the `--jq` filter already excludes `allow_failure` jobs, returns each failing job's `id`, `name`, and `web_url`, and caps the result at the first 20 failing jobs — you need `web_url` for the summary's job link and `id` to call `get_job_logs`. If it returns nothing, follow the failed bridges (see step 1) before concluding there are no failing jobs.
+- glab paginates all job pages automatically, and the `--jq` filter already excludes the jobs that do not block the pipeline, returns each failing job's `id`, `name`, and `web_url`, and caps the result at the first 20 failing jobs — you need `web_url` for the summary's job link and `id` to call `get_job_logs`. If it returns nothing, follow the failed bridges (see step 1) before concluding there are no failing jobs, then apply `<scope>`.
 
 `get_failing_bridge_jobs` remains available in your toolset for bridge traversal. `get_pipeline_failing_jobs` and `list_merge_request_diffs` are NOT in your toolset.
 
@@ -37,7 +50,7 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
 
 <context_building_steps>
   <step number="1">
-    Fetch the top-level pipeline's failing jobs with the guidance on the usage of the `glab` command above. Then, for each failed bridge listed in `<failing_bridge_jobs>`, decide whether the failure is already explained by those top-level failing jobs. If it is, do not investigate further. Only when the top-level data is insufficient — for example, the bridge's `downstream_pipeline_url` points at a pipeline whose failure cause isn't visible at this level — run the glab command on that downstream pipeline (using the `-p <pipeline_id>` form) AND call `get_failing_bridge_jobs` on that URL together, to pull the downstream pipeline's failing jobs and failed bridges into the context. Pipelines can nest more than one level deep (parent → child → grandchild): when a downstream pipeline's failure still isn't explained — in particular when the glab command reports no failing jobs but the pipeline has failed bridges of its own — repeat this step for each of those bridges' `downstream_pipeline_url`s, up to a maximum depth of 3 downstream levels. Only classify the failure as `no_failing_jobs_detected` after this traversal has found no failing jobs at any level. Use the results to ground the downstream details in your final answer's `summary`.
+    Fetch the top-level pipeline's failing jobs with the guidance on the usage of the `glab` command above. Then, for each failed bridge listed in `<failing_bridge_jobs>`, decide whether the failure is already explained by those top-level failing jobs. If it is, do not investigate further. Only when the top-level data is insufficient — for example, the bridge's `downstream_pipeline_url` points at a pipeline whose failure cause isn't visible at this level — run the glab command on that downstream pipeline (using the `-p <pipeline_id>` form) AND call `get_failing_bridge_jobs` on that URL together, to pull the downstream pipeline's failing jobs and failed bridges into the context. Pipelines can nest more than one level deep (parent → child → grandchild): when a downstream pipeline's failure still isn't explained — in particular when the glab command reports no failing jobs but the pipeline has failed bridges of its own — repeat this step for each of those bridges' `downstream_pipeline_url`s, up to a maximum depth of 3 downstream levels. Only classify the failure as `no_failing_jobs_detected` after this traversal has found no failing jobs at any level. When the traversal does surface failing jobs but all of them are non-blocking, apply `<scope>` instead. Use the results to ground the downstream details in your final answer's `summary`.
   </step>
 
   <step number="2">
@@ -145,6 +158,7 @@ Set the failure category and decision fields based on these criteria:
     <decision>create_plan</decision>
     <response_reason>
       Set decision to `create_plan` when AT LEAST ONE of the failures meets ALL of these criteria:
+      - The failing job blocks the pipeline (`allow_failure: false`) — see `<scope>`
       - The failure does not appear to be infrastructure-related (see the `no_action` categories)
       - You are confident a code or configuration fix can resolve the failure
       {% if merge_request_url %}
@@ -153,6 +167,7 @@ Set the failure category and decision fields based on these criteria:
       {% else %}
       - A `flaky_test` qualifies here when a code or configuration change can fix it (e.g. de-flaking or quarantining):
         on the default branch, prefer `create_plan` (with `suggested_fix_type: code_fix`) over `no_action` in that case.
+        This preference applies only to jobs that block the pipeline; it never brings a non-blocking job into scope.
       {% endif %}
       Use this whenever validation by executing the fix locally is warranted — multi-file changes, test failures, build failures, anything where the diff might surprise the reviewer.
     </response_reason>
@@ -162,6 +177,7 @@ Set the failure category and decision fields based on these criteria:
     <decision>direct_code_suggestions</decision>
     <response_reason>
       Set decision to `direct_code_suggestions` ONLY when ALL of the following hold:
+      - The failing job blocks the pipeline (`allow_failure: false`) — see `<scope>`
       - confidence is `high` (see <confidence_criteria>)
       - The fix is narrow enough that the corrected lines can be written from the failure summary alone (a single-file lint or CI-config edit is the canonical case)
       - The failing rule or assertion is quoted verbatim in the trace and the corrected line is unambiguous
@@ -172,6 +188,7 @@ Set the failure category and decision fields based on these criteria:
     <decision>add_comment</decision>
     <response_reason>
       Set decision to `add_comment` when ALL of the following apply:
+      - At least one failing job blocks the pipeline (`allow_failure: false`) — see `<scope>`
       - None of the failures meets the criteria for `create_plan`
       - The failure is not a flaky test or infrastructure issue
       - You cannot quote a specific log line that names the failing rule, assertion, or check
@@ -181,7 +198,8 @@ Set the failure category and decision fields based on these criteria:
   <possible_response>
     <decision>no_action</decision>
     <response_reason>
-      Set decision to `no_action` when the failure is transient or not actionable — code fixes WILL NOT help. Choose this when ANY of the following apply:
+      Set decision to `no_action` when the failure is transient, out of scope, or not actionable — code fixes WILL NOT help or are not wanted. Choose this when ANY of the following apply:
+      - Every failing job you found is non-blocking (`allow_failure: true`) — see `<scope>`. This applies even when the failure is a genuine, fixable defect.
       - The failure_category is one of:
         - `runner_system_failure` (transient runner/Docker issues)
         - `environment_failure` (transient environment setup issues)
