@@ -1006,7 +1006,7 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             False,
             None,
             grpc.StatusCode.OK,
-            "workflow execution stopped:",
+            "workflow execution stopped",
         ),
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
@@ -1020,7 +1020,7 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             False,
             "USER_CANCELLED",
             grpc.StatusCode.OK,
-            "workflow execution stopped:",
+            "workflow execution stopped",
         ),
         (
             ValueError("Some error"),
@@ -1148,14 +1148,14 @@ async def test_execute_workflow_status_codes(
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
-            "workflow execution stopped:",
+            "workflow execution stopped",
             1,  # Only called from abort_workflow
         ),
         (
             # Tuple-style error from LangGraph cleanup
             (AIO_CANCEL_STOP_WORKFLOW_REQUEST, "<Task cancelled>"),
             grpc.StatusCode.OK,
-            "workflow execution stopped:",
+            "workflow execution stopped",
             1,  # Only called from abort_workflow
         ),
         (
