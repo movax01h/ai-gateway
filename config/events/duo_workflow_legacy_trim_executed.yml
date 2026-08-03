@@ -2,7 +2,7 @@
 description: Tracks each legacy token-based trim execution with before/after token data
 internal_events: true
 action: duo_workflow_legacy_trim_executed
-product_group: agent_foundations
+product_group: agent_execution
 additional_properties:
   label:
     description: Agent name that triggered the trim

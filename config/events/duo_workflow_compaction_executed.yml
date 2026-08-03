@@ -2,7 +2,7 @@
 description: Tracks each compaction LLM call execution with token and cost data
 internal_events: true
 action: duo_workflow_compaction_executed
-product_group: agent_foundations
+product_group: agent_execution
 additional_properties:
   label:
     description: Agent name that triggered compaction

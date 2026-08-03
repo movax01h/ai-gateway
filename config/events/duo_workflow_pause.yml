@@ -2,7 +2,7 @@
 description: Tracks Duo Workflow pauses
 internal_events: true
 action: pause_duo_workflow
-product_group: agent_foundations
+product_group: agent_execution
 product_categories:
   - duo_agent_platform
 additional_properties:
