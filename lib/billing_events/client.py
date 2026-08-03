@@ -242,6 +242,7 @@ class BillingEventsClient:
             additional_properties = InternalEventAdditionalProperties(
                 label=event_id,
                 property=event.value,
+                metadata=metadata,
             )
             self.internal_event_client.track_event(
                 event_name="usage_billing_event",
