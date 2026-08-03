@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.tools.ascp.create_security_context import (
     CreateAscpSecurityContext,
@@ -241,9 +242,9 @@ async def test_ascp_create_security_context_with_optional_fields(
 ):
     security_context_data = {
         **created_security_context_data_fixture,
-        "authenticationModel": "OAuth2",
-        "authorizationModel": "RBAC",
-        "dataSensitivity": "HIGH",
+        "authenticationModel": "true",
+        "authorizationModel": "elevated",
+        "dataSensitivity": "false",
     }
     gitlab_client_mock.graphql = AsyncMock(
         return_value={
@@ -261,20 +262,20 @@ async def test_ascp_create_security_context_with_optional_fields(
         component_id="gid://gitlab/Ascp::Component/1",
         scan_id="gid://gitlab/Ascp::Scan/1",
         guidelines=[{"name": "No direct DB access", "operation": "READ"}],
-        authentication_model="OAuth2",
-        authorization_model="RBAC",
-        data_sensitivity="HIGH",
+        authentication_model="true",
+        authorization_model="elevated",
+        data_sensitivity="false",
     )
 
     response_json = json.loads(response)
-    assert response_json["security_context"]["authenticationModel"] == "OAuth2"
-    assert response_json["security_context"]["authorizationModel"] == "RBAC"
-    assert response_json["security_context"]["dataSensitivity"] == "HIGH"
+    assert response_json["security_context"]["authenticationModel"] == "true"
+    assert response_json["security_context"]["authorizationModel"] == "elevated"
+    assert response_json["security_context"]["dataSensitivity"] == "false"
 
     call_args = gitlab_client_mock.graphql.call_args[0]
-    assert call_args[1]["input"]["authenticationModel"] == "OAuth2"
-    assert call_args[1]["input"]["authorizationModel"] == "RBAC"
-    assert call_args[1]["input"]["dataSensitivity"] == "HIGH"
+    assert call_args[1]["input"]["authenticationModel"] == "true"
+    assert call_args[1]["input"]["authorizationModel"] == "elevated"
+    assert call_args[1]["input"]["dataSensitivity"] == "false"
 
 
 @pytest.mark.asyncio
@@ -446,6 +447,55 @@ async def test_ascp_create_security_context_missing_id(
         )
 
     assert "Failed to create ASCP security context" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("authentication_model", "yes"),
+        ("authentication_model", True),
+        ("authorization_model", "RBAC"),
+        ("authorization_model", "admin"),
+        ("data_sensitivity", "HIGH"),
+        ("data_sensitivity", False),
+    ],
+)
+def test_ascp_create_security_context_rejects_invalid_structured_values(field, value):
+    """Structured fields only accept their literal contract values."""
+    base = {
+        "project_path": "my-group/my-project",
+        "component_id": "gid://gitlab/Ascp::Component/1",
+        "scan_id": "gid://gitlab/Ascp::Scan/1",
+        "guidelines": [{"name": "Test", "operation": "READ"}],
+    }
+    with pytest.raises(ValidationError):
+        CreateAscpSecurityContextInput(**{**base, field: value})
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("authentication_model", "true"),
+        ("authentication_model", "false"),
+        ("authorization_model", "elevated"),
+        ("authorization_model", "standard"),
+        ("data_sensitivity", "true"),
+        ("data_sensitivity", "false"),
+        ("authentication_model", None),
+        ("authorization_model", None),
+        ("data_sensitivity", None),
+    ],
+)
+def test_ascp_create_security_context_accepts_valid_structured_values(field, value):
+    """Structured fields accept their literal contract values and None."""
+    base = {
+        "project_path": "my-group/my-project",
+        "component_id": "gid://gitlab/Ascp::Component/1",
+        "scan_id": "gid://gitlab/Ascp::Scan/1",
+        "guidelines": [{"name": "Test", "operation": "READ"}],
+    }
+    parsed = CreateAscpSecurityContextInput(**{**base, field: value})
+    assert getattr(parsed, field) == value
 
 
 def test_ascp_create_security_context_format_display_message():

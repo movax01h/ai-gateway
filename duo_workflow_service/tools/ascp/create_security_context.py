@@ -1,4 +1,4 @@
-from typing import Any, Optional, Type
+from typing import Any, Literal, Optional, Type
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, ConfigDict, Field
@@ -75,17 +75,20 @@ class CreateAscpSecurityContextInput(BaseModel):
         default=None,
         description="Optional summary of the security context.",
     )
-    authentication_model: Optional[str] = Field(
+    authentication_model: Optional[Literal["true", "false"]] = Field(
         default=None,
-        description="Optional description of the authentication model used by this component.",
+        description="Whether the component requires authentication.",
     )
-    authorization_model: Optional[str] = Field(
+    authorization_model: Optional[Literal["elevated", "standard"]] = Field(
         default=None,
-        description="Optional description of the authorization model used by this component.",
+        description="Whether the component requires elevated privileges.",
     )
-    data_sensitivity: Optional[str] = Field(
+    data_sensitivity: Optional[Literal["true", "false"]] = Field(
         default=None,
-        description="Optional description of data sensitivity classification for this component.",
+        description=(
+            "Whether the component handles sensitive data "
+            "(PII, credentials, secrets, tokens)."
+        ),
     )
 
 

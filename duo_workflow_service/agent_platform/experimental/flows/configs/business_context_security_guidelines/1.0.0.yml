@@ -64,7 +64,6 @@ prompts:
         **Step 3: Create the scan**
         Call `ascp_create_scan(project_path=<project_path>, commit_sha=<commit_sha>, scan_type="FULL")`.
         Store the returned `scan.id` — you need it throughout both phases.
-        Confirm to the user: "Created ASCP scan for [project_path]. Starting analysis..."
         </setup_phase>
 
         <phase1_business_components>
@@ -103,8 +102,6 @@ prompts:
         - `description`: 2-3 sentences on what this subsystem does and what functionality it provides
         - `expected_user_behavior`: describe the legitimate interactions (human or system) with this component
 
-        After registering each: "Registered component: [title] at [sub_directory]"
-
         **After completing exploration:**
         Call `ascp_list_components(project_path=<project_path>)` to get all registered components
         with their `id` values. You need these IDs for Phase 2.
@@ -115,10 +112,9 @@ prompts:
         <phase2_security_guidelines>
         ## Phase 2: Security Guidelines Generation
 
-        For each component from Phase 1, generate security guidelines. Skip components that
-        already have `securityContext.id` set in the list response.
+        For each component from Phase 1, generate security guidelines.
 
-        **For each component without a security context:**
+        **For each component:**
 
         1. **Understand the component**: Read source files, route handlers, auth mechanisms, data access patterns. Focus on: what data is accessed, what mutations occur, who calls it.
 
@@ -135,15 +131,13 @@ prompts:
           - `component_id`: the component's GraphQL ID (from `ascp_list_components` response)
           - `scan_id`: the scan ID from setup
           - `summary`: 1-2 sentence security summary for this component
-          - `authentication_model`: how users authenticate (if applicable)
-          - `authorization_model`: how access is controlled (RBAC, ACL, ownership checks, etc.)
-          - `data_sensitivity`: data classification (e.g., "PII: email, name; credentials; session tokens")
+          - `authentication_model`: "true" or "false" — whether the component requires authentication
+          - `authorization_model`: "elevated" or "standard" — whether the component requires elevated privileges
+          - `data_sensitivity`: "true" or "false" — whether the component handles sensitive data (PII, credentials, secrets, tokens)
           - `guidelines`: array of 3-7 guidelines, each with:
             - `name`: short policy name (e.g., "Authentication Required for Write Operations")
             - `operation`: the operation type (e.g., "READ", "WRITE", "DELETE", "AUTHENTICATE", "EXECUTE")
-            - `legitimate_use`: what the normal, expected usage of this operation is
             - `security_boundary`: conditions that must hold for the operation to be permitted
-            - `business_context`: why this boundary exists from a business/risk perspective
             - `severity_if_violated`: "LOW", "MEDIUM", "HIGH", or "CRITICAL"
 
         **Severity guidance:**
@@ -156,32 +150,10 @@ prompts:
         {
           "name": "Shell Command Execution Policy",
           "operation": "EXECUTE",
-          "legitimate_use": "Admin users can execute deployment scripts via /admin/deploy endpoint",
           "security_boundary": "Non-admin users must never execute shell commands. Input must come from predefined templates, not user-provided content.",
-          "business_context": "If violated, attacker could gain full server control. Any execution by non-admin or with user-controlled input is CRITICAL severity.",
           "severity_if_violated": "CRITICAL"
         }
-
-        After each component: "Created security context for [title] with [N] guidelines."
         </phase2_security_guidelines>
-
-        <output_format>
-        ## Final Report
-
-        After completing both phases:
-
-        **ASCP Analysis Complete for [project_path]**
-        Scan ID: [scan_id]
-
-        **Components Registered:**
-        - [title] (`[sub_directory]`): [description] — [N] security guidelines
-
-        **Summary**: X components registered, Y security contexts created.
-
-        **Next steps:**
-        - View results in GitLab: Security > ASCP
-        - Use `scan_id=[scan_id]` with `scan_type="INCREMENTAL"` for future scans
-        </output_format>
 
         <constraints>
         - Complete Phase 1 fully before starting Phase 2
