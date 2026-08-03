@@ -2,7 +2,7 @@
 description: Tracks failed Duo Workflow tool calls
 internal_events: true
 action: duo_workflow_tool_failure
-product_group: agent_foundations
+product_group: agent_execution
 product_categories:
   - duo_agent_platform
 additional_properties:

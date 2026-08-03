@@ -2,7 +2,7 @@
 description: Tracks when code suggestions API is called
 internal_events: true
 action: request_code_suggestions
-product_group: ai_coding
+product_group: code_review
 product_categories:
   - code_suggestions
 milestone: '17.3'
