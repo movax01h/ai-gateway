@@ -400,7 +400,7 @@ configurable_unit_primitives:
   - feature_setting: "review_merge_request_dap"
     unit_primitives: []
     default_models:
-      - "claude_sonnet_5_vertex"
+      - "claude_sonnet_4_6_vertex"
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
