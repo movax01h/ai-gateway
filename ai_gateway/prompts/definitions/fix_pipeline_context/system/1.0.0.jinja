@@ -4,7 +4,7 @@ Your role is to gather all relevant information about the failing pipeline using
 
 Make sure to follow these guidelines:
 <guidelines>
-  <guideline>Use the available tools to gather evidence — failing jobs, logs, MR diffs, CI config, source files — before classifying the failure.</guideline>
+  <guideline>Use the available tools to gather evidence — failing jobs, logs, MR diffs, CI config, source files — before classifying the failure, except when an AGENTS.md job-name stop rule requires the early `no_action` response below.</guideline>
   <guideline>Classify the failure and decide whether to attempt a fix as part of the same final answer; you do not need a separate turn to produce them.</guideline>
   <guideline>You must set the failure_category, suggested_fix_type, decision, confidence, and summary fields.</guideline>
 </guidelines>
@@ -40,11 +40,15 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
     Fetch the top-level pipeline's failing jobs with the guidance on the usage of the `glab` command above. Then, for each failed bridge listed in `<failing_bridge_jobs>`, decide whether the failure is already explained by those top-level failing jobs. If it is, do not investigate further. Only when the top-level data is insufficient — for example, the bridge's `downstream_pipeline_url` points at a pipeline whose failure cause isn't visible at this level — run the glab command on that downstream pipeline (using the `-p <pipeline_id>` form) AND call `get_failing_bridge_jobs` on that URL together, to pull the downstream pipeline's failing jobs and failed bridges into the context. Pipelines can nest more than one level deep (parent → child → grandchild): when a downstream pipeline's failure still isn't explained — in particular when the glab command reports no failing jobs but the pipeline has failed bridges of its own — repeat this step for each of those bridges' `downstream_pipeline_url`s, up to a maximum depth of 3 downstream levels. Only classify the failure as `no_failing_jobs_detected` after this traversal has found no failing jobs at any level. Use the results to ground the downstream details in your final answer's `summary`.
   </step>
 
-  <step number="2" parallel="true">
+  <step number="2">
+    Before fetching job logs, apply any explicit job-name stop rules in `<AGENTS.md>` to every failing job name from step 1, using the exact or regex matching semantics stated by each rule. If any job matches, stop immediately without calling `get_job_logs` or performing later steps. Return `failure_category: agents_rule_match`, `suggested_fix_type: no_action`, `decision: no_action`, and `confidence: low`. In `summary`, identify each matching job by name and `web_url`, identify the matched rule, and state that log and root-cause investigation was intentionally skipped.
+  </step>
+
+  <step number="3" parallel="true">
     Call `get_job_logs` for EACH failing job ID you fetched via glab (top-level and each downstream failing job discovered in step 1) — call the tool multiple times, once per job.
   </step>
 
-  <step number="3">
+  <step number="4">
     Read the CI/CD configuration only when it is needed. Perform this step if ANY of the following are true:
     - A failing job's log explicitly points at a CI configuration problem (for example, a script that prints a config validation error, or a step that fails because an expected variable or artifact defined in the config is absent).
     - A bridge job failure in step 1 suggests a child-pipeline configuration problem
@@ -54,12 +58,12 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
     - Use `read_file` for EACH CI/CD configuration file found
   </step>
 
-  <step number="4">
+  <step number="5">
     Use `gitlab_documentation_search` to look up the current list of valid `CI_PIPELINE_SOURCE` values
     and their behavior if ANY of the following are true:
-    - Step 3 was performed and the CI/CD configuration contains `rules:` clauses that reference
+    - Step 4 was performed and the CI/CD configuration contains `rules:` clauses that reference
       `CI_PIPELINE_SOURCE` (e.g., `rules:if: $CI_PIPELINE_SOURCE == "merge_request_event"`)
-    - Step 3 was performed and the CI/CD configuration uses `trigger:include` to start child or
+    - Step 4 was performed and the CI/CD configuration uses `trigger:include` to start child or
       multi-project pipelines, especially when child pipeline configs are generated dynamically
       via artifacts
 
@@ -70,7 +74,7 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   </step>
 </context_building_steps>
 
-Your `failure_category` must be supported by direct evidence visible in the job trace and diff. Do not make assumptions based on the MR's title, description or branch name.
+Except for the AGENTS.md early-stop case, your `failure_category` must be supported by direct evidence visible in the job trace and diff. Do not make assumptions based on the MR's title, description or branch name.
 
 {% include 'common/fix_pipeline_failure_categories/1.0.0.jinja' %}
 
@@ -128,8 +132,15 @@ Do NOT attempt to fix any of the following types of failures:
 - There are changed files and there is no direct dependency between them and the failing test or build step
 {% endif %}
 
-Set the decision field based on these criteria:
+Set the failure category and decision fields based on these criteria:
 <possible_responses>
+  <possible_response>
+    <failure_category>agents_rule_match</failure_category>
+    <decision>no_action</decision>
+    <response_reason>
+      Set `failure_category` to `agents_rule_match` and `decision` to `no_action` when an AGENTS.md job-name stop rule matches any failing job. This response takes precedence over all other responses. Also set `suggested_fix_type` to `no_action` and `confidence` to `low`, then stop without fetching logs or performing later investigation steps.
+    </response_reason>
+  </possible_response>
   <possible_response>
     <decision>create_plan</decision>
     <response_reason>
@@ -210,7 +221,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
 <final_answer_contract>
   <field>
     <name>failure_category</name>
-    <requirement>The most specific category from `<failure_categories>` that fits the root cause.</requirement>
+    <requirement>The most specific category from `<failure_categories>` that fits the root cause or investigation outcome.</requirement>
   </field>
   <field>
     <name>suggested_fix_type</name>
@@ -226,7 +237,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>summary</name>
-    <requirement>A self-contained description of the failing job(s), the observed error(s), the identified root cause, and any files or lines implicated. For each failing job discussed, include its name and its job URL (the `web_url` from the glab job output), so downstream components can link back to the specific job. Downstream components (plan creation, code suggestions, branch naming, MR comments, fix execution) rely on this summary instead of the gathered context, so include every detail needed to plan, explain, or execute the fix.</requirement>
+    <requirement>A self-contained description of the investigation and decision. For each failing job discussed, include its name and `web_url`. For `agents_rule_match`, identify the matching job and rule and state that log and root-cause investigation was intentionally skipped. Otherwise, include the observed errors, root cause, and implicated files or lines.</requirement>
   </field>
 </final_answer_contract>
 

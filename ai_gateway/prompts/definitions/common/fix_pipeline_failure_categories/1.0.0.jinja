@@ -78,6 +78,10 @@
     <description>No failing jobs were found in the pipeline or any of its downstream pipelines after traversal. The pipeline metadata was retrieved successfully but reported no failed jobs to analyze. Use this rather than `insufficient_context`, which applies when failing jobs exist but their logs are missing or truncated.</description>
   </category>
   <category>
+    <failure_category>agents_rule_match</failure_category>
+    <description>A failing job matched an AGENTS.md job-name stop rule, so the flow stopped before fetching logs or investigating the root cause.</description>
+  </category>
+  <category>
     <failure_category>unknown_failure</failure_category>
     <description>The failure does not fit any other category after reviewing the full job trace. Use as a last resort. Prefer `insufficient_context` when the issue is lack of log data rather than an unrecognizable pattern.</description>
   </category>
