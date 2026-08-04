@@ -87,6 +87,7 @@ from duo_workflow_service.server_helpers import (
     clean_start_request,
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
+    BadStatusEvent,
     ForbiddenStatusEvent,
 )
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
@@ -218,6 +219,12 @@ def _extract_error_message(error: BaseException) -> str:
         ) or str(error)
     elif isinstance(error, SecurityException):
         message = "Flow configuration failed security validation"
+    elif isinstance(error, BadStatusEvent):
+        # The rejected status event and the Rails error body vary per request
+        # (e.g. "bad status event: retry, error: {'message': 'Can not retry workflow
+        # that has status finished'}"), which fragments log grouping. Keep only the
+        # stable part; both are available as attributes on the exception.
+        message = "Session status cannot be updated due to bad status event"
     elif re.match(
         r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
         str(error),
