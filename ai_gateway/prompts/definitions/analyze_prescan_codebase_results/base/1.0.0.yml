@@ -1,8 +1,5 @@
 ---
 name: Analyze Prescan Codebase Results
-model:
-  params:
-    max_tokens: 8_192
 unit_primitive: duo_agent_platform
 prompt_template:
   system: |
@@ -10,5 +7,5 @@ prompt_template:
   user: |
     {% include 'analyze_prescan_codebase_results/user/1.0.0.jinja' %}
 params:
-  timeout: 60
+  timeout: 120
   cache_control_injection_points: []
