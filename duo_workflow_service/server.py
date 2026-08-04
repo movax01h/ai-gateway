@@ -494,9 +494,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     )
                 else:
                     context.set_code(grpc.StatusCode.OK)
-                    context.set_details(
-                        f"workflow execution stopped: {workflow.last_gitlab_status}"
-                    )
+                    context.set_details("workflow execution stopped")
             elif str(workflow.last_error) == OUTGOING_MESSAGE_TOO_LARGE:
                 context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
                 context.set_details("Outgoing message too large.")
@@ -559,9 +557,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         except asyncio.CancelledError as err:
             if AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(err):
                 context.set_code(grpc.StatusCode.OK)
-                context.set_details(
-                    f"workflow execution stopped: {workflow.last_gitlab_status}"
-                )
+                context.set_details("workflow execution stopped")
             else:
                 # This exception is raised when RPC is cancelled by the client.
                 context.set_code(grpc.StatusCode.CANCELLED)
