@@ -15,6 +15,26 @@ class UnsupportedStatusEvent(Exception):
     pass
 
 
+class BadStatusEvent(UnsupportedStatusEvent):
+    """Raised when Rails rejects a status event with HTTP 400.
+
+    The status event and the Rails error body vary per request, so they are kept as attributes rather than only being
+    embedded in the message. This lets callers that group by error message (e.g. the gRPC status details) collapse
+    them to a stable string.
+
+    Attributes:
+        status_event: The workflow status event that was rejected.
+        error_body: The error body returned by Rails.
+    """
+
+    def __init__(self, status_event: WorkflowStatusEventEnum, error_body):
+        super().__init__(
+            f"Session status cannot be updated due to bad status event: {status_event}, error: {error_body}"
+        )
+        self.status_event = status_event
+        self.error_body = error_body
+
+
 class ForbiddenStatusEvent(Exception):
     def __init__(self, message: str, status_event: str):
         super().__init__(message)
@@ -64,9 +84,7 @@ class GitLabStatusUpdater:
             )
 
         if result.status_code == 400:
-            raise UnsupportedStatusEvent(
-                f"Session status cannot be updated due to bad status event: {status_event}, error: {result.body}"
-            )
+            raise BadStatusEvent(status_event, result.body)
 
         if result.status_code == 403:
             exception = ForbiddenStatusEvent(

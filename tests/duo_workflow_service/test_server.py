@@ -35,6 +35,9 @@ from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    WorkflowStatusEventEnum,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
@@ -61,7 +64,9 @@ from duo_workflow_service.server import (
     validate_llm_access,
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
+    BadStatusEvent,
     ForbiddenStatusEvent,
+    UnsupportedStatusEvent,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.session_context import GetSessionContext
@@ -3485,6 +3490,48 @@ def test_extract_error_message_security_exception_returns_generic_message():
     assert (
         _extract_error_message(error) == "Flow configuration failed security validation"
     )
+
+
+@pytest.mark.parametrize(
+    "status_event,error_body",
+    [
+        (
+            WorkflowStatusEventEnum.RETRY,
+            {"message": "Can not retry workflow that has status finished"},
+        ),
+        (
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            {"message": "Can not require_input workflow that has status stopped"},
+        ),
+    ],
+)
+def test_extract_error_message_bad_status_event_is_collapsed(status_event, error_body):
+    # The rejected status event and the Rails error body vary per request, so only the
+    # stable prefix should be surfaced.
+    error = BadStatusEvent(status_event, error_body)
+    assert (
+        _extract_error_message(error)
+        == "Session status cannot be updated due to bad status event"
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param(
+            "Stalled workflow can not be executed. Please create a new workflow.",
+            id="stalled",
+        ),
+        pytest.param(
+            "Archived workflow can not be executed. Please create a new workflow.",
+            id="archived",
+        ),
+    ],
+)
+def test_extract_error_message_unsupported_status_event_is_preserved(message):
+    # UnsupportedStatusEvent messages that aren't status-event rejections are already
+    # low cardinality and must keep their full text.
+    assert _extract_error_message(UnsupportedStatusEvent(message)) == message
 
 
 @pytest.mark.parametrize(

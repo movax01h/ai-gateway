@@ -493,7 +493,7 @@ async def test_workflow_context_manager_startup_error(
         event_name=EventEnum.WORKFLOW_REJECT.value,
         additional_properties=InternalEventAdditionalProperties(
             label=EventLabelEnum.WORKFLOW_REJECT_LABEL.value,
-            property="UnsupportedStatusEvent(\"Session status cannot be updated due to bad status event: start, error: {'message': 'Can not start workflow that has status failed'}\")",
+            property="BadStatusEvent(\"Session status cannot be updated due to bad status event: start, error: {'message': 'Can not start workflow that has status failed'}\")",
             value=workflow_id,
         ),
         category=workflow_type,
