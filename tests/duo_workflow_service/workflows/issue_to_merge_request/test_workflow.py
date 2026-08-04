@@ -10,8 +10,24 @@ from langgraph.checkpoint.memory import MemorySaver
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
-from duo_workflow_service.workflows.issue_to_merge_request.workflow import Workflow
+from duo_workflow_service.workflows.issue_to_merge_request.workflow import (
+    CONTEXT_BUILDER_TOOLS,
+    EXECUTOR_TOOLS,
+    Workflow,
+)
 from lib.events import GLReportingEventContext
+
+
+def test_tool_lists_do_not_reference_removed_get_epic_note_tool():
+    """get_epic_note was removed from the tool registry and replaced by list_epic_notes.
+
+    A stale reference is silently dropped at runtime rather than erroring, so assert directly that it's absent to
+    prevent it from regressing unnoticed.
+    """
+    assert "get_epic_note" not in CONTEXT_BUILDER_TOOLS
+    assert "get_epic_note" not in EXECUTOR_TOOLS
+    assert "list_epic_notes" in CONTEXT_BUILDER_TOOLS
+    assert "list_epic_notes" in EXECUTOR_TOOLS
 
 
 @pytest.fixture(name="mock_executor_component")
