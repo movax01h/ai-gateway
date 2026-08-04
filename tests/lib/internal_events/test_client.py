@@ -160,6 +160,50 @@ class TestInternalEventsClientAIContext:
         assert standard_context.data["user_type"] == "service_account"
         assert "subject_type" not in standard_context.data
 
+    def test_track_event_forwards_context_extra_into_emitted_payload(
+        self, client, mock_tracker
+    ):
+        """The request-scoped EventContext.extra (e.g. the client-supplied x-gitlab-tracking-context fields parsed by
+        the middleware/interceptor) must reach the emitted gitlab_standard payload, merged with the per-event extras —
+        per-event keys win on conflict."""
+        current_event_context.set(
+            EventContext(
+                extra={
+                    "distribution": "glab",
+                    "execution_environment": "gitlab_ci",
+                    "lsp_version": "9.6.0",
+                    "shared_key": "from_context",
+                }
+            )
+        )
+        additional_properties = InternalEventAdditionalProperties(
+            label="test-label",
+            workflow_id="123",
+            shared_key="from_event",
+        )
+
+        client.track_event("some_event", additional_properties=additional_properties)
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        standard_context = next(
+            ctx
+            for ctx in structured_event.context
+            if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+        )
+        assert standard_context.data["extra"] == {
+            "distribution": "glab",
+            "execution_environment": "gitlab_ci",
+            "lsp_version": "9.6.0",
+            "workflow_id": "123",
+            "shared_key": "from_event",
+        }
+        # The caller's dict must not be mutated by the merge.
+        assert additional_properties.extra == {
+            "workflow_id": "123",
+            "shared_key": "from_event",
+        }
+
     def test_track_event_includes_merge_request_url_when_context_set(
         self, client, mock_tracker
     ):

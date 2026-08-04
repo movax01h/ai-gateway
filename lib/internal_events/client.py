@@ -155,7 +155,11 @@ class InternalEventsClient:
             **context.model_dump(exclude={"user_id"}),
             **kwargs,
         }
-        extra = additional_properties.extra
+        # Merge the request-scoped context extra (e.g. the client-supplied
+        # x-gitlab-tracking-context fields, lsp_version) with the per-event
+        # extras; per-event keys win on conflict. Build a new dict so the
+        # caller's additional_properties.extra is never mutated.
+        extra = {**(context.extra or {}), **additional_properties.extra}
         mr_url = merge_request_url_context.get(None)
         if mr_url:
             extra["merge_request_url"] = mr_url
