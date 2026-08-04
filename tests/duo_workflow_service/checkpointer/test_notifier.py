@@ -1845,3 +1845,185 @@ class TestStreamingToolCallUiChatLog:
         checkpoint_notifier._sync_streaming_tool_call_ui_chat_log()
 
         assert not checkpoint_notifier.ui_chat_log
+
+
+def _server_tool_use_chunk(msg_id="resp_1", tool_id="srvtu_1", name="web_search"):
+    return AIMessageChunk(
+        id=msg_id,
+        content=[
+            {
+                "type": "server_tool_use",
+                "id": tool_id,
+                "name": name,
+                "input": {"query": "latest AI research"},
+                "index": 1,
+            }
+        ],
+    )
+
+
+def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1"):
+    return AIMessageChunk(
+        id=msg_id,
+        content=[
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": tool_id,
+                "content": [{"type": "web_search_result", "url": "https://x"}],
+                "index": 2,
+            }
+        ],
+    )
+
+
+def _tool_entries(notifier):
+    return [
+        e for e in notifier.ui_chat_log if e["message_type"] == MessageTypeEnum.TOOL
+    ]
+
+
+def test_server_tool_use_creates_pending_card(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_server_tool_use_chunk())
+
+    tool_entries = _tool_entries(checkpoint_notifier)
+    assert len(tool_entries) == 1
+    entry = tool_entries[0]
+    assert entry["status"] == ToolStatus.PENDING
+    assert entry["message_sub_type"] == "web_search"
+    assert entry["message_id"] == "srvtu_1"
+    assert entry["tool_info"]["name"] == "web_search"
+    assert entry["tool_info"]["args"] == {"query": "latest AI research"}
+
+
+def test_server_tool_result_flips_pending_card_to_success(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_server_tool_use_chunk())
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_server_tool_result_chunk())
+
+    tool_entries = _tool_entries(checkpoint_notifier)
+    assert len(tool_entries) == 1  # updated in place, not duplicated
+    entry = tool_entries[0]
+    assert entry["status"] == ToolStatus.SUCCESS
+    assert entry["message_id"] == "srvtu_1"
+    assert entry["tool_info"]["tool_response"] == [
+        {"type": "web_search_result", "url": "https://x"}
+    ]
+
+
+def test_duplicate_server_tool_use_block_is_idempotent(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_server_tool_use_chunk())
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_server_tool_use_chunk())
+
+    assert len(_tool_entries(checkpoint_notifier)) == 1
+
+
+def test_server_tool_use_without_id_is_ignored(checkpoint_notifier):
+    chunk = AIMessageChunk(
+        id="resp_1",
+        content=[
+            {
+                "type": "server_tool_use",
+                "name": "web_search",
+                "input": {},
+                "index": 1,
+            }
+        ],
+    )
+    checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+    checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+    assert _tool_entries(checkpoint_notifier) == []
+
+
+@pytest.mark.parametrize(
+    "leading_chunks",
+    [
+        pytest.param([], id="text_first"),
+        # Anthropic often streams an empty opening chunk before any text arrives;
+        # the leading AGENT entry must still be created once the text streams in,
+        # otherwise the opening line is lost and the log starts at the tool card.
+        pytest.param([AIMessageChunk(id="resp_1", content=[])], id="empty_first_chunk"),
+    ],
+)
+def test_text_around_server_tool_splits_into_separate_agent_entries(
+    checkpoint_notifier, leading_chunks
+):
+    chunks = leading_chunks + [
+        AIMessageChunk(
+            id="resp_1",
+            content=[{"type": "text", "text": "Let me search.", "index": 0}],
+        ),
+        _server_tool_use_chunk(),
+        _server_tool_result_chunk(),
+        AIMessageChunk(
+            id="resp_1",
+            content=[{"type": "text", "text": "Based on results.", "index": 3}],
+        ),
+    ]
+    for chunk in chunks:
+        checkpoint_notifier._append_chunk_to_ui_chat_log(chunk)
+
+    log = checkpoint_notifier.ui_chat_log
+    assert [e["message_type"] for e in log] == [
+        MessageTypeEnum.AGENT,
+        MessageTypeEnum.TOOL,
+        MessageTypeEnum.AGENT,
+    ]
+    assert log[0]["message_id"] == "resp_1"
+    assert log[0]["content"] == "Let me search."
+    assert log[1]["status"] == ToolStatus.SUCCESS
+    assert log[1]["message_id"] == "srvtu_1"
+    assert log[2]["message_id"] == "resp_1:seg1"
+    assert log[2]["content"] == "Based on results."
+
+
+def test_multiple_server_tools_match_their_results(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        _server_tool_use_chunk(tool_id="srvtu_1", name="web_search")
+    )
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        _server_tool_use_chunk(tool_id="srvtu_2", name="web_fetch")
+    )
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        _server_tool_result_chunk(tool_id="srvtu_2")
+    )
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        _server_tool_result_chunk(tool_id="srvtu_1")
+    )
+
+    tool_entries = _tool_entries(checkpoint_notifier)
+    assert len(tool_entries) == 2
+    assert {e["message_id"] for e in tool_entries} == {"srvtu_1", "srvtu_2"}
+    assert all(e["status"] == ToolStatus.SUCCESS for e in tool_entries)
+
+
+def test_client_tool_use_block_creates_no_server_card(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        AIMessageChunk(
+            id="resp_1",
+            content=[
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read_file",
+                    "input": {"path": "x"},
+                    "index": 0,
+                }
+            ],
+        )
+    )
+
+    assert _tool_entries(checkpoint_notifier) == []
+
+
+def test_server_tool_result_without_matching_use_logs_warning(checkpoint_notifier):
+    with patch("duo_workflow_service.checkpointer.notifier.log") as mock_log:
+        checkpoint_notifier._append_chunk_to_ui_chat_log(
+            _server_tool_result_chunk(tool_id="orphan")
+        )
+
+    assert _tool_entries(checkpoint_notifier) == []
+    mock_log.warning.assert_called_once_with(
+        "Received server tool result with no matching server_tool_use entry",
+        tool_use_id="orphan",
+        block_type="web_search_tool_result",
+    )

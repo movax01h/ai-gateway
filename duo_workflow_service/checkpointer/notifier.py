@@ -17,12 +17,20 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
+from duo_workflow_service.entities.server_tool_blocks import (
+    AgentTextSegment,
+    build_anthropic_tool_ui_chat_log,
+    is_anthropic_server_tool_result_block,
+    is_anthropic_server_tool_use_block,
+    split_content_around_server_tools,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolInfo,
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    build_tool_info,
     get_current_model_max_context_token_limit,
 )
 from duo_workflow_service.executor.outbox import Outbox
@@ -75,6 +83,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self._throttle = _ThrottleState()
         self._agent_token_totals: dict[str, int] = {}
         self._agent_context_limits: dict[str, int] = {}
+        self._created_agent_keys: set[Optional[str]] = set()
         self._node_event_log = node_event_log
         # Count of node-lifecycle events already sent; advances only when a
         # checkpoint is actually composed for sending (see _pop_recent_node_events).
@@ -339,34 +348,111 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         self._replace_langchain_id_with_open_ai_id(message)
 
-        if self.latest_ai_message and self.latest_ai_message.id == message.id:
+        content = message.content
+        if isinstance(content, list):
+            for block in content:
+                if is_anthropic_server_tool_use_block(block):
+                    self._handle_server_tool_use_block(block, component_name)
+                elif is_anthropic_server_tool_result_block(block):
+                    self._handle_server_tool_result_block(block)
+
+        self._accumulate_text_chunk(message, component_name)
+        self._sync_streaming_tool_call_ui_chat_log(component_name)
+
+    def _accumulate_text_chunk(
+        self, message: AIMessageChunk, component_name: Optional[str] = None
+    ) -> None:
+        """Accumulate streamed text into per-segment AGENT entries, split at tool boundaries."""
+        if (
+            self.latest_ai_message is not None
+            and self.latest_ai_message.id == message.id
+        ):
             self.latest_ai_message += message
-            safe_content = redact_secrets_for_ui(
-                self.latest_ai_message.text(), tool_name="streaming"
-            )
-            agent_entry = self._find_ui_chat_log_entry(
-                message.id, message_type=MessageTypeEnum.AGENT
-            )
-            if agent_entry is not None:
-                agent_entry["content"] = safe_content
         else:
             self.latest_ai_message = message
-            safe_content = redact_secrets_for_ui(message.text(), tool_name="streaming")
-            last_ui_message = UiChatLog(
-                message_id=message.id,
-                status=None,
-                correlation_id=None,
-                message_type=MessageTypeEnum.AGENT,
-                message_sub_type=None,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                content=safe_content,
-                tool_info=None,
-                additional_context=None,
-                component_name=component_name,
-            )
-            self.ui_chat_log.append(last_ui_message)
+            self._created_agent_keys = set()
 
-        self._sync_streaming_tool_call_ui_chat_log(component_name)
+        content = self.latest_ai_message.content
+
+        if isinstance(content, str):
+            if content:
+                self._upsert_agent_segment(message.id, content, component_name)
+            return
+
+        # Tool cards are handled by _append_chunk_to_ui_chat_log; here we only
+        # (re)build the AGENT text entries between them.
+        for segment in split_content_around_server_tools(content, message.id):
+            if isinstance(segment, AgentTextSegment):
+                self._upsert_agent_segment(segment.key, segment.text, component_name)
+
+    def _upsert_agent_segment(
+        self,
+        message_id: Optional[str],
+        raw_text: str,
+        component_name: Optional[str],
+    ) -> None:
+        """Create or update the agent entry for one text segment."""
+        safe_content = redact_secrets_for_ui(raw_text, tool_name="streaming")
+        existing = self._find_ui_chat_log_entry(
+            message_id, message_type=MessageTypeEnum.AGENT
+        )
+        if existing is not None:
+            existing["content"] = safe_content
+            return
+
+        if message_id in self._created_agent_keys:
+            return
+
+        self._created_agent_keys.add(message_id)
+        entry = UiChatLog(
+            message_id=message_id,
+            status=None,
+            correlation_id=None,
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            content=safe_content,
+            tool_info=None,
+            additional_context=None,
+            component_name=component_name,
+        )
+        self.ui_chat_log.append(entry)
+
+    def _handle_server_tool_use_block(
+        self, block: dict, component_name: Optional[str] = None
+    ) -> None:
+        """Append a pending TOOL card for an Anthropic server-tool invocation (idempotent)."""
+        tool_use_id = block.get("id")
+        if not tool_use_id:
+            return
+        if (
+            self._find_ui_chat_log_entry(tool_use_id, message_type=MessageTypeEnum.TOOL)
+            is not None
+        ):
+            return
+
+        entry = build_anthropic_tool_ui_chat_log(block, component_name=component_name)
+        self.ui_chat_log.append(entry)
+
+    def _handle_server_tool_result_block(self, block: dict) -> None:
+        """Flip a pending server-tool card to SUCCESS with its result."""
+        tool_use_id = block.get("tool_use_id")
+        entry = self._find_ui_chat_log_entry(
+            tool_use_id, message_type=MessageTypeEnum.TOOL
+        )
+        if entry is not None:
+            info = entry.get("tool_info") or ToolInfo(name="server_tool", args={})
+            entry["status"] = ToolStatus.SUCCESS
+            entry["tool_info"] = build_tool_info(
+                info["name"], info["args"], block.get("content")
+            )
+            return
+
+        log.warning(
+            "Received server tool result with no matching server_tool_use entry",
+            tool_use_id=tool_use_id,
+            block_type=block.get("type"),
+        )
 
     def _find_ui_chat_log_entry(
         self,

@@ -22,6 +22,12 @@ from duo_workflow_service.conversation.history_optimizer.optimizers.compaction i
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
+from duo_workflow_service.entities.server_tool_blocks import (
+    AgentTextSegment,
+    build_anthropic_tool_ui_chat_log,
+    is_anthropic_server_tool_result_block,
+    split_content_around_server_tools,
+)
 from duo_workflow_service.entities.state import (
     TIER_ACCESS_DENIED_SUB_TYPE,
     ApprovalStateRejection,
@@ -40,9 +46,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
-from duo_workflow_service.slash_commands.goal_parser import (
-    is_slash_command,
-)
+from duo_workflow_service.slash_commands.goal_parser import is_slash_command
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tracking.errors import log_exception
@@ -263,7 +267,8 @@ class ChatAgent:
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
         }
 
-        self._build_text_response(agent_response, state, result)
+        self._build_ui_chat_log(agent_response, state, result)
+
         if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
             await self._build_tool_response(agent_response, state, result)
 
@@ -280,24 +285,68 @@ class ChatAgent:
 
         if content:
             tier_payload = self._extract_tier_access_denied(state)
-            chat_log = UiChatLog(
-                message_type=MessageTypeEnum.AGENT,
-                message_sub_type=(
-                    TIER_ACCESS_DENIED_SUB_TYPE if tier_payload else None
-                ),
-                content=content,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status=ToolStatus.SUCCESS,
-                correlation_id=None,
-                tool_info=None,
-                additional_context=None,
-                message_id=agent_response.id,
+            ui_chat_log.append(
+                self._make_agent_entry(content, agent_response.id, tier_payload)
             )
-            if tier_payload and tier_payload.get("required_plan") is not None:
-                chat_log["required_plan"] = tier_payload["required_plan"]
-            ui_chat_log.append(chat_log)
-
         result["ui_chat_log"] = ui_chat_log
+
+    def _build_ui_chat_log(
+        self,
+        agent_response: BaseMessage,
+        state: ChatWorkflowState,
+        result: Dict[str, Any],
+    ) -> None:
+        """Build ``ui_chat_log``, segmenting text around server-tool blocks."""
+        content = agent_response.content
+        if not isinstance(content, list):
+            self._build_text_response(agent_response, state, result)
+            return
+
+        tier_payload = self._extract_tier_access_denied(state)
+        results_by_use_id = {
+            block["tool_use_id"]: block
+            for block in content
+            if is_anthropic_server_tool_result_block(block) and block.get("tool_use_id")
+        }
+
+        entries: list[UiChatLog] = []
+        for segment in split_content_around_server_tools(content, agent_response.id):
+            if isinstance(segment, AgentTextSegment):
+                # Tier-access-denied styling belongs on the leading text only.
+                seg_tier = tier_payload if segment.index == 0 else None
+                entries.append(
+                    self._make_agent_entry(segment.text, segment.key, seg_tier)
+                )
+            else:
+                entries.append(
+                    build_anthropic_tool_ui_chat_log(
+                        segment.block, results_by_use_id.get(segment.block.get("id"))
+                    )
+                )
+
+        result["ui_chat_log"] = entries
+
+    def _make_agent_entry(
+        self,
+        text: str,
+        message_id: Optional[str],
+        tier_payload: Optional[Dict[str, Any]] = None,
+    ) -> UiChatLog:
+        """Create an AGENT ``UiChatLog`` entry."""
+        chat_log = UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=TIER_ACCESS_DENIED_SUB_TYPE if tier_payload else None,
+            content=text,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=ToolStatus.SUCCESS,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+            message_id=message_id,
+        )
+        if tier_payload and tier_payload.get("required_plan") is not None:
+            chat_log["required_plan"] = tier_payload["required_plan"]
+        return chat_log
 
     def _extract_tier_access_denied(
         self, state: ChatWorkflowState
