@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.types import Send
 
 from duo_workflow_service.tracking.errors import log_exception
 
@@ -22,22 +23,36 @@ class GitLabHttpResponse:
         return 200 <= self.status_code < 300
 
 
+_MESSAGE_TYPES = {
+    "SystemMessage": SystemMessage,
+    "HumanMessage": HumanMessage,
+    "AIMessage": AIMessage,
+    "ToolMessage": ToolMessage,
+}
+
+
 def checkpoint_decoder(json_object: dict):
+    if (
+        json_object.get("type") == "Send"
+        and "node" in json_object
+        and "arg" in json_object
+    ):
+        # Reconstruct the `Send` packets encoded by `CustomEncoder` so that
+        # `channel_values["__pregel_tasks"]` round-trips back to
+        # `list[Send]`, as required by langgraph's task-preparation code
+        # (e.g. `isinstance(value, Send)` checks / `.node`/`.arg` access).
+        return Send(json_object["node"], json_object["arg"])
+
     if not ("type" in json_object and "content" in json_object):
         return json_object
 
     message_type = json_object.pop("type")
-    if message_type == "SystemMessage":
-        return SystemMessage(**json_object)
-    elif message_type == "HumanMessage":
-        return HumanMessage(**json_object)
-    elif message_type == "AIMessage":
-        return AIMessage(**json_object)
-    elif message_type == "ToolMessage":
-        return ToolMessage(**json_object)
-    else:
+    message_cls = _MESSAGE_TYPES.get(message_type)
+    if message_cls is None:
         json_object["type"] = message_type
         return json_object
+
+    return message_cls(**json_object)
 
 
 class GitlabHttpClient(ABC):

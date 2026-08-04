@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.types import Send
 
 from duo_workflow_service.gitlab.http_client import (
     GitlabHttpClient,
@@ -262,6 +263,24 @@ def test_checkpoint_decoder():
     assert isinstance(result, ToolMessage)
     assert result.content == "Tool content"
     assert result.tool_call_id == "tool123"
+
+    # Test with Send
+    send_json = {
+        "type": "Send",
+        "node": "developer",
+        "arg": {"goal": "Fix the bug"},
+    }
+    result = checkpoint_decoder(send_json)
+    assert isinstance(result, Send)
+    assert result.node == "developer"
+    assert result.arg == {"goal": "Fix the bug"}
+
+    # Test with a malformed Send payload (missing "arg") - falls through to
+    # the generic path and is returned as a plain dict, since it doesn't
+    # match the message-type shape (no "content" key) either.
+    malformed_send_json = {"type": "Send", "node": "developer"}
+    result = checkpoint_decoder(dict(malformed_send_json))
+    assert result == malformed_send_json
 
     # Test with unknown type
     unknown_json = {"type": "Unknown", "content": "Unknown content"}

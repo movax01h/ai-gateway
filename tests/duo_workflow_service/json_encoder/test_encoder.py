@@ -1,4 +1,5 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.types import Send
 
 from duo_workflow_service.entities.state import (
     AdditionalContext,
@@ -81,6 +82,18 @@ def test_default_with_approval_state_rejection():
     assert encoded_approval_state == {
         "message": "Cancel this tool",
         "type": "ApprovalStateRejection",
+    }
+
+
+def test_default_with_send():
+    encoder = CustomEncoder()
+    send = Send("developer", {"goal": "Fix the bug"})
+
+    encoded_send = encoder.default(send)
+    assert encoded_send == {
+        "type": "Send",
+        "node": "developer",
+        "arg": {"goal": "Fix the bug"},
     }
 
 
