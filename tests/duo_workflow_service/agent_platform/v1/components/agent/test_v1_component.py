@@ -751,7 +751,7 @@ class TestAgentComponentAttachNodes:
         ],
     )
     # pylint: disable=too-many-arguments,too-many-positional-arguments
-    def test_attach_creates_nodes_with_correct_parameters(  # noqa: PLR0913
+    def test_attach_creates_nodes_with_correct_parameters(  # ruff: ignore[PLR0913, PLR0917]
         self,
         mock_final_response_node_cls,
         mock_tool_node_cls,

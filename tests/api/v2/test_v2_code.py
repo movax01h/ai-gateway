@@ -800,7 +800,7 @@ class TestCodeCompletions:
         ],
     )
     @pytest.mark.usefixtures("mock_config")
-    def test_non_stream_response(  # noqa: PLR0913
+    def test_non_stream_response(  # ruff: ignore[PLR0913, PLR0917]
         self,
         mock_client,
         mock_llm_text: Mock,
@@ -2122,7 +2122,7 @@ class TestCodeGenerations:
             ),
         ],
     )
-    def test_non_stream_response(  # noqa: PLR0913
+    def test_non_stream_response(  # ruff: ignore[PLR0913, PLR0917]
         self,
         mock_client,
         mock_code_bison: Mock,
