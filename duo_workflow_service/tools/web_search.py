@@ -167,7 +167,7 @@ def native_web_search_available() -> bool:
     if definition is None:
         return True
 
-    return supports_native_web_search(definition.model_class_provider)
+    return supports_native_web_search(definition)
 
 
 @lru_cache(maxsize=1)

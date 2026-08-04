@@ -513,7 +513,7 @@ configurable_unit_primitives:
   - feature_setting: "resolve_dependency_bump"
     unit_primitives: []
     # Only native-provider models are selectable: they honor provider-native web
-    # search, whereas LiteLLM (_vertex/_bedrock) variants discard web_search_options.
+    # search, whereas Bedrock variants has no hosted search.
     default_models:
       - "claude_sonnet_5"
     selectable_models:

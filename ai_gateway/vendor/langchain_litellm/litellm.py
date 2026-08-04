@@ -148,6 +148,43 @@ def _create_fireworks_retry_decorator(
     )
 
 
+# Tool calls with IDs prefixed `srvtoolu_` were already executed server-side
+# (e.g. web_search). LiteLLM merges them with client-side `toolu_` calls
+# into one `tool_calls` list, so we filter by prefix to avoid re-dispatching.
+_SERVER_TOOL_USE_ID_PREFIX = "srvtoolu_"
+
+
+def _drop_server_tool_calls(
+    raw_tool_calls: Sequence[Any],
+    _streamed_server_call_indices: Optional[set[int]] = None,
+) -> List[Any]:
+    """Drop tool calls the platform already ran server-side, so they are never dispatched."""
+    client_tool_calls: List[Any] = []
+
+    for tc in raw_tool_calls:
+        _get = tc.get if isinstance(tc, dict) else lambda a, d=None: getattr(tc, a, d)
+        tool_call_id = _get("id")
+        index = _get("index")
+
+        if isinstance(tool_call_id, str) and tool_call_id.startswith(
+            _SERVER_TOOL_USE_ID_PREFIX
+        ):
+            if _streamed_server_call_indices is not None and isinstance(index, int):
+                _streamed_server_call_indices.add(index)
+            continue
+
+        if (
+            _streamed_server_call_indices is not None
+            and isinstance(index, int)
+            and index in _streamed_server_call_indices
+        ):
+            continue
+
+        client_tool_calls.append(tc)
+
+    return client_tool_calls
+
+
 def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
     role = _dict["role"]
     if role == "user":
@@ -157,12 +194,13 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
         # Also OpenAI returns None for tool invocations
         content = _dict.get("content", "") or ""
 
-        additional_kwargs = {}
+        additional_kwargs: Dict[str, Any] = {}
         if _dict.get("function_call"):
             additional_kwargs["function_call"] = dict(_dict["function_call"])
 
-        if _dict.get("tool_calls"):
-            additional_kwargs["tool_calls"] = _dict["tool_calls"]
+        client_tool_calls = _drop_server_tool_calls(_dict.get("tool_calls") or [])
+        if client_tool_calls:
+            additional_kwargs["tool_calls"] = client_tool_calls
 
         # Preserve reasoning_content so it survives the inbound (non-streaming)
         # conversion and remains available for subsequent turns.  Providers such
@@ -183,7 +221,9 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
 
 
 def _convert_delta_to_message_chunk(
-    delta: Union[Delta, Dict[str, Any]], default_class: Type[BaseMessageChunk]
+    delta: Union[Delta, Dict[str, Any]],
+    default_class: Type[BaseMessageChunk],
+    _streamed_server_call_indices: Optional[set[int]] = None,
 ) -> BaseMessageChunk:
     # Handle both Delta objects and dicts
     if isinstance(delta, dict):
@@ -199,6 +239,7 @@ def _convert_delta_to_message_chunk(
         raw_tool_calls = delta.tool_calls
         reasoning_content = getattr(delta, "reasoning_content", None)
 
+    additional_kwargs: Dict[str, Any]
     if function_call:
         additional_kwargs = {"function_call": dict(function_call)}
     # The hasattr check is necessary because litellm explicitly deletes the
@@ -209,6 +250,8 @@ def _convert_delta_to_message_chunk(
         additional_kwargs = {"reasoning_content": reasoning_content}
     else:
         additional_kwargs = {}
+
+    raw_tool_calls = _drop_server_tool_calls(raw_tool_calls or [], _streamed_server_call_indices)
 
     tool_call_chunks = []
     if raw_tool_calls:
@@ -642,6 +685,7 @@ class ChatLiteLLM(BaseChatModel):
         params = {**params, **kwargs, "stream": True}
         params["stream_options"] = self.stream_options
         default_chunk_class = AIMessageChunk
+        _streamed_server_call_indices: set[int] = set()
         for chunk in self.completion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         ):
@@ -653,7 +697,9 @@ class ChatLiteLLM(BaseChatModel):
             if len(chunk["choices"]) == 0:
                 continue
             delta = chunk["choices"][0]["delta"]
-            chunk = _convert_delta_to_message_chunk(delta, default_chunk_class)
+            chunk = _convert_delta_to_message_chunk(
+                delta, default_chunk_class, _streamed_server_call_indices
+            )
             if usage_metadata and isinstance(chunk, AIMessageChunk):
                 chunk.usage_metadata = usage_metadata
 
@@ -687,6 +733,8 @@ class ChatLiteLLM(BaseChatModel):
 
         default_chunk_class: Type[BaseMessageChunk] = AIMessageChunk
         added_model_name = False
+        # Per-stream, never shared: identifies continuation chunks, which carry no id.
+        _streamed_server_call_indices: set[int] = set()
         async for raw_chunk in await self.acompletion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         ):
@@ -704,7 +752,9 @@ class ChatLiteLLM(BaseChatModel):
 
             delta = raw_chunk["choices"][0]["delta"]
             usage = raw_chunk.get("usage", {})
-            chunk = _convert_delta_to_message_chunk(delta, default_chunk_class)
+            chunk = _convert_delta_to_message_chunk(
+                delta, default_chunk_class, _streamed_server_call_indices
+            )
             if isinstance(chunk, AIMessageChunk):
                 if not added_model_name:
                     chunk.response_metadata = {

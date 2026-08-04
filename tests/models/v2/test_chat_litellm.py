@@ -1,4 +1,5 @@
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import litellm
@@ -20,15 +21,19 @@ from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
+    _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
+    _litellm_maps_web_search,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import (
+    _convert_delta_to_message_chunk,
     _convert_dict_to_message,
     _convert_message_to_dict,
     _create_usage_metadata,
+    _drop_server_tool_calls,
     _get_attr_or_key,
 )
 
@@ -351,27 +356,172 @@ def test_get_attr_or_key(obj, key, expected):
 
 
 @pytest.mark.parametrize(
-    ("bind_tools_params", "expected_tools"),
+    ("bind_tools_params", "expect_web_search_forwarded"),
     [
-        (
-            {"web_search_options": {}},
-            [{"type": "function", "function": {"name": "get_issue"}}],
-        ),
-        ({}, [{"type": "function", "function": {"name": "get_issue"}}]),
+        pytest.param({"web_search_options": {}}, True, id="with-web-search"),
+        pytest.param({}, False, id="without-web-search"),
     ],
 )
-def test_bind_tools_with_web_search_options(bind_tools_params, expected_tools):
-    """Test that web search tool is added when web_search_options is in bind_tools_params."""
-    chat = ChatLiteLLM(model="gpt-3.5-turbo")
+def test_bind_tools_web_search_options(bind_tools_params, expect_web_search_forwarded):
+    """web_search_options must pass through as a kwarg without altering the tools list."""
+    chat = ChatLiteLLM(model="claude-sonnet-4-6")
 
-    existing_tools = [{"name": "get_issue"}]
-    result = chat.bind_tools(
-        tools=existing_tools,
-        **bind_tools_params,
-    )
+    result = chat.bind_tools(tools=[{"name": "get_issue"}], **bind_tools_params)
 
     assert isinstance(result, Runnable)
-    assert result.kwargs["tools"] == expected_tools
+    assert result.kwargs["tools"] == [
+        {"type": "function", "function": {"name": "get_issue"}}
+    ]
+    assert ("web_search_options" in result.kwargs) is expect_web_search_forwarded
+
+
+class TestLitellmMapsWebSearch:
+    """Canary: tests hit the real LiteLLM supported-params registry, so a LiteLLM
+    bump that changes parameter mappings will fail here intentionally."""
+
+    @pytest.mark.parametrize(
+        ("model", "provider", "expected"),
+        [
+            pytest.param("claude-sonnet-4-6", "vertex_ai", True, id="vertex-claude"),
+            pytest.param(
+                "bedrock/global.anthropic.claude-sonnet-4-6",
+                "bedrock",
+                False,
+                id="bedrock-converse",
+            ),
+            pytest.param("foo", "not_a_provider", False, id="unknown-provider"),
+            pytest.param(None, "vertex_ai", False, id="missing-model"),
+        ],
+    )
+    def test_reports_litellm_mapping(self, model, provider, expected):
+        assert _litellm_maps_web_search(model, provider) is expected
+
+
+class TestDropUnsupportedWebSearch:
+    @pytest.mark.parametrize(
+        ("model", "provider"),
+        [
+            pytest.param("claude-sonnet-4-6", "vertex_ai", id="vertex-claude"),
+            pytest.param("claude-haiku-4-5", "vertex_ai", id="vertex-haiku"),
+        ],
+    )
+    def test_kept_for_capable_provider(self, model, provider):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": provider,
+            "web_search_options": {},
+        }
+
+        _drop_unsupported_web_search(kwargs)
+
+        assert kwargs["web_search_options"] == {}
+
+    @pytest.mark.parametrize(
+        ("model", "provider"),
+        [
+            # Bedrock never runs Anthropic's server-side tools, on either routing path.
+            pytest.param(
+                "bedrock/global.anthropic.claude-sonnet-4-6", "bedrock", id="bedrock"
+            ),
+            pytest.param(
+                "anthropic.claude-sonnet-4-5-v1:0", "bedrock", id="bedrock-invoke"
+            ),
+            pytest.param("accounts/x/models/y", "fireworks_ai", id="fireworks"),
+            pytest.param("mistral-large", "mistral", id="mistral"),
+            # Self-hosted endpoints have no hosted search tool at all.
+            pytest.param("some-model", "custom_openai", id="self-hosted"),
+            pytest.param("some-model", None, id="no-provider"),
+        ],
+    )
+    def test_dropped_for_incapable_provider(self, model, provider):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": provider,
+            "web_search_options": {},
+        }
+
+        _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+
+    def test_dropped_when_litellm_does_not_map_the_model(self):
+        """A capable provider is not enough; the installed LiteLLM must map the parameter for that model too."""
+        kwargs = {
+            "model": "gpt-5",
+            "custom_llm_provider": "openai",
+            "web_search_options": {},
+        }
+
+        with patch(
+            "ai_gateway.models.v2.chat_litellm._WEB_SEARCH_CAPABLE_PROVIDERS",
+            frozenset({"openai"}),
+        ):
+            _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param(
+                {"model": "claude-sonnet-4-6", "custom_llm_provider": "bedrock"},
+                id="absent",
+            ),
+            pytest.param(
+                {
+                    "model": "claude-sonnet-4-6",
+                    "custom_llm_provider": "bedrock",
+                    "web_search_options": None,
+                },
+                id="none",
+            ),
+        ],
+    )
+    def test_noop_when_web_search_was_not_requested(self, kwargs):
+        original = dict(kwargs)
+
+        _drop_unsupported_web_search(kwargs)
+
+        assert kwargs == original
+
+    def test_drop_is_logged(self):
+        """A request that asked for web search and did not get it must stay diagnosable."""
+        kwargs = {
+            "model": "bedrock/global.anthropic.claude-sonnet-4-6",
+            "custom_llm_provider": "bedrock",
+            "web_search_options": {},
+        }
+
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            _drop_unsupported_web_search(kwargs)
+
+        mock_log.warning.assert_called_once()
+        assert mock_log.warning.call_args.kwargs["custom_llm_provider"] == "bedrock"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider", "expect_forwarded"),
+        [
+            pytest.param("vertex_ai", True, id="vertex"),
+            pytest.param("bedrock", False, id="bedrock"),
+        ],
+    )
+    async def test_gate_applies_on_the_way_to_litellm(self, provider, expect_forwarded):
+        """The gate runs in `acompletion_with_retry`, where model and provider are finally merged."""
+        chat = ChatLiteLLM(model="claude-sonnet-4-6")
+
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock()
+        ) as mock_parent:
+            await chat.acompletion_with_retry(
+                model="claude-sonnet-4-6",
+                custom_llm_provider=provider,
+                web_search_options={},
+            )
+
+        forwarded = mock_parent.call_args.kwargs
+
+        assert ("web_search_options" in forwarded) is expect_forwarded
 
 
 @pytest.mark.asyncio
@@ -1391,3 +1541,234 @@ class TestUserIdentityHeader:
 
         call_kwargs = mock_acompletion_with_retry.call_args[1]
         assert "extra_headers" not in call_kwargs
+
+
+# --- Server-side tool call filtering ---
+
+SERVER_TOOL_ID = "srvtoolu_01ABC"
+CLIENT_TOOL_ID = "toolu_01XYZ"
+
+
+def server_tool_call(
+    index=0, name="web_search", arguments="", tool_call_id=SERVER_TOOL_ID
+):
+    return {
+        "id": tool_call_id,
+        "index": index,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def client_tool_call(
+    index=0, name="get_issue", arguments="", tool_call_id=CLIENT_TOOL_ID
+):
+    return {
+        "id": tool_call_id,
+        "index": index,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def continuation_chunk(index, arguments):
+    """A `partial_json` delta: carries neither id nor name, only an index."""
+    return {
+        "id": None,
+        "index": index,
+        "type": "function",
+        "function": {"name": None, "arguments": arguments},
+    }
+
+
+class TestDropServerToolCalls:
+    def test_client_tool_call_is_kept(self):
+        assert _drop_server_tool_calls([client_tool_call()]) == [client_tool_call()]
+
+    def test_server_tool_call_is_dropped(self):
+        assert _drop_server_tool_calls([server_tool_call()]) == []
+
+    def test_pydantic_tool_call_objects(self):
+        """Non-streaming responses carry LiteLLM pydantic objects rather than dicts."""
+        server = SimpleNamespace(id=SERVER_TOOL_ID, index=0)
+        client = SimpleNamespace(id=CLIENT_TOOL_ID, index=1)
+
+        assert _drop_server_tool_calls([server, client]) == [client]
+
+    def test_streaming_drops_continuation_of_a_server_call(self):
+        indices: set[int] = set()
+        _drop_server_tool_calls([server_tool_call(index=1)], indices)
+
+        assert (
+            _drop_server_tool_calls([continuation_chunk(1, '{"query":"x"}')], indices)
+            == []
+        )
+
+    def test_streaming_keeps_continuation_of_a_client_call(self):
+        indices: set[int] = set()
+        _drop_server_tool_calls([server_tool_call(index=1)], indices)
+        _drop_server_tool_calls([client_tool_call(index=2)], indices)
+
+        continuation = continuation_chunk(2, '{"id":5}')
+
+        assert _drop_server_tool_calls([continuation], indices) == [continuation]
+
+
+class TestConvertDictToMessage:
+    def test_server_tool_call_is_not_surfaced(self):
+        message = _convert_dict_to_message(
+            {"role": "assistant", "content": "done", "tool_calls": [server_tool_call()]}
+        )
+
+        assert isinstance(message, AIMessage)
+        assert message.tool_calls == []
+        assert "tool_calls" not in message.additional_kwargs
+
+    def test_client_tool_call_is_preserved(self):
+        message = _convert_dict_to_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [client_tool_call(arguments='{"id":5}')],
+            }
+        )
+
+        assert [call["name"] for call in message.tool_calls] == ["get_issue"]
+        assert message.tool_calls[0]["args"] == {"id": 5}
+
+
+class TestConvertDeltaToMessageChunk:
+    def test_streamed_server_tool_call_is_suppressed_across_merge(self):
+        indices: set[int] = set()
+        deltas = [
+            {"tool_calls": [server_tool_call(index=1)]},
+            {"tool_calls": [continuation_chunk(1, '{"query":"gitlab ')]},
+            {"tool_calls": [continuation_chunk(1, '18.9"}')]},
+            {"content": "Based on my search"},
+        ]
+
+        merged = None
+        for delta in deltas:
+            chunk = _convert_delta_to_message_chunk(delta, AIMessageChunk, indices)
+            merged = chunk if merged is None else merged + chunk
+
+        assert merged.tool_calls == []
+        assert merged.additional_kwargs == {}
+        assert merged.content == "Based on my search"
+
+    def test_streamed_client_tool_call_survives_merge(self):
+        indices: set[int] = set()
+        deltas = [
+            {"tool_calls": [server_tool_call(index=1)]},
+            {"tool_calls": [continuation_chunk(1, '{"query":"x"}')]},
+            {"tool_calls": [client_tool_call(index=2)]},
+            {"tool_calls": [continuation_chunk(2, '{"id":')]},
+            {"tool_calls": [continuation_chunk(2, "5}")]},
+        ]
+
+        merged = None
+        for delta in deltas:
+            chunk = _convert_delta_to_message_chunk(delta, AIMessageChunk, indices)
+            merged = chunk if merged is None else merged + chunk
+
+        assert [call["name"] for call in merged.tool_calls] == ["get_issue"]
+        assert merged.tool_calls[0]["args"] == {"id": 5}
+
+
+def streaming_chunk(delta, finish_reason=None):
+    return {
+        "choices": [{"delta": delta, "finish_reason": finish_reason, "index": 0}],
+        "usage": {},
+    }
+
+
+class TestStreamStateIsolation:
+    """The server-tool index set must not outlive a single stream."""
+
+    @staticmethod
+    def _stream_with_server_tool_at_index_1():
+        return [
+            streaming_chunk({"tool_calls": [server_tool_call(index=1)]}),
+            streaming_chunk({"tool_calls": [continuation_chunk(1, '{"query":"x"}')]}),
+            streaming_chunk({}, finish_reason="stop"),
+        ]
+
+    @staticmethod
+    def _stream_with_client_tool_at_index_1():
+        return [
+            streaming_chunk({"tool_calls": [client_tool_call(index=1)]}),
+            streaming_chunk({"tool_calls": [continuation_chunk(1, '{"id":5}')]}),
+            streaming_chunk({}, finish_reason="stop"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_astream_does_not_leak_indices_between_streams(self):
+        streams = [
+            self._stream_with_server_tool_at_index_1(),
+            self._stream_with_client_tool_at_index_1(),
+        ]
+
+        async def fake_acompletion(*_args, **_kwargs):
+            async def generator():
+                for chunk in streams.pop(0):
+                    yield chunk
+
+            return generator()
+
+        chat = _LChatLiteLLM(model="claude-sonnet-4-6")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(side_effect=fake_acompletion),
+        ):
+            merged_messages = []
+            for _ in range(2):
+                merged = None
+                async for generation in chat._astream(messages=[]):
+                    merged = (
+                        generation.message
+                        if merged is None
+                        else merged + generation.message
+                    )
+                merged_messages.append(merged)
+
+        server_stream, client_stream = merged_messages
+
+        assert server_stream.tool_calls == []
+        # Same index as the dropped server call, but a genuine client call.
+        assert [call["name"] for call in client_stream.tool_calls] == ["get_issue"]
+        assert client_stream.tool_calls[0]["args"] == {"id": 5}
+
+    def test_sync_stream_does_not_leak_indices_between_streams(self):
+        streams = [
+            self._stream_with_server_tool_at_index_1(),
+            self._stream_with_client_tool_at_index_1(),
+        ]
+
+        def fake_completion(*_args, **_kwargs):
+            return iter(streams.pop(0))
+
+        chat = _LChatLiteLLM(model="claude-sonnet-4-6")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "completion_with_retry",
+            side_effect=fake_completion,
+        ):
+            merged_messages = []
+            for _ in range(2):
+                merged = None
+                for generation in chat._stream(messages=[]):
+                    merged = (
+                        generation.message
+                        if merged is None
+                        else merged + generation.message
+                    )
+                merged_messages.append(merged)
+
+        server_stream, client_stream = merged_messages
+
+        assert server_stream.tool_calls == []
+        assert [call["name"] for call in client_stream.tool_calls] == ["get_issue"]
+        assert client_stream.tool_calls[0]["args"] == {"id": 5}

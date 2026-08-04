@@ -235,6 +235,51 @@ class TestBindToolsCache:
         # bind_tools should be called twice (cache miss both times)
         assert fake_model.bind_tools.call_count == 2
 
+    def test_cache_miss_different_bind_kwargs(
+        self, cache, read_file_tool, write_file_tool
+    ):
+        """Web search on and off must not share a cache entry."""
+        fake_model = mock.MagicMock(spec=BaseChatModel)
+        fake_model.bind_tools.side_effect = [mock.Mock(), mock.Mock()]
+
+        tools = [read_file_tool, write_file_tool]
+
+        without_search = cache.get_or_bind(
+            fake_model, "test-model", tools, None, "test"
+        )
+        with_search = cache.get_or_bind(
+            fake_model, "test-model", tools, None, "test", web_search_options={}
+        )
+
+        assert without_search is not with_search
+        assert fake_model.bind_tools.call_count == 2
+
+    def test_cache_hit_same_bind_kwargs(self, cache, read_file_tool, write_file_tool):
+        fake_model = mock.MagicMock(spec=BaseChatModel)
+        tools = [read_file_tool, write_file_tool]
+
+        first = cache.get_or_bind(
+            fake_model, "test-model", tools, None, "test", web_search_options={}
+        )
+        second = cache.get_or_bind(
+            fake_model, "test-model", tools, None, "test", web_search_options={}
+        )
+
+        assert first is second
+        assert fake_model.bind_tools.call_count == 1
+
+    def test_bind_kwargs_are_forwarded_to_bind_tools(
+        self, cache, read_file_tool, write_file_tool
+    ):
+        fake_model = mock.MagicMock(spec=BaseChatModel)
+        tools = [read_file_tool, write_file_tool]
+
+        cache.get_or_bind(
+            fake_model, "test-model", tools, None, "test", web_search_options={}
+        )
+
+        assert fake_model.bind_tools.call_args.kwargs["web_search_options"] == {}
+
     def test_cache_miss_different_tool_choice(
         self, cache, read_file_tool, write_file_tool
     ):

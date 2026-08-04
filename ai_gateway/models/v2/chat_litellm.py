@@ -1,6 +1,9 @@
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union, override
 
+import litellm
+import structlog
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import _ChatModelBinding
@@ -28,7 +31,61 @@ from ai_gateway.models.v2.litellm_model_registry import (
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
-__all__ = ["ChatLiteLLM"]
+__all__ = ["ChatLiteLLM", "litellm_supports_native_web_search"]
+
+log = structlog.stdlib.get_logger("chat_litellm")
+
+# Only Vertex AI runs Anthropic's server-side tools (hosted web search). Bedrock does not.
+_WEB_SEARCH_CAPABLE_PROVIDERS = frozenset({"vertex_ai"})
+
+
+@lru_cache(maxsize=64)
+def _litellm_maps_web_search(
+    model: Optional[str], custom_llm_provider: Optional[str]
+) -> bool:
+    """Whether the installed LiteLLM maps `web_search_options` for this model."""
+    if not model:
+        return False
+
+    supported_params = litellm.get_supported_openai_params(
+        model=model, custom_llm_provider=custom_llm_provider
+    )
+
+    return "web_search_options" in (supported_params or [])
+
+
+def litellm_supports_native_web_search(
+    model: Optional[str], custom_llm_provider: Optional[str]
+) -> bool:
+    """Whether a litellm-routed model runs a provider-hosted web search."""
+    return (
+        custom_llm_provider in _WEB_SEARCH_CAPABLE_PROVIDERS
+        and _litellm_maps_web_search(model, custom_llm_provider)
+    )
+
+
+def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
+    """Drop `web_search_options` unless the model can run a hosted web search."""
+    if kwargs.get("web_search_options") is None:
+        return
+
+    model = kwargs.get("model")
+    custom_llm_provider = kwargs.get("custom_llm_provider")
+
+    if custom_llm_provider not in _WEB_SEARCH_CAPABLE_PROVIDERS:
+        reason = "provider does not run a hosted web search"
+    elif not _litellm_maps_web_search(model, custom_llm_provider):
+        reason = "litellm does not map web_search_options for this model"
+    else:
+        return
+
+    del kwargs["web_search_options"]
+    log.warning(
+        "Dropping web_search_options: web search unsupported for this model",
+        model=model,
+        custom_llm_provider=custom_llm_provider,
+        reason=reason,
+    )
 
 
 def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
@@ -206,8 +263,6 @@ class ChatLiteLLM(_LChatLiteLLM):
         ] = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        kwargs.pop("web_search_options", None)  # Not yet supported for LiteLLM
-
         self.validate_endpoint_kwargs(kwargs)
         return super().bind_tools(tools, tool_choice=tool_choice, **kwargs)
 
@@ -233,10 +288,13 @@ class ChatLiteLLM(_LChatLiteLLM):
         **kwargs: Any,
     ) -> Any:
         # kwargs has the merged model, provider, and max_tokens by this point.
+        # Nothing here invokes the model synchronously, so none of these kwargs fixes
+        # are mirrored in the sync completion_with_retry.
         _force_gpt_5_max_completion_tokens(kwargs)
         _remove_deprecated_temperature_parameters(kwargs)
         _rewrite_trailing_assistant_prefill(kwargs)
         inject_user_identity_header(kwargs, self.user_id_header)
+        _drop_unsupported_web_search(kwargs)
         return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
 
     @property
