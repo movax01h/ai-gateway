@@ -1724,3 +1724,119 @@ class TestSuggestPatterns:
             },
         )
         assert patterns == ["git add *"]
+
+
+def _web_search_ai_message(msg_id="agent-msg-id"):
+    """A final AIMessage carrying Anthropic server-side web-search content blocks."""
+    return AIMessage(
+        content=[
+            {"type": "text", "text": "Let me look that up."},
+            {
+                "type": "server_tool_use",
+                "id": "srvtu_1",
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtu_1",
+                "content": [{"type": "web_search_result", "url": "https://x"}],
+            },
+            {"type": "text", "text": " Here is what I found."},
+        ],
+        id=msg_id,
+    )
+
+
+class TestServerToolResponse:
+    """Agent-response-path projection of server_tool_use blocks."""
+
+    def test_splits_text_around_tool_with_success_card(self, chat_agent):
+        result = {}
+
+        chat_agent._build_ui_chat_log(
+            _web_search_ai_message(), {"conversation_history": {}}, result
+        )
+
+        log = result["ui_chat_log"]
+        assert [e["message_type"] for e in log] == [
+            MessageTypeEnum.AGENT,
+            MessageTypeEnum.TOOL,
+            MessageTypeEnum.AGENT,
+        ]
+        pre, tool, summary = log
+        assert pre["message_id"] == "agent-msg-id"
+        assert pre["content"] == "Let me look that up."
+        assert tool["message_sub_type"] == "web_search"
+        assert tool["status"] == ToolStatus.SUCCESS
+        assert tool["message_id"] == "srvtu_1"
+        assert tool["tool_info"]["args"] == {"query": "gitlab duo"}
+        assert tool["tool_info"]["tool_response"] == [
+            {"type": "web_search_result", "url": "https://x"}
+        ]
+        assert summary["message_id"] == "agent-msg-id:seg1"
+        assert summary["content"] == " Here is what I found."
+
+    def test_pending_card_when_result_block_absent(self, chat_agent):
+        msg = AIMessage(
+            content=[
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_search",
+                    "input": {},
+                },
+            ],
+            id="agent-msg-id",
+        )
+        result = {}
+
+        chat_agent._build_ui_chat_log(msg, {"conversation_history": {}}, result)
+
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["status"] == ToolStatus.PENDING
+
+    def test_plain_string_produces_single_agent_entry(self, chat_agent):
+        result = {}
+        chat_agent._build_ui_chat_log(
+            AIMessage(content="plain text", id="msg-1"),
+            {"conversation_history": {}},
+            result,
+        )
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+        assert result["ui_chat_log"][0]["content"] == "plain text"
+
+    def test_list_content_with_only_text_blocks_produces_single_agent_entry(
+        self, chat_agent
+    ):
+        msg = AIMessage(
+            content=[{"type": "text", "text": "Hello world"}],
+            id="msg-1",
+        )
+        result = {}
+        chat_agent._build_ui_chat_log(msg, {"conversation_history": {}}, result)
+        assert len(result["ui_chat_log"]) == 1
+        assert result["ui_chat_log"][0]["message_type"] == MessageTypeEnum.AGENT
+        assert result["ui_chat_log"][0]["content"] == "Hello world"
+
+    def test_client_tool_use_block_produces_no_server_card(self, chat_agent):
+        msg = AIMessage(
+            content=[
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "read_file",
+                    "input": {"path": "x"},
+                },
+            ],
+            id="agent-msg-id",
+        )
+        result = {}
+        chat_agent._build_ui_chat_log(msg, {"conversation_history": {}}, result)
+        tool_entries = [
+            e
+            for e in result["ui_chat_log"]
+            if e["message_type"] == MessageTypeEnum.TOOL
+        ]
+        assert tool_entries == []
