@@ -341,6 +341,39 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `code_review 2.0.0-dev (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> build_review_context;
+    build_review_context(build_review_context<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    explore_relevant_directories(explore_relevant_directories<br>#91;OneOffComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;OneOffComponent#93;);
+    fetch_mr_metadata(fetch_mr_metadata<br>#91;DeterministicStepComponent#93;);
+    analyze_prescan_results(analyze_prescan_results<br>#91;AgentComponent#93;);
+    fetch_existing_discussions(fetch_existing_discussions<br>#91;DeterministicStepComponent#93;);
+    perform_code_review_and_publish(perform_code_review_and_publish<br>#91;OneOffComponent#93;);
+    build_review_context --> fetch_mr_diffs;
+    fetch_mr_diffs --> explore_relevant_directories;
+    explore_relevant_directories --> prescan_codebase;
+    prescan_codebase --> fetch_mr_metadata;
+    fetch_mr_metadata --> analyze_prescan_results;
+    analyze_prescan_results --> fetch_existing_discussions;
+    fetch_existing_discussions --> perform_code_review_and_publish;
+    perform_code_review_and_publish --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `convert_to_gl_ci 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
