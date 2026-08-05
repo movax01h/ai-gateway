@@ -87,6 +87,7 @@ from duo_workflow_service.tracking.response_schema_tracking_context import (
     response_schema_tracking_results,
 )
 from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
@@ -702,7 +703,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if exc_type:
             audit_status = "failure"
             if isinstance(exc_value, asyncio.exceptions.CancelledError):
-                if str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+                # Both stop kinds audit as "stopped". An infra stop used to arrive as
+                # AIO_CANCEL_STOP_WORKFLOW_REQUEST, so this preserves the exact
+                # pre-existing audit value: `ai_agent_session_ended.details.status` is a
+                # documented compliance field (GA since 19.0) that customers can stream
+                # externally, so this MR deliberately makes no compliance-visible change.
+                if str(exc_value) in (
+                    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+                    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+                ):
                     audit_status = "stopped"
                 else:
                     audit_status = "aborted"
@@ -786,6 +795,29 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 return False
 
             stop_exception = str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+            infra_stop_exception = (
+                str(exc_value) == AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST
+            )
+
+            # Detect infrastructure-initiated stops (e.g. Workhorse pod rotation,
+            # WebSocket ping failures).  These must NOT persist a `stopped` status to
+            # Rails — the session should remain `running` so that the client's automatic
+            # reconnect is classified as a plain RETRY (LangGraph replay from the last
+            # checkpoint) rather than a STOP_RECOVERY (which would attempt a rollback or
+            # restart with an empty goal).  Sessions that never reconnect are eventually
+            # reaped by Rails' FailStuckWorkflowsWorker and land as `failed`.
+            # The gRPC status code (UNAVAILABLE vs OK) is set by the server layer and is
+            # unaffected by this path — Workhorse's stop-handshake ack is preserved.
+            # The infra-stop signal is carried in the cancellation message itself
+            # (AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST) rather than read from
+            # MonitoringContext, keeping stop-type discrimination self-contained.
+            if infra_stop_exception:
+                self._logger.info(
+                    "Infrastructure-initiated stop; leaving Rails workflow status "
+                    "untouched so the session stays running for reconnect.",
+                    workflow_id=self._workflow_id,
+                )
+                return False
 
             if not stop_exception:
                 log_exception(

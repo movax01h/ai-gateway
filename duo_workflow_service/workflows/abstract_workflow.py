@@ -81,6 +81,7 @@ from duo_workflow_service.tracking import (
     tag_current_run,
 )
 from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
@@ -548,6 +549,7 @@ class AbstractWorkflow(ABC):
         is_notifiable = isinstance(e, NotifiableException)
         is_notifiable_agent = isinstance(e, NotifiableAgentException)
         is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+        is_infra_cancel = str(e) == AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST
         is_invalid_request = isinstance(e, InvalidRequestException)
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
@@ -560,6 +562,28 @@ class AbstractWorkflow(ABC):
         # caller gets a clear signal that the input was wrong.  Skip all side-effects
         # and terminate.
         if is_invalid_request:
+            raise TraceableException(e)
+
+        # Infrastructure-initiated cancellation (e.g. Workhorse pod rotation, WebSocket
+        # ping failure). Unlike a user stop, the session is NOT finished: Rails keeps it
+        # `running` (see GitLabWorkflow.__aexit__) and the client reconnects on the
+        # WebSocket 1001 to replay from the last checkpoint. So skip every terminal
+        # side-effect:
+        #   - no _handle_workflow_failure, which would persist a spurious "something
+        #     went wrong" entry into the ui_chat_log of a session that is about to
+        #     resume;
+        #   - no status notification, because both CANCELLED (-> STOPPED) and ERROR
+        #     (-> FAILED) look terminal to the client and can suppress its automatic
+        #     reconnect.
+        # The gRPC status (UNAVAILABLE for a Workhorse drain, so its stop-handshake ack
+        # is preserved) is set by the server layer from `last_error`, which is assigned
+        # above. See gitlab-org/modelops/applied-ml/code-suggestions/ai-assist#2641.
+        if is_infra_cancel:
+            self.log.info(
+                "Infrastructure-initiated cancellation; skipping failure handling and "
+                "status notification so the session can resume on reconnect.",
+                workflow_id=self._workflow_id,
+            )
             raise TraceableException(e)
 
         # NotifiableException is chat-specific and carries its own UI semantics; the

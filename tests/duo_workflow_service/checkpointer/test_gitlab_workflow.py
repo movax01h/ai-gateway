@@ -18,6 +18,7 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 
+from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
@@ -45,6 +46,10 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
 from duo_workflow_service.tracking.monitoring_context import (
     MonitoringContext,
     current_monitoring_context,
+)
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.billing_events.service import LLMOperation
@@ -1007,6 +1012,173 @@ async def test_bad_request_skips_reconciliation_when_checkpoint_status_has_no_wo
         c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
     ]
     assert status_calls == [WorkflowStatusEventEnum.RESUME]
+
+
+@pytest.mark.asyncio
+async def test_infra_stop_leaves_rails_status_untouched(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Infrastructure-initiated stops (e.g. Workhorse pod rotation) must NOT persist a `stopped` status to Rails.  The
+    session should remain `running` so that the client's automatic reconnect is classified as a plain RETRY (LangGraph
+    replay from the last checkpoint) rather than a STOP_RECOVERY.
+
+    server.py maps every stop reason in INFRA_STOP_REASONS to the single cancellation
+    message AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST (tested in
+    test_execute_workflow_stop_workflow_event_cancels_with_correct_message).  This test
+    verifies that __aexit__ skips the Rails status update when it receives that message.
+
+    Verifies that:
+    - No STOP status event is sent to Rails.
+    - No DROP status event is sent to Rails.
+    - Only the entry event (RETRY in this case) is sent.
+    """
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": "running",
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": False,
+        "archived": False,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock = AsyncMock()
+    gitlab_workflow._status_handler = status_handler_mock
+
+    with pytest.raises(asyncio.CancelledError):
+        async with gitlab_workflow:
+            # server.py cancels with AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST when the
+            # stop reason is in INFRA_STOP_REASONS, so __aexit__ can detect it without
+            # consulting MonitoringContext.
+            raise asyncio.CancelledError(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST)
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    # Only the entry RETRY event — no STOP or DROP must be sent.
+    assert WorkflowStatusEventEnum.STOP not in status_calls, (
+        "STOP must not be sent for an infrastructure-initiated stop"
+    )
+    assert WorkflowStatusEventEnum.DROP not in status_calls, (
+        "DROP must not be sent for an infrastructure-initiated stop"
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_stop_still_persists_stopped_status(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """A genuine user stop (e.g. stop_button_click) must still persist `stopped` to Rails — only infra stops are
+    exempted."""
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": "running",
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": False,
+        "archived": False,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    status_handler_mock = AsyncMock()
+    gitlab_workflow._status_handler = status_handler_mock
+
+    # A user-initiated stop uses AIO_CANCEL_STOP_WORKFLOW_REQUEST — must still
+    # persist `stopped` to Rails.
+    with pytest.raises(asyncio.CancelledError):
+        async with gitlab_workflow:
+            raise asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST)
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert WorkflowStatusEventEnum.STOP in status_calls, (
+        "STOP must be sent for a genuine user stop"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cancel_message,expected_audit_status",
+    [
+        (AIO_CANCEL_STOP_WORKFLOW_REQUEST, "stopped"),
+        (AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST, "stopped"),
+        ("Client-side streaming has been closed.", "aborted"),
+    ],
+    ids=["user_stop", "infra_stop", "other_cancellation"],
+)
+async def test_session_ended_audit_status_is_unchanged_for_infra_stops(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+    cancel_message,
+    expected_audit_status,
+):
+    """An infra stop must audit as `stopped`, exactly as it did before it got its own cancellation constant.
+
+    `ai_agent_session_ended.details.status` is a documented compliance field that customers can stream externally, so
+    splitting the cancellation constants must not change it. Guards against the infra constant silently falling into the
+    `aborted` bucket, which is reserved for every other kind of cancellation.
+    """
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": "running",
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": False,
+        "archived": False,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._status_handler = AsyncMock()
+
+    collector = Mock()
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.get_audit_collector",
+        return_value=collector,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            async with gitlab_workflow:
+                raise asyncio.CancelledError(cancel_message)
+
+    session_ended_events = [
+        c.args[0]
+        for c in collector.capture.call_args_list
+        if isinstance(c.args[0], SessionEndedEvent)
+    ]
+    assert len(session_ended_events) == 1
+    assert session_ended_events[0].status == expected_audit_status
 
 
 @pytest.mark.asyncio

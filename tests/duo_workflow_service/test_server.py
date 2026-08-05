@@ -73,6 +73,7 @@ from duo_workflow_service.tools.session_context import GetSessionContext
 from duo_workflow_service.tracking import MonitoringContext
 from duo_workflow_service.workflows.registry import ResolvedFlow
 from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
@@ -1014,16 +1015,16 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             "workflow execution stopped",
         ),
         (
-            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             False,
             "WORKHORSE_SERVER_SHUTDOWN",
             grpc.StatusCode.UNAVAILABLE,
             "workflow execution interrupted:",
         ),
         (
-            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             False,
-            "USER_CANCELLED",
+            "WORKHORSE_WEBSOCKET_PING_FAILED",
             grpc.StatusCode.OK,
             "workflow execution stopped",
         ),
@@ -1152,6 +1153,12 @@ async def test_execute_workflow_status_codes(
     [
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            grpc.StatusCode.OK,
+            "workflow execution stopped",
+            1,  # Only called from abort_workflow
+        ),
+        (
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
             1,  # Only called from abort_workflow
@@ -3631,3 +3638,192 @@ def test_extract_error_message_api_connection_error_token_normalization_still_ap
     result = _extract_error_message(error)
     assert "<N> tokens" in result
     assert "205531" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stop_reason,expected_cancel_msg",
+    [
+        (
+            "WORKHORSE_SERVER_SHUTDOWN",
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "WORKHORSE_WEBSOCKET_PING_FAILED",
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "user_requested",
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.current_monitoring_context")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_stop_workflow_event_cancels_with_correct_message(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_current_monitoring_context,
+    stop_reason,
+    expected_cancel_msg,
+    mock_context,
+    servicer,
+):
+    """Test that stopWorkflow events cancel the workflow task with the correct message.
+
+    Infrastructure-initiated stops (INFRA_STOP_REASONS) must use AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST so that
+    __aexit__ skips the Rails status update.  User-initiated stops use AIO_CANCEL_STOP_WORKFLOW_REQUEST.
+    """
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+
+    # The workflow task will be cancelled; simulate it raising CancelledError
+    # with the expected message so the outer handler sees it.
+    mock_workflow.get_from_outbox = AsyncMock(
+        side_effect=asyncio.CancelledError(expected_cancel_msg)
+    )
+
+    mock_monitoring_context = MagicMock()
+    mock_current_monitoring_context.get.return_value = mock_monitoring_context
+
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    # Use a mock task for the workflow task so we can assert cancel() is called with
+    # the correct message.  The second create_task call (receive_events) must use the
+    # real asyncio.create_task so the event-processing coroutine actually runs.
+    #
+    # Synchronisation strategy:
+    # - mock_workflow_task is a MagicMock whose cancel() records calls and sets an
+    #   asyncio.Event so get_from_outbox can unblock and raise CancelledError.
+    # - mock_workflow_task.done() returns True so abort_workflow skips the await.
+    # - get_from_outbox waits for the event, then raises CancelledError with the
+    #   expected message, simulating the workflow task being cancelled.
+    cancel_called_event = asyncio.Event()
+    cancel_calls: list[str] = []
+
+    mock_workflow_task = MagicMock()
+    mock_workflow_task.done.return_value = True
+
+    def record_cancel(msg: str = "") -> bool:
+        cancel_calls.append(msg)
+        cancel_called_event.set()
+        return True
+
+    mock_workflow_task.cancel = record_cancel
+
+    async def get_from_outbox_waiting():
+        await cancel_called_event.wait()
+        raise asyncio.CancelledError(expected_cancel_msg)
+
+    mock_workflow.get_from_outbox = get_from_outbox_waiting
+
+    original_create_task = asyncio.create_task
+    call_count = 0
+
+    def mock_create_task(coro, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call: workflow task — return the mock so cancel() can be asserted.
+            # Close the coroutine to avoid a ResourceWarning.
+            coro.close()
+            return mock_workflow_task
+        # Subsequent calls (receive_events task, etc.) use the real implementation.
+        return original_create_task(coro, **kwargs)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="software_development",
+                goal="test",
+            )
+        )
+        # Send the stopWorkflow event after the start
+        yield contract_pb2.ClientEvent(
+            stopWorkflow=contract_pb2.StopWorkflowRequest(reason=stop_reason)
+        )
+
+    with patch("asyncio.create_task", side_effect=mock_create_task):
+        result = servicer.ExecuteWorkflow(
+            mock_request_iterator(),
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await anext(result)
+
+    # Verify the monitoring context recorded the stop reason
+    assert mock_monitoring_context.workflow_stop_reason == stop_reason
+    # Verify the workflow task was cancelled with the correct message.
+    # The first cancel() call comes from receive_events processing the stopWorkflow
+    # event; subsequent calls (e.g. "Client-side streaming has been closed.") are
+    # irrelevant to this assertion.
+    assert cancel_calls[0] == expected_cancel_msg, (
+        f"Expected first cancel({expected_cancel_msg!r}), got {cancel_calls}"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "err_str,should_log",
+    [
+        (AIO_CANCEL_STOP_WORKFLOW_REQUEST, False),
+        (AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST, False),
+        ("some unexpected error", True),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.log_exception")
+async def test_execute_workflow_base_exception_logging(
+    mock_log_exception,
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    err_str,
+    should_log,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """Test that BaseException handler only logs when the error is not a stop-workflow signal.
+
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST and AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in the error string must suppress
+    log_exception; any other error must trigger it.
+    """
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+    # Raise a non-CancelledError BaseException so the BaseException branch is hit
+    mock_workflow.get_from_outbox = AsyncMock(side_effect=RuntimeError(err_str))
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+
+    if should_log:
+        # log_exception called once from the BaseException handler
+        assert any(
+            isinstance(c[0][0], RuntimeError) for c in mock_log_exception.call_args_list
+        )
+    else:
+        # log_exception must NOT be called from the BaseException handler
+        # (it may still be called from abort_workflow's inner wait_for, but
+        # the RuntimeError itself must not be logged)
+        for c in mock_log_exception.call_args_list:
+            assert not isinstance(c[0][0], RuntimeError)
