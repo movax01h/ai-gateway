@@ -238,6 +238,11 @@ def checkpoint_metadata_fixture():
     return metadata
 
 
+def _incremental_state(gitlab_workflow):
+    """The checkpointer's incremental-checkpoint delta state."""
+    return gitlab_workflow._incremental_state
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_workflow_event_tracking_for_cancelled_workflow(
@@ -709,7 +714,9 @@ def _make_workflow_for_reconciliation(
     gitlab_workflow._status_handler = status_handler_mock
 
     if use_prev_channel_values:
-        gitlab_workflow._prev_channel_values = {"status": checkpoint_status}
+        _incremental_state(gitlab_workflow).prev_channel_values = {
+            "status": checkpoint_status
+        }
 
     return gitlab_workflow, status_handler_mock
 
@@ -996,7 +1003,9 @@ async def test_bad_request_skips_reconciliation_when_checkpoint_status_has_no_wo
     )
     gitlab_workflow._internal_event_client = internal_event_client
     # Inject an unknown status value that has no entry in WORKFLOW_STATUS_TO_CHECKPOINT_STATUS.
-    gitlab_workflow._prev_channel_values = {"status": "UNKNOWN_FUTURE_STATUS"}
+    _incremental_state(gitlab_workflow).prev_channel_values = {
+        "status": "UNKNOWN_FUTURE_STATUS"
+    }
 
     with pytest.raises(InvalidRequestException):
         async with gitlab_workflow:
@@ -3512,9 +3521,12 @@ async def test_aget_tuple_hydrates_current_thread_from_response(
     result = await gitlab_workflow.aget_tuple(config)
 
     assert result is not None
-    assert gitlab_workflow._current_thread == 3
-    assert gitlab_workflow._prev_checkpoint_id == "5678"
-    assert "conversation_history" in gitlab_workflow._prev_channel_values
+    assert _incremental_state(gitlab_workflow).current_thread == 3
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "5678"
+    assert (
+        "conversation_history"
+        in _incremental_state(gitlab_workflow).prev_channel_values
+    )
 
 
 @pytest.mark.asyncio
@@ -3538,7 +3550,10 @@ async def test_aget_tuple_hydrates_current_thread_started_at(
     result = await gitlab_workflow.aget_tuple(config)
 
     assert result is not None
-    assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
+    assert (
+        _incremental_state(gitlab_workflow).current_thread_started_at
+        == "2026-07-08T10:00:00+00:00"
+    )
 
 
 @pytest.mark.asyncio
@@ -3580,9 +3595,12 @@ async def test_aget_tuple_hydrates_current_thread_on_latest_fetch_path(
 
     assert result is not None
     assert "per_page=1" in http_client.aget.call_args[1]["path"]
-    assert gitlab_workflow._current_thread == 7
-    assert gitlab_workflow._prev_checkpoint_id == "5678"
-    assert "conversation_history" in gitlab_workflow._prev_channel_values
+    assert _incremental_state(gitlab_workflow).current_thread == 7
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "5678"
+    assert (
+        "conversation_history"
+        in _incremental_state(gitlab_workflow).prev_channel_values
+    )
 
 
 @pytest.mark.asyncio
@@ -3603,8 +3621,8 @@ async def test_aget_tuple_hydration_tolerates_missing_current_thread(
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
     await gitlab_workflow.aget_tuple(config)
 
-    assert gitlab_workflow._current_thread == 0
-    assert gitlab_workflow._prev_checkpoint_id == "5678"
+    assert _incremental_state(gitlab_workflow).current_thread == 0
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "5678"
 
 
 @pytest.mark.asyncio
@@ -3625,8 +3643,8 @@ async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
     await gitlab_workflow.aget_tuple(config)
 
-    assert gitlab_workflow._current_thread == 0
-    assert gitlab_workflow._prev_checkpoint_id == "5678"
+    assert _incremental_state(gitlab_workflow).current_thread == 0
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "5678"
 
 
 @pytest.mark.asyncio
@@ -3645,8 +3663,8 @@ async def test_aget_tuple_skips_hydration_when_incremental_disabled(
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
     await gitlab_workflow.aget_tuple(config)
 
-    assert gitlab_workflow._current_thread == 0
-    assert gitlab_workflow._prev_checkpoint_id is None
+    assert _incremental_state(gitlab_workflow).current_thread == 0
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id is None
 
 
 @pytest.mark.asyncio
@@ -3716,19 +3734,24 @@ def test_decode_graphql_checkpoint_is_side_effect_free(gitlab_workflow):
     """
     gitlab_workflow._workflow_config["incremental_checkpoints_enabled"] = True
     # Seed the cache with sentinels so the assertion is "unchanged", not merely "still default".
-    gitlab_workflow._prev_checkpoint_id = "sentinel-ckpt"
-    gitlab_workflow._prev_channel_values = {"sentinel": True}
-    gitlab_workflow._current_thread = 9
-    gitlab_workflow._current_thread_started_at = "2026-01-01T00:00:00+00:00"
+    _incremental_state(gitlab_workflow).prev_checkpoint_id = "sentinel-ckpt"
+    _incremental_state(gitlab_workflow).prev_channel_values = {"sentinel": True}
+    _incremental_state(gitlab_workflow).current_thread = 9
+    _incremental_state(
+        gitlab_workflow
+    ).current_thread_started_at = "2026-01-01T00:00:00+00:00"
 
     result = gitlab_workflow.decode_graphql_checkpoint(dict(_GQL_LATEST_CHECKPOINT))
 
     assert result is not None
     assert result.checkpoint["channel_values"] == {"x": [1]}
-    assert gitlab_workflow._prev_checkpoint_id == "sentinel-ckpt"
-    assert gitlab_workflow._prev_channel_values == {"sentinel": True}
-    assert gitlab_workflow._current_thread == 9
-    assert gitlab_workflow._current_thread_started_at == "2026-01-01T00:00:00+00:00"
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "sentinel-ckpt"
+    assert _incremental_state(gitlab_workflow).prev_channel_values == {"sentinel": True}
+    assert _incremental_state(gitlab_workflow).current_thread == 9
+    assert (
+        _incremental_state(gitlab_workflow).current_thread_started_at
+        == "2026-01-01T00:00:00+00:00"
+    )
 
 
 @pytest.mark.asyncio
@@ -3758,10 +3781,13 @@ async def test_aget_tuple_hydrates_from_cached_latest_checkpoint(
 
     assert result is not None
     http_client.aget.assert_not_called()  # served from the session-start cache
-    assert gitlab_workflow._current_thread == 4
-    assert gitlab_workflow._prev_checkpoint_id == "gql-ckpt"
-    assert gitlab_workflow._prev_channel_values == {"x": [1]}
-    assert gitlab_workflow._current_thread_started_at == "2026-07-08T10:00:00+00:00"
+    assert _incremental_state(gitlab_workflow).current_thread == 4
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "gql-ckpt"
+    assert _incremental_state(gitlab_workflow).prev_channel_values == {"x": [1]}
+    assert (
+        _incremental_state(gitlab_workflow).current_thread_started_at
+        == "2026-07-08T10:00:00+00:00"
+    )
 
 
 def _make_gl_checkpoint(thread_ts, status):
