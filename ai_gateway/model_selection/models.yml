@@ -21,7 +21,7 @@ models:
     max_context_tokens: 1_000_000
     model_class_provider: litellm
     params:
-      model: "accounts/gitlab/deployments/ymzmlgj5"
+      model: "accounts/fireworks/models/kimi-k3"
       custom_llm_provider: "fireworks_ai"
       temperature: 0.0
       max_tokens: 32_768
