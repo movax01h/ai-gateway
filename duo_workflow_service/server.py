@@ -101,7 +101,9 @@ from duo_workflow_service.tracking.sentry_error_tracking import setup_error_trac
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import ResolvedFlow, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    INFRA_STOP_REASONS,
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
@@ -451,12 +453,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     continue
 
                 if event.HasField("stopWorkflow"):
+                    stop_reason = event.stopWorkflow.reason
                     log.info(
                         "Stopping workflow...",
-                        reason=event.stopWorkflow.reason,
+                        reason=stop_reason,
                     )
-                    monitoring_context.workflow_stop_reason = event.stopWorkflow.reason
-                    workflow_task.cancel(AIO_CANCEL_STOP_WORKFLOW_REQUEST)
+                    monitoring_context.workflow_stop_reason = stop_reason
+                    # Use a distinct cancellation message for infrastructure-initiated
+                    # stops so that __aexit__ can skip the Rails status update without
+                    # consulting MonitoringContext.
+                    if stop_reason in INFRA_STOP_REASONS:
+                        workflow_task.cancel(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST)
+                    else:
+                        workflow_task.cancel(AIO_CANCEL_STOP_WORKFLOW_REQUEST)
                     continue
 
         receive_events_task = asyncio.create_task(receive_events())
@@ -490,7 +499,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             if workflow.successful_execution():
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow execution success")
-            elif AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
+            elif AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
+                # Infrastructure-initiated stop (e.g. Workhorse pod rotation).
+                # WORKHORSE_SERVER_SHUTDOWN signals a graceful pod drain — return
+                # UNAVAILABLE so Workhorse knows to retry on another pod.
+                # Other infra stops (e.g. WebSocket ping failure) return OK.
                 if (
                     monitoring_context.workflow_stop_reason
                     == "WORKHORSE_SERVER_SHUTDOWN"
@@ -502,6 +515,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 else:
                     context.set_code(grpc.StatusCode.OK)
                     context.set_details("workflow execution stopped")
+            elif AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
+                context.set_code(grpc.StatusCode.OK)
+                context.set_details("workflow execution stopped")
             elif str(workflow.last_error) == OUTGOING_MESSAGE_TOO_LARGE:
                 context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
                 context.set_details("Outgoing message too large.")
@@ -562,7 +578,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     f"RPC ended with unknown workflow state: {workflow.last_gitlab_status}"
                 )
         except asyncio.CancelledError as err:
-            if AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(err):
+            err_str = str(err)
+            if (
+                AIO_CANCEL_STOP_WORKFLOW_REQUEST in err_str
+                or AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in err_str
+            ):
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow execution stopped")
             else:
@@ -575,7 +595,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
             raise
         except BaseException as err:
-            if AIO_CANCEL_STOP_WORKFLOW_REQUEST not in str(err):
+            err_str = str(err)
+            if (
+                AIO_CANCEL_STOP_WORKFLOW_REQUEST not in err_str
+                and AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST not in err_str
+            ):
                 log_exception(
                     err,
                     extra={

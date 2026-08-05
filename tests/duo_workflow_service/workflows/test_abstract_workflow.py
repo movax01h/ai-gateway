@@ -34,6 +34,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
     TraceableException,
 )
 from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.internal_events import InternalEventAdditionalProperties
@@ -853,31 +854,67 @@ async def test_compile_and_run_graph_recursion_limit_handling(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@pytest.mark.parametrize(
+    "cancel_message,expected_event_state",
+    [
+        (
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+            {"status": WorkflowStatusEnum.CANCELLED, "ui_chat_log": []},
+        ),
+        (AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST, None),
+    ],
+    ids=["user_stop_notifies_cancelled", "infra_stop_sends_no_notification"],
+)
 async def test_compile_and_run_graph_with_cancellation_during_fetch(
     mock_user_interface,
     mock_fetch_workflow_and_container_data,
     workflow,
+    cancel_message,
+    expected_event_state,
 ):
+    """A user stop surfaces a CANCELLED status to the client; an infra stop must not.
+
+    An infrastructure-initiated stop (Workhorse drain / ping failure) leaves the Rails session `running` and the client
+    reconnects to replay from the last checkpoint, so a terminal-looking checkpoint would both misreport the session and
+    risk suppressing that automatic reconnect. See #2641.
+    """
     mock_fetch_workflow_and_container_data.side_effect = asyncio.CancelledError(
-        AIO_CANCEL_STOP_WORKFLOW_REQUEST
+        cancel_message
     )
 
     mock_notifier = AsyncMock()
     mock_user_interface.return_value = mock_notifier
 
-    with pytest.raises(TraceableException) as exc_info:
+    with (
+        patch.object(
+            workflow, "_handle_workflow_failure", new_callable=AsyncMock
+        ) as mock_handle_failure,
+        pytest.raises(TraceableException) as exc_info,
+    ):
         await workflow._compile_and_run_graph("Test goal")
 
     mock_fetch_workflow_and_container_data.assert_called_once()
     assert workflow.is_done
     assert isinstance(exc_info.value.original_exception, asyncio.CancelledError)
-    assert str(exc_info.value.original_exception) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
+    assert str(exc_info.value.original_exception) == cancel_message
 
-    mock_notifier.send_event.assert_called_once_with(
-        type="values",
-        state={"status": WorkflowStatusEnum.CANCELLED, "ui_chat_log": []},
-        stream=workflow._stream,
-    )
+    # Neither stop kind is a workflow failure, so no error may be persisted to the
+    # ui_chat_log of a session that is about to resume.
+    mock_handle_failure.assert_not_called()
+
+    # The server layer derives the gRPC status (UNAVAILABLE for a Workhorse drain, which
+    # preserves its stop-handshake ack) from last_error, so the cancellation kind must
+    # survive on the workflow.
+    assert str(workflow.last_error) == cancel_message
+
+    if expected_event_state is None:
+        mock_notifier.send_event.assert_not_called()
+    else:
+        mock_notifier.send_event.assert_called_once_with(
+            type="values",
+            state=expected_event_state,
+            stream=workflow._stream,
+        )
 
 
 @pytest.mark.asyncio
