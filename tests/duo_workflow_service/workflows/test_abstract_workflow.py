@@ -254,6 +254,50 @@ async def test_init(user):
     assert workflow._user == user
 
 
+@pytest.mark.parametrize(
+    "approval_source_value,expected_logged_source",
+    [
+        (
+            contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_USER_EXPLICIT,
+            "user_explicit",
+        ),
+        (
+            contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_UNSPECIFIED,
+            "unspecified",
+        ),
+        (None, None),  # field never set by the client (old clients)
+        (99, "unknown(99)"),  # newer client sends a value this build doesn't know
+    ],
+    ids=["user_explicit", "explicit_unspecified", "unset", "unknown_value"],
+)
+def test_init_logs_approval_source(user, approval_source_value, expected_logged_source):
+    """Client approvals are logged with a safe, presence-aware approval_source.
+
+    Regression: proto3 enums are open, so an unknown value from a newer client
+    must not raise ValueError and crash workflow startup.
+    """
+    approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(tool_name="run_command")
+    )
+    if approval_source_value is not None:
+        approval.approval.approval_source = approval_source_value
+
+    with capture_logs() as cap_logs:
+        MockWorkflow(
+            "test-workflow-id",
+            {"key": "value"},
+            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            user,
+            approval=approval,
+        )
+
+    entry = next(
+        e for e in cap_logs if e["event"] == "Received tool call approval from client"
+    )
+    assert entry["approval_source"] == expected_logged_source
+    assert entry["tool_name"] == "run_command"
+
+
 @pytest.mark.asyncio
 async def test_get_from_outbox(workflow, mock_action):
     # Put an item in the outbox

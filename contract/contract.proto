@@ -445,6 +445,29 @@ message AdditionalContext {
 
 // Approval represents a user's decision on whether to allow a pending action.
 message Approval {
+    // ApprovalSource identifies who or what the client reports made the approval decision.
+    // Informational only: the value is client-provided and is not verified server-side.
+    //
+    // Values name the proximate decision MECHANISM, not the policy content or its
+    // author: a PreToolUse hook approval is APPROVAL_SOURCE_PRETOOLUSE_HOOK whether the matched
+    // policy is GitLab's distributed default policy or a customer-authored local
+    // policy. Policy provenance (author/origin/version of the matched policy) is
+    // carried separately, never as new enum values. Add values only for genuinely
+    // new decision mechanisms, for example a server-side governance preapproval
+    // that bypasses client approval entirely.
+    enum ApprovalSource {
+        // APPROVAL_SOURCE_UNSPECIFIED is the default value when the source is unknown or not set by the client.
+        APPROVAL_SOURCE_UNSPECIFIED = 0;
+        // APPROVAL_SOURCE_USER_EXPLICIT indicates a human explicitly approved the action (e.g. clicking "approve" in a UI).
+        APPROVAL_SOURCE_USER_EXPLICIT = 1;
+        // APPROVAL_SOURCE_PRETOOLUSE_HOOK indicates the approval was granted automatically by a PreToolUse hook.
+        APPROVAL_SOURCE_PRETOOLUSE_HOOK = 2;
+        // APPROVAL_SOURCE_AUTO_MODE indicates the approval was granted automatically by auto-mode.
+        APPROVAL_SOURCE_AUTO_MODE = 3;
+        // APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration.
+        APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4;
+    }
+
     // Approved signals that the user has approved the pending action.
     message Approved {
         // remember_approval indicates whether this approval should be remembered for future identical actions.
@@ -453,6 +476,9 @@ message Approval {
         optional string tool_name = 2 [json_name = "tool_name"];
         // tool_args_json is the JSON-encoded arguments of the tool invocation that was approved.
         optional string tool_args_json = 3 [json_name = "tool_args_json"];
+        // approval_source identifies who or what the client reports made this approval decision.
+        // Informational only: the value is client-provided and is not verified server-side.
+        optional ApprovalSource approval_source = 4 [json_name = "approval_source"];
     }
 
     // Rejected signals that the user has rejected the pending action.

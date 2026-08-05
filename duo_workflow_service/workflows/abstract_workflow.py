@@ -49,7 +49,12 @@ from duo_workflow_service.checkpointer.node_lifecycle import (
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
-from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
+from duo_workflow_service.entities.state import (
+    ApprovalSource,
+    MessageTypeEnum,
+    ToolStatus,
+    UiChatLog,
+)
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
     InvalidRequestException,
@@ -174,6 +179,20 @@ class AbstractWorkflow(ABC):
         self._additional_context = additional_context
         self._mcp_tools = convert_mcp_tools_to_configs(mcp_tools=mcp_tools)
         self._approval = approval
+        if approval is not None and approval.HasField("approval"):
+            approved = approval.approval
+            self.log.info(
+                "Received tool call approval from client",
+                tool_name=approved.tool_name,
+                remember_approval=approved.remember_approval,
+                # None distinguishes clients that never sent the field from
+                # ones that explicitly sent APPROVAL_SOURCE_UNSPECIFIED.
+                approval_source=(
+                    ApprovalSource.from_proto(approved.approval_source)
+                    if approved.HasField("approval_source")
+                    else None
+                ),
+            )
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()
         self._internal_event_client = internal_event_client

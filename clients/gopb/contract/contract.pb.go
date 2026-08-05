@@ -21,6 +21,76 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ApprovalSource identifies who or what the client reports made the approval decision.
+// Informational only: the value is client-provided and is not verified server-side.
+//
+// Values name the proximate decision MECHANISM, not the policy content or its
+// author: a PreToolUse hook approval is APPROVAL_SOURCE_PRETOOLUSE_HOOK whether the matched
+// policy is GitLab's distributed default policy or a customer-authored local
+// policy. Policy provenance (author/origin/version of the matched policy) is
+// carried separately, never as new enum values. Add values only for genuinely
+// new decision mechanisms, for example a server-side governance preapproval
+// that bypasses client approval entirely.
+type Approval_ApprovalSource int32
+
+const (
+	// APPROVAL_SOURCE_UNSPECIFIED is the default value when the source is unknown or not set by the client.
+	Approval_APPROVAL_SOURCE_UNSPECIFIED Approval_ApprovalSource = 0
+	// APPROVAL_SOURCE_USER_EXPLICIT indicates a human explicitly approved the action (e.g. clicking "approve" in a UI).
+	Approval_APPROVAL_SOURCE_USER_EXPLICIT Approval_ApprovalSource = 1
+	// APPROVAL_SOURCE_PRETOOLUSE_HOOK indicates the approval was granted automatically by a PreToolUse hook.
+	Approval_APPROVAL_SOURCE_PRETOOLUSE_HOOK Approval_ApprovalSource = 2
+	// APPROVAL_SOURCE_AUTO_MODE indicates the approval was granted automatically by auto-mode.
+	Approval_APPROVAL_SOURCE_AUTO_MODE Approval_ApprovalSource = 3
+	// APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration.
+	Approval_APPROVAL_SOURCE_PREAPPROVED_CONFIG Approval_ApprovalSource = 4
+)
+
+// Enum value maps for Approval_ApprovalSource.
+var (
+	Approval_ApprovalSource_name = map[int32]string{
+		0: "APPROVAL_SOURCE_UNSPECIFIED",
+		1: "APPROVAL_SOURCE_USER_EXPLICIT",
+		2: "APPROVAL_SOURCE_PRETOOLUSE_HOOK",
+		3: "APPROVAL_SOURCE_AUTO_MODE",
+		4: "APPROVAL_SOURCE_PREAPPROVED_CONFIG",
+	}
+	Approval_ApprovalSource_value = map[string]int32{
+		"APPROVAL_SOURCE_UNSPECIFIED":        0,
+		"APPROVAL_SOURCE_USER_EXPLICIT":      1,
+		"APPROVAL_SOURCE_PRETOOLUSE_HOOK":    2,
+		"APPROVAL_SOURCE_AUTO_MODE":          3,
+		"APPROVAL_SOURCE_PREAPPROVED_CONFIG": 4,
+	}
+)
+
+func (x Approval_ApprovalSource) Enum() *Approval_ApprovalSource {
+	p := new(Approval_ApprovalSource)
+	*p = x
+	return p
+}
+
+func (x Approval_ApprovalSource) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Approval_ApprovalSource) Descriptor() protoreflect.EnumDescriptor {
+	return file_contract_contract_proto_enumTypes[0].Descriptor()
+}
+
+func (Approval_ApprovalSource) Type() protoreflect.EnumType {
+	return &file_contract_contract_proto_enumTypes[0]
+}
+
+func (x Approval_ApprovalSource) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Approval_ApprovalSource.Descriptor instead.
+func (Approval_ApprovalSource) EnumDescriptor() ([]byte, []int) {
+	return file_contract_contract_proto_rawDescGZIP(), []int{38, 0}
+}
+
 // ClientEvent is a message sent from the client to the server during a workflow session.
 type ClientEvent struct {
 	state         protoimpl.MessageState
@@ -3225,6 +3295,9 @@ type Approval_Approved struct {
 	ToolName *string `protobuf:"bytes,2,opt,name=tool_name,proto3,oneof" json:"tool_name,omitempty"`
 	// tool_args_json is the JSON-encoded arguments of the tool invocation that was approved.
 	ToolArgsJson *string `protobuf:"bytes,3,opt,name=tool_args_json,proto3,oneof" json:"tool_args_json,omitempty"`
+	// approval_source identifies who or what the client reports made this approval decision.
+	// Informational only: the value is client-provided and is not verified server-side.
+	ApprovalSource *Approval_ApprovalSource `protobuf:"varint,4,opt,name=approval_source,proto3,enum=Approval_ApprovalSource,oneof" json:"approval_source,omitempty"`
 }
 
 func (x *Approval_Approved) Reset() {
@@ -3276,6 +3349,13 @@ func (x *Approval_Approved) GetToolArgsJson() string {
 		return *x.ToolArgsJson
 	}
 	return ""
+}
+
+func (x *Approval_Approved) GetApprovalSource() Approval_ApprovalSource {
+	if x != nil && x.ApprovalSource != nil {
+		return *x.ApprovalSource
+	}
+	return Approval_APPROVAL_SOURCE_UNSPECIFIED
 }
 
 // Rejected signals that the user has rejected the pending action.
@@ -3698,14 +3778,14 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x64, 0x61, 0x74, 0x61, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x48, 0x02, 0x52, 0x08, 0x6d, 0x65,
 	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x88, 0x01, 0x01, 0x42, 0x05, 0x0a, 0x03, 0x5f, 0x69, 0x64,
 	0x42, 0x0a, 0x0a, 0x08, 0x5f, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x42, 0x0b, 0x0a, 0x09,
-	0x5f, 0x6d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x22, 0xff, 0x02, 0x0a, 0x08, 0x41, 0x70,
+	0x5f, 0x6d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x22, 0x9f, 0x05, 0x0a, 0x08, 0x41, 0x70,
 	0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x12, 0x30, 0x0a, 0x08, 0x61, 0x70, 0x70, 0x72, 0x6f, 0x76,
 	0x61, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x12, 0x2e, 0x41, 0x70, 0x70, 0x72, 0x6f,
 	0x76, 0x61, 0x6c, 0x2e, 0x41, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x65, 0x64, 0x48, 0x00, 0x52, 0x08,
 	0x61, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x12, 0x32, 0x0a, 0x09, 0x72, 0x65, 0x6a, 0x65,
 	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x12, 0x2e, 0x41, 0x70,
 	0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x2e, 0x52, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x65, 0x64, 0x48,
-	0x00, 0x52, 0x09, 0x72, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x1a, 0xc4, 0x01, 0x0a,
+	0x00, 0x52, 0x09, 0x72, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x1a, 0xa1, 0x02, 0x0a,
 	0x08, 0x41, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x65, 0x64, 0x12, 0x31, 0x0a, 0x11, 0x72, 0x65, 0x6d,
 	0x65, 0x6d, 0x62, 0x65, 0x72, 0x5f, 0x61, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x18, 0x01,
 	0x20, 0x01, 0x28, 0x08, 0x48, 0x00, 0x52, 0x11, 0x72, 0x65, 0x6d, 0x65, 0x6d, 0x62, 0x65, 0x72,
@@ -3714,14 +3794,32 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x01, 0x52, 0x09, 0x74, 0x6f, 0x6f, 0x6c, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x88, 0x01, 0x01, 0x12,
 	0x2b, 0x0a, 0x0e, 0x74, 0x6f, 0x6f, 0x6c, 0x5f, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x6a, 0x73, 0x6f,
 	0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x48, 0x02, 0x52, 0x0e, 0x74, 0x6f, 0x6f, 0x6c, 0x5f,
-	0x61, 0x72, 0x67, 0x73, 0x5f, 0x6a, 0x73, 0x6f, 0x6e, 0x88, 0x01, 0x01, 0x42, 0x14, 0x0a, 0x12,
-	0x5f, 0x72, 0x65, 0x6d, 0x65, 0x6d, 0x62, 0x65, 0x72, 0x5f, 0x61, 0x70, 0x70, 0x72, 0x6f, 0x76,
-	0x61, 0x6c, 0x42, 0x0c, 0x0a, 0x0a, 0x5f, 0x74, 0x6f, 0x6f, 0x6c, 0x5f, 0x6e, 0x61, 0x6d, 0x65,
-	0x42, 0x11, 0x0a, 0x0f, 0x5f, 0x74, 0x6f, 0x6f, 0x6c, 0x5f, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x6a,
-	0x73, 0x6f, 0x6e, 0x1a, 0x35, 0x0a, 0x08, 0x52, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x65, 0x64, 0x12,
-	0x1d, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
-	0x48, 0x00, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x88, 0x01, 0x01, 0x42, 0x0a,
-	0x0a, 0x08, 0x5f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x0f, 0x0a, 0x0d, 0x75, 0x73,
+	0x61, 0x72, 0x67, 0x73, 0x5f, 0x6a, 0x73, 0x6f, 0x6e, 0x88, 0x01, 0x01, 0x12, 0x47, 0x0a, 0x0f,
+	0x61, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x5f, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x18,
+	0x04, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x18, 0x2e, 0x41, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c,
+	0x2e, 0x41, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x48,
+	0x03, 0x52, 0x0f, 0x61, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x5f, 0x73, 0x6f, 0x75, 0x72,
+	0x63, 0x65, 0x88, 0x01, 0x01, 0x42, 0x14, 0x0a, 0x12, 0x5f, 0x72, 0x65, 0x6d, 0x65, 0x6d, 0x62,
+	0x65, 0x72, 0x5f, 0x61, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x42, 0x0c, 0x0a, 0x0a, 0x5f,
+	0x74, 0x6f, 0x6f, 0x6c, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x42, 0x11, 0x0a, 0x0f, 0x5f, 0x74, 0x6f,
+	0x6f, 0x6c, 0x5f, 0x61, 0x72, 0x67, 0x73, 0x5f, 0x6a, 0x73, 0x6f, 0x6e, 0x42, 0x12, 0x0a, 0x10,
+	0x5f, 0x61, 0x70, 0x70, 0x72, 0x6f, 0x76, 0x61, 0x6c, 0x5f, 0x73, 0x6f, 0x75, 0x72, 0x63, 0x65,
+	0x1a, 0x35, 0x0a, 0x08, 0x52, 0x65, 0x6a, 0x65, 0x63, 0x74, 0x65, 0x64, 0x12, 0x1d, 0x0a, 0x07,
+	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x48, 0x00, 0x52,
+	0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x88, 0x01, 0x01, 0x42, 0x0a, 0x0a, 0x08, 0x5f,
+	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0xc0, 0x01, 0x0a, 0x0e, 0x41, 0x70, 0x70, 0x72,
+	0x6f, 0x76, 0x61, 0x6c, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x12, 0x1f, 0x0a, 0x1b, 0x41, 0x50,
+	0x50, 0x52, 0x4f, 0x56, 0x41, 0x4c, 0x5f, 0x53, 0x4f, 0x55, 0x52, 0x43, 0x45, 0x5f, 0x55, 0x4e,
+	0x53, 0x50, 0x45, 0x43, 0x49, 0x46, 0x49, 0x45, 0x44, 0x10, 0x00, 0x12, 0x21, 0x0a, 0x1d, 0x41,
+	0x50, 0x50, 0x52, 0x4f, 0x56, 0x41, 0x4c, 0x5f, 0x53, 0x4f, 0x55, 0x52, 0x43, 0x45, 0x5f, 0x55,
+	0x53, 0x45, 0x52, 0x5f, 0x45, 0x58, 0x50, 0x4c, 0x49, 0x43, 0x49, 0x54, 0x10, 0x01, 0x12, 0x23,
+	0x0a, 0x1f, 0x41, 0x50, 0x50, 0x52, 0x4f, 0x56, 0x41, 0x4c, 0x5f, 0x53, 0x4f, 0x55, 0x52, 0x43,
+	0x45, 0x5f, 0x50, 0x52, 0x45, 0x54, 0x4f, 0x4f, 0x4c, 0x55, 0x53, 0x45, 0x5f, 0x48, 0x4f, 0x4f,
+	0x4b, 0x10, 0x02, 0x12, 0x1d, 0x0a, 0x19, 0x41, 0x50, 0x50, 0x52, 0x4f, 0x56, 0x41, 0x4c, 0x5f,
+	0x53, 0x4f, 0x55, 0x52, 0x43, 0x45, 0x5f, 0x41, 0x55, 0x54, 0x4f, 0x5f, 0x4d, 0x4f, 0x44, 0x45,
+	0x10, 0x03, 0x12, 0x26, 0x0a, 0x22, 0x41, 0x50, 0x50, 0x52, 0x4f, 0x56, 0x41, 0x4c, 0x5f, 0x53,
+	0x4f, 0x55, 0x52, 0x43, 0x45, 0x5f, 0x50, 0x52, 0x45, 0x41, 0x50, 0x50, 0x52, 0x4f, 0x56, 0x45,
+	0x44, 0x5f, 0x43, 0x4f, 0x4e, 0x46, 0x49, 0x47, 0x10, 0x04, 0x42, 0x0f, 0x0a, 0x0d, 0x75, 0x73,
 	0x65, 0x72, 0x5f, 0x64, 0x65, 0x63, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x2f, 0x0a, 0x05, 0x4d,
 	0x6b, 0x64, 0x69, 0x72, 0x12, 0x26, 0x0a, 0x0e, 0x64, 0x69, 0x72, 0x65, 0x63, 0x74, 0x6f, 0x72,
 	0x79, 0x5f, 0x70, 0x61, 0x74, 0x68, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x64, 0x69,
@@ -3829,119 +3927,122 @@ func file_contract_contract_proto_rawDescGZIP() []byte {
 	return file_contract_contract_proto_rawDescData
 }
 
+var file_contract_contract_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_contract_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_contract_contract_proto_goTypes = []any{
-	(*ClientEvent)(nil),                // 0: ClientEvent
-	(*StartWorkflowRequest)(nil),       // 1: StartWorkflowRequest
-	(*ActionResponse)(nil),             // 2: ActionResponse
-	(*HeartbeatRequest)(nil),           // 3: HeartbeatRequest
-	(*StopWorkflowRequest)(nil),        // 4: StopWorkflowRequest
-	(*PlainTextResponse)(nil),          // 5: PlainTextResponse
-	(*HttpResponse)(nil),               // 6: HttpResponse
-	(*Action)(nil),                     // 7: Action
-	(*TrackLlmCallForSelfHosted)(nil),  // 8: TrackLlmCallForSelfHosted
-	(*RunShellCommand)(nil),            // 9: RunShellCommand
-	(*RunCommandAction)(nil),           // 10: RunCommandAction
-	(*ReadFile)(nil),                   // 11: ReadFile
-	(*ReadFiles)(nil),                  // 12: ReadFiles
-	(*WriteFile)(nil),                  // 13: WriteFile
-	(*EditFile)(nil),                   // 14: EditFile
-	(*RunHTTPRequest)(nil),             // 15: RunHTTPRequest
-	(*RunGitCommand)(nil),              // 16: RunGitCommand
-	(*GenerateTokenRequest)(nil),       // 17: GenerateTokenRequest
-	(*GenerateTokenResponse)(nil),      // 18: GenerateTokenResponse
-	(*Capability)(nil),                 // 19: Capability
-	(*ListCapabilitiesRequest)(nil),    // 20: ListCapabilitiesRequest
-	(*ListCapabilitiesResponse)(nil),   // 21: ListCapabilitiesResponse
-	(*ListToolsRequest)(nil),           // 22: ListToolsRequest
-	(*ListToolsResponse)(nil),          // 23: ListToolsResponse
-	(*ListFlowsRequest)(nil),           // 24: ListFlowsRequest
-	(*ListFlowsRequestFilter)(nil),     // 25: ListFlowsRequestFilter
-	(*ListFlowsResponse)(nil),          // 26: ListFlowsResponse
-	(*TokenBreakdown)(nil),             // 27: TokenBreakdown
-	(*NewCheckpoint)(nil),              // 28: NewCheckpoint
-	(*ListDirectory)(nil),              // 29: ListDirectory
-	(*Grep)(nil),                       // 30: Grep
-	(*FindFiles)(nil),                  // 31: FindFiles
-	(*Icon)(nil),                       // 32: Icon
-	(*ToolAnnotations)(nil),            // 33: ToolAnnotations
-	(*McpTool)(nil),                    // 34: McpTool
-	(*Icons)(nil),                      // 35: Icons
-	(*RunMCPTool)(nil),                 // 36: RunMCPTool
-	(*AdditionalContext)(nil),          // 37: AdditionalContext
-	(*Approval)(nil),                   // 38: Approval
-	(*Mkdir)(nil),                      // 39: Mkdir
-	(*OsInformationContext)(nil),       // 40: OsInformationContext
-	(*ShellInformationContext)(nil),    // 41: ShellInformationContext
-	(*TrackSelfHostedClientEvent)(nil), // 42: TrackSelfHostedClientEvent
-	(*TrackSelfHostedAction)(nil),      // 43: TrackSelfHostedAction
-	(*ValidateFlowConfigRequest)(nil),  // 44: ValidateFlowConfigRequest
-	(*ValidateFlowConfigResponse)(nil), // 45: ValidateFlowConfigResponse
-	nil,                                // 46: HttpResponse.HeadersEntry
-	nil,                                // 47: NewCheckpoint.AgentContextUsageEntry
-	(*Approval_Approved)(nil),          // 48: Approval.Approved
-	(*Approval_Rejected)(nil),          // 49: Approval.Rejected
-	(*structpb.Struct)(nil),            // 50: google.protobuf.Struct
+	(Approval_ApprovalSource)(0),       // 0: Approval.ApprovalSource
+	(*ClientEvent)(nil),                // 1: ClientEvent
+	(*StartWorkflowRequest)(nil),       // 2: StartWorkflowRequest
+	(*ActionResponse)(nil),             // 3: ActionResponse
+	(*HeartbeatRequest)(nil),           // 4: HeartbeatRequest
+	(*StopWorkflowRequest)(nil),        // 5: StopWorkflowRequest
+	(*PlainTextResponse)(nil),          // 6: PlainTextResponse
+	(*HttpResponse)(nil),               // 7: HttpResponse
+	(*Action)(nil),                     // 8: Action
+	(*TrackLlmCallForSelfHosted)(nil),  // 9: TrackLlmCallForSelfHosted
+	(*RunShellCommand)(nil),            // 10: RunShellCommand
+	(*RunCommandAction)(nil),           // 11: RunCommandAction
+	(*ReadFile)(nil),                   // 12: ReadFile
+	(*ReadFiles)(nil),                  // 13: ReadFiles
+	(*WriteFile)(nil),                  // 14: WriteFile
+	(*EditFile)(nil),                   // 15: EditFile
+	(*RunHTTPRequest)(nil),             // 16: RunHTTPRequest
+	(*RunGitCommand)(nil),              // 17: RunGitCommand
+	(*GenerateTokenRequest)(nil),       // 18: GenerateTokenRequest
+	(*GenerateTokenResponse)(nil),      // 19: GenerateTokenResponse
+	(*Capability)(nil),                 // 20: Capability
+	(*ListCapabilitiesRequest)(nil),    // 21: ListCapabilitiesRequest
+	(*ListCapabilitiesResponse)(nil),   // 22: ListCapabilitiesResponse
+	(*ListToolsRequest)(nil),           // 23: ListToolsRequest
+	(*ListToolsResponse)(nil),          // 24: ListToolsResponse
+	(*ListFlowsRequest)(nil),           // 25: ListFlowsRequest
+	(*ListFlowsRequestFilter)(nil),     // 26: ListFlowsRequestFilter
+	(*ListFlowsResponse)(nil),          // 27: ListFlowsResponse
+	(*TokenBreakdown)(nil),             // 28: TokenBreakdown
+	(*NewCheckpoint)(nil),              // 29: NewCheckpoint
+	(*ListDirectory)(nil),              // 30: ListDirectory
+	(*Grep)(nil),                       // 31: Grep
+	(*FindFiles)(nil),                  // 32: FindFiles
+	(*Icon)(nil),                       // 33: Icon
+	(*ToolAnnotations)(nil),            // 34: ToolAnnotations
+	(*McpTool)(nil),                    // 35: McpTool
+	(*Icons)(nil),                      // 36: Icons
+	(*RunMCPTool)(nil),                 // 37: RunMCPTool
+	(*AdditionalContext)(nil),          // 38: AdditionalContext
+	(*Approval)(nil),                   // 39: Approval
+	(*Mkdir)(nil),                      // 40: Mkdir
+	(*OsInformationContext)(nil),       // 41: OsInformationContext
+	(*ShellInformationContext)(nil),    // 42: ShellInformationContext
+	(*TrackSelfHostedClientEvent)(nil), // 43: TrackSelfHostedClientEvent
+	(*TrackSelfHostedAction)(nil),      // 44: TrackSelfHostedAction
+	(*ValidateFlowConfigRequest)(nil),  // 45: ValidateFlowConfigRequest
+	(*ValidateFlowConfigResponse)(nil), // 46: ValidateFlowConfigResponse
+	nil,                                // 47: HttpResponse.HeadersEntry
+	nil,                                // 48: NewCheckpoint.AgentContextUsageEntry
+	(*Approval_Approved)(nil),          // 49: Approval.Approved
+	(*Approval_Rejected)(nil),          // 50: Approval.Rejected
+	(*structpb.Struct)(nil),            // 51: google.protobuf.Struct
 }
 var file_contract_contract_proto_depIdxs = []int32{
-	1,  // 0: ClientEvent.startRequest:type_name -> StartWorkflowRequest
-	2,  // 1: ClientEvent.actionResponse:type_name -> ActionResponse
-	3,  // 2: ClientEvent.heartbeat:type_name -> HeartbeatRequest
-	4,  // 3: ClientEvent.stopWorkflow:type_name -> StopWorkflowRequest
-	34, // 4: StartWorkflowRequest.mcpTools:type_name -> McpTool
-	37, // 5: StartWorkflowRequest.additional_context:type_name -> AdditionalContext
-	38, // 6: StartWorkflowRequest.approval:type_name -> Approval
-	50, // 7: StartWorkflowRequest.flowConfig:type_name -> google.protobuf.Struct
-	5,  // 8: ActionResponse.plainTextResponse:type_name -> PlainTextResponse
-	6,  // 9: ActionResponse.httpResponse:type_name -> HttpResponse
-	46, // 10: HttpResponse.headers:type_name -> HttpResponse.HeadersEntry
-	10, // 11: Action.runCommand:type_name -> RunCommandAction
-	15, // 12: Action.runHTTPRequest:type_name -> RunHTTPRequest
-	11, // 13: Action.runReadFile:type_name -> ReadFile
-	13, // 14: Action.runWriteFile:type_name -> WriteFile
-	16, // 15: Action.runGitCommand:type_name -> RunGitCommand
-	14, // 16: Action.runEditFile:type_name -> EditFile
-	28, // 17: Action.newCheckpoint:type_name -> NewCheckpoint
-	29, // 18: Action.listDirectory:type_name -> ListDirectory
-	30, // 19: Action.grep:type_name -> Grep
-	31, // 20: Action.findFiles:type_name -> FindFiles
-	36, // 21: Action.runMCPTool:type_name -> RunMCPTool
-	39, // 22: Action.mkdir:type_name -> Mkdir
-	12, // 23: Action.runReadFiles:type_name -> ReadFiles
-	9,  // 24: Action.runShellCommand:type_name -> RunShellCommand
-	8,  // 25: Action.trackLlmCallForSelfHosted:type_name -> TrackLlmCallForSelfHosted
-	19, // 26: ListCapabilitiesResponse.capabilities:type_name -> Capability
-	50, // 27: ListToolsResponse.tools:type_name -> google.protobuf.Struct
-	50, // 28: ListToolsResponse.eval_dataset:type_name -> google.protobuf.Struct
-	25, // 29: ListFlowsRequest.filters:type_name -> ListFlowsRequestFilter
-	50, // 30: ListFlowsResponse.configs:type_name -> google.protobuf.Struct
-	47, // 31: NewCheckpoint.agent_context_usage:type_name -> NewCheckpoint.AgentContextUsageEntry
-	35, // 32: McpTool.icons:type_name -> Icons
-	33, // 33: McpTool.annotations:type_name -> ToolAnnotations
-	32, // 34: Icons.items:type_name -> Icon
-	48, // 35: Approval.approval:type_name -> Approval.Approved
-	49, // 36: Approval.rejection:type_name -> Approval.Rejected
-	50, // 37: ValidateFlowConfigRequest.flow_config:type_name -> google.protobuf.Struct
-	27, // 38: NewCheckpoint.AgentContextUsageEntry.value:type_name -> TokenBreakdown
-	0,  // 39: DuoWorkflow.ExecuteWorkflow:input_type -> ClientEvent
-	17, // 40: DuoWorkflow.GenerateToken:input_type -> GenerateTokenRequest
-	20, // 41: DuoWorkflow.ListCapabilities:input_type -> ListCapabilitiesRequest
-	22, // 42: DuoWorkflow.ListTools:input_type -> ListToolsRequest
-	24, // 43: DuoWorkflow.ListFlows:input_type -> ListFlowsRequest
-	42, // 44: DuoWorkflow.TrackSelfHostedExecuteWorkflow:input_type -> TrackSelfHostedClientEvent
-	44, // 45: DuoWorkflow.ValidateFlowConfig:input_type -> ValidateFlowConfigRequest
-	7,  // 46: DuoWorkflow.ExecuteWorkflow:output_type -> Action
-	18, // 47: DuoWorkflow.GenerateToken:output_type -> GenerateTokenResponse
-	21, // 48: DuoWorkflow.ListCapabilities:output_type -> ListCapabilitiesResponse
-	23, // 49: DuoWorkflow.ListTools:output_type -> ListToolsResponse
-	26, // 50: DuoWorkflow.ListFlows:output_type -> ListFlowsResponse
-	43, // 51: DuoWorkflow.TrackSelfHostedExecuteWorkflow:output_type -> TrackSelfHostedAction
-	45, // 52: DuoWorkflow.ValidateFlowConfig:output_type -> ValidateFlowConfigResponse
-	46, // [46:53] is the sub-list for method output_type
-	39, // [39:46] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	2,  // 0: ClientEvent.startRequest:type_name -> StartWorkflowRequest
+	3,  // 1: ClientEvent.actionResponse:type_name -> ActionResponse
+	4,  // 2: ClientEvent.heartbeat:type_name -> HeartbeatRequest
+	5,  // 3: ClientEvent.stopWorkflow:type_name -> StopWorkflowRequest
+	35, // 4: StartWorkflowRequest.mcpTools:type_name -> McpTool
+	38, // 5: StartWorkflowRequest.additional_context:type_name -> AdditionalContext
+	39, // 6: StartWorkflowRequest.approval:type_name -> Approval
+	51, // 7: StartWorkflowRequest.flowConfig:type_name -> google.protobuf.Struct
+	6,  // 8: ActionResponse.plainTextResponse:type_name -> PlainTextResponse
+	7,  // 9: ActionResponse.httpResponse:type_name -> HttpResponse
+	47, // 10: HttpResponse.headers:type_name -> HttpResponse.HeadersEntry
+	11, // 11: Action.runCommand:type_name -> RunCommandAction
+	16, // 12: Action.runHTTPRequest:type_name -> RunHTTPRequest
+	12, // 13: Action.runReadFile:type_name -> ReadFile
+	14, // 14: Action.runWriteFile:type_name -> WriteFile
+	17, // 15: Action.runGitCommand:type_name -> RunGitCommand
+	15, // 16: Action.runEditFile:type_name -> EditFile
+	29, // 17: Action.newCheckpoint:type_name -> NewCheckpoint
+	30, // 18: Action.listDirectory:type_name -> ListDirectory
+	31, // 19: Action.grep:type_name -> Grep
+	32, // 20: Action.findFiles:type_name -> FindFiles
+	37, // 21: Action.runMCPTool:type_name -> RunMCPTool
+	40, // 22: Action.mkdir:type_name -> Mkdir
+	13, // 23: Action.runReadFiles:type_name -> ReadFiles
+	10, // 24: Action.runShellCommand:type_name -> RunShellCommand
+	9,  // 25: Action.trackLlmCallForSelfHosted:type_name -> TrackLlmCallForSelfHosted
+	20, // 26: ListCapabilitiesResponse.capabilities:type_name -> Capability
+	51, // 27: ListToolsResponse.tools:type_name -> google.protobuf.Struct
+	51, // 28: ListToolsResponse.eval_dataset:type_name -> google.protobuf.Struct
+	26, // 29: ListFlowsRequest.filters:type_name -> ListFlowsRequestFilter
+	51, // 30: ListFlowsResponse.configs:type_name -> google.protobuf.Struct
+	48, // 31: NewCheckpoint.agent_context_usage:type_name -> NewCheckpoint.AgentContextUsageEntry
+	36, // 32: McpTool.icons:type_name -> Icons
+	34, // 33: McpTool.annotations:type_name -> ToolAnnotations
+	33, // 34: Icons.items:type_name -> Icon
+	49, // 35: Approval.approval:type_name -> Approval.Approved
+	50, // 36: Approval.rejection:type_name -> Approval.Rejected
+	51, // 37: ValidateFlowConfigRequest.flow_config:type_name -> google.protobuf.Struct
+	28, // 38: NewCheckpoint.AgentContextUsageEntry.value:type_name -> TokenBreakdown
+	0,  // 39: Approval.Approved.approval_source:type_name -> Approval.ApprovalSource
+	1,  // 40: DuoWorkflow.ExecuteWorkflow:input_type -> ClientEvent
+	18, // 41: DuoWorkflow.GenerateToken:input_type -> GenerateTokenRequest
+	21, // 42: DuoWorkflow.ListCapabilities:input_type -> ListCapabilitiesRequest
+	23, // 43: DuoWorkflow.ListTools:input_type -> ListToolsRequest
+	25, // 44: DuoWorkflow.ListFlows:input_type -> ListFlowsRequest
+	43, // 45: DuoWorkflow.TrackSelfHostedExecuteWorkflow:input_type -> TrackSelfHostedClientEvent
+	45, // 46: DuoWorkflow.ValidateFlowConfig:input_type -> ValidateFlowConfigRequest
+	8,  // 47: DuoWorkflow.ExecuteWorkflow:output_type -> Action
+	19, // 48: DuoWorkflow.GenerateToken:output_type -> GenerateTokenResponse
+	22, // 49: DuoWorkflow.ListCapabilities:output_type -> ListCapabilitiesResponse
+	24, // 50: DuoWorkflow.ListTools:output_type -> ListToolsResponse
+	27, // 51: DuoWorkflow.ListFlows:output_type -> ListFlowsResponse
+	44, // 52: DuoWorkflow.TrackSelfHostedExecuteWorkflow:output_type -> TrackSelfHostedAction
+	46, // 53: DuoWorkflow.ValidateFlowConfig:output_type -> ValidateFlowConfigResponse
+	47, // [47:54] is the sub-list for method output_type
+	40, // [40:47] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_contract_contract_proto_init() }
@@ -4000,13 +4101,14 @@ func file_contract_contract_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_contract_contract_proto_rawDesc,
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   50,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_contract_contract_proto_goTypes,
 		DependencyIndexes: file_contract_contract_proto_depIdxs,
+		EnumInfos:         file_contract_contract_proto_enumTypes,
 		MessageInfos:      file_contract_contract_proto_msgTypes,
 	}.Build()
 	File_contract_contract_proto = out.File

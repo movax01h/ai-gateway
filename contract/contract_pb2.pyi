@@ -1,5 +1,6 @@
 from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
@@ -411,15 +412,29 @@ class AdditionalContext(_message.Message):
 
 class Approval(_message.Message):
     __slots__ = ("approval", "rejection")
+    class ApprovalSource(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+        __slots__ = ()
+        APPROVAL_SOURCE_UNSPECIFIED: _ClassVar[Approval.ApprovalSource]
+        APPROVAL_SOURCE_USER_EXPLICIT: _ClassVar[Approval.ApprovalSource]
+        APPROVAL_SOURCE_PRETOOLUSE_HOOK: _ClassVar[Approval.ApprovalSource]
+        APPROVAL_SOURCE_AUTO_MODE: _ClassVar[Approval.ApprovalSource]
+        APPROVAL_SOURCE_PREAPPROVED_CONFIG: _ClassVar[Approval.ApprovalSource]
+    APPROVAL_SOURCE_UNSPECIFIED: Approval.ApprovalSource
+    APPROVAL_SOURCE_USER_EXPLICIT: Approval.ApprovalSource
+    APPROVAL_SOURCE_PRETOOLUSE_HOOK: Approval.ApprovalSource
+    APPROVAL_SOURCE_AUTO_MODE: Approval.ApprovalSource
+    APPROVAL_SOURCE_PREAPPROVED_CONFIG: Approval.ApprovalSource
     class Approved(_message.Message):
-        __slots__ = ("remember_approval", "tool_name", "tool_args_json")
+        __slots__ = ("remember_approval", "tool_name", "tool_args_json", "approval_source")
         REMEMBER_APPROVAL_FIELD_NUMBER: _ClassVar[int]
         TOOL_NAME_FIELD_NUMBER: _ClassVar[int]
         TOOL_ARGS_JSON_FIELD_NUMBER: _ClassVar[int]
+        APPROVAL_SOURCE_FIELD_NUMBER: _ClassVar[int]
         remember_approval: bool
         tool_name: str
         tool_args_json: str
-        def __init__(self, remember_approval: bool = ..., tool_name: _Optional[str] = ..., tool_args_json: _Optional[str] = ...) -> None: ...
+        approval_source: Approval.ApprovalSource
+        def __init__(self, remember_approval: bool = ..., tool_name: _Optional[str] = ..., tool_args_json: _Optional[str] = ..., approval_source: _Optional[_Union[Approval.ApprovalSource, str]] = ...) -> None: ...
     class Rejected(_message.Message):
         __slots__ = ("message",)
         MESSAGE_FIELD_NUMBER: _ClassVar[int]

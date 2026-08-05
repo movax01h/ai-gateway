@@ -12,6 +12,7 @@ from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import IOKey, RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import (
+    ApprovalSource,
     MessageTypeEnum,
     ToolStatus,
     WorkflowStatusEnum,
@@ -50,8 +51,9 @@ def mock_toolset_fixture():
     mock_toolset.__getitem__.return_value = mock_tool
 
     # Tools are NOT pre-approved or session-approved by default (require approval).
-    # approval_required is async on Toolset, so the spec makes it an AsyncMock.
-    mock_toolset.approval_required.return_value = True
+    # resolve_approval_source is async on Toolset, so the spec makes it an
+    # AsyncMock; None means "human approval required".
+    mock_toolset.resolve_approval_source.return_value = None
 
     return mock_toolset
 
@@ -383,8 +385,12 @@ class TestToolApprovalRequestNodePreApproved:
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
 
-        # Mock _should_skip_approval to return True for approved_tool
-        with patch.object(node, "_should_skip_approval", return_value=True):
+        # Mock _should_skip_approval to return a source for approved_tool
+        with patch.object(
+            node,
+            "_should_skip_approval",
+            return_value=ApprovalSource.PREAPPROVED_CONFIG,
+        ):
             result = await node.run(state)
 
             # Should set status to EXECUTION for explicit routing
@@ -393,6 +399,94 @@ class TestToolApprovalRequestNodePreApproved:
 
             # Should NOT include ui_chat_log
             assert "ui_chat_log" not in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "pre_approved_tools,toolset_source,expected_source",
+        [
+            (
+                ["test_tool"],
+                ApprovalSource.SESSION_APPROVAL,
+                ApprovalSource.PREAPPROVED_CONFIG,
+            ),
+            ([], ApprovalSource.PREAPPROVED_CONFIG, ApprovalSource.PREAPPROVED_CONFIG),
+            ([], ApprovalSource.SESSION_APPROVAL, ApprovalSource.SESSION_APPROVAL),
+            ([], None, None),
+            ([], UnknownToolError("unknown"), None),
+        ],
+        ids=[
+            "component_pre_approved_short_circuits_toolset",
+            "toolset_privilege_pre_approved",
+            "toolset_session_approved",
+            "not_pre_approved",
+            "unknown_tool_defers_to_validation",
+        ],
+    )
+    async def test_approval_skip_source_resolution_through_run(
+        self,
+        conversation_history_key,
+        status_key,
+        mock_toolset,
+        mock_ui_history,
+        base_flow_state,
+        component_name,
+        mock_ai_message_with_tool_calls,
+        pre_approved_tools,
+        toolset_source,
+        expected_source,
+    ):
+        """Run() skips approval per mechanism and logs the resolved source."""
+        if isinstance(toolset_source, Exception):
+            mock_toolset.resolve_approval_source.side_effect = toolset_source
+        else:
+            mock_toolset.resolve_approval_source.return_value = toolset_source
+
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=pre_approved_tools,
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=mock_ui_history,
+        )
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_with_tool_calls]
+        }
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent."
+                "nodes.tool_approval_request_node.log"
+            ) as mock_log,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.agent."
+                "nodes.tool_approval_request_node.format_tool_display_message"
+            ) as mock_format,
+        ):
+            mock_format.return_value = "Execute test_tool"
+
+            result = await node.run(state)
+
+        if expected_source is None:
+            assert (
+                result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
+            )
+            assert "ui_chat_log" in result
+            mock_log.info.assert_not_called()
+        else:
+            assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+            assert "ui_chat_log" not in result
+            # The skip is logged with the mechanism that granted it.
+            mock_log.info.assert_called_once()
+            assert mock_log.info.call_args.kwargs["approval_source"] == expected_source
+
+        # Component-level pre-approval must short-circuit before any toolset check.
+        if pre_approved_tools:
+            mock_toolset.resolve_approval_source.assert_not_awaited()
 
 
 class TestToolApprovalRequestNodeSessionApprovals:
@@ -408,17 +502,29 @@ class TestToolApprovalRequestNodeSessionApprovals:
         mock_ai_message_with_tool_calls,
     ):
         """Test that a session-approved tool call skips approval entirely."""
-        mock_toolset.approval_required.return_value = False
+        mock_toolset.resolve_approval_source.return_value = (
+            ApprovalSource.SESSION_APPROVAL
+        )
 
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_ai_message_with_tool_calls]
         }
 
-        result = await tool_approval_request_node.run(state)
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent."
+            "nodes.tool_approval_request_node.log"
+        ) as mock_log:
+            result = await tool_approval_request_node.run(state)
 
-        mock_toolset.approval_required.assert_awaited_once_with(
+        mock_toolset.resolve_approval_source.assert_awaited_once_with(
             "test_tool", {"param": "value"}
+        )
+        # The skip is logged with the session-approval provenance.
+        mock_log.info.assert_called_once()
+        assert (
+            mock_log.info.call_args.kwargs["approval_source"]
+            == ApprovalSource.SESSION_APPROVAL
         )
         assert result["status"] == WorkflowStatusEnum.EXECUTION.value
         assert "ui_chat_log" not in result
@@ -439,8 +545,8 @@ class TestToolApprovalRequestNodeSessionApprovals:
         ]
 
         # Only the first call is session-approved
-        mock_toolset.approval_required.side_effect = lambda _name, args: (
-            args != {"cmd": "approved"}
+        mock_toolset.resolve_approval_source.side_effect = lambda _name, args: (
+            ApprovalSource.SESSION_APPROVAL if args == {"cmd": "approved"} else None
         )
 
         state = base_flow_state.copy()
@@ -457,7 +563,7 @@ class TestToolApprovalRequestNodeSessionApprovals:
         assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
         assert len(result["ui_chat_log"]) == 1
         assert result["ui_chat_log"][0]["message_id"] == "call_2"
-        assert mock_toolset.approval_required.await_count == 2
+        assert mock_toolset.resolve_approval_source.await_count == 2
 
     @pytest.mark.asyncio
     async def test_component_pre_approved_tools_skip_toolset_check(
@@ -491,7 +597,7 @@ class TestToolApprovalRequestNodeSessionApprovals:
 
         result = await node.run(state)
 
-        mock_toolset.approval_required.assert_not_awaited()
+        mock_toolset.resolve_approval_source.assert_not_awaited()
         assert result["status"] == WorkflowStatusEnum.EXECUTION.value
         assert "ui_chat_log" not in result
 
@@ -509,7 +615,7 @@ class TestToolApprovalRequestNodeSessionApprovals:
         Unknown tools are rejected by _filter_tool_calls before the approval check runs, so this path should be
         unreachable; if it is ever hit, the call must fail toward requiring approval.
         """
-        mock_toolset.approval_required.side_effect = UnknownToolError("nope")
+        mock_toolset.resolve_approval_source.side_effect = UnknownToolError("nope")
 
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {

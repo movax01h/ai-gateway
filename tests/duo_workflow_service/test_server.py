@@ -2121,6 +2121,14 @@ def test_clean_start_request(has_flow_config):
     )
     if has_flow_config:
         start_request.flowConfig.CopyFrom(struct_pb2.Struct())
+    start_request.approval.CopyFrom(
+        contract_pb2.Approval(
+            approval=contract_pb2.Approval.Approved(
+                tool_name="create_file_with_contents",
+                tool_args_json='{"contents": "sensitive user content"}',
+            )
+        )
+    )
     client_event = contract_pb2.ClientEvent(startRequest=start_request)
 
     # Call the clean_start_request function
@@ -2139,6 +2147,8 @@ def test_clean_start_request(has_flow_config):
     assert cleaned_request.startRequest.goal == ""
     assert len(cleaned_request.startRequest.additional_context) == 0
     assert not cleaned_request.startRequest.HasField("flowConfig")
+    assert not cleaned_request.startRequest.HasField("approval")
+    assert client_event.startRequest.HasField("approval")
 
     # Verify hasFlowConfig reflects the original state
     assert extra["hasFlowConfig"] is has_flow_config

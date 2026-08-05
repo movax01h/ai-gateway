@@ -22,6 +22,8 @@ def clean_start_request(
     request.startRequest.ClearField("flowConfig")
     request.startRequest.ClearField("workflowMetadata")
     request.startRequest.ClearField("additional_context")
+    # approval.approval.tool_args_json can carry user file contents
+    request.startRequest.ClearField("approval")
     return request, extra
 
 

@@ -5,6 +5,7 @@ import structlog
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 
+from contract import contract_pb2
 from duo_workflow_service.conversation.trimmer import LEGACY_MAX_CONTEXT_TOKENS
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
@@ -71,6 +72,39 @@ class SlashCommandStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
     FAILURE = "failure"
+
+
+class ApprovalSource(StrEnum):
+    """Identifies who or what made a tool call approval decision.
+
+    Client-reported values are informational only and are not verified server-side.
+    """
+
+    USER_EXPLICIT = "user_explicit"
+    PRETOOLUSE_HOOK = "pretooluse_hook"
+    AUTO_MODE = "auto_mode"
+    PREAPPROVED_CONFIG = "preapproved_config"
+    # Server-produced only (never client-reported): the skip was granted by a
+    # session approval persisted on the GitLab instance (a prior
+    # remember_approval replayed server-side). Python-only for now; not yet
+    # mirrored in contract.proto (a separate follow-up promotes it to the wire).
+    SESSION_APPROVAL = "session_approval"
+
+    @classmethod
+    def from_proto(cls, value: int) -> str:
+        """Map a contract_pb2.Approval.ApprovalSource value to a loggable string.
+
+        Proto enum values carry an APPROVAL_SOURCE_ prefix (proto enum names share the enclosing message's namespace);
+        it is stripped here so the StrEnum members stay unprefixed. Proto3 enums are open: a newer client may send a
+        value this build doesn't know, so unknown values map to "unknown(N)" instead of raising.
+        """
+        try:
+            name = contract_pb2.Approval.ApprovalSource.Name(value)
+        except ValueError:
+            return f"unknown({value})"
+        name = name.removeprefix("APPROVAL_SOURCE_")
+        member = cls.__members__.get(name)
+        return member.value if member is not None else name.lower()
 
 
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
