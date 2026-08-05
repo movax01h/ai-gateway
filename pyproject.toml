@@ -126,7 +126,7 @@ diff-cover = "^10.2.0"
 optional = true
 
 [tool.poetry.group.lint.dependencies]
-ruff = "^0.15.14"
+ruff = "^0.16.0"
 pylint = "^4.0.5"
 astroid = "^4.0.4"
 mypy = "^2.0.0"

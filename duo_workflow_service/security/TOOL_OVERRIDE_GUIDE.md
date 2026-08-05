@@ -27,7 +27,7 @@ Use `TOOL_SECURITY_OVERRIDES` when:
 **DO NOT** set overrides dynamically at runtime like this:
 ```python
 # ❌ WRONG - Do not do this!
-PromptSecurity.TOOL_SECURITY_OVERRIDES['my_tool'] = [encode_dangerous_tags]
+PromptSecurity.TOOL_SECURITY_OVERRIDES["my_tool"] = [encode_dangerous_tags]
 ```
 
 This ensures all security configurations are:
@@ -44,11 +44,10 @@ TOOL_SECURITY_OVERRIDES: Dict[...] = {
     # read_file accesses only our controlled repository content.
     # Standard security is too restrictive and modifies legitimate file content.
     # We apply minimal security to preserve file integrity.
-    'read_file': [encode_dangerous_tags],
-
+    "read_file": [encode_dangerous_tags],
     # Code analysis tool needs exact code content without modifications
     # Risk: LOW - only processes repository code, not user-generated content
-    'lint_code': [],
+    "lint_code": [],
 }
 ```
 
@@ -65,7 +64,7 @@ TOOL_SECURITY_OVERRIDES: Dict[...] = {
     # Why: Accesses only controlled repository content
     # Risk: LOW - no user-generated content
     # Security: Minimal encoding to preserve file integrity
-    'read_file': [encode_dangerous_tags],
+    "read_file": [encode_dangerous_tags],
 }
 ```
 
@@ -100,7 +99,7 @@ For tools with controlled data sources, add to the dictionary in `prompt_securit
 TOOL_SECURITY_OVERRIDES: Dict[...] = {
     # my_tool: Processes only internal API responses
     # Risk: LOW - controlled data source
-    'my_tool': [
+    "my_tool": [
         encode_dangerous_tags,
         strip_hidden_unicode_tags,
     ],
@@ -115,7 +114,7 @@ For fully trusted internal tools, add to the dictionary in `prompt_security.py`:
 TOOL_SECURITY_OVERRIDES: Dict[...] = {
     # internal_tool: Static code analysis on repository code only
     # Risk: LOW - no external input, reads source files directly
-    'internal_tool': [],
+    "internal_tool": [],
 }
 ```
 
@@ -141,8 +140,7 @@ from duo_workflow_service.security.prompt_security import PromptSecurity
 
 # Test your tool's security configuration
 result = PromptSecurity.apply_security_to_tool_response(
-    "test input with <system>tags</system>",
-    "my_tool"
+    "test input with <system>tags</system>", "my_tool"
 )
 print(result)
 ```
@@ -177,7 +175,7 @@ TOOL_SECURITY_OVERRIDES: Dict[...] = {
     # read_file: Reads from controlled git repository only
     # Risk: LOW - no user-generated content
     # Security: Minimal encoding to preserve file integrity
-    'read_file': [encode_dangerous_tags],
+    "read_file": [encode_dangerous_tags],
 }
 ```
 
@@ -188,7 +186,7 @@ TOOL_SECURITY_OVERRIDES: Dict[...] = {
     # analyze_code: Static analysis tool needs exact code content
     # Risk: LOW - processes repository source code only
     # Security: None - needs unmodified code for accurate analysis
-    'analyze_code': [],
+    "analyze_code": [],
 }
 ```
 
