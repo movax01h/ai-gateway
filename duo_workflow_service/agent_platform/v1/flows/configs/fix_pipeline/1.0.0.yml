@@ -343,6 +343,30 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  - name: "fix_pipeline_new_mr_comment"
+    type: AgentComponent
+    prompt_id: "fix_pipeline_new_mr_comment"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.agent_platform_standard_context.session_owner_id"
+        as: "session_owner_id"
+      - from: "context:fix_pipeline_create_new_mr.tool_responses"
+        as: "create_mr_result"
+        optional: True
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+    max_cycles: 4
+    toolset:
+      - run_command
+      - create_merge_request_note
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
 routers:
   - from: "fetch_failing_bridge_jobs"
     condition:
@@ -406,6 +430,8 @@ routers:
         "failed": "end"
         "default_route": "fix_pipeline_create_new_mr"
   - from: "fix_pipeline_create_new_mr"
+    to: "fix_pipeline_new_mr_comment"
+  - from: "fix_pipeline_new_mr_comment"
     to: "end"
 
 flow:

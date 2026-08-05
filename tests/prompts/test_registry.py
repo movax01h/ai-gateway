@@ -1706,6 +1706,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "fix_pipeline_create_new_mr",
         "fix_pipeline_decide_fix",
         "fix_pipeline_execution",
+        "fix_pipeline_new_mr_comment",
         "fix_pipeline_next_add_comment",
         "fix_pipeline_next_checkout_existing_branch",
         "fix_pipeline_next_code_suggestions",
