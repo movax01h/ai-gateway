@@ -58,6 +58,11 @@ When a new minor GitLab version is released (vX.Y.0-ee), a new branch with the n
 [GitLab container registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284)
 and on [DockerHub](https://hub.docker.com/repository/docker/gitlab/model-gateway/tags).
 
+For Kubernetes based deployments a Helm chart is [maintained and published](https://gitlab.com/gitlab-org/charts/ai-gateway-helm-chart#build-and-publish-assets). We recommend using the latest available [chart version](https://gitlab.com/gitlab-org/charts/ai-gateway-helm-chart/-/packages).
+
+You can configure the `appVersion` to define the specific container image tags to fetch from the [GitLab container registry](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/container_registry/3809284).
+These tags and branches are created by [the script in GitLab-Rails](https://gitlab.com/gitlab-org/gitlab/-/blob/master/scripts/aigw-tagging.sh) that runs in tag pipelines.
+
 ### Releasing patches to previous versions
 
 Stable branches will not be receiving updates from main branch. If a bug at a version needs to be addressed, the developer can cherry-pick the necessary commits, and request a maintainer to bump the PATCH version and create a new release tag, publishing a new image. This allows AI teams to release fixes without getting blocked by GitLab-rails patch release process.
