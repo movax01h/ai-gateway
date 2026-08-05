@@ -5,6 +5,7 @@ from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.tools import (
     MalformedToolCallError,
     Toolset,
@@ -268,16 +269,16 @@ class TestToolset:
             toolset.approved("nonexistent_tool")
 
     @pytest.mark.asyncio
-    async def test_approval_required_unknown_tool_raises(self, toolset):
-        """Test that approval_required raises UnknownToolError for nonexistent tools."""
+    async def test_resolve_approval_source_unknown_tool_raises(self, toolset):
+        """resolve_approval_source raises UnknownToolError for nonexistent tools."""
         with pytest.raises(UnknownToolError):
-            await toolset.approval_required("nonexistent_tool")
+            await toolset.resolve_approval_source("nonexistent_tool")
 
     @pytest.mark.asyncio
-    async def test_approval_required_pre_approved_skips_policy(
+    async def test_resolve_approval_source_pre_approved_skips_policy(
         self, mock_all_tools, mock_pre_approved
     ):
-        """Test that pre-approved tools never require approval or consult the policy."""
+        """Pre-approved tools report PREAPPROVED_CONFIG and never consult the policy."""
         policy = Mock()
         policy.approval_required = AsyncMock(return_value=True)
         toolset = Toolset(
@@ -286,22 +287,36 @@ class TestToolset:
             approval_policy=policy,
         )
 
-        assert await toolset.approval_required("mock_tool_pre_approved") is False
+        assert (
+            await toolset.resolve_approval_source("mock_tool_pre_approved")
+            == ApprovalSource.PREAPPROVED_CONFIG
+        )
         policy.approval_required.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_approval_required_without_policy(self, toolset):
-        """Test that non-pre-approved tools require approval when no policy is set."""
-        assert await toolset.approval_required("mock_tool") is True
+    async def test_resolve_approval_source_without_policy(self, toolset):
+        """Non-pre-approved tools require approval (None) when no policy is set."""
+        assert await toolset.resolve_approval_source("mock_tool") is None
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("policy_result", [True, False])
-    async def test_approval_required_delegates_to_policy(
-        self, mock_all_tools, mock_pre_approved, policy_result
+    @pytest.mark.parametrize(
+        "policy_requires_approval,expected_source",
+        [
+            (True, None),
+            (False, ApprovalSource.SESSION_APPROVAL),
+        ],
+        ids=["policy_requires_approval", "policy_session_approves"],
+    )
+    async def test_resolve_approval_source_delegates_to_policy(
+        self,
+        mock_all_tools,
+        mock_pre_approved,
+        policy_requires_approval,
+        expected_source,
     ):
-        """Test that non-pre-approved tools delegate to the approval policy."""
+        """Non-pre-approved tools delegate to the policy; a policy skip is SESSION_APPROVAL."""
         policy = Mock()
-        policy.approval_required = AsyncMock(return_value=policy_result)
+        policy.approval_required = AsyncMock(return_value=policy_requires_approval)
         toolset = Toolset(
             pre_approved=mock_pre_approved,
             all_tools=mock_all_tools,
@@ -309,7 +324,10 @@ class TestToolset:
         )
         tool_args = {"param": "value"}
 
-        assert await toolset.approval_required("mock_tool", tool_args) is policy_result
+        assert (
+            await toolset.resolve_approval_source("mock_tool", tool_args)
+            == expected_source
+        )
         policy.approval_required.assert_awaited_once_with("mock_tool", tool_args)
 
     def test_validate_tool_call_base_tool(self, toolset):

@@ -316,17 +316,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         flow_type: GLReportingEventContext,
     ):
         """Test _resume_command returns correct FlowEvent based on approval decision."""
-        # Create approval mock if decision is provided
+        # Create approval if decision is provided
         approval = None
-        if approval_decision:
-            approval = Mock(spec=contract_pb2.Approval)
-            approval.WhichOneof.return_value = approval_decision
-
-            # Mock the rejection attribute for REJECT decision
-            if approval_decision == UserDecision.REJECT:
-                mock_rejection = Mock()
-                mock_rejection.message = expected_message
-                approval.rejection = mock_rejection
+        if approval_decision == UserDecision.APPROVE:
+            approval = contract_pb2.Approval(approval=contract_pb2.Approval.Approved())
+        elif approval_decision == UserDecision.REJECT:
+            approval = contract_pb2.Approval(
+                rejection=contract_pb2.Approval.Rejected(message=expected_message)
+            )
 
         with (
             self.mock_components(["AgentComponent"]),
@@ -646,8 +643,10 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_checkpointer,
     ):
         """Test _resume_command raises ValueError for invalid approval decision."""
-        # Create approval mock with invalid decision
+        # Create approval mock with invalid decision (impossible with a real
+        # proto, whose oneof only yields "approval"/"rejection"/None)
         approval = Mock(spec=contract_pb2.Approval)
+        approval.HasField.return_value = False
         approval.WhichOneof.return_value = "invalid_decision"
 
         with (

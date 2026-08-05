@@ -2,8 +2,10 @@ from typing import Dict, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
+from contract import contract_pb2
 from duo_workflow_service.entities.state import (
     TOOL_RESPONSE_MAX_DISPLAY_MSG,
+    ApprovalSource,
     MessageTypeEnum,
     ToolInfo,
     UiChatLog,
@@ -11,6 +13,51 @@ from duo_workflow_service.entities.state import (
     _ui_chat_log_reducer,
     build_tool_info,
 )
+
+
+class TestApprovalSourceFromProto:
+    """Documents the mapping between the proto enum and the StrEnum.
+
+    Client-reportable sources map 1:1 with the proto enum. Server-only sources are Python-only (never cross the wire)
+    and are exempted below; promoting one to the proto is a deliberate, separately-reviewable change.
+    """
+
+    # Members produced only server-side; intentionally absent from the proto
+    # enum because they are never client-reported. See ApprovalSource docs.
+    SERVER_ONLY_MEMBERS = {ApprovalSource.SESSION_APPROVAL}
+
+    def test_every_proto_value_maps_to_a_loggable_string(self):
+        for name, value in contract_pb2.Approval.ApprovalSource.items():
+            mapped = ApprovalSource.from_proto(value)
+            short = name.removeprefix("APPROVAL_SOURCE_")
+            if short == "UNSPECIFIED":
+                assert mapped == "unspecified"
+            else:
+                assert mapped == ApprovalSource[short].value
+
+    def test_every_proto_value_is_prefixed(self):
+        for name in contract_pb2.Approval.ApprovalSource.keys():
+            assert name.startswith("APPROVAL_SOURCE_"), (
+                f"{name} lacks the APPROVAL_SOURCE_ prefix; proto enum values "
+                "share the enclosing message's namespace, so keep them prefixed."
+            )
+
+    def test_every_client_reportable_member_has_a_proto_counterpart(self):
+        proto_names = {
+            name.removeprefix("APPROVAL_SOURCE_")
+            for name in contract_pb2.Approval.ApprovalSource.keys()
+        }
+        for member in ApprovalSource:
+            if member in self.SERVER_ONLY_MEMBERS:
+                assert member.name not in proto_names, (
+                    f"{member.name} is documented as server-only but now exists "
+                    "in the proto; promote it deliberately and drop the exemption."
+                )
+                continue
+            assert member.name in proto_names
+
+    def test_unknown_value_does_not_raise(self):
+        assert ApprovalSource.from_proto(99) == "unknown(99)"
 
 
 class TestConversationHistoryReducer:

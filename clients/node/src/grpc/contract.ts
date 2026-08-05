@@ -512,6 +512,74 @@ export interface Approval {
   rejection?: Approval_Rejected | undefined;
 }
 
+/**
+ * ApprovalSource identifies who or what the client reports made the approval decision.
+ * Informational only: the value is client-provided and is not verified server-side.
+ *
+ * Values name the proximate decision MECHANISM, not the policy content or its
+ * author: a PreToolUse hook approval is APPROVAL_SOURCE_PRETOOLUSE_HOOK whether the matched
+ * policy is GitLab's distributed default policy or a customer-authored local
+ * policy. Policy provenance (author/origin/version of the matched policy) is
+ * carried separately, never as new enum values. Add values only for genuinely
+ * new decision mechanisms, for example a server-side governance preapproval
+ * that bypasses client approval entirely.
+ */
+export enum Approval_ApprovalSource {
+  /** APPROVAL_SOURCE_UNSPECIFIED - APPROVAL_SOURCE_UNSPECIFIED is the default value when the source is unknown or not set by the client. */
+  APPROVAL_SOURCE_UNSPECIFIED = 0,
+  /** APPROVAL_SOURCE_USER_EXPLICIT - APPROVAL_SOURCE_USER_EXPLICIT indicates a human explicitly approved the action (e.g. clicking "approve" in a UI). */
+  APPROVAL_SOURCE_USER_EXPLICIT = 1,
+  /** APPROVAL_SOURCE_PRETOOLUSE_HOOK - APPROVAL_SOURCE_PRETOOLUSE_HOOK indicates the approval was granted automatically by a PreToolUse hook. */
+  APPROVAL_SOURCE_PRETOOLUSE_HOOK = 2,
+  /** APPROVAL_SOURCE_AUTO_MODE - APPROVAL_SOURCE_AUTO_MODE indicates the approval was granted automatically by auto-mode. */
+  APPROVAL_SOURCE_AUTO_MODE = 3,
+  /** APPROVAL_SOURCE_PREAPPROVED_CONFIG - APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration. */
+  APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4,
+  UNRECOGNIZED = -1,
+}
+
+export function approval_ApprovalSourceFromJSON(object: any): Approval_ApprovalSource {
+  switch (object) {
+    case 0:
+    case "APPROVAL_SOURCE_UNSPECIFIED":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_UNSPECIFIED;
+    case 1:
+    case "APPROVAL_SOURCE_USER_EXPLICIT":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_USER_EXPLICIT;
+    case 2:
+    case "APPROVAL_SOURCE_PRETOOLUSE_HOOK":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_PRETOOLUSE_HOOK;
+    case 3:
+    case "APPROVAL_SOURCE_AUTO_MODE":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_AUTO_MODE;
+    case 4:
+    case "APPROVAL_SOURCE_PREAPPROVED_CONFIG":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_PREAPPROVED_CONFIG;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return Approval_ApprovalSource.UNRECOGNIZED;
+  }
+}
+
+export function approval_ApprovalSourceToJSON(object: Approval_ApprovalSource): string {
+  switch (object) {
+    case Approval_ApprovalSource.APPROVAL_SOURCE_UNSPECIFIED:
+      return "APPROVAL_SOURCE_UNSPECIFIED";
+    case Approval_ApprovalSource.APPROVAL_SOURCE_USER_EXPLICIT:
+      return "APPROVAL_SOURCE_USER_EXPLICIT";
+    case Approval_ApprovalSource.APPROVAL_SOURCE_PRETOOLUSE_HOOK:
+      return "APPROVAL_SOURCE_PRETOOLUSE_HOOK";
+    case Approval_ApprovalSource.APPROVAL_SOURCE_AUTO_MODE:
+      return "APPROVAL_SOURCE_AUTO_MODE";
+    case Approval_ApprovalSource.APPROVAL_SOURCE_PREAPPROVED_CONFIG:
+      return "APPROVAL_SOURCE_PREAPPROVED_CONFIG";
+    case Approval_ApprovalSource.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /** Approved signals that the user has approved the pending action. */
 export interface Approval_Approved {
   /** remember_approval indicates whether this approval should be remembered for future identical actions. */
@@ -523,7 +591,14 @@ export interface Approval_Approved {
     | string
     | undefined;
   /** tool_args_json is the JSON-encoded arguments of the tool invocation that was approved. */
-  tool_args_json?: string | undefined;
+  tool_args_json?:
+    | string
+    | undefined;
+  /**
+   * approval_source identifies who or what the client reports made this approval decision.
+   * Informational only: the value is client-provided and is not verified server-side.
+   */
+  approval_source?: Approval_ApprovalSource | undefined;
 }
 
 /** Rejected signals that the user has rejected the pending action. */
@@ -4537,7 +4612,7 @@ export const Approval: MessageFns<Approval> = {
 };
 
 function createBaseApproval_Approved(): Approval_Approved {
-  return { remember_approval: undefined, tool_name: undefined, tool_args_json: undefined };
+  return { remember_approval: undefined, tool_name: undefined, tool_args_json: undefined, approval_source: undefined };
 }
 
 export const Approval_Approved: MessageFns<Approval_Approved> = {
@@ -4550,6 +4625,9 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     }
     if (message.tool_args_json !== undefined) {
       writer.uint32(26).string(message.tool_args_json);
+    }
+    if (message.approval_source !== undefined) {
+      writer.uint32(32).int32(message.approval_source);
     }
     return writer;
   },
@@ -4585,6 +4663,14 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
           message.tool_args_json = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.approval_source = reader.int32() as any;
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4599,6 +4685,9 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
       remember_approval: isSet(object.remember_approval) ? globalThis.Boolean(object.remember_approval) : undefined,
       tool_name: isSet(object.tool_name) ? globalThis.String(object.tool_name) : undefined,
       tool_args_json: isSet(object.tool_args_json) ? globalThis.String(object.tool_args_json) : undefined,
+      approval_source: isSet(object.approval_source)
+        ? approval_ApprovalSourceFromJSON(object.approval_source)
+        : undefined,
     };
   },
 
@@ -4613,6 +4702,9 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     if (message.tool_args_json !== undefined) {
       obj.tool_args_json = message.tool_args_json;
     }
+    if (message.approval_source !== undefined) {
+      obj.approval_source = approval_ApprovalSourceToJSON(message.approval_source);
+    }
     return obj;
   },
 
@@ -4624,6 +4716,7 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     message.remember_approval = object.remember_approval ?? undefined;
     message.tool_name = object.tool_name ?? undefined;
     message.tool_args_json = object.tool_args_json ?? undefined;
+    message.approval_source = object.approval_source ?? undefined;
     return message;
   },
 };

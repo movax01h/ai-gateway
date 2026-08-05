@@ -2,7 +2,7 @@ __all__ = ["ToolApprovalRequestNode"]
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import structlog.stdlib
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import (
+    ApprovalSource,
     MessageTypeEnum,
     ToolInfo,
     ToolStatus,
@@ -116,12 +117,19 @@ class ToolApprovalRequestNode:
 
         # Filter out pre-approved and session-approved tool calls. Checks may
         # hit the GitLab instance, so run them concurrently across the batch.
-        skip_flags = await asyncio.gather(
+        skip_sources = await asyncio.gather(
             *(self._should_skip_approval(call) for call in valid_calls)
         )
-        needs_approval = [
-            call for call, skip in zip(valid_calls, skip_flags) if not skip
-        ]
+        needs_approval = []
+        for call, source in zip(valid_calls, skip_sources):
+            if source is None:
+                needs_approval.append(call)
+            else:
+                log.info(
+                    "Skipping tool call approval",
+                    tool_name=call["name"],
+                    approval_source=source,
+                )
 
         # If all tools are pre-approved, skip approval entirely
         if not needs_approval:
@@ -166,7 +174,7 @@ class ToolApprovalRequestNode:
 
         return valid_calls, invalid_calls
 
-    async def _should_skip_approval(self, tool_call: dict) -> bool:
+    async def _should_skip_approval(self, tool_call: dict) -> Optional[ApprovalSource]:
         """Check if a tool call should skip approval.
 
         A tool call skips approval if:
@@ -174,6 +182,11 @@ class ToolApprovalRequestNode:
         2. The toolset reports no approval is required for this exact call
             (privilege-level pre-approval or a session approval persisted
             on the GitLab instance)
+
+        Returns the source of the skip (``PREAPPROVED_CONFIG`` for a
+        privilege/component pre-approval, ``SESSION_APPROVAL`` for a session
+        approval persisted on the GitLab instance) if the tool call should
+        skip approval, or None if human approval is still required.
         """
         tool_name = tool_call["name"]
 
@@ -183,18 +196,17 @@ class ToolApprovalRequestNode:
                 "Tool call approval skipped: component pre_approved_tools",
                 tool_name=tool_name,
             )
-            return True
+            return ApprovalSource.PREAPPROVED_CONFIG
 
         try:
-            approval_needed = await self._toolset.approval_required(
+            return await self._toolset.resolve_approval_source(
                 tool_name, tool_call.get("args")
             )
-            return not approval_needed
         except UnknownToolError:
             # Defensive: unknown tools are already rejected by
             # _filter_tool_calls before this point. Fail toward requiring
             # approval anyway.
-            return False
+            return None
 
     def _build_approval_ui_logs(self, tool_calls: list) -> list[UiChatLog]:
         """Build UI chat log entries for tool approval requests."""

@@ -6,6 +6,8 @@ from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, ValidationError
 
+from duo_workflow_service.entities.state import ApprovalSource
+
 log = structlog.stdlib.get_logger(__name__)
 
 ToolType = Union[BaseTool, Type[BaseModel]]
@@ -112,10 +114,10 @@ class Toolset(collections.abc.Mapping):
         """Check if a tool is pre-approved for use.
 
         This only checks static privilege-level pre-approval by name. Use
-        `approval_required` for the full per-call decision, which also
+        `resolve_approval_source` for the full per-call decision, which also
         consults session approvals via the approval policy.
 
-        Deprecated: new callers should use `approval_required`. This method
+        Deprecated: new callers should use `resolve_approval_source`. This method
         is slated for removal together with `ToolsApprovalComponent`, its
         last production caller.
 
@@ -133,22 +135,26 @@ class Toolset(collections.abc.Mapping):
 
         return tool_name in self._pre_approved
 
-    async def approval_required(
+    async def resolve_approval_source(
         self, tool_name: str, tool_args: Optional[dict[Any, Any]] = None
-    ) -> bool:
-        """Check if a specific tool call requires human approval.
+    ) -> Optional[ApprovalSource]:
+        """Resolve the source that lets a specific tool call skip human approval.
 
-        Pre-approved tools never require approval. Other tools are checked
-        against the approval policy, which may consult session approvals
-        persisted on the GitLab instance. See `approved` for the name-only
-        pre-approval check.
+        Pre-approved tools skip approval on privilege grounds. Other tools are
+        checked against the approval policy, which may consult session
+        approvals persisted on the GitLab instance. See `approved` for the
+        name-only pre-approval check.
 
         Args:
             tool_name: The name of the tool to check.
             tool_args: The arguments passed to the tool.
 
         Returns:
-            False if the tool call is approved, True if approval is required.
+            None if the tool call requires human approval; otherwise the source
+            of the skip: ``ApprovalSource.PREAPPROVED_CONFIG`` for a
+            privilege-level pre-approval, or ``ApprovalSource.SESSION_APPROVAL``
+            when the approval policy (a session approval persisted on the
+            GitLab instance) grants it.
 
         Raises:
             UnknownToolError: If the tool is not found in all_tools.
@@ -164,12 +170,17 @@ class Toolset(collections.abc.Mapping):
                 "Tool call approval skipped: privilege pre-approval",
                 tool_name=tool_name,
             )
-            return False
+            return ApprovalSource.PREAPPROVED_CONFIG
 
         if self._approval_policy is None:
-            return True
+            return None
 
-        return await self._approval_policy.approval_required(tool_name, tool_args)
+        if await self._approval_policy.approval_required(tool_name, tool_args):
+            return None
+
+        # The privilege pre-approved set is already excluded above, so a
+        # policy "approved" answer can only come from a session approval.
+        return ApprovalSource.SESSION_APPROVAL
 
     @staticmethod
     def _validate_tool_options(
