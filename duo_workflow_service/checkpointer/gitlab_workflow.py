@@ -8,6 +8,7 @@ import os
 import time
 import zlib
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import (
     Any,
@@ -158,6 +159,22 @@ def _attribute_dirty(
 class Delta(NamedTuple):
     values: dict | list
     is_append: bool
+
+
+@dataclass
+class _IncrementalCheckpointState:
+    """Delta-encoding bookkeeping for the incremental-checkpoint write path.
+
+    Together these fields cache *the last checkpoint written to (or read from) the server*, which ``aput`` needs in
+    order to emit channel blobs as deltas against it rather than as full snapshots. They are only meaningful when the
+    client supports ``incremental_checkpoints``; see ``_serialize_channel_blobs`` for how the cache is consumed and
+    ``_hydrate_incremental_state`` for how it is restored after a gateway restart.
+    """
+
+    prev_channel_values: Dict[str, Any] = field(default_factory=dict)
+    prev_checkpoint_id: Optional[str] = None
+    current_thread: int = 0
+    current_thread_started_at: Optional[str] = None
 
 
 def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
@@ -393,10 +410,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # _handle_online_mode_completion, once the answer checkpoint is persisted.
         self._pending_finish = False
         self.serde = CheckpointSerializer()
-        self._prev_channel_values: Dict[str, Any] = {}
-        self._prev_checkpoint_id: Optional[str] = None
-        self._current_thread: int = 0
-        self._current_thread_started_at: Optional[str] = None
+        self._incremental_state = _IncrementalCheckpointState()
 
     @override
     @not_implemented_sync_method
@@ -1031,15 +1045,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     async def _get_latest_checkpoint_status(self) -> Optional[WorkflowStatusEnum]:
         """Return the workflow status from the most recent checkpoint.
 
-        Primary source: ``_prev_channel_values["status"]``, which is kept current by
-        ``_hydrate_incremental_state`` (session start) and ``aput`` (every write).
-        Only populated when the client supports ``incremental_checkpoints``.
+        Primary source: the cached ``prev_channel_values["status"]``, which is kept
+        current by ``_hydrate_incremental_state`` (session start) and ``aput`` (every
+        write). Only populated when the client supports ``incremental_checkpoints``.
 
         Fallback: ``_fetch_most_recent_checkpoint`` — fetches fresh from the Rails
         API, bypassing the stale session-start cache.
         """
         checkpoint_status_value: Optional[WorkflowStatusEnum] = (
-            self._prev_channel_values.get("status")
+            self._incremental_state.prev_channel_values.get("status")
         )
         if checkpoint_status_value is not None:
             return checkpoint_status_value
@@ -1135,8 +1149,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         ``aget_tuple`` cached-latest-checkpoint path.
 
         **Side-effect free**: decoding never touches the incremental-checkpoint write cache
-        (``_prev_checkpoint_id`` / ``_prev_channel_values`` / ``_current_thread`` /
-        ``_current_thread_started_at``). Hydration of that cache is reserved for the ``aget_tuple``
+        (``_incremental_state``). Hydration of that cache is reserved for the ``aget_tuple``
         fetch paths — the checkpoint LangGraph actually resumes from is the only valid delta
         baseline, and an arbitrary decoded checkpoint (e.g. the pre-rollback tip during
         stop-recovery) must never repoint it. Callers for whom the decoded checkpoint IS the resume
@@ -1170,22 +1183,23 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     ) -> None:
         """Restore in-memory incremental-checkpoint state from a fetched checkpoint.
 
-        On gateway restart, ``_current_thread`` / ``_current_thread_started_at`` / ``_prev_channel_values`` /
-        ``_prev_checkpoint_id`` reset to their __init__ defaults. Without this, the next aput would either trigger a
-        stale-cache rewrite or emit a current_thread that no longer matches the server's view. Accepts both REST
-        (snake_case) and GraphQL
+        On gateway restart, ``_incremental_state`` resets to its defaults. Without this, the next aput would either
+        trigger a stale-cache rewrite or emit a current_thread that no longer matches the server's view. Accepts both
+        REST (snake_case) and GraphQL
         (camelCase) field names. Absent values are tolerated: older Rails versions don't expose current_thread, in
         which case the in-memory default is kept.
         """
         if not self._workflow_config.get("incremental_checkpoints_enabled", False):
             return
 
+        state = self._incremental_state
+
         current_thread = gl_checkpoint.get("current_thread")
         if current_thread is None:
             current_thread = gl_checkpoint.get("currentThread")
         if current_thread is not None:
             try:
-                self._current_thread = int(current_thread)
+                state.current_thread = int(current_thread)
             except (TypeError, ValueError):
                 self._logger.warning(
                     "Unexpected current_thread value from server; keeping default",
@@ -1198,10 +1212,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if started_at is not None:
             # Restore the group's original start time so a post-restart checkpoint doesn't
             # re-pin the marker to a mid-group time and drop the group's earlier blobs.
-            self._current_thread_started_at = started_at
+            state.current_thread_started_at = started_at
 
-        self._prev_checkpoint_id = decoded_checkpoint.get("id")
-        self._prev_channel_values = dict(decoded_checkpoint.get("channel_values", {}))
+        state.prev_checkpoint_id = decoded_checkpoint.get("id")
+        state.prev_channel_values = dict(decoded_checkpoint.get("channel_values", {}))
 
     @override
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -1476,23 +1490,24 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         }
 
         if incremental_enabled:
+            state = self._incremental_state
             parent_checkpoint_id = configurable.get("checkpoint_id")
             stale_cache = (
-                self._prev_checkpoint_id is not None
-                and parent_checkpoint_id != self._prev_checkpoint_id
+                state.prev_checkpoint_id is not None
+                and parent_checkpoint_id != state.prev_checkpoint_id
             )
             if stale_cache:
                 self._logger.warning(
                     "Stale incremental checkpoint cache detected; resetting to full values",
                     expected_prev_checkpoint_id=parent_checkpoint_id,
-                    cached_prev_checkpoint_id=self._prev_checkpoint_id,
+                    cached_prev_checkpoint_id=state.prev_checkpoint_id,
                 )
-                self._prev_channel_values = {}
+                state.prev_channel_values = {}
 
             channel_blobs, is_compaction = _serialize_channel_blobs(
                 checkpoint,
                 new_versions,
-                self._prev_channel_values,
+                state.prev_channel_values,
                 force_rewrite=stale_cache,
             )
             # A new current_thread group starts on the first checkpoint and whenever
@@ -1500,14 +1515,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             # later blob query. Carried forward (and restored on restart) otherwise so the
             # marker stays pinned to the group's first checkpoint.
             starts_new_thread = (
-                self._current_thread_started_at is None or stale_cache or is_compaction
+                state.current_thread_started_at is None or stale_cache or is_compaction
             )
             # A genuine group boundary: the workflow's first checkpoint, a stale-cache
-            # reset, or a compaction. Keyed on _prev_checkpoint_id (not the started_at
+            # reset, or a compaction. Keyed on prev_checkpoint_id (not the started_at
             # marker, which stays None when a checkpoint id isn't time-based) so later
             # checkpoints in a group are never re-seeded.
             is_group_start = (
-                self._prev_checkpoint_id is None or stale_cache or is_compaction
+                state.prev_checkpoint_id is None or stale_cache or is_compaction
             )
             if is_group_start:
                 # A group must be self-contained (issue 605653): re-seed EVERY channel
@@ -1515,22 +1530,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 # the checkpoint header. Otherwise keep the per-channel deltas above.
                 channel_blobs = _serialize_all_channels_full(checkpoint)
             if stale_cache or is_compaction:
-                self._current_thread += 1
+                state.current_thread += 1
             if starts_new_thread:
-                self._current_thread_started_at = _thread_started_at_from_id(
+                state.current_thread_started_at = _thread_started_at_from_id(
                     checkpoint["id"]
                 )
-            self._prev_channel_values = dict(checkpoint.get("channel_values", {}))
-            self._prev_checkpoint_id = checkpoint["id"]
+            state.prev_channel_values = dict(checkpoint.get("channel_values", {}))
+            state.prev_checkpoint_id = checkpoint["id"]
             payload["channel_blobs"] = channel_blobs
-            payload["current_thread"] = self._current_thread
-            if self._current_thread_started_at is not None:
-                payload["current_thread_started_at"] = self._current_thread_started_at
+            payload["current_thread"] = state.current_thread
+            if state.current_thread_started_at is not None:
+                payload["current_thread_started_at"] = state.current_thread_started_at
             self._logger.info(
                 "Incremental checkpoint sizes",
                 thread_ts=checkpoint["id"],
-                current_thread=self._current_thread,
-                current_thread_started_at=self._current_thread_started_at,
+                current_thread=state.current_thread,
+                current_thread_started_at=state.current_thread_started_at,
                 compressed_checkpoint_bytes=len(payload["compressed_checkpoint"]),
                 channel_blobs_total_bytes=sum(len(b["data"]) for b in channel_blobs),
                 channel_blob_count=len(channel_blobs),
