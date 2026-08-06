@@ -303,7 +303,7 @@ class AbstractWorkflow(ABC):
         """Record the time to first response ready metric."""
         if not self._first_response_metric_recorded:
             duo_workflow_metrics.record_time_to_first_response(
-                workflow_type=self._workflow_type.value,
+                flow_type=self._workflow_type.value,
             )
             self._first_response_metric_recorded = True
 
