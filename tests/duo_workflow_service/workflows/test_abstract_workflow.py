@@ -1198,6 +1198,9 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
     await workflow._compile_and_run_graph("Test goal")
 
     assert mock_metrics.record_time_to_first_response.call_count == 1
+    assert mock_metrics.record_time_to_first_response.call_args.kwargs == {
+        "flow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+    }
     assert workflow._first_response_metric_recorded is True
 
 

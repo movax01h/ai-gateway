@@ -198,7 +198,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.time_to_first_response = Histogram(
             "duo_workflow_time_to_first_response_seconds",
             "Time from ExecuteWorkflow call to first outgoing action",
-            ["workflow_type"] + METADATA_LABELS,
+            ["flow_type"] + METADATA_LABELS,
             registry=registry,
             buckets=FIRST_RESPONSE_SCALE_BUCKETS,
         )
@@ -489,12 +489,12 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
 
     def record_time_to_first_response(
         self,
-        workflow_type: str = "unknown",
+        flow_type: str = "unknown",
     ) -> None:
         """Record the time to first response ready metric.
 
         Args:
-            workflow_type: Type of workflow being executed
+            flow_type: Type of flow being executed
         """
         start_time = workflow_start_time.get()
         if start_time is None or start_time <= 0:
@@ -502,7 +502,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
 
         duration = time.time() - start_time
         self.time_to_first_response.labels(
-            workflow_type=workflow_type,
+            flow_type=flow_type,
             **build_metadata_labels(),
         ).observe(duration)
         log.info(
