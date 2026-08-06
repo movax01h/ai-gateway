@@ -314,8 +314,26 @@ _SCHEMAS = {
                 "ref",
                 "source",
                 "status",
-                "started",
-                "finished",
+                {
+                    "name": "started",
+                    "parameters": [
+                        {
+                            "name": "granularity",
+                            "values": ["daily", "weekly", "monthly"],
+                            "default": "weekly",
+                        }
+                    ],
+                },
+                {
+                    "name": "finished",
+                    "parameters": [
+                        {
+                            "name": "granularity",
+                            "values": ["daily", "weekly", "monthly"],
+                            "default": "weekly",
+                        }
+                    ],
+                },
                 "project",
             ],
             "metrics": [
@@ -324,7 +342,16 @@ _SCHEMAS = {
                 "failureRate",
                 "canceledRate",
                 "skippedRate",
-                "durationQuantile",
+                {
+                    "name": "durationQuantile",
+                    "parameters": [
+                        {
+                            "name": "quantile",
+                            "range": "0.01-0.99",
+                            "default": "0.95",
+                        }
+                    ],
+                },
             ],
             "sort_fields": [
                 "ref",
@@ -472,7 +499,21 @@ _SCHEMAS = {
                     "note": "numeric user ID only (e.g. user = 123)",
                 },
             ],
-            "dimensions": ["language", "ideName", "timestamp", "user"],
+            "dimensions": [
+                "language",
+                "ideName",
+                {
+                    "name": "timestamp",
+                    "parameters": [
+                        {
+                            "name": "granularity",
+                            "values": ["monthly"],
+                            "default": "monthly",
+                        }
+                    ],
+                },
+                "user",
+            ],
             "metrics": [
                 "totalCount",
                 "usersCount",
@@ -509,10 +550,20 @@ _SCHEMAS = {
                 },
                 {"name": "created", "operators": ["=", ">", "<", ">=", "<="]},
             ],
-            "dimensions": ["created"],
+            "dimensions": [
+                {
+                    "name": "created",
+                    "parameters": [
+                        {
+                            "name": "granularity",
+                            "values": ["daily", "weekly", "monthly"],
+                            "default": "monthly",
+                        }
+                    ],
+                },
+            ],
             "metrics": ["totalCount", "usersCount"],
             "sort_fields": ["created", "totalCount", "usersCount"],
-            "note": "created groups by month.",
         },
     },
 }

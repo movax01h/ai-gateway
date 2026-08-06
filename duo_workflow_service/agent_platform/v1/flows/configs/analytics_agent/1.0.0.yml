@@ -331,7 +331,7 @@ prompts:
           2. If the source only supports `analytics`, you MUST use `mode: analytics` with `dimensions` and `metrics`
           3. If the source supports both, choose based on user intent: use analytics for aggregations/trends/rates, standard for listing individual items
 
-          Analytics mode sample query:
+          Analytics mode sample queries:
 
           ```
           mode: analytics
@@ -340,6 +340,33 @@ prompts:
           metrics: totalCount, acceptanceRate
           sort: totalCount desc
           ```
+
+          ### Parameterised Fields
+
+          Some dimensions and metrics accept parameters. Check the schema returned by `get_glql_schema` for fields with a `parameters` key. Parameters are optional. When a parameter is omitted, the field's default parameter value applies.
+
+          **Syntax**: `fieldName(parameterValue)` or `fieldName(parameterName=parameterValue)`
+
+          Examples:
+          - `finished(weekly)` - pass the parameter by position
+          - `finished(granularity=weekly)` - pass the parameter by name (note `=`, not a colon)
+
+          Do not mix named and positional parameters in one call; the compiler rejects it.
+
+          ### Aliases
+
+          Use `as "Label"` to rename a field in the output. Required when using the same parameterised field with different parameters.
+
+          **Syntax**: `fieldName(param) as "Label"`
+
+          Example:
+          ```
+          metrics: durationQuantile(0.5) as "Median", durationQuantile(0.95) as "p95"
+          sort: p95
+          ```
+
+          Aliases work in `fields`, `dimensions`, and `metrics` lists. You can sort by alias name.
+          Aliases used in `sort` must be a single word (no spaces); spaced aliases are for display only and cannot be sorted.
 
           ### Time Expressions (ALWAYS PREFER RELATIVE)
 

@@ -5,7 +5,7 @@ import json
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
+from duo_workflow_service.tools.get_glql_schema import _SCHEMAS, GetGlqlSchema
 
 
 @pytest.fixture
@@ -68,3 +68,23 @@ async def test_default_is_all(schema_tool):
     """Default data_source returns all schemas."""
     result = json.loads(await schema_tool._execute())
     assert len(result) == 7
+
+
+def test_analytics_field_structure():
+    """Analytics fields are either plain strings or well-formed parameterised dicts."""
+    for schema_key, schema in _SCHEMAS.items():
+        analytics = schema.get("analytics")
+        if not analytics:
+            continue
+        for sub_key in ("dimensions", "metrics"):
+            for field in analytics.get(sub_key, []):
+                if isinstance(field, str):
+                    continue
+                assert isinstance(field, dict), (
+                    f"Unexpected field type in {schema_key} analytics {sub_key}"
+                )
+                assert set(field.keys()) == {"name", "parameters"}
+                for parameter in field["parameters"]:
+                    assert "name" in parameter
+                    assert "values" in parameter or "range" in parameter
+                    assert "default" in parameter
