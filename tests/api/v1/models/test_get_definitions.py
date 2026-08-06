@@ -85,6 +85,22 @@ def mock_model_config_fixture():
                 selectable_models=["model3"],
                 beta_models=[],
             ),
+            UnitPrimitiveConfig(
+                feature_setting="config4",
+                unit_primitives=[
+                    GitLabUnitPrimitive.DUO_CHAT,
+                ],
+                default_models=["model2"],
+                selectable_models=["model1", "model2"],
+                beta_models=[],
+                deprecated_models=[
+                    {
+                        "identifier": "model1",
+                        "deprecation_date": "2026-08-05",
+                        "removal_version": "19.6",
+                    }
+                ],
+            ),
         ]
 
         yield mock_configs
@@ -182,6 +198,22 @@ def test_get_models_returns_correct_data_with_flag_enabled(client):
     assert expected2.items() <= resp2.items()
     assert set(resp2["unit_primitives"]) == set(expected2["unit_primitives"])
 
+    # config4 has a feature-scoped deprecated model that is still selectable.
+    resp3 = data["unit_primitives"][3]
+    assert resp3["feature_setting"] == "config4"
+    assert resp3["selectable_models"] == ["model1", "model2"]
+    assert resp3["deprecated_models"] == [
+        {
+            "identifier": "model1",
+            "deprecation_date": "2026-08-05",
+            "removal_version": "19.6",
+        }
+    ]
+    # Other unit primitives have no feature-scoped deprecations.
+    assert resp0["deprecated_models"] == []
+    assert resp1["deprecated_models"] == []
+    assert resp2["deprecated_models"] == []
+
 
 @pytest.mark.usefixtures("mock_model_config")
 def test_get_models_returns_correct_data_with_flag_disabled(client):
@@ -227,3 +259,14 @@ def test_get_models_returns_correct_data_with_flag_disabled(client):
     }
     assert expected1.items() <= resp1.items()
     assert set(resp1["unit_primitives"]) == set(expected1["unit_primitives"])
+
+    resp3 = data["unit_primitives"][3]
+    assert resp0["deprecated_models"] == []
+    assert resp1["deprecated_models"] == []
+    assert resp3["deprecated_models"] == [
+        {
+            "identifier": "model1",
+            "deprecation_date": "2026-08-05",
+            "removal_version": "19.6",
+        }
+    ]

@@ -4,7 +4,11 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from ai_gateway.model_selection import ModelSelectionConfig
-from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
+from ai_gateway.model_selection.types import (
+    DeprecationInfo,
+    DevConfig,
+    FeatureDeprecatedModel,
+)
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 router = APIRouter()
@@ -37,6 +41,7 @@ class _GetModelResponseUnitPrimitive(BaseModel):
     ]  # deprecated alias for models_for_tags, maintained for backward compatibility
     selectable_models: list[str]
     beta_models: list[str]
+    deprecated_models: list[FeatureDeprecatedModel]
     dev: DevConfig | None
     unit_primitives: list[GitLabUnitPrimitive]
 

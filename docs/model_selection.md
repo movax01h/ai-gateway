@@ -264,9 +264,13 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
   - `selectable_models`: models only visible to GitLab team members
-- `deprecation`: optional nested configuration for model deprecations with the following fields:
-  - `deprecation_date`: indicates when the model becomes deprecated (e.g., `2025-10-08`)
-  - `removal_version`: specifies the GitLab version after which the model will no longer be supported (e.g., `18.8`)
+- `deprecated_models`: (optional) a list of models being deprecated for this feature specifically, while remaining
+  fully supported for other features (see [Feature-scoped model deprecation](#feature-scoped-model-deprecation)).
+  Each entry has:
+  - `identifier`: the `gitlab_identifier` of the model, must also be listed in this feature's `selectable_models`
+  - `deprecation_date`: indicates when the model becomes deprecated for this feature (e.g., `2025-10-08`)
+  - `removal_version`: specifies the GitLab version after which the model will no longer be offered for this feature
+    (e.g., `18.8`)
 
 Example:
 
@@ -375,8 +379,76 @@ GitLab team members see both the regular and developer models, while everyone el
 
 ## Model deprecations
 
-To mark a model as deprecated, add a deprecation block to the model's entry with two required fields: `deprecation.deprecation_date` (the date the model is considered deprecated, in YYYY-MM-DD format) and `deprecation.removal_version` (the GitLab version in which the model will be removed).
+There are two kinds of model deprecation, depending on whether the model is going away everywhere or only for a
+specific feature:
 
-The deprecation field is optional and defaults to `null` when omitted, meaning the model is active and not deprecated. When set, the deprecation information is automatically exposed through the `GET /v1/models` API endpoint, allowing downstream consumers (such as GitLab Rails) to detect and handle deprecated models accordingly.
+- **Global deprecation**: the model is being phased out entirely, across every feature that offers it.
+- **Feature-scoped deprecation**: the model is being phased out for one feature only (for example, because it
+  performs poorly for that feature's prompts), while remaining fully supported everywhere else.
 
-In GitLab Rails, a deprecation banner appears at the page level on the GitLab Duo settings page, both for SaaS (group settings, visible to top-level group owners) and self-managed (admin settings). It only renders when the user has actively selected a model that carries a deprecation field from the AI Gateway.
+Both are surfaced identically to GitLab Rails through the `GET /v1/models/definitions` endpoint, and both are
+optional — omitting them means the model (or model/feature pair) is active and not deprecated.
+
+### Global model deprecation
+
+To mark a model as deprecated everywhere, add a `deprecation` block to its entry in `models.yml` with two required
+fields: `deprecation.deprecation_date` (the date the model is considered deprecated, in YYYY-MM-DD format) and
+`deprecation.removal_version` (the GitLab version in which the model will be removed).
+
+```yaml
+# ai_gateway/model_selection/models.yml
+models:
+  - name: "Gemini 2.5 Flash"
+    gitlab_identifier: "gemini_2_5_flash_vertex"
+    # ...
+    deprecation:
+      deprecation_date: "2026-03-01"
+      removal_version: "19.5"
+```
+
+### Feature-scoped model deprecation
+
+To deprecate a model for a single feature without deprecating it globally, add a `deprecated_models` list to that
+feature's entry in `unit_primitives.yml` instead of touching `models.yml`. Each entry needs `identifier` (the
+`gitlab_identifier` of the model being deprecated), `deprecation_date`, and `removal_version`.
+
+```yaml
+# ai_gateway/model_selection/unit_primitives.yml
+configurable_unit_primitives:
+  - feature_setting: "review_merge_request_dap"
+    unit_primitives: []
+    default_models:
+      - "claude_sonnet_4_6_vertex"
+    selectable_models:
+      - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_vertex"
+      - "gpt_5_2"
+      - "gpt_5_3_codex"
+    deprecated_models:
+      - identifier: "claude_sonnet_4_5_20250929"
+        deprecation_date: "2026-08-05"
+        removal_version: "19.6"
+```
+
+Here, `claude_sonnet_4_5_20250929` is deprecated for `review_merge_request_dap` only. It stays in that feature's
+`selectable_models` (still selectable and functional through the deprecation window) and remains fully available
+for every other feature that offers it (for example `duo_chat` or `code_generations`) with no deprecation at all — its
+entry in `models.yml` is untouched.
+
+Validation (`ModelSelectionConfig.validate`) enforces that every `deprecated_models.identifier` for a feature is also
+present in that same feature's `selectable_models` — a feature-scoped deprecation can only apply to a model the
+feature currently offers.
+
+### How deprecations are surfaced downstream
+
+When either kind of deprecation is set, the information is automatically exposed through the `GET
+/v1/models/definitions` API endpoint, allowing downstream consumers (such as GitLab Rails) to detect and handle
+deprecated models accordingly.
+
+In GitLab Rails, a deprecation banner appears at the page level on the GitLab Duo settings page, both for SaaS
+(group settings, visible to top-level group owners) and self-managed (admin settings). It only renders when the user
+has actively selected a model that is deprecated — either globally, or for the specific feature it's pinned to. For
+a feature-scoped deprecation, the banner names the affected feature so the user knows what to go fix.
