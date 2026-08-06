@@ -315,6 +315,17 @@ duo-workflow-docs:
 	@poetry install
 	@poetry run python scripts/generate_graph_docs.py ${DOC_DIR}/duo_workflow_service_graphs.md
 
+.PHONY: duo-workflow-flow-schema
+duo-workflow-flow-schema:
+	@echo "Generating Duo Agent Platform flow config JSON Schema..."
+	@poetry install
+	@poetry run python -m duo_workflow_service.schemas.v1.flow_config_schema
+
+.PHONY: check-duo-workflow-flow-schema
+check-duo-workflow-flow-schema: duo-workflow-flow-schema
+	@echo "Checking Duo Agent Platform flow config JSON Schema is up to date..."
+	@git diff --exit-code -- duo_workflow_service/schemas/v1/flow_config.schema.json
+
 .PHONY: duo-workflow-service-reload
 duo-workflow-service-reload:
 	poetry run watchmedo auto-restart \

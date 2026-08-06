@@ -62,6 +62,21 @@ lint:pricing_multipliers:
   script:
     - make check-pricing-multipliers
 
+lint:duo_workflow_flow_schema:
+  stage: test
+  extends: .poetry
+  needs:
+    - install
+  rules:
+    - changes:
+        - "duo_workflow_service/agent_platform/v1/flows/flow_config.py"
+        - "duo_workflow_service/schemas/**/*"
+        - "ai_gateway/prompts/config/base.py"
+        - "ai_gateway/response_schemas/config.py"
+        - "ai_gateway/gitlab_features.py"
+  script:
+    - make check-duo-workflow-flow-schema
+
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}

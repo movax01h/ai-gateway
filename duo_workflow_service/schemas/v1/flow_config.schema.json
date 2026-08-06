@@ -1,0 +1,613 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema#",
+  "$defs": {
+    "BaseModelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "top_p": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top P"
+        },
+        "top_k": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top K"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "max_retries": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1,
+          "title": "Max Retries"
+        },
+        "extra_headers": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extra Headers"
+        }
+      },
+      "title": "BaseModelParams",
+      "type": "object"
+    },
+    "FlowConfigInput": {
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "input_schema": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FlowConfigInputSchema"
+          },
+          "title": "Input Schema",
+          "type": "object"
+        },
+        "version_constraint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Constraint"
+        }
+      },
+      "required": [
+        "category",
+        "input_schema"
+      ],
+      "title": "FlowConfigInput",
+      "type": "object"
+    },
+    "FlowConfigInputSchema": {
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "optional": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optional"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "FlowConfigInputSchema",
+      "type": "object"
+    },
+    "FlowConfigMetadata": {
+      "properties": {
+        "entry_point": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry Point"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FlowConfigInput"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputs"
+        }
+      },
+      "title": "FlowConfigMetadata",
+      "type": "object"
+    },
+    "GitLabUnitPrimitive": {
+      "enum": [
+        "access_artifact_registry",
+        "agent_quick_actions",
+        "ai_gateway_model_provider_proxy",
+        "amazon_q_integration",
+        "ask_build",
+        "ask_commit",
+        "ask_epic",
+        "ask_issue",
+        "ask_merge_request",
+        "ask_work_item",
+        "categorize_duo_chat_question",
+        "code_suggestions",
+        "codebase_search",
+        "complete_code",
+        "description_composer",
+        "documentation_search",
+        "duo_agent_platform",
+        "duo_chat",
+        "duo_classic_chat",
+        "duo_workflow_execute_workflow",
+        "explain_code",
+        "explain_vulnerability",
+        "feature_discovery_search",
+        "fix_code",
+        "generate_code",
+        "generate_commit_message",
+        "generate_cube_query",
+        "generate_embeddings_codebase",
+        "generate_issue_description",
+        "glab_ask_git_command",
+        "include_agent_platform_standard_context",
+        "include_agent_user_environment_context",
+        "include_dependency_context",
+        "include_directory_context",
+        "include_file_context",
+        "include_issue_context",
+        "include_local_git_context",
+        "include_merge_request_context",
+        "include_os_information_context",
+        "include_repository_context",
+        "include_snippet_context",
+        "include_terminal_context",
+        "include_user_rule_context",
+        "malware_advisories",
+        "measure_comment_temperature",
+        "observability_all",
+        "refactor_code",
+        "resolve_vulnerability",
+        "review_merge_request",
+        "security_scans",
+        "self_hosted_duo_agent_platform",
+        "self_hosted_models",
+        "semantic_search_issue",
+        "summarize_comments",
+        "summarize_issue_discussions",
+        "summarize_new_merge_request",
+        "summarize_review",
+        "troubleshoot_job",
+        "update_vulnerability_severity",
+        "write_tests"
+      ],
+      "title": "GitLabUnitPrimitive",
+      "type": "string"
+    },
+    "InMemoryPromptConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unit_primitives": {
+          "items": {
+            "$ref": "#/$defs/GitLabUnitPrimitive"
+          },
+          "title": "Unit Primitives",
+          "type": "array"
+        },
+        "prompt_template": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "title": "Prompt Template",
+          "type": "object"
+        },
+        "params": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "operation_type": {
+          "default": "standard",
+          "enum": [
+            "standard",
+            "compaction_auto",
+            "compaction_manual"
+          ],
+          "title": "Operation Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "name",
+        "unit_primitives",
+        "prompt_template"
+      ],
+      "title": "InMemoryPromptConfig",
+      "type": "object"
+    },
+    "InlineResponseSchemaConfig": {
+      "additionalProperties": false,
+      "description": "Inline response schema definition for use in the ``response_schemas`` flow config block.\n\nMirrors the role of ``InMemoryPromptConfig`` for prompts: defined once in a\ntop-level ``response_schemas`` block and referenced by components via\n``response_schema_id`` (with no ``response_schema_version``).\n\nThe ``definition`` field accepts either a YAML mapping (parsed as a Python dict)\nor a raw JSON string \u2014 useful when pasting a schema directly from an external\nsource or JSON editor.  Both forms produce an identical dict when\n``to_schema_dict()`` is called.\n\nSee ``docs/flow_registry/v1.md`` for full YAML usage examples.",
+      "properties": {
+        "schema_id": {
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "definition": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Definition"
+        }
+      },
+      "required": [
+        "schema_id",
+        "definition"
+      ],
+      "title": "InlineResponseSchemaConfig",
+      "type": "object"
+    },
+    "ModelConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "$ref": "#/$defs/BaseModelParams",
+          "default": {
+            "model": null,
+            "temperature": null,
+            "top_p": null,
+            "top_k": null,
+            "max_tokens": null,
+            "max_retries": 1,
+            "extra_headers": null
+          }
+        }
+      },
+      "title": "ModelConfig",
+      "type": "object"
+    },
+    "PromptParams": {
+      "additionalProperties": false,
+      "properties": {
+        "stop": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        },
+        "vertex_location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vertex Location"
+        },
+        "cache_control_injection_points": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Control Injection Points"
+        },
+        "context_management": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Management"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        }
+      },
+      "title": "PromptParams",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "flow": {
+      "$ref": "#/$defs/FlowConfigMetadata"
+    },
+    "components": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Components",
+      "type": "array"
+    },
+    "routers": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Routers",
+      "type": "array"
+    },
+    "environment": {
+      "enum": [
+        "ambient",
+        "chat",
+        "chat-partial"
+      ],
+      "title": "Environment",
+      "type": "string"
+    },
+    "version": {
+      "const": "v1",
+      "title": "Version",
+      "type": "string"
+    },
+    "resolved_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolved Version"
+    },
+    "prompts": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/InMemoryPromptConfig"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Prompts"
+    },
+    "response_schemas": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/InlineResponseSchemaConfig"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Response Schemas"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Name"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "product_group": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Product Group"
+    }
+  },
+  "required": [
+    "flow",
+    "components",
+    "routers",
+    "environment",
+    "version"
+  ],
+  "title": "FlowConfig",
+  "type": "object"
+}
