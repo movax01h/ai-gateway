@@ -28,9 +28,8 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
     and nodes (e.g. ``AgentComponent``) that resolve the subsession ID dynamically at
     runtime.
 
-    When ``ui_role_as=MessageTypeEnum.TOOL`` is used, the writer also forwards
-    ``tool_info``, ``message_sub_type``, and ``subsession_id`` from ``**kwargs`` into
-    the log entry, making it suitable for delegation and subagent return nodes.
+    ``tool_info``, ``message_sub_type``, ``message_id`` and ``subsession_id`` are
+    forwarded from ``**kwargs`` into the log entry for every ``ui_role_as``.
 
     Args:
         log_callback: Callback function that receives log entries.
@@ -94,7 +93,7 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
 
 def default_ui_log_writer_class[E: BaseUILogEvents](
     events_class: type[E],
-    ui_role_as: Literal["agent", "tool"],
+    ui_role_as: Literal["agent", "tool", "request"],
     component_name: Optional[str] = None,
 ) -> Callable[[UILogCallback], DefaultUILogWriter[E]]:
     """Factory that creates a ``DefaultUILogWriter`` bound to *events_class*.
@@ -104,7 +103,8 @@ def default_ui_log_writer_class[E: BaseUILogEvents](
 
     Args:
         events_class: The ``BaseUILogEvents`` subclass that defines the valid events.
-        ui_role_as: The message type role (``"agent"`` or ``"tool"``).
+        ui_role_as: The message type role.  Clients key human-in-the-loop
+            approval controls off ``"request"``.
         component_name: Optional human-readable name of the component that owns this
             writer.  Embedded in every log entry when provided.
 

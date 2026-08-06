@@ -138,7 +138,6 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
-      - "on_tool_approval_request"
 
 routers:
   - from: "context_builder"

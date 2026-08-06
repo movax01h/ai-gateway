@@ -36,6 +36,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
+    DEFAULT_SESSION_ID_KEY,
     AgentNode,
     FinalResponseNode,
     ToolApprovalFetchNode,
@@ -44,7 +45,6 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
-    UILogWriterAgentTools,
     agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
@@ -60,7 +60,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKeyTemplate,
     RuntimeIOKey,
 )
-from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
@@ -482,7 +482,7 @@ class AgentComponentBase(BaseComponent):
         self,
         graph: StateGraph,
         conversation_history_key: RuntimeIOKey,
-        ui_log_events: list,
+        session_id_key: BaseIOKey,
     ) -> None:
         """Add tool approval nodes and edges to the graph when ``require_tool_approval`` is True.
 
@@ -497,8 +497,8 @@ class AgentComponentBase(BaseComponent):
             graph: The LangGraph ``StateGraph`` being assembled.
             conversation_history_key: ``RuntimeIOKey`` resolving this component's
                 conversation-history slot at runtime.
-            ui_log_events: Event list passed to ``ToolApprovalRequestNode``'s
-                ``UIHistory``.
+            session_id_key: ``IOKey`` resolving the active subsession ID, so the
+                prompt is attributed to the subagent that raised it.
         """
         if not self.require_tool_approval:
             return
@@ -512,10 +512,18 @@ class AgentComponentBase(BaseComponent):
                 alias="status",
                 factory=lambda _: IOKey(target="status"),
             ),
+            # Event is fixed, not from `ui_log_events`: the flow blocks on this
+            # prompt, so a config omitting it would hang. Clients key
+            # approve/reject off `request`.
             ui_history=UIHistory(
-                events=ui_log_events,
-                writer_class=UILogWriterAgentTools,
+                events=[UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST],
+                writer_class=default_ui_log_writer_class(
+                    events_class=UILogEventsAgent,
+                    ui_role_as="request",
+                    component_name=self.name,
+                ),
             ),
+            session_id_key=session_id_key,
         )
 
         node_tool_approval_fetch = ToolApprovalFetchNode(
@@ -613,8 +621,7 @@ class AgentComponent(AgentComponentBase):
             factory=lambda _: static_output_key,
         )
 
-        # Standalone components have no session — use NoneIOKey sentinel
-        self._session_id_key = NoneIOKey(alias="session_id")
+        self._session_id_key = DEFAULT_SESSION_ID_KEY
 
         return self
 
@@ -624,7 +631,7 @@ class AgentComponent(AgentComponentBase):
         conversation_history_key: RuntimeIOKey,
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
-        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tool_approval_decision_key: RuntimeIOKey,
         cycle_count_key: RuntimeIOKey,
     ) -> None:
@@ -647,11 +654,8 @@ class AgentComponent(AgentComponentBase):
                 ``context:goal`` input so the subagent reads the delegation
                 prompt written by ``DelegationNode`` rather than the shared
                 flow goal.
-            session_id_key: ``IOKey`` pointing to the active subsession ID in
-                state.  When provided, the resolved value is included in every
-                ``UiChatLog`` entry emitted by this component's nodes so the UI
-                can attribute tool calls and final answers to the correct
-                subsession.  Defaults to ``NoneIOKey()`` (always ``None``).
+            session_id_key: ``IOKey`` resolving the active subsession ID, so
+                entries from this component's nodes are attributed to it.
             tool_approval_decision_key: ``RuntimeIOKey`` that resolves the
                 subsession-scoped tool approval decision key at runtime.  The
                 tool approval decision is stored under a subsession-scoped key,
@@ -874,7 +878,7 @@ class AgentComponent(AgentComponentBase):
         self._attach_tool_approval_nodes(
             graph,
             conversation_history_key=self._conversation_history_key,
-            ui_log_events=self.ui_log_events,
+            session_id_key=self._session_id_key,
         )
 
         graph.add_conditional_edges(

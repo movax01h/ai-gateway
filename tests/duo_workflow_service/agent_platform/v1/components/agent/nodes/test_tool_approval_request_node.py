@@ -8,9 +8,18 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_request_node import (
     ToolApprovalRequestNode,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
-from duo_workflow_service.agent_platform.v1.state.base import IOKey, RuntimeIOKey
-from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.agent_platform.v1.state.base import (
+    IOKey,
+    RuntimeIOKey,
+)
+from duo_workflow_service.agent_platform.v1.ui_log import (
+    UIHistory,
+    default_ui_log_writer_class,
+)
 from duo_workflow_service.entities import (
     ApprovalSource,
     MessageTypeEnum,
@@ -22,6 +31,8 @@ from duo_workflow_service.tools import (
     Toolset,
     UnknownToolError,
 )
+
+_APPROVAL_EVENTS = [UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST]
 
 
 @pytest.fixture(name="conversation_history_key")
@@ -58,27 +69,80 @@ def mock_toolset_fixture():
     return mock_toolset
 
 
-@pytest.fixture(name="mock_ui_history")
-def mock_ui_history_fixture():
-    """Fixture for mock UI history."""
-    return Mock(spec=UIHistory)
+@pytest.fixture(name="make_ui_history")
+def make_ui_history_fixture(component_name):
+    """Build a real history: the writer stamps the fields under test, so a mock would be vacuous."""
+
+    def _make(events=_APPROVAL_EVENTS):
+        return UIHistory(
+            events=events,
+            writer_class=default_ui_log_writer_class(
+                events_class=UILogEventsAgent,
+                ui_role_as="request",
+                component_name=component_name,
+            ),
+        )
+
+    return _make
+
+
+@pytest.fixture(name="ui_history")
+def ui_history_fixture(make_ui_history):
+    """Fixture for a UI history wired as the component wires it."""
+    return make_ui_history()
+
+
+@pytest.fixture(name="session_id_key")
+def session_id_key_fixture():
+    """Fixture for a subsession-scoped session ID key, as a supervisor would pass."""
+    return IOKey(
+        target="context",
+        subkeys=["supervisor", "active_subsession"],
+        optional=True,
+    )
+
+
+@pytest.fixture(name="make_node")
+def make_node_fixture(conversation_history_key, status_key, mock_toolset, ui_history):
+    """Build a node, overriding only what a test cares about."""
+
+    def _make(pre_approved_tools=(), ui_history=ui_history, **kwargs):
+        return ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=list(pre_approved_tools),
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+            **kwargs,
+        )
+
+    return _make
 
 
 @pytest.fixture(name="tool_approval_request_node")
-def tool_approval_request_node_fixture(
-    conversation_history_key, status_key, mock_toolset, mock_ui_history
-):
+def tool_approval_request_node_fixture(make_node):
     """Fixture for ToolApprovalRequestNode instance."""
-    return ToolApprovalRequestNode(
-        name="test_agent#tool_approval_request",
-        conversation_history_key=RuntimeIOKey(
-            alias="conversation_history", factory=lambda _: conversation_history_key
-        ),
-        toolset=mock_toolset,
-        pre_approved_tools=[],
-        status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
-        ui_history=mock_ui_history,
-    )
+    return make_node()
+
+
+@pytest.fixture(name="state_with")
+def state_with_fixture(base_flow_state, component_name):
+    """Build flow state holding *messages*, optionally under an active subsession."""
+
+    def _state(messages, active_subsession=None):
+        return {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {component_name: messages},
+            "context": {
+                **base_flow_state.get("context", {}),
+                "supervisor": {"active_subsession": active_subsession},
+            },
+        }
+
+    return _state
 
 
 @pytest.fixture(name="mock_ai_message_with_tool_calls")
@@ -97,62 +161,71 @@ class TestToolApprovalRequestNodeValidCalls:
     @pytest.mark.asyncio
     async def test_valid_tool_calls_creates_ui_logs_and_sets_status(
         self,
-        tool_approval_request_node,
-        base_flow_state,
+        make_node,
+        state_with,
+        session_id_key,
         component_name,
         mock_ai_message_with_tool_calls,
     ):
-        """Test that valid tool calls create UI logs and set TOOL_CALL_APPROVAL_REQUIRED status."""
-        # Setup state with conversation history
-        state = base_flow_state.copy()
-        state[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [mock_ai_message_with_tool_calls]
-        }
+        """Test the entry shape field-for-field, since it is the client-facing contract.
 
-        # Mock format_tool_display_message to return display text
+        ``additional_context`` is the fragile one: the writer defaults it to
+        ``[]`` when the kwarg is omitted, so the node must pass ``None``.
+        """
+        state = state_with([mock_ai_message_with_tool_calls], active_subsession=2)
+
         with patch(
             "duo_workflow_service.agent_platform.v1.components."
             "agent.nodes.tool_approval_request_node.format_tool_display_message"
         ) as mock_format:
             mock_format.return_value = "Execute test_tool with param=value"
 
-            result = await tool_approval_request_node.run(state)
+            result = await make_node(session_id_key=session_id_key).run(state)
 
-            # Should include UI chat logs
-            assert "ui_chat_log" in result
-            assert len(result["ui_chat_log"]) == 1
-
-            ui_log = result["ui_chat_log"][0]
-            # UiChatLog is TypedDict, so it's a dict
-            assert ui_log["message_type"] == MessageTypeEnum.REQUEST
-            assert ui_log["content"] == "Execute test_tool with param=value"
-            assert ui_log["status"] == ToolStatus.SUCCESS
-            assert ui_log["tool_info"]["name"] == "test_tool"
-            assert ui_log["message_id"] == "call_123"
-
-            # Should set status to TOOL_CALL_APPROVAL_REQUIRED (nested dict)
-            assert "status" in result
-            assert (
-                result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
-            )
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
+        (entry,) = result["ui_chat_log"]
+        assert entry == {
+            "component_name": component_name,
+            "subsession_id": "2",
+            # Clients key the approve/reject controls off this.
+            "message_type": MessageTypeEnum.REQUEST,
+            "content": "Execute test_tool with param=value",
+            "status": ToolStatus.SUCCESS,
+            # The tool call's own id, so this resolves the streamed PENDING card.
+            "message_id": "call_123",
+            "tool_info": {"name": "test_tool", "args": {"param": "value"}},
+            "additional_context": None,
+            "message_sub_type": None,
+            "correlation_id": None,
+            "timestamp": entry["timestamp"],
+        }
 
     @pytest.mark.asyncio
-    async def test_multiple_valid_tool_calls_creates_multiple_ui_logs(
+    @pytest.mark.parametrize(
+        ("active_subsession", "expected_subsession_id"),
+        [
+            # A supervisor writes the subsession as an int; nodes stringify it.
+            pytest.param(3, "3", id="subagent"),
+            # 0 is a real subsession ID, so it must not be read as absent.
+            pytest.param(0, "0", id="subagent-zero"),
+            pytest.param(None, None, id="standalone"),
+        ],
+    )
+    async def test_every_call_in_a_batch_gets_an_attributed_entry(
         self,
-        tool_approval_request_node,
-        base_flow_state,
+        make_node,
+        state_with,
+        session_id_key,
         component_name,
+        mock_ai_message_with_multiple_tool_calls,
+        active_subsession,
+        expected_subsession_id,
     ):
-        """Test that multiple valid tool calls create multiple UI logs."""
-        # Create message with multiple tool calls
-        mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = [
-            {"id": "call_1", "name": "tool_a", "args": {"x": 1}},
-            {"id": "call_2", "name": "tool_b", "args": {"y": 2}},
-        ]
-
-        state = base_flow_state.copy()
-        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+        """One entry per call, each attributed, so a stamp on only the first fails."""
+        node = make_node(session_id_key=session_id_key)
+        state = state_with(
+            [mock_ai_message_with_multiple_tool_calls], active_subsession
+        )
 
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent."
@@ -160,30 +233,25 @@ class TestToolApprovalRequestNodeValidCalls:
         ) as mock_format:
             mock_format.side_effect = ["Display A", "Display B"]
 
-            result = await tool_approval_request_node.run(state)
+            result = await node.run(state)
 
-            # Should have 2 UI logs
-            assert len(result["ui_chat_log"]) == 2
-            assert result["ui_chat_log"][0]["message_id"] == "call_1"
-            assert result["ui_chat_log"][1]["message_id"] == "call_2"
+        assert [
+            (e["message_id"], e["component_name"], e["subsession_id"])
+            for e in result["ui_chat_log"]
+        ] == [
+            ("tool_call_id_1", component_name, expected_subsession_id),
+            ("tool_call_id_2", component_name, expected_subsession_id),
+        ]
 
     @pytest.mark.asyncio
     async def test_tool_with_none_display_message_skipped(
         self,
         tool_approval_request_node,
-        base_flow_state,
-        component_name,
+        state_with,
+        mock_ai_message_with_multiple_tool_calls,
     ):
         """Test that tools with None display message are skipped from UI logs."""
-        # Create message with multiple tool calls
-        mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = [
-            {"id": "call_1", "name": "tool_a", "args": {"x": 1}},
-            {"id": "call_2", "name": "tool_b", "args": {"y": 2}},
-        ]
-
-        state = base_flow_state.copy()
-        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+        state = state_with([mock_ai_message_with_multiple_tool_calls])
 
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent."
@@ -196,7 +264,7 @@ class TestToolApprovalRequestNodeValidCalls:
 
             # Should only have 1 UI log (second one)
             assert len(result["ui_chat_log"]) == 1
-            assert result["ui_chat_log"][0]["message_id"] == "call_2"
+            assert result["ui_chat_log"][0]["message_id"] == "tool_call_id_2"
 
 
 class TestToolApprovalRequestNodeInvalidCalls:
@@ -360,7 +428,7 @@ class TestToolApprovalRequestNodePreApproved:
         conversation_history_key,
         status_key,
         mock_toolset,
-        mock_ui_history,
+        ui_history,
         base_flow_state,
         component_name,
     ):
@@ -374,7 +442,7 @@ class TestToolApprovalRequestNodePreApproved:
             toolset=mock_toolset,
             pre_approved_tools=["approved_tool"],
             status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
-            ui_history=mock_ui_history,
+            ui_history=ui_history,
         )
 
         mock_message = Mock(spec=AIMessage)
@@ -424,12 +492,9 @@ class TestToolApprovalRequestNodePreApproved:
     )
     async def test_approval_skip_source_resolution_through_run(
         self,
-        conversation_history_key,
-        status_key,
+        make_node,
+        state_with,
         mock_toolset,
-        mock_ui_history,
-        base_flow_state,
-        component_name,
         mock_ai_message_with_tool_calls,
         pre_approved_tools,
         toolset_source,
@@ -441,21 +506,8 @@ class TestToolApprovalRequestNodePreApproved:
         else:
             mock_toolset.resolve_approval_source.return_value = toolset_source
 
-        node = ToolApprovalRequestNode(
-            name="test_agent#tool_approval_request",
-            conversation_history_key=RuntimeIOKey(
-                alias="conversation_history", factory=lambda _: conversation_history_key
-            ),
-            toolset=mock_toolset,
-            pre_approved_tools=pre_approved_tools,
-            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
-            ui_history=mock_ui_history,
-        )
-
-        state = base_flow_state.copy()
-        state[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [mock_ai_message_with_tool_calls]
-        }
+        node = make_node(pre_approved_tools=pre_approved_tools)
+        state = state_with([mock_ai_message_with_tool_calls])
 
         with (
             patch(
@@ -568,24 +620,13 @@ class TestToolApprovalRequestNodeSessionApprovals:
     @pytest.mark.asyncio
     async def test_component_pre_approved_tools_skip_toolset_check(
         self,
-        conversation_history_key,
-        status_key,
+        make_node,
         mock_toolset,
-        mock_ui_history,
         base_flow_state,
         component_name,
     ):
         """Test that component-level pre-approved tools never consult the toolset."""
-        node = ToolApprovalRequestNode(
-            name="test_agent#tool_approval_request",
-            conversation_history_key=RuntimeIOKey(
-                alias="conversation_history", factory=lambda _: conversation_history_key
-            ),
-            toolset=mock_toolset,
-            pre_approved_tools=["approved_tool"],
-            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
-            ui_history=mock_ui_history,
-        )
+        node = make_node(pre_approved_tools=["approved_tool"])
 
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = [
@@ -648,29 +689,70 @@ class TestToolApprovalRequestNodeEdgeCases:
             await tool_approval_request_node.run(state)
 
     @pytest.mark.asyncio
-    async def test_all_tools_return_none_display_raises_error(
+    @pytest.mark.parametrize(
+        ("rendered", "events"),
+        [
+            pytest.param(None, _APPROVAL_EVENTS, id="nothing-renderable"),
+            # An event filter dropping the prompt is what a count of written
+            # entries cannot see. Both must raise rather than report
+            # TOOL_CALL_APPROVAL_REQUIRED with an empty log.
+            pytest.param(
+                "Execute tool_a",
+                [UILogEventsAgent.ON_AGENT_FINAL_ANSWER],
+                id="event-filtered-out",
+            ),
+        ],
+    )
+    async def test_raises_when_no_prompt_reaches_the_chat_log(
         self,
-        tool_approval_request_node,
-        base_flow_state,
-        component_name,
+        make_node,
+        make_ui_history,
+        state_with,
+        mock_ai_message_with_tool_calls,
+        rendered,
+        events,
     ):
-        """Test that when all tools return None for display message, raises RuntimeError."""
-        mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = [
-            {"id": "call_1", "name": "tool_a", "args": {}},
-        ]
-
-        state = base_flow_state.copy()
-        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+        """Test that a flow is never left waiting on a prompt the user never saw."""
+        node = make_node(ui_history=make_ui_history(events))
 
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent."
             "nodes.tool_approval_request_node.format_tool_display_message"
         ) as mock_format:
-            # All return None
-            mock_format.return_value = None
+            mock_format.return_value = rendered
 
             with pytest.raises(
                 RuntimeError, match="No valid tool calls found to display for approval"
             ):
+                await node.run(state_with([mock_ai_message_with_tool_calls]))
+
+    @pytest.mark.asyncio
+    async def test_a_failed_render_does_not_leak_into_the_next_run(
+        self,
+        tool_approval_request_node,
+        state_with,
+        mock_ai_message_with_multiple_tool_calls,
+    ):
+        """All rendering happens before the first write.
+
+        ``UIHistory`` only clears in ``pop_state_updates``, so writing entries as
+        they render would strand them for a later run to flush as its own.
+        """
+        message = mock_ai_message_with_multiple_tool_calls
+        state = state_with([message])
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent."
+            "nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.side_effect = ["Display A", RuntimeError("render blew up")]
+            with pytest.raises(RuntimeError, match="render blew up"):
                 await tool_approval_request_node.run(state)
+
+            mock_format.side_effect = None
+            mock_format.return_value = "Display C"
+            message.tool_calls = [{"id": "call_3", "name": "tool_c", "args": {"z": 3}}]
+
+            result = await tool_approval_request_node.run(state)
+
+        assert [entry["message_id"] for entry in result["ui_chat_log"]] == ["call_3"]

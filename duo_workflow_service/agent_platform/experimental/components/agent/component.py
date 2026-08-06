@@ -23,6 +23,7 @@ from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
+    DEFAULT_SESSION_ID_KEY,
     AgentNode,
     FinalResponseNode,
     ToolApprovalFetchNode,
@@ -31,7 +32,6 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
 )
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
-    UILogWriterAgentTools,
     agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.experimental.components.base import (
@@ -62,7 +62,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
-from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.compaction import (
     CompactionConfig,
@@ -377,9 +377,7 @@ class AgentComponent(AgentComponentBase):
             factory=lambda _: static_output_key,
         )
 
-        # Default session_id_key is a no-op key; overridden by bind_to_supervisor
-        # when used as a subagent to attribute tool calls to subsessions in UI logs.
-        self._session_id_key = NoneIOKey(alias="session_id")
+        self._session_id_key = DEFAULT_SESSION_ID_KEY
 
         # Default tool approval decision key is component-scoped (no subsession namespace).
         # Overridden by bind_to_supervisor to be subsession-scoped when used as a subagent,
@@ -402,7 +400,7 @@ class AgentComponent(AgentComponentBase):
         conversation_history_key: RuntimeIOKey,
         output_key: RuntimeIOKey,
         goal_key: RuntimeIOKey,
-        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tool_approval_decision_key: RuntimeIOKey,
         cycle_count_key: RuntimeIOKey,
     ) -> None:
@@ -699,10 +697,16 @@ class AgentComponent(AgentComponentBase):
                     alias="status",
                     factory=lambda _: IOKey(target="status"),
                 ),
+                # See v1 AgentComponentBase._attach_tool_approval_nodes.
                 ui_history=UIHistory(
-                    events=self.ui_log_events,
-                    writer_class=UILogWriterAgentTools,
+                    events=[UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST],
+                    writer_class=default_ui_log_writer_class(
+                        events_class=UILogEventsAgent,
+                        ui_role_as="request",
+                        component_name=self.name,
+                    ),
                 ),
+                session_id_key=self._session_id_key,
             )
 
             node_tool_approval_fetch = ToolApprovalFetchNode(

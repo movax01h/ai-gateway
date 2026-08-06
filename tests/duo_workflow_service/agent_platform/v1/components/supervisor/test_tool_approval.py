@@ -10,8 +10,12 @@ from langgraph.graph import END
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.v1.state import FlowEventType, FlowStateKeys
-from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
+from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 
 from .conftest import _AGENT_COMPONENT_MODULE, _compile
 
@@ -359,3 +363,31 @@ class TestSupervisorAgentComponentToolApproval:
             nodes["tools"].run.assert_called_once()
         else:
             nodes["tools"].run.assert_not_called()
+
+    def test_supervisors_own_approval_prompt_is_not_subsession_scoped(
+        self,
+        all_approval_node_mocks,  # pylint: disable=unused-argument
+        mock_tool_approval_request_node_cls,
+        mock_router,
+        supervisor_name,
+        make_supervisor,
+    ):
+        """The supervisor's own prompt carries no subsession, and the event list is fixed.
+
+        Its ``active_subsession`` would mis-attribute the prompt to whichever
+        subagent ran last. The fixed event list is what stops a config omitting
+        ``on_tool_approval_request`` from hanging the flow; neither is visible
+        from graph topology.
+        """
+        supervisor = make_supervisor(require_tool_approval=True, pre_approved_tools=[])
+        _compile(supervisor, mock_router)
+
+        call_kwargs = mock_tool_approval_request_node_cls.call_args[1]
+        assert isinstance(call_kwargs["session_id_key"], NoneIOKey)
+
+        ui_history = call_kwargs["ui_history"]
+        assert ui_history.events == [UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST]
+        # pylint: disable=protected-access
+        assert ui_history.log._component_name == supervisor_name
+        assert ui_history.log._ui_roles_as == MessageTypeEnum.REQUEST
+        # pylint: enable=protected-access

@@ -31,7 +31,7 @@ from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
-from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 from lib.feature_flags.context import FeatureFlag
 
 
@@ -1539,6 +1539,34 @@ class TestAgentComponentToolApprovalRouter:
         state = {**base_flow_state, "status": status}
         result = agent_component_with_tool_approval._tool_approval_request_router(state)
         assert result == f"{component_name}#{expected_role}"
+
+    def test_attach_wires_approval_request_node_for_attribution(
+        self,
+        agent_component_with_tool_approval,
+        mock_state_graph,
+        mock_router,
+        component_name,
+        bind_as_subagent,
+    ):
+        """This package inlines its own copy of the wiring, predating the v1 base method."""
+        component = agent_component_with_tool_approval
+        session_id_key = bind_as_subagent(component)
+
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.components."
+            "agent.component.ToolApprovalRequestNode"
+        ) as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#tool_approval_request"
+            component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["session_id_key"] is session_id_key
+        assert call_kwargs["ui_history"].events == [
+            UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST
+        ]
+        # pylint: disable=protected-access
+        assert call_kwargs["ui_history"].log._ui_roles_as == MessageTypeEnum.REQUEST
+        # pylint: enable=protected-access
 
 
 # ---------------------------------------------------------------------------
