@@ -339,6 +339,40 @@ SAMPLE_CONTRIBUTIONS_OVERALL = [
     {"totalCount": 1005, "usersCount": 22},
 ]
 
+SAMPLE_PIPELINE_ANALYTICS_PARAMETERISED = [
+    {
+        "finished(weekly)": "2026-04-13T00:00:00Z",
+        "totalCount": 210,
+        "successRate": 0.90,
+        "durationQuantile(0.5)": 540,
+    },
+    {
+        "finished(weekly)": "2026-04-20T00:00:00Z",
+        "totalCount": 245,
+        "successRate": 0.87,
+        "durationQuantile(0.5)": 612,
+    },
+    {
+        "finished(weekly)": "2026-04-27T00:00:00Z",
+        "totalCount": 198,
+        "successRate": 0.93,
+        "durationQuantile(0.5)": 498,
+    },
+]
+
+SAMPLE_PIPELINE_ANALYTICS_PERCENTILES = [
+    {
+        "ref": "main",
+        "durationQuantile(0.5)": 540,
+        "durationQuantile(0.95)": 1200,
+    },
+    {
+        "ref": "develop",
+        "durationQuantile(0.5)": 612,
+        "durationQuantile(0.95)": 1450,
+    },
+]
+
 
 EMPTY_RESPONSE: list[dict[str, Any]] = []
 
