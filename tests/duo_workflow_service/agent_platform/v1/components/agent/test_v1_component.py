@@ -2285,6 +2285,25 @@ class TestAgentComponentToolApprovalExecutionFlow:
         result = agent_component_with_tool_approval._tool_approval_request_router(state)
         assert result == f"{component_name}#{expected_role}"
 
+    def test_attach_forwards_bound_session_key_to_approval_node(
+        self,
+        all_node_mocks,  # pylint: disable=unused-argument
+        mock_tool_approval_request_node_cls,
+        mock_router,
+        agent_component_with_tool_approval,
+        bind_as_subagent,
+    ):
+        """A subagent attributes its prompt to its own subsession, unlike a supervisor.
+
+        Bound rather than standalone, so dropping the key and falling back to the standalone sentinel fails here.
+        """
+        session_id_key = bind_as_subagent(agent_component_with_tool_approval)
+
+        agent_component_with_tool_approval.attach(StateGraph(FlowState), mock_router)
+
+        call_kwargs = mock_tool_approval_request_node_cls.call_args[1]
+        assert call_kwargs["session_id_key"] is session_id_key
+
 
 # ---------------------------------------------------------------------------
 # Tests for _agent_node_invoke_config TAG_NOSTREAM logic

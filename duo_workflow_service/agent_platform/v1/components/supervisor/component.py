@@ -15,6 +15,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
+    DEFAULT_SESSION_ID_KEY,
     AgentNode,
     FinalResponseNode,
     ToolNode,
@@ -44,7 +45,6 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.state.base import (
     IOKey,
-    NoneIOKey,
     RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import (
@@ -706,8 +706,9 @@ class SupervisorAgentComponent(AgentComponentBase):
                 ),
             ),
             tracker=tracker,
-            # Supervisor is never a subagent — session_id is always None for its own nodes
-            session_id_key=NoneIOKey(alias="session_id"),
+            # Never a subagent: its own active_subsession would mis-attribute
+            # these to whichever subagent ran last.
+            session_id_key=DEFAULT_SESSION_ID_KEY,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",
@@ -725,8 +726,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             ),
             response_schema=self._response_schema,
             component_name=self.name,
-            # Supervisor is never a subagent — session_id is always None for its own nodes
-            session_id_key=NoneIOKey(alias="session_id"),
+            session_id_key=DEFAULT_SESSION_ID_KEY,
         )
 
         # --- Delegation node ---
@@ -782,7 +782,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         self._attach_tool_approval_nodes(
             graph,
             conversation_history_key=supervisor_history_key,
-            ui_log_events=agent_events,
+            session_id_key=DEFAULT_SESSION_ID_KEY,
         )
 
         # --- Supervisor edges ---

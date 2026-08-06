@@ -10,6 +10,10 @@ from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
+    DEFAULT_SESSION_ID_KEY,
+    resolve_session_id,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -17,7 +21,6 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import (
     BaseIOKey,
-    NoneIOKey,
     RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
@@ -52,12 +55,6 @@ class ToolNode:
     writer (see ``agent_tools_ui_log_writer_class``).  The node itself does not
     store or forward ``component_name`` — it is the writer's responsibility.
 
-    ``session_id_key`` is an ``IOKey`` (or ``NoneIOKey`` sentinel) that reads the
-    active subsession ID from state.  When ``NoneIOKey`` (standalone mode),
-    ``session_id`` is always ``None`` in log entries.  When an ``IOKey`` is
-    provided (subagent mode), the resolved value is included in every log entry
-    so the UI can attribute tool calls to the correct subsession.
-
     Args:
         name: LangGraph node name.
         conversation_history_key: ``RuntimeIOKey`` that resolves the
@@ -66,9 +63,7 @@ class ToolNode:
         ui_history: UI log history writer for tool execution events.  Must be
             constructed with a writer that already has ``component_name`` bound
             (e.g. via ``agent_tools_ui_log_writer_class``).
-        session_id_key: ``IOKey`` pointing to the active subsession ID in state.
-            Defaults to ``NoneIOKey()`` for standalone components (always
-            resolves to ``None``).
+        session_id_key: ``IOKey`` resolving the active subsession ID.
     """
 
     def __init__(
@@ -79,7 +74,7 @@ class ToolNode:
         ui_history: UIHistory[UILogWriterAgentTools, UILogEventsAgent],
         conversation_history_key: RuntimeIOKey,
         tracker: ToolEventTracker,
-        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
     ):
         self.name = name
         self._toolset = toolset
@@ -89,20 +84,10 @@ class ToolNode:
         self._tracker = tracker
         self._session_id_key = session_id_key
 
-    def _resolve_session_id(self, state: FlowState) -> Optional[str]:
-        """Resolve the active session ID from state.
-
-        Returns:
-            The session ID string when running as a subagent, or ``None`` for
-            standalone components (when ``session_id_key`` is ``NoneIOKey``).
-        """
-        value = self._session_id_key.value_from_state(state)
-        return str(value) if value is not None else None
-
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         conversation_history = history_iokey.value_from_state(state) or []
-        session_id = self._resolve_session_id(state)
+        session_id = resolve_session_id(self._session_id_key, state)
 
         # TODO: add ability to register all tool calls in a follow up
         # context = state["context"].get(self.component_name, {})

@@ -10,7 +10,11 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
+from duo_workflow_service.agent_platform.v1.state import (
+    FlowStateKeys,
+    IOKey,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
@@ -338,3 +342,29 @@ def mock_state_graph_fixture():
     mock_graph.add_edge = Mock()
     mock_graph.add_conditional_edges = Mock()
     return mock_graph
+
+
+@pytest.fixture(name="bind_as_subagent")
+def bind_as_subagent_fixture():
+    """Bind a component as a subagent and return the session key it was given."""
+
+    def _bind(component):
+        session_id_key = IOKey(
+            target="context", subkeys=["supervisor", "active_subsession"], optional=True
+        )
+        component.description = component.description or "subagent under test"
+        component.bind_to_supervisor(
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=Mock()
+            ),
+            output_key=RuntimeIOKey(alias="final_answer", factory=Mock()),
+            goal_key=RuntimeIOKey(alias="goal", factory=Mock()),
+            session_id_key=session_id_key,
+            tool_approval_decision_key=RuntimeIOKey(
+                alias="tool_approval_decision", factory=Mock()
+            ),
+            cycle_count_key=RuntimeIOKey(alias="cycle_count", factory=Mock()),
+        )
+        return session_id_key
+
+    return _bind

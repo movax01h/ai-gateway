@@ -9,12 +9,21 @@ from langchain_core.tools import BaseTool
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
     AgentFinalOutput,
 )
-from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys, IOKey
+from duo_workflow_service.agent_platform.experimental.state import (
+    FlowStateKeys,
+    IOKey,
+)
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
+
+# pylint: disable-next=unused-import
+# Discovered by pytest via import; IOKey types are shared with v1.
+from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (  # noqa: F401
+    bind_as_subagent_fixture,
+)
 
 
 def assert_security_called_with(mock_security, expected_response, expected_tool_name):

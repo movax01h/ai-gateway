@@ -1,23 +1,28 @@
 __all__ = ["ToolApprovalRequestNode"]
 
 import asyncio
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import structlog.stdlib
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
+    DEFAULT_SESSION_ID_KEY,
+    resolve_session_id,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
+    FlowStateKeys,
     RuntimeIOKey,
 )
-from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
+from duo_workflow_service.agent_platform.v1.ui_log import DefaultUILogWriter, UIHistory
 from duo_workflow_service.entities import (
     ApprovalSource,
-    MessageTypeEnum,
     ToolInfo,
-    ToolStatus,
-    UiChatLog,
     WorkflowStatusEnum,
 )
 from duo_workflow_service.tools import (
@@ -41,13 +46,20 @@ class ToolApprovalRequestNode:
     5. Sets workflow status to TOOL_CALL_APPROVAL_REQUIRED (or EXECUTION
         when nothing needs approval)
 
+    Entries must stay attributed: the notifier streams a PENDING card carrying
+    ``component_name`` for each tool call, and ``_merge_ui_chat_log`` matches on
+    ``message_id`` alone, so an unattributed entry reusing that id replaces an
+    attributed one.
+
     Args:
         name: Node name
         conversation_history_key: RuntimeIOKey for conversation history
         toolset: Toolset containing available tools
         pre_approved_tools: List of tool names that skip approval
         status_key: RuntimeIOKey for workflow status
-        ui_history: UI logging history
+        ui_history: UI logging history. Its events must include
+            ``ON_TOOL_APPROVAL_REQUEST``; ``run`` raises if nothing survives.
+        session_id_key: IOKey resolving the active subsession ID.
     """
 
     def __init__(
@@ -58,7 +70,8 @@ class ToolApprovalRequestNode:
         toolset: Toolset,
         pre_approved_tools: list[str],
         status_key: RuntimeIOKey,
-        ui_history: UIHistory,
+        ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
     ):
         self.name = name
         self._conversation_history_key = conversation_history_key
@@ -66,6 +79,7 @@ class ToolApprovalRequestNode:
         self._pre_approved_tools = set(pre_approved_tools)
         self._status_key = status_key
         self._ui_history = ui_history
+        self._session_id_key = session_id_key
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Validate tool calls and request approval."""
@@ -139,17 +153,20 @@ class ToolApprovalRequestNode:
             )
             return status_dict
 
-        # Build approval request UI messages
-        ui_logs = self._build_approval_ui_logs(needs_approval)
-
-        if not ui_logs:
-            raise RuntimeError("No valid tool calls found to display for approval")
+        self._emit_approval_requests(
+            needs_approval, resolve_session_id(self._session_id_key, state)
+        )
 
         result = self._status_key.to_nested_dict(
             WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, state
         )
 
-        return {**result, "ui_chat_log": ui_logs}
+        # Guard on what survived the event filter, not on what was written.
+        updates = self._ui_history.pop_state_updates()
+        if not updates[FlowStateKeys.UI_CHAT_LOG]:
+            raise RuntimeError("No valid tool calls found to display for approval")
+
+        return {**result, **updates}
 
     def _filter_tool_calls(
         self, tool_calls: list
@@ -208,9 +225,16 @@ class ToolApprovalRequestNode:
             # approval anyway.
             return None
 
-    def _build_approval_ui_logs(self, tool_calls: list) -> list[UiChatLog]:
-        """Build UI chat log entries for tool approval requests."""
-        approval_messages = []
+    def _emit_approval_requests(
+        self, tool_calls: list, session_id: Optional[str]
+    ) -> None:
+        """Write one approval-request entry per renderable tool call.
+
+        All rendering happens before the first write: ``UIHistory`` only clears
+        in ``pop_state_updates``, so a mid-batch raise would otherwise strand
+        entries for the next run to flush as its own.
+        """
+        renderable: list[tuple[dict, str]] = []
 
         for call in tool_calls:
             tool = self._toolset[call["name"]]
@@ -220,17 +244,14 @@ class ToolApprovalRequestNode:
             if msg is None:
                 continue
 
-            ui_log = UiChatLog(
-                correlation_id=None,
-                message_type=MessageTypeEnum.REQUEST,
-                message_sub_type=None,
-                content=msg,
+            renderable.append((call, msg))
+
+        for call, msg in renderable:
+            self._ui_history.log.success(
+                msg,
+                event=UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST,
                 message_id=call["id"],
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                status=ToolStatus.SUCCESS,
                 tool_info=ToolInfo(name=call["name"], args=call["args"]),
                 additional_context=None,
+                subsession_id=session_id,
             )
-            approval_messages.append(ui_log)
-
-        return approval_messages

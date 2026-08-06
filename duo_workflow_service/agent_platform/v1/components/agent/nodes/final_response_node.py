@@ -8,6 +8,10 @@ from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
+    DEFAULT_SESSION_ID_KEY,
+    resolve_session_id,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
@@ -16,7 +20,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKey,
     RuntimeIOKey,
 )
-from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey, NoneIOKey
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import DefaultUILogWriter, UIHistory
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import ToolInvokedEvent
@@ -62,9 +66,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         output_key: ``RuntimeIOKey`` that resolves the output ``IOKey`` at runtime.
         component_name: Human-readable name of the owning component.  Used only
             for response-schema tracking metrics, not for UI log entries.
-        session_id_key: ``IOKey`` pointing to the active subsession ID in state.
-            Defaults to ``NoneIOKey()`` for standalone components (always
-            resolves to ``None``).
+        session_id_key: ``IOKey`` resolving the active subsession ID.
     """
 
     def __init__(
@@ -78,7 +80,7 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         response_schema_tracking: bool = False,
         response_schema_tracking_context: Optional[dict[str, str]] = None,
         component_name: Optional[str] = None,
-        session_id_key: BaseIOKey = NoneIOKey(alias="session_id"),
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         flow_id: Optional[str] = None,
         flow_type: Optional[GLReportingEventContext] = None,
         internal_event_client: Optional[InternalEventsClient] = None,
@@ -96,20 +98,10 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
         self._flow_type = flow_type
         self._internal_event_client = internal_event_client
 
-    def _resolve_session_id(self, state: FlowState) -> Optional[str]:
-        """Resolve the active session ID from state.
-
-        Returns:
-            The session ID string when running as a subagent, or ``None`` for
-            standalone components (when ``session_id_key`` is ``NoneIOKey``).
-        """
-        value = self._session_id_key.value_from_state(state)
-        return str(value) if value is not None else None
-
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         output_iokey = self._output_key.to_iokey(state)
-        session_id = self._resolve_session_id(state)
+        session_id = resolve_session_id(self._session_id_key, state)
 
         last_message, history = self._get_last_ai_message(state, history_iokey)
 
