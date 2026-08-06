@@ -13,6 +13,7 @@ from lib.internal_events.context import (
     InternalEventAdditionalProperties,
     current_event_context,
 )
+from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
 BASE_BILLING_CONTEXT_SCHEMA: Dict[str, Any] = {
     "event_id": None,
@@ -204,7 +205,7 @@ class TestBillingEventsClient:
             "subject": kwargs.get("user_id"),
             "global_user_id": kwargs.get("global_user_id"),
             "correlation_id": "corr-123",
-            "metadata": metadata or {},
+            "metadata": {**(metadata or {}), "is_gitlab_team_member": False},
             "unique_instance_id": "test-instance-uid",
             "deployment_type": ".com",
             "subject_type": "human",
@@ -285,18 +286,102 @@ class TestBillingEventsClient:
         event_init_args = mock_dependencies["structured_event_init"].call_args[1]
         context = event_init_args["context"][0]
 
-        assert context.data["metadata"] == {}
+        assert context.data["metadata"] == {"is_gitlab_team_member": False}
 
-        # None metadata must also be forwarded as {} to the internal event client
+        # None metadata must also be forwarded to the internal event client
         client.internal_event_client.track_event.assert_called_once_with(
             event_name="usage_billing_event",
             category=__name__,
             additional_properties=InternalEventAdditionalProperties(
                 property=BillingEvent.AIGW_PROXY_USE.value,
                 label="12345678-1234-5678-9012-123456789012",
-                metadata={},
+                metadata={"is_gitlab_team_member": False},
             ),
         )
+
+    @pytest.mark.parametrize(
+        "claims,expected_flag",
+        [
+            (UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}), True),
+            (UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: False}), False),
+            (UserClaims(extra={"other_claim": True}), False),
+            (UserClaims(extra=None), False),
+            (None, False),
+        ],
+    )
+    def test_track_billing_event_sets_is_gitlab_team_member(
+        self, client, mock_dependencies, claims, expected_flag
+    ):
+        """The skip_usage_cutoff claim is surfaced as metadata.is_gitlab_team_member."""
+        current_event_context.set(EventContext())
+
+        client.track_billing_event(
+            user=CloudConnectorUser(authenticated=True, claims=claims),
+            event=BillingEvent.AIGW_PROXY_USE,
+            category=__name__,
+            unit_of_measure="tokens",
+            quantity=100.0,
+            metadata={"model": "claude-3"},
+        )
+
+        expected_metadata = {
+            "model": "claude-3",
+            "is_gitlab_team_member": expected_flag,
+        }
+
+        event_init_args = mock_dependencies["structured_event_init"].call_args[1]
+        context = event_init_args["context"][0]
+        assert context.data["metadata"] == expected_metadata
+
+        # The same enriched metadata is forwarded to the internal event client
+        client.internal_event_client.track_event.assert_called_once_with(
+            event_name="usage_billing_event",
+            category=__name__,
+            additional_properties=InternalEventAdditionalProperties(
+                property=BillingEvent.AIGW_PROXY_USE.value,
+                label="12345678-1234-5678-9012-123456789012",
+                metadata=expected_metadata,
+            ),
+        )
+
+    def test_track_billing_event_overrides_caller_supplied_team_member_flag(
+        self, client, mock_dependencies
+    ):
+        """A caller-provided is_gitlab_team_member value never wins over the claim."""
+        current_event_context.set(EventContext())
+
+        client.track_billing_event(
+            user=CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
+            ),
+            event=BillingEvent.AIGW_PROXY_USE,
+            category=__name__,
+            unit_of_measure="tokens",
+            quantity=100.0,
+            metadata={"is_gitlab_team_member": False},
+        )
+
+        event_init_args = mock_dependencies["structured_event_init"].call_args[1]
+        context = event_init_args["context"][0]
+        assert context.data["metadata"] == {"is_gitlab_team_member": True}
+
+    @pytest.mark.usefixtures("mock_dependencies")
+    def test_track_billing_event_does_not_mutate_caller_metadata(self, client, user):
+        """Enrichment must not leak back into the dict owned by the caller."""
+        current_event_context.set(EventContext())
+        metadata = {"model": "claude-3"}
+
+        client.track_billing_event(
+            user=user,
+            event=BillingEvent.AIGW_PROXY_USE,
+            category=__name__,
+            unit_of_measure="tokens",
+            quantity=100.0,
+            metadata=metadata,
+        )
+
+        assert metadata == {"model": "claude-3"}
 
     def test_billing_event_context_creation_with_internal_context(
         self, client, user, mock_dependencies
@@ -336,7 +421,10 @@ class TestBillingEventsClient:
         assert billing_data["subject"] == "user-456"
         assert billing_data["global_user_id"] == "global-user-456"
         assert billing_data["correlation_id"] == "request-789"
-        assert billing_data["metadata"] == {"workflow_type": "code_review"}
+        assert billing_data["metadata"] == {
+            "workflow_type": "code_review",
+            "is_gitlab_team_member": False,
+        }
         assert billing_data["timestamp"] == "2023-12-01T10:00:00"
         assert billing_data["event_id"] == "12345678-1234-5678-9012-123456789012"
         assert billing_data["deployment_type"] == ".com"
@@ -386,7 +474,7 @@ class TestBillingEventsClient:
             additional_properties=InternalEventAdditionalProperties(
                 property=event.value,
                 label="12345678-1234-5678-9012-123456789012",
-                metadata=metadata,
+                metadata={**metadata, "is_gitlab_team_member": False},
             ),
         )
 

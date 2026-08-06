@@ -14,6 +14,7 @@ from lib.internal_events.context import (
     InternalEventAdditionalProperties,
     current_event_context,
 )
+from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 __all__ = ["BillingEvent", "BillingEventsClient"]
 
@@ -175,8 +176,10 @@ class BillingEventsClient:
         # This event_id will also act as an idempotent key to filter out duplicates
         event_id = str(uuid.uuid4())
 
-        if metadata is None:
-            metadata = {}
+        metadata = {
+            **(metadata or {}),
+            "is_gitlab_team_member": should_skip_usage_quota_for_user(user),
+        }
 
         realm_mapping = {
             "self-managed": "SM",
