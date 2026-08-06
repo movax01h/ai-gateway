@@ -246,6 +246,15 @@ def _extract_error_message(error: BaseException) -> str:
         # Keep only the "input '<category>' does not match specified schema" prefix so
         # we don't surface the schema/instance internals to the client.
         message = schema_match.group()
+    elif graphql_match := re.search(r"GraphQL errors: \[.*\]", str(error), re.DOTALL):
+        # GraphQL failures are raised as Exception("GraphQL errors: {data['errors']}"),
+        # embedding a per-request payload (variable names, locations, messages) e.g.
+        # "GraphQL errors: [{'message': 'Variable $workflowId of type
+        # AiDuoWorkflowsWorkflowID! was provided invalid value', ...}]". The list
+        # varies per request and fragments SLO grouping, so strip the ": [...]" payload
+        # and keep only the stable "GraphQL errors" label. Any leading prefix (e.g.
+        # "Invalid workflow ID: ") is preserved.
+        message = str(error)[: graphql_match.start()] + "GraphQL errors"
     elif isinstance(error, ModelError):
         raw = error.message
         # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
