@@ -3605,6 +3605,38 @@ def test_extract_error_message_additional_context_schema_error_is_collapsed():
     )
 
 
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        pytest.param(
+            "GraphQL errors: [{'message': 'Variable $workflowId of type "
+            "AiDuoWorkflowsWorkflowID! was provided invalid value', "
+            "'locations': [{'line': 2, 'column': 5}]}]",
+            "GraphQL errors",
+            id="plain_graphql_errors",
+        ),
+        pytest.param(
+            "Invalid workflow ID: GraphQL errors: [{'message': 'Workflow not found', "
+            "'locations': [{'line': 2, 'column': 5}], 'path': ['duoWorkflowWorkflows'], "
+            "'extensions': {'code': 'WORKFLOW_NOT_FOUND'}}]",
+            "Invalid workflow ID: GraphQL errors",
+            id="prefixed_graphql_errors",
+        ),
+        pytest.param(
+            "GraphQL errors: [{'message': 'Variable $workflowId\n"
+            "was provided invalid value'}]",
+            "GraphQL errors",
+            id="multiline_graphql_errors",
+        ),
+    ],
+)
+def test_extract_error_message_graphql_errors_collapse(message, expected):
+    # GraphQL failures embed a per-request payload (variable names, locations, codes)
+    # that fragments SLO grouping; only the stable "GraphQL errors" label (with any
+    # leading prefix preserved) should be surfaced.
+    assert _extract_error_message(Exception(message)) == expected
+
+
 def test_extract_error_message_bedrock_api_connection_error_collapses_to_stable_prefix():
     # Bedrock authorization errors embed a per-request ARN/action/resource in the JSON
     # payload, causing each occurrence to fragment into its own SLO row.  The function
