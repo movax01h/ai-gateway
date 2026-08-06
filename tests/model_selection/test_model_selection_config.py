@@ -1006,3 +1006,171 @@ def test_validate_tags_models_not_required_in_selectable(
     # editorconfig-checker-enable
 
     selection_config.validate()  # must not raise
+
+
+def test_get_unit_primitive_config_map_with_deprecated_models(
+    selection_config, fs: FakeFilesystem
+):
+    """deprecated_models on a feature_setting should parse into FeatureDeprecatedModel entries."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Model One
+                gitlab_identifier: gitlab-model-1
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Model one description."
+                params:
+                  model: provider-model-1
+              - name: Model Two
+                gitlab_identifier: gitlab-model-2
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$$"
+                description: "Model two description."
+                params:
+                  model: provider-model-2
+            """),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent("""
+            configurable_unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
+                  - "ask_commit"
+                default_models:
+                  - "gitlab-model-1"
+                selectable_models:
+                  - "gitlab-model-1"
+                  - "gitlab-model-2"
+                deprecated_models:
+                  - identifier: "gitlab-model-2"
+                    deprecation_date: "2026-08-05"
+                    removal_version: "19.6"
+            """),
+    )
+    # editorconfig-checker-enable
+
+    deprecated = selection_config.get_unit_primitive_config_map()[
+        "test_config"
+    ].deprecated_models
+
+    assert len(deprecated) == 1
+    assert deprecated[0].identifier == "gitlab-model-2"
+    assert str(deprecated[0].deprecation_date) == "2026-08-05"
+    assert deprecated[0].removal_version == "19.6"
+
+
+def test_validate_deprecated_model_not_in_selectable_models(
+    selection_config, fs: FakeFilesystem
+):
+    """Validation should fail when a feature-deprecated model isn't in that feature's selectable_models."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Model One
+                gitlab_identifier: model_1
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Model one description."
+                params:
+                  model: provider-model-1
+              - name: Model Two
+                gitlab_identifier: model_2
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$$"
+                description: "Model two description."
+                params:
+                  model: provider-model-2
+            """),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent("""
+            configurable_unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
+                  - "ask_commit"
+                default_models:
+                  - "model_1"
+                selectable_models:
+                  - "model_1"
+                deprecated_models:
+                  - identifier: "model_2"
+                    deprecation_date: "2026-08-05"
+                    removal_version: "19.6"
+            """),
+    )
+    # editorconfig-checker-enable
+
+    with pytest.raises(ValueError) as excinfo:
+        selection_config.validate()
+
+    error_message = str(excinfo.value)
+    expected_error = (
+        "Feature-deprecated models must be included in selectable_models:\n"
+        "  - Feature 'test_config' has deprecated model 'model_2' that is not in selectable_models."
+    )
+    assert error_message == expected_error
+
+
+def test_validate_with_valid_deprecated_model(selection_config, fs: FakeFilesystem):
+    """Validation should pass when a feature-deprecated model is still in selectable_models."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Model One
+                gitlab_identifier: model_1
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Model one description."
+                params:
+                  model: provider-model-1
+            """),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent("""
+            configurable_unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
+                  - "ask_commit"
+                default_models:
+                  - "model_1"
+                selectable_models:
+                  - "model_1"
+                deprecated_models:
+                  - identifier: "model_1"
+                    deprecation_date: "2026-08-05"
+                    removal_version: "19.6"
+            """),
+    )
+    # editorconfig-checker-enable
+
+    selection_config.validate()  # must not raise

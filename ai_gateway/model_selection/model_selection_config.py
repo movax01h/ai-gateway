@@ -19,7 +19,11 @@ from ai_gateway.model_selection.models import (
     EmbeddingLiteLLMParams,
     ModelClassProvider,
 )
-from ai_gateway.model_selection.types import DeprecationInfo, DevConfig
+from ai_gateway.model_selection.types import (
+    DeprecationInfo,
+    DevConfig,
+    FeatureDeprecatedModel,
+)
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 BASE_PATH = Path(__file__).parent
@@ -137,6 +141,7 @@ class UnitPrimitiveConfig(BaseModel):
     models_for_tags: dict[str, str] = Field(default_factory=dict)
     selectable_models: list[str] = Field(default_factory=list)
     beta_models: list[str] = Field(default_factory=list)
+    deprecated_models: list[FeatureDeprecatedModel] = Field(default_factory=list)
     dev: DevConfig | None = None
 
 
@@ -233,6 +238,7 @@ class ModelSelectionConfig:
                 unit_primitive_config.models_for_tags.values(),
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
+                (dm.identifier for dm in unit_primitive_config.deprecated_models),
                 (
                     unit_primitive_config.dev.selectable_models
                     if unit_primitive_config.dev
@@ -259,6 +265,23 @@ class ModelSelectionConfig:
         if errors:
             return [
                 "Default models must be included in selectable_models:\n"
+                + "\n".join(f"  - {error}" for error in errors)
+            ]
+        return []
+
+    def _validate_deprecated_models_are_selectable(
+        self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
+    ) -> list[str]:
+        errors = [
+            f"Feature '{upc.feature_setting}' has deprecated model "
+            f"'{deprecated_model.identifier}' that is not in selectable_models."
+            for upc in unit_primitive_configs
+            for deprecated_model in upc.deprecated_models
+            if deprecated_model.identifier not in upc.selectable_models
+        ]
+        if errors:
+            return [
+                "Feature-deprecated models must be included in selectable_models:\n"
                 + "\n".join(f"  - {error}" for error in errors)
             ]
         return []
@@ -299,6 +322,7 @@ class ModelSelectionConfig:
         error_messages = [
             *self._validate_model_ids_exist(unit_primitive_configs, models_ids),
             *self._validate_default_models_are_selectable(unit_primitive_configs),
+            *self._validate_deprecated_models_are_selectable(unit_primitive_configs),
             *self._validate_selectable_model_required_fields(
                 unit_primitive_configs, models, models_ids
             ),
