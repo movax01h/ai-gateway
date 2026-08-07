@@ -22,6 +22,7 @@ class EventEnum(StrEnum):
     ORBIT_DAP_SESSION_SUMMARY = "orbit_dap_session_summary"
     COMPACTION_EXECUTED = "duo_workflow_compaction_executed"
     LEGACY_TRIM_EXECUTED = "duo_workflow_legacy_trim_executed"
+    WORKFLOW_MAX_CYCLES_REACHED = "duo_workflow_max_cycles_reached"
 
 
 class EventLabelEnum(StrEnum):

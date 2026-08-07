@@ -33,6 +33,7 @@ from duo_workflow_service.conversation.compaction import (
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
+from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -1757,6 +1758,60 @@ class TestAgentNodeMaxCycles:
 
         mock_run_tree.add_tags.assert_not_called()
         mock_run_tree.add_metadata.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_soft_limit_tracks_internal_event(
+        self,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        mock_internal_event_client,
+    ):
+        """Crossing max_cycles emits the event once; staying above it does not re-emit."""
+        state = copy.deepcopy(base_flow_state)
+        state["context"].setdefault(component_name, {})["cycle_count"] = 2
+        agent_node = make_agent_node()
+
+        await agent_node.run(state)
+
+        mock_internal_event_client.track_event.assert_called_once_with(
+            event_name="duo_workflow_max_cycles_reached",
+            additional_properties=InternalEventAdditionalProperties(
+                label="test_agent_node",
+                property="workflow_id",
+                value="test_flow_id",
+                max_cycles=3,
+                cycle_count=3,
+            ),
+            category=CategoryEnum.DEVELOPER.value,
+        )
+
+        state["context"][component_name]["cycle_count"] = 3
+        await agent_node.run(state)
+
+        mock_internal_event_client.track_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_soft_limit_event_label_strips_node_role_suffix(
+        self,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        mock_internal_event_client,
+    ):
+        """The event is labelled with the component name, not the `{component}#agent` node name.
+
+        AgentComponent builds its AgentNode with the runtime node name, so the raw value would
+        otherwise disagree with how `duo_workflow_compaction_executed` labels the same agent.
+        """
+        state = copy.deepcopy(base_flow_state)
+        state["context"].setdefault(component_name, {})["cycle_count"] = 2
+        agent_node = make_agent_node(name="fix_pipeline_execution#agent")
+
+        await agent_node.run(state)
+
+        _, kwargs = mock_internal_event_client.track_event.call_args
+        assert kwargs["additional_properties"].label == "fix_pipeline_execution"
 
 
 class TestAgentNodeIterationWarning:
