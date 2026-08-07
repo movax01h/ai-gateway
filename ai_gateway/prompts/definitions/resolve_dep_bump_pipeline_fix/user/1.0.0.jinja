@@ -5,13 +5,25 @@ stop if the fix can't be established), then post a short summary comment on the 
 <pipeline>
   <pipeline_url>{{pipeline_url}}</pipeline_url>
 </pipeline>
+{%- if merge_request_url %}
+
+<merge_request>
+  <merge_request_url>{{merge_request_url}}</merge_request_url>
+</merge_request>
+{%- endif %}
 
 Procedure (apply the guidelines above at each step):
 
 1. `get_pipeline_failing_jobs` + `get_job_logs` — gather errors, stack traces, and
    failing test names with their `file:line` locations.
+{%- if merge_request_url %}
+2. `get_merge_request(url="{{merge_request_url}}")` — the MR is already identified
+   above; fetch it once to capture its `source_branch` (you will commit to this
+   branch). Never probe other merge request iids looking for it.
+{%- else %}
 2. `get_merge_request` — identify the MR for this pipeline and capture its
    `source_branch` (you will commit to this branch).
+{%- endif %}
 3. `list_merge_request_diffs` — see what the dep-bump changed.
 4. `find_files` + `read_file` the manifest/lock files (requirements.txt,
    pyproject.toml, Gemfile(.lock), package.json / package-lock.json, go.mod/go.sum,
