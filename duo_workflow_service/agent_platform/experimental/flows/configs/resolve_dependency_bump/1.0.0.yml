@@ -16,6 +16,9 @@ components:
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+        optional: True
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -44,6 +47,13 @@ routers:
 flow:
   entry_point: "resolve_dep_bump_pipeline_fix"
   inputs:
+    - category: merge_request
+      version_constraint: "^1.0.0"
+      input_schema:
+        url:
+          type: string
+          format: uri
+          description: The URL for the GitLab Merge Request
     - category: agent_platform_standard_context
       version_constraint: "^1.0.0"
       input_schema:
