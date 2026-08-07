@@ -1,0 +1,187 @@
+version: "v1"
+environment: ambient
+components:
+  # Step 1: Fetch complete MR context with full file contents for final review
+  - name: "build_review_context"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: Fetch lightweight MR diffs for prescan analysis
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: Generate targeted directory tree exploration calls based on changed files
+  - name: "explore_relevant_directories"
+    type: OneOffComponent
+    prompt_id: "explore_directories_for_prescan"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+    toolset:
+      - "list_repository_tree"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_call_input"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 4: Batch read additional context files (tests, dependencies, custom instructions)
+  - name: "prescan_codebase"
+    type: OneOffComponent
+    prompt_id: "code_review_prescan"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_context"
+      - from: "context:explore_relevant_directories.tool_responses"
+        as: "directory_trees"
+        optional: True
+    toolset:
+      - "get_repository_file"
+      - "read_file"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_call_input"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 5: Fetch lightweight MR metadata (file paths + custom instructions)
+  - name: "fetch_mr_metadata"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "true"
+        as: "lightweight"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 6: Transform prescan results into structured JSON for review consumption
+  - name: "analyze_prescan_results"
+    type: AgentComponent
+    prompt_id: "analyze_prescan_codebase_results"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:fetch_mr_metadata.tool_responses"
+        as: "mr_context"
+      - from: "context:prescan_codebase.tool_responses"
+        as: "prescan_tool_responses"
+        optional: True
+    toolset: []
+    ui_log_events:
+      - "on_agent_final_answer"
+
+  # Step 7: Fetch the inline discussion threads this bot started on earlier reviews.
+  # only_from_author matches on the thread's first note, so a thread opened by the review bot
+  # is returned along with any human replies inside it. The bot name stays optional so an older
+  # GitLab that never sends code_review_context can still run this flow. When it is missing the
+  # filter is skipped and every resolvable thread comes back, so the system prompt falls back to
+  # the author field on each thread to tell its own findings from a human reviewer's.
+  - name: "fetch_existing_discussions"
+    type: DeterministicStepComponent
+    tool_name: "list_mr_discussions"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:inputs.code_review_context.duo_code_review_bot_name"
+        as: "only_from_author"
+        optional: True
+      - from: "true"
+        as: "only_resolvable"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 8: Execute code review with complete context and publish results
+  - name: "perform_code_review_and_publish"
+    type: OneOffComponent
+    prompt_id: "review_merge_request_dap"
+    prompt_version: "2.0.0-dev"
+    inputs:
+      - from: "context:build_review_context.tool_responses"
+        as: "mr_data"
+      - from: "context:analyze_prescan_results.final_answer"
+        as: "codebase_context"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:fetch_existing_discussions.tool_responses"
+        as: "existing_discussions"
+        optional: True
+      - from: "context:inputs.code_review_context.duo_code_review_bot_name"
+        as: "duo_code_review_bot_name"
+        optional: True
+    toolset:
+      - "post_duo_code_review"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_call_input"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "build_review_context"
+    to: "fetch_mr_diffs"
+  - from: "fetch_mr_diffs"
+    to: "explore_relevant_directories"
+  - from: "explore_relevant_directories"
+    to: "prescan_codebase"
+  - from: "prescan_codebase"
+    to: "fetch_mr_metadata"
+  - from: "fetch_mr_metadata"
+    to: "analyze_prescan_results"
+  - from: "analyze_prescan_results"
+    to: "fetch_existing_discussions"
+  - from: "fetch_existing_discussions"
+    to: "perform_code_review_and_publish"
+  - from: "perform_code_review_and_publish"
+    to: "end"
+
+flow:
+  entry_point: "build_review_context"
+  inputs:
+    # Sent by the additional_context_resolver on the code_review/v1 catalog entry, so only
+    # this flow receives it.
+    - category: code_review_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        duo_code_review_bot_name:
+          type: string
+          description: Username of the bot that authors Duo Code Review comments
+          optional: true

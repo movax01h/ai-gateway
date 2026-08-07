@@ -1,0 +1,11 @@
+---
+name: Review Merge Request DAP
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'review_merge_request_dap/system/2.0.0-dev.jinja' %}
+  user: |
+    {% include 'review_merge_request_dap/user/2.0.0-dev.jinja' %}
+params:
+  timeout: 180
+  cache_control_injection_points: []
