@@ -204,14 +204,21 @@ class GetRepositoryFile(RepositoryFileBaseTool):
         offset: Optional[int],
         limit: Optional[int],
     ) -> str:
-        lines = content.rstrip("\n").splitlines()
+        # str.splitlines() also breaks on \r/\v/\f, corrupting CRLF files; a
+        # blanket rstrip("\n") ate real trailing blank lines. Split on "\n" only.
+        if content == "":
+            lines: List[str] = []
+        elif content.endswith("\n"):
+            lines = content[:-1].split("\n")
+        else:
+            lines = content.split("\n")
         total_lines = len(lines)
 
         start = offset if offset is not None else 0
         if limit is not None and limit > 0:
             end = min(start + limit, total_lines)
         elif limit is None and total_lines > DEFAULT_GET_REPOSITORY_FILE_LIMIT:
-            end = DEFAULT_GET_REPOSITORY_FILE_LIMIT
+            end = min(start + DEFAULT_GET_REPOSITORY_FILE_LIMIT, total_lines)
         else:
             end = total_lines
 
