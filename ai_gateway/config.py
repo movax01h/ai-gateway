@@ -1,4 +1,5 @@
 import os
+import ssl
 from typing import Annotated, Literal, Optional, Set, Tuple, TypedDict, Union
 from urllib.parse import urlparse
 
@@ -83,9 +84,13 @@ class ConfigMtls(BaseModel):
     is installed process-wide via litellm.client_session / litellm.aclient_session
     in setup_litellm.
 
-    `verify` / `ca_bundle` control server-certificate trust and are independent of
-    the client certificate: httpx does not read SSL_CERT_FILE / REQUESTS_CA_BUNDLE,
-    so a corporate CA must be supplied explicitly via `ca_bundle`.
+    `verify` / `ca_bundle` control server-certificate trust. Without `ca_bundle`,
+    httpx trusts certifi plus whatever SSL_CERT_FILE or SSL_CERT_DIR name. Setting
+    `ca_bundle` replaces that trust set outright: neither variable is consulted
+    once it is set, so the bundle must carry every root the gateway needs. httpx
+    never reads REQUESTS_CA_BUNDLE. LiteLLM's experimental
+    EXPERIMENTAL_OPENAI_BASE_LLM_HTTP_HANDLER flag routes custom_openai past the
+    sessions installed here, where none of this configuration applies.
     """
 
     enabled: bool = Field(
@@ -643,18 +648,26 @@ def _setup_litellm_mtls(mtls: ConfigMtls) -> None:
     else:
         cert = mtls.cert_file
 
-    # httpx `verify` (server trust): explicit CA bundle > disabled > certifi default.
-    verify: Union[bool, str]
-    if not mtls.verify:
-        verify = False
-    elif mtls.ca_bundle:
-        verify = mtls.ca_bundle
-    else:
-        verify = True
-
     # Installed once at startup and reused for the process lifetime; cleaned up on
     # process exit. setup_litellm is not re-invoked at runtime, so any previous
     # sessions are intentionally not closed here — they may still be serving
     # in-flight requests, and AsyncClient.aclose() cannot be awaited from here.
-    litellm.client_session = httpx.Client(cert=cert, verify=verify)
-    litellm.aclient_session = httpx.AsyncClient(cert=cert, verify=verify)
+    litellm.client_session = httpx.Client(cert=cert, verify=_mtls_verify(mtls))
+    litellm.aclient_session = httpx.AsyncClient(cert=cert, verify=_mtls_verify(mtls))
+
+
+def _mtls_verify(mtls: ConfigMtls) -> Union[bool, ssl.SSLContext]:
+    """Build the httpx `verify` argument: disabled > CA bundle > certifi default.
+
+    A CA bundle is handed to httpx as an ssl.SSLContext, never as a path: given a
+    string `verify`, httpx 0.28 returns the context it builds before reaching the
+    branch that loads the client certificate (httpx/_config.py:52-54 vs :58-67),
+    so the certificate is silently dropped and the handshake completes as
+    server-only TLS. Built once per client because httpx and httpcore mutate the
+    context they are given.
+    """
+    if not mtls.verify:
+        return False
+    if mtls.ca_bundle:
+        return ssl.create_default_context(cafile=mtls.ca_bundle)
+    return True

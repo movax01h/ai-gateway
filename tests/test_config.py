@@ -1,5 +1,8 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import os
+import socket
+import ssl
+import threading
 from unittest import mock
 
 import litellm
@@ -909,18 +912,98 @@ def test_setup_litellm_vertex_location(env: dict, expected_location: str):
 
 @pytest.fixture
 def mtls_cert_files(tmp_path):
-    """Create dummy cert/key/CA files so ConfigMtls validation passes.
+    """Real PEM material: a CA plus client and server certificates it signed.
 
-    Contents are irrelevant because httpx is mocked in these tests; only the resolution logic (cert tuple + verify
-    value) is under test.
+    The wire-level regression test completes a real TLS handshake, so the files
+    must parse. The kwarg-shape tests only pass the paths through.
     """
-    cert = tmp_path / "client.pem"
-    key = tmp_path / "client.key"
-    ca = tmp_path / "ca.crt"
-    for path in (cert, key, ca):
-        path.write_text("dummy")
+    from datetime import datetime, timedelta, timezone
 
-    return mock.Mock(cert=str(cert), key=str(key), ca=str(ca))
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    def _name(cn):
+        return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+
+    def _key_usage(*, ca):
+        return x509.KeyUsage(
+            digital_signature=not ca,
+            content_commitment=False,
+            key_encipherment=False,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=ca,
+            crl_sign=ca,
+            encipher_only=False,
+            decipher_only=False,
+        )
+
+    def _cert(cn, key, issuer_cert, issuer_key, *, ca=False, eku=None, san=None):
+        now = datetime.now(timezone.utc)
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(_name(cn))
+            .issuer_name(issuer_cert.subject if issuer_cert else _name(cn))
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5))
+            .not_valid_after(now + timedelta(hours=1))
+            .add_extension(
+                x509.BasicConstraints(ca=ca, path_length=None), critical=True
+            )
+            .add_extension(_key_usage(ca=ca), critical=True)
+        )
+        if eku:
+            builder = builder.add_extension(x509.ExtendedKeyUsage(eku), critical=False)
+        if san:
+            builder = builder.add_extension(
+                x509.SubjectAlternativeName(san), critical=False
+            )
+        return builder.sign(issuer_key or key, hashes.SHA256())
+
+    def _write(fname, data):
+        path = tmp_path / fname
+        path.write_bytes(data)
+        return str(path)
+
+    def _key_pem(key):
+        return key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_cert = _cert("test-mtls-ca", ca_key, None, None, ca=True)
+    client_key = ec.generate_private_key(ec.SECP256R1())
+    client_cert = _cert(
+        "aigw-client",
+        client_key,
+        ca_cert,
+        ca_key,
+        eku=[ExtendedKeyUsageOID.CLIENT_AUTH],
+    )
+    server_key = ec.generate_private_key(ec.SECP256R1())
+    server_cert = _cert(
+        "localhost",
+        server_key,
+        ca_cert,
+        ca_key,
+        eku=[ExtendedKeyUsageOID.SERVER_AUTH],
+        san=[x509.DNSName("localhost")],
+    )
+
+    return mock.Mock(
+        cert=_write("client.pem", client_cert.public_bytes(serialization.Encoding.PEM)),
+        key=_write("client.key", _key_pem(client_key)),
+        ca=_write("ca.crt", ca_cert.public_bytes(serialization.Encoding.PEM)),
+        server_cert=_write(
+            "server.pem", server_cert.public_bytes(serialization.Encoding.PEM)
+        ),
+        server_key=_write("server.key", _key_pem(server_key)),
+    )
 
 
 def test_setup_litellm_mtls_disabled():
@@ -995,12 +1078,18 @@ def test_setup_litellm_mtls_verify_uses_ca_bundle(mtls_cert_files):
     ):
         setup_litellm(Config(_env_file=None))
 
-        async_client.assert_called_once_with(
-            cert=mtls_cert_files.cert, verify=mtls_cert_files.ca
-        )
-        sync_client.assert_called_once_with(
-            cert=mtls_cert_files.cert, verify=mtls_cert_files.ca
-        )
+        # The CA bundle must arrive as an ssl.SSLContext, never as a path: httpx
+        # returns early on a string `verify` and silently drops `cert`. One
+        # context per client, because httpx/httpcore mutate what they are given.
+        async_client.assert_called_once()
+        sync_client.assert_called_once()
+        async_verify = async_client.call_args.kwargs["verify"]
+        sync_verify = sync_client.call_args.kwargs["verify"]
+        assert async_client.call_args.kwargs["cert"] == mtls_cert_files.cert
+        assert sync_client.call_args.kwargs["cert"] == mtls_cert_files.cert
+        assert isinstance(async_verify, ssl.SSLContext)
+        assert isinstance(sync_verify, ssl.SSLContext)
+        assert async_verify is not sync_verify
 
 
 def test_setup_litellm_mtls_verify_disabled(mtls_cert_files):
@@ -1020,6 +1109,68 @@ def test_setup_litellm_mtls_verify_disabled(mtls_cert_files):
 
         async_client.assert_called_once_with(cert=mtls_cert_files.cert, verify=False)
         sync_client.assert_called_once_with(cert=mtls_cert_files.cert, verify=False)
+
+
+def test_setup_litellm_mtls_client_cert_reaches_the_wire(mtls_cert_files):
+    """A CA bundle plus a client certificate must still present the certificate.
+
+    Regression test for
+    https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2672:
+    a string `verify` makes httpx 0.28 return before load_cert_chain, so the
+    client certificate silently never reaches the handshake. Kwarg assertions
+    cannot catch that; this test completes a real handshake against a server
+    that requires a client certificate.
+    """
+    seen = {}
+    server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_ctx.load_cert_chain(mtls_cert_files.server_cert, mtls_cert_files.server_key)
+    server_ctx.verify_mode = ssl.CERT_REQUIRED
+    server_ctx.load_verify_locations(mtls_cert_files.ca)
+
+    def serve(srv):
+        try:
+            conn, _ = srv.accept()
+            with server_ctx.wrap_socket(conn, server_side=True) as tls:
+                seen["peer"] = tls.getpeercert()
+                tls.recv(4096)
+                tls.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+        except Exception as exc:  # surfaced by the handshake assertion below
+            seen["error"] = exc
+
+    env = {
+        "AIGW_MTLS__ENABLED": "true",
+        "AIGW_MTLS__CERT_FILE": mtls_cert_files.cert,
+        "AIGW_MTLS__KEY_FILE": mtls_cert_files.key,
+        "AIGW_MTLS__CA_BUNDLE": mtls_cert_files.ca,
+    }
+    with socket.create_server(("127.0.0.1", 0)) as srv:
+        srv.settimeout(10)
+        port = srv.getsockname()[1]
+        thread = threading.Thread(target=serve, args=(srv,), daemon=True)
+        thread.start()
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(litellm, "aclient_session", None),
+            mock.patch.object(litellm, "client_session", None),
+        ):
+            setup_litellm(Config(_env_file=None))
+            try:
+                response = litellm.client_session.get(
+                    f"https://localhost:{port}/", timeout=10
+                )
+            except Exception as client_exc:
+                thread.join(timeout=10)
+                raise AssertionError(
+                    f"request failed ({client_exc!r}); server-side handshake "
+                    f"result: {seen.get('error')!r}"
+                ) from client_exc
+        thread.join(timeout=10)
+
+    assert response.status_code == 200
+    subject = dict(item[0] for item in seen["peer"]["subject"])
+    assert subject["commonName"] == "aigw-client"
 
 
 def test_config_mtls_enabled_without_cert_raises():
