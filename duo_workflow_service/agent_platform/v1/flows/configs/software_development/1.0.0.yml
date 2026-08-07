@@ -235,10 +235,21 @@ prompts:
         **CRITICAL:** Use todo_write tool to create structured plan. This is REQUIRED.
         Break down work into specific, actionable tasks.
 
+        **IMPORTANT todo_write rules:**
+        - Call todo_write **exactly once**, at the very end of your planning, after you have
+          decided on the complete list of tasks.
+        - Every task MUST have status set to **"pending"** — tasks have not been executed yet
+          and must never be marked as "in_progress", "completed", or "cancelled" during planning.
+        - Include **all** tasks in that single call. Do not call todo_write multiple times or
+          with partial task lists.
+        - This matters because the next step after planning is plan approval: the user is shown
+          exactly the tasks you wrote with todo_write and asked to approve them. If you skip
+          todo_write, the user is presented with an empty plan to approve, which is confusing.
+
         # Output Format
         Provide:
         1. High-level approach summary
-        2. Detailed task list (via todo_write)
+        2. Detailed task list (via todo_write, all tasks with status "pending")
         3. Key considerations or risks
         4. Expected outcomes
 
@@ -272,6 +283,8 @@ prompts:
         Your very first action MUST be to call todo_write with every task from
         the approved task list below, preserving each description and the order
         exactly. Do not consolidate, reword, split, or omit any tasks.
+        Reset every task's status to "pending" regardless of what status it
+        has in the approved task list — no task has been executed yet.
         Then for each task: mark it in_progress, do the work, mark it completed.
         {%- endif %}
 
