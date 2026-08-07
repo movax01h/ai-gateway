@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import re
 from unittest.mock import AsyncMock
 
 import pytest
@@ -631,6 +632,107 @@ class TestGetRepositoryFilePagination:
         content = json.loads(result)["content"]
         assert content == "\n".join(f"line {i}" for i in range(3000))
         assert "[Showing" not in content
+
+    @pytest.fixture
+    def very_large_file_content(self):
+        """A 5000-line file, large enough for a second default-sized window."""
+        lines = [f"line {i}" for i in range(5000)]
+        raw = "\n".join(lines)
+        encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
+        return GitLabHttpResponse(
+            status_code=200,
+            body={"content": encoded},
+            headers={"content-type": "application/json"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_offset_past_default_limit_advances_window(
+        self, tool, gitlab_client_mock, very_large_file_content
+    ):
+        """Regression test: offset >= DEFAULT_GET_REPOSITORY_FILE_LIMIT with no limit
+        must return the next window, not an empty slice at the same offset.
+        """
+        gitlab_client_mock.aget.return_value = very_large_file_content
+        result = await tool._arun(
+            project_id="org/repo", ref="main", file_path="file.py", offset=2000
+        )
+        content = json.loads(result)["content"]
+        assert content.startswith("line 2000")
+        assert (
+            "[Showing lines 2000-3999 of 5000 total. Use offset=4000 to continue reading.]"
+            in content
+        )
+
+    @pytest.mark.asyncio
+    async def test_offset_only_hint_chain_advances_to_eof(
+        self, tool, gitlab_client_mock, very_large_file_content
+    ):
+        """Regression test: following the emitted hint literally (never passing
+        limit, exactly as an agent reading the tool description would) must make
+        forward progress on every call and eventually reach the end of the file,
+        instead of looping on the same offset.
+        """
+        gitlab_client_mock.aget.return_value = very_large_file_content
+
+        offsets_seen = []
+        offset = None
+        for _ in range(5):
+            kwargs = {"project_id": "org/repo", "ref": "main", "file_path": "file.py"}
+            if offset is not None:
+                kwargs["offset"] = offset
+            result = await tool._arun(**kwargs)
+            content = json.loads(result)["content"]
+            assert content.strip() != ""
+
+            match = re.search(r"Use offset=(\d+) to continue reading", content)
+            if match is None:
+                break
+            next_offset = int(match.group(1))
+            assert next_offset > (offset or 0)
+            offsets_seen.append(next_offset)
+            offset = next_offset
+
+        assert offsets_seen == [2000, 4000]
+
+    @pytest.mark.asyncio
+    async def test_trailing_blank_lines_are_counted(self, tool, gitlab_client_mock):
+        """Regression test: blank lines at EOF must be counted, not swallowed by
+        the blanket rstrip("\\n") that used to run before splitting into lines.
+        """
+        raw = "a\nb\nc\n\n\n"
+        encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
+        mock_resp = GitLabHttpResponse(
+            status_code=200,
+            body={"content": encoded},
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.aget.return_value = mock_resp
+        result = await tool._arun(
+            project_id="org/repo", ref="main", file_path="file.py", offset=4
+        )
+        content = json.loads(result)["content"]
+        assert "beyond end of file" not in content
+        assert "5 total" in content
+
+    @pytest.mark.asyncio
+    async def test_crlf_line_endings_are_preserved(self, tool, gitlab_client_mock):
+        """Regression test: CRLF files must not be silently rewritten to LF by
+        pagination. str.splitlines() treats \\r as a line separator in its own
+        right; splitting on a literal "\\n" instead keeps it attached to its line.
+        """
+        raw = "line 0\r\nline 1\r\nline 2\r\n"
+        encoded = base64.b64encode(raw.encode("utf-8")).decode("utf-8")
+        mock_resp = GitLabHttpResponse(
+            status_code=200,
+            body={"content": encoded},
+            headers={"content-type": "application/json"},
+        )
+        gitlab_client_mock.aget.return_value = mock_resp
+        result = await tool._arun(
+            project_id="org/repo", ref="main", file_path="file.py", offset=0, limit=3
+        )
+        content = json.loads(result)["content"]
+        assert content == "line 0\r\nline 1\r\nline 2\r"
 
 
 @pytest.mark.parametrize("host", ["gitlab.com", "gitlab.example.com"])
