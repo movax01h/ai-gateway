@@ -1,3 +1,4 @@
+import asyncio
 import contextvars
 from unittest import mock
 
@@ -398,7 +399,7 @@ class TestWatchContainer:
 
         assert len(cap_logs) == 1
         assert cap_logs[0]["event"] == "Request to LLM complete"
-        assert cap_logs[0]["duration"] == 1
+        assert cap_logs[0]["duration_s"] == 1
         assert cap_logs[0]["model_engine"] == "test_engine"
         assert cap_logs[0]["model_name"] == "test_model"
         assert cap_logs[0]["unit_primitive"] == unit_primitive
@@ -418,6 +419,45 @@ class TestWatchContainer:
 
         assert mock_counters.mock_calls == [expected_call, mock.call().inc()]
         assert mock_histograms.mock_calls == [expected_call, mock.call().observe(1)]
+
+    @mock.patch("prometheus_client.Gauge.labels")
+    @mock.patch("prometheus_client.Counter.labels")
+    @mock.patch("prometheus_client.Histogram.labels")
+    @mock.patch("time.perf_counter")
+    def test_finish_sets_duration_s(
+        self, time_counter, _mock_histograms, _mock_counters, _mock_gauges, container
+    ):
+        time_counter.side_effect = [10, 15]
+
+        container.start()
+        assert container.duration_s is None
+
+        container.finish()
+        assert container.duration_s == 5
+
+    @mock.patch("prometheus_client.Gauge.labels")
+    @mock.patch("prometheus_client.Counter.labels")
+    @mock.patch("prometheus_client.Histogram.labels")
+    @mock.patch("time.perf_counter")
+    def test_finish_is_idempotent(
+        self, time_counter, mock_histograms, mock_counters, mock_gauges, container
+    ):
+        # Only two `perf_counter` values are available: one for `start()` and one for
+        # the first `finish()`. Recomputing the duration would raise `StopIteration`.
+        time_counter.side_effect = [10, 15]
+
+        container.start()
+        mock_gauges.reset_mock()  # So we only have the calls from `finish` below
+
+        container.finish()
+        container.finish()
+
+        assert container.duration_s == 5
+        # The gauge decrement, counter increment and histogram observation must each
+        # happen exactly once, so a cancelled stream is not counted twice.
+        assert mock_gauges.mock_calls.count(mock.call().dec()) == 1
+        assert mock_counters.mock_calls.count(mock.call().inc()) == 1
+        assert mock_histograms.mock_calls.count(mock.call().observe(5)) == 1
 
 
 class TestModelRequestInstrumentator:
@@ -570,6 +610,71 @@ class TestModelRequestInstrumentator:
                 mock.call(**{**DEFAULT_ARGS, "streaming": "yes"}),
                 mock.call().observe(1),
             ]
+
+    @mock.patch("prometheus_client.Gauge.labels")
+    @mock.patch("prometheus_client.Counter.labels")
+    @mock.patch("prometheus_client.Histogram.labels")
+    @mock.patch("time.perf_counter")
+    def test_watch_finishes_on_base_exception(
+        self,
+        time_counter,
+        mock_histograms,
+        _mock_counters,
+        _mock_gauges,
+        instrumentator,
+    ):
+        """A cancelled request is still recorded, but is not reported as an error."""
+        time_counter.side_effect = [1, 2]
+
+        with pytest.raises(asyncio.CancelledError):
+            with instrumentator.watch() as watcher:
+                raise asyncio.CancelledError()
+
+        assert watcher.error is False
+        assert watcher.duration_s == 1
+        assert mock_histograms.mock_calls == [
+            mock.call(**DEFAULT_ARGS),
+            mock.call().observe(1),
+        ]
+
+    @mock.patch("prometheus_client.Gauge.labels")
+    @mock.patch("prometheus_client.Counter.labels")
+    @mock.patch("prometheus_client.Histogram.labels")
+    @mock.patch("time.perf_counter")
+    def test_watch_streaming_finishes_on_base_exception(
+        self,
+        time_counter,
+        mock_histograms,
+        _mock_counters,
+        _mock_gauges,
+        instrumentator,
+    ):
+        """A cancelled streaming request is recorded, as no stream callback will run."""
+        time_counter.side_effect = [1, 2]
+
+        with pytest.raises(asyncio.CancelledError):
+            with instrumentator.watch(stream=True) as watcher:
+                raise asyncio.CancelledError()
+
+        assert watcher.duration_s == 1
+        assert mock_histograms.mock_calls == [
+            mock.call(**{**DEFAULT_ARGS, "streaming": "yes"}),
+            mock.call().observe(1),
+        ]
+
+    @mock.patch("prometheus_client.Gauge.labels")
+    @mock.patch("prometheus_client.Counter.labels")
+    @mock.patch("prometheus_client.Histogram.labels")
+    def test_watch_streaming_success_defers_finish(
+        self, mock_histograms, mock_counters, _mock_gauges, instrumentator
+    ):
+        """A successful streaming request is only recorded once its stream callback runs."""
+        with instrumentator.watch(stream=True) as watcher:
+            pass
+
+        assert watcher.duration_s is None
+        assert mock_histograms.mock_calls == []
+        assert mock_counters.mock_calls == []
 
 
 @pytest.fixture(name="instrumentator")
