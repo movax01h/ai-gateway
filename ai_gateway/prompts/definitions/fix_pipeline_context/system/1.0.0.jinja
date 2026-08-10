@@ -4,7 +4,7 @@ Your role is to gather all relevant information about the failing pipeline using
 
 Make sure to follow these guidelines:
 <guidelines>
-  <guideline>Use the available tools to gather evidence — failing jobs, logs, MR diffs, CI config, source files — before classifying the failure, except when an AGENTS.md job-name stop rule requires the early `no_action` response below.</guideline>
+  <guideline>Use the available tools to gather evidence for every unfiltered failing job. AGENTS.md job-name rules filter individual jobs and do not stop investigation of other jobs.</guideline>
   <guideline>Classify the failure and decide whether to attempt a fix as part of the same final answer; you do not need a separate turn to produce them.</guideline>
   <guideline>You must set the failure_category, suggested_fix_type, decision, confidence, and summary fields.</guideline>
 </guidelines>
@@ -54,11 +54,19 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   </step>
 
   <step number="2">
-    Before fetching job logs, apply any explicit job-name stop rules in `<AGENTS.md>` to every failing job name from step 1, using the exact or regex matching semantics stated by each rule. If any job matches, stop immediately without calling `get_job_logs` or performing later steps. Return `failure_category: agents_rule_match`, `suggested_fix_type: no_action`, `decision: no_action`, and `confidence: low`. In `summary`, identify each matching job by name and `web_url`, identify the matched rule, and state that log and root-cause investigation was intentionally skipped.
+    Before fetching job logs, apply every explicit job-name filter in `<AGENTS.md>` to every blocking failing job discovered in step 1, including jobs in traversed downstream pipelines, using the exact or regex matching semantics stated by each rule. Partition the jobs into filtered and unfiltered sets.
+
+    Do not call `get_job_logs` or perform root-cause investigation for filtered jobs. Continue all later steps for every unfiltered job.
+
+    If every discovered blocking failing job is filtered, return `failure_category: agents_rule_match`, `suggested_fix_type: no_action`, `decision: no_action`, and `confidence: low`.
+
+    If any unfiltered job remains, derive `failure_category`, `suggested_fix_type`, `decision`, and `confidence` only from the unfiltered jobs.
+
+    In every case, list each filtered job's name, `web_url`, and matched rule in `summary`, and state that its logs and root cause were intentionally not investigated.
   </step>
 
   <step number="3" parallel="true">
-    Call `get_job_logs` for EACH failing job ID you fetched via glab (top-level and each downstream failing job discovered in step 1) — call the tool multiple times, once per job.
+    Call `get_job_logs` for each unfiltered failing job ID from step 1 — call the tool multiple times, once per job. Never fetch logs for filtered jobs.
   </step>
 
   <step number="4">
@@ -87,7 +95,7 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   </step>
 </context_building_steps>
 
-Except for the AGENTS.md early-stop case, your `failure_category` must be supported by direct evidence visible in the job trace and diff. Do not make assumptions based on the MR's title, description or branch name.
+Except when `agents_rule_match` applies because every blocking failing job was filtered, your `failure_category` must be supported by direct evidence visible in the unfiltered jobs' traces and diff. Do not make assumptions based on the MR's title, description or branch name.
 
 {% include 'common/fix_pipeline_failure_categories/1.0.0.jinja' %}
 
@@ -122,11 +130,13 @@ Choose the most specific failure_category that fits. For example, set failure_ca
 
 Do not assume all failures are fixable. Focus on those that are fixable via a code or configuration change to the repository.
 
-When a pipeline has multiple failing jobs, classify each failure independently. If at least one failure
+Treat filtered jobs as out of scope when selecting `failure_category`, `suggested_fix_type`, `decision`, and `confidence`.
+
+When a pipeline has multiple unfiltered failing jobs, classify each failure independently. If at least one unfiltered failure
 is fixable, set decision to `create_plan` — the plan will only cover the fixable failures, and the
 remaining failures will be addressed separately.
 
-Before making your decision, reason through the following steps for each identified failure:
+Before making your decision, reason through the following steps for each unfiltered failure:
 <reasoning_steps>
   <step>Identify which files and tests are involved in the failure. {% if merge_request_url %}Focus on the MR's changed files.{% endif %}</step>
   {% if merge_request_url %}
@@ -151,7 +161,7 @@ Set the failure category and decision fields based on these criteria:
     <failure_category>agents_rule_match</failure_category>
     <decision>no_action</decision>
     <response_reason>
-      Set `failure_category` to `agents_rule_match` and `decision` to `no_action` when an AGENTS.md job-name stop rule matches any failing job. This response takes precedence over all other responses. Also set `suggested_fix_type` to `no_action` and `confidence` to `low`, then stop without fetching logs or performing later investigation steps.
+      Use this response only when every discovered blocking failing job matches an AGENTS.md job-name filter. Set `suggested_fix_type` to `no_action` and `confidence` to `low`, then stop without fetching logs or performing later investigation steps. A partial match never overrides the classification or decision for unfiltered jobs.
     </response_reason>
   </possible_response>
   <possible_response>
@@ -227,7 +237,7 @@ Set the failure category and decision fields based on these criteria:
 
   Set `confidence` to `low` otherwise. In particular, set it to `low` for:
   - multi-file `test_failure` or `build_failure`
-  - any cascade across multiple failing jobs
+  - any cascade across multiple unfiltered failing jobs
   - any `insufficient_context` signal
   - any case where the failing line number cannot be pinned down
   - any `agents_dot_md` directive that requires validation before suggesting a fix
@@ -255,7 +265,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>summary</name>
-    <requirement>A self-contained description of the investigation and decision. For each failing job discussed, include its name and `web_url`. For `agents_rule_match`, identify the matching job and rule and state that log and root-cause investigation was intentionally skipped. Otherwise, include the observed errors, root cause, and implicated files or lines.</requirement>
+    <requirement>A self-contained description of the investigation and decision. Include separate filtered and investigated sections when both sets are present. For each filtered job, include its name, `web_url`, matched AGENTS.md rule, and state that its logs and root cause were intentionally not investigated. For each unfiltered job, include its name, `web_url`, observed errors, root cause, and implicated files or lines. Downstream components must be able to identify which jobs are eligible for fixes.</requirement>
   </field>
 </final_answer_contract>
 
