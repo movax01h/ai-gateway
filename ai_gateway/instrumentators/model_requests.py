@@ -159,6 +159,8 @@ class ModelRequestInstrumentator:
             self.unit_primitive = unit_primitive
             self.internal_event_client = internal_event_client
             self.finish_reason = "unknown"
+            self.duration_s: Optional[float] = None
+            self.finished = False
 
         def start(self):
             """Register the start of the inference request.
@@ -286,26 +288,32 @@ class ModelRequestInstrumentator:
         def finish(self):
             """Register the end of the inference request.
 
-            Duration is calculated from the start time set by `start()`.
+            Duration is calculated from the start time set by `start()`. Repeated calls are ignored, so `watch()` can
+            finalize a request as a fallback even when a stream callback already did.
             """
+            if self.finished:
+                return
+
+            self.finished = True
+
             INFERENCE_IN_FLIGHT_GAUGE.labels(**self.labels).dec()
 
             if self.start_time is None:
                 logger.warning("finish() called without start()", source=__name__)
                 return
 
-            duration = time.perf_counter() - self.start_time
+            self.duration_s = time.perf_counter() - self.start_time
             detail_labels = self._detail_labels()
 
             logger.info(
                 "Request to LLM complete",
                 source=__name__,
-                duration=duration,
+                duration_s=self.duration_s,
                 **detail_labels,
             )
 
             INFERENCE_COUNTER.labels(**detail_labels).inc()
-            INFERENCE_DURATION_S.labels(**detail_labels).observe(duration)
+            INFERENCE_DURATION_S.labels(**detail_labels).observe(self.duration_s)
 
         async def afinish(self):
             self.finish()
@@ -436,16 +444,26 @@ class ModelRequestInstrumentator:
             internal_event_client=internal_event_client,
         )
         watcher.start()
+        error: Optional[BaseException] = None
         try:
             yield watcher
-        except Exception as ex:
-            log_exception(ex, self.labels)
-            watcher.register_error(ex)
-            watcher.finish()
+        except BaseException as ex:
+            # `CancelledError` and `GeneratorExit` are not application errors, so the
+            # request is still recorded below, but it is neither logged nor labelled
+            # as an error.
+            error = ex
+            if isinstance(ex, Exception):
+                log_exception(ex, self.labels)
+                watcher.register_error(ex)
             raise
-
-        if not stream:
-            watcher.finish()
+        finally:
+            # Streaming requests are finalized by a callback that runs once the stream
+            # is consumed, which never happens when an exception propagates - a client
+            # disconnecting mid-stream, for example. Finalize here in that case so the
+            # request is still recorded. `finish()` is idempotent, so the callback
+            # running later is a safe no-op.
+            if not stream or error is not None:
+                watcher.finish()
 
 
 # Re-export for backward compatibility during transition
