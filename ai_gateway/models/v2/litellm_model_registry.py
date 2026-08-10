@@ -36,14 +36,19 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import litellm
 import structlog
 from litellm import register_model
+
+from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 
 __all__ = [
     "ENV_VAR_NAME",
     "load_external_model_metadata",
     "register_builtin_models",
     "register_external_models",
+    "register_fireworks_models",
 ]
 
 ENV_VAR_NAME = "AIGW_LITELLM__MODEL_METADATA_FILE"
@@ -135,6 +140,80 @@ def register_builtin_models() -> None:
         "Registered built-in LiteLLM models",
         count=len(BUILTIN_MODEL_METADATA),
         models=list(BUILTIN_MODEL_METADATA.keys()),
+    )
+
+
+def register_fireworks_models(llm_definitions: dict[str, LLMDefinition]) -> None:
+    """Register LiteLLM metadata for Fireworks AI models among the given LLM definitions.
+
+    Custom Fireworks deployment identifiers (e.g. ``accounts/gitlab/deployments/<id>``)
+    are absent from LiteLLM's bundled ``model_cost`` registry, so LiteLLM assumes they
+    do not support ``tools``/``tool_choice`` and rejects agentic requests client-side.
+    The Fireworks chat completions API supports tool calling unconditionally, so every
+    Fireworks model in the given definitions is registered with the corresponding
+    capability flags. New Fireworks entries in ``models.yml`` are picked up
+    automatically; nothing needs to be declared per model.
+
+    https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2587
+
+    Args:
+        llm_definitions: LLM definitions keyed by GitLab identifier, as returned by
+            ``ModelSelectionConfig.instance().get_llm_definitions()``. Entries whose
+            params do not declare ``custom_llm_provider: "fireworks_ai"``, and
+            embedding models, are ignored.
+    """
+
+    metadata: Dict[str, Dict[str, Any]] = {}
+    for llm_def in llm_definitions.values():
+        params = llm_def.params
+        if not isinstance(params, ChatLiteLLMParams):
+            continue
+        if params.custom_llm_provider != "fireworks_ai":
+            continue
+
+        entry: Dict[str, Any] = {
+            "litellm_provider": "fireworks_ai",
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_tool_choice": True,
+        }
+        if llm_def.max_context_tokens:
+            entry["max_input_tokens"] = llm_def.max_context_tokens
+        if params.max_tokens:
+            entry["max_output_tokens"] = params.max_tokens
+            entry["max_tokens"] = params.max_tokens
+
+        # `model` holds deployment-style IDs (accounts/gitlab/deployments/...);
+        # router-style entries additionally set `identifier`
+        # (accounts/gitlab/routers/...). Register both when present.
+        for model_id in (params.model, params.identifier):
+            if not model_id:
+                continue
+            key = f"fireworks_ai/{model_id}"
+            # Never clobber entries LiteLLM already ships: those carry real
+            # cost data and verified capability flags.
+            if key in litellm.model_cost or model_id in litellm.model_cost:
+                continue
+            metadata[key] = {**entry}
+
+    if not metadata:
+        return
+
+    try:
+        register_model(metadata)
+    except Exception as exc:  # pylint: disable=broad-except
+        log.warning(
+            "Failed to register Fireworks LiteLLM model metadata",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            models=list(metadata.keys()),
+        )
+        return
+
+    log.info(
+        "Registered Fireworks LiteLLM models from model selection config",
+        count=len(metadata),
+        models=list(metadata.keys()),
     )
 
 

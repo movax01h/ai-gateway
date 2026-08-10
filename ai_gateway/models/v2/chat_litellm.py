@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool
 from litellm import AnthropicConfig, OpenAIGPT5Config
 from pydantic import BaseModel
 
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import validate_custom_endpoint
 from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
@@ -21,6 +22,7 @@ from ai_gateway.models.v2._model_compat import (
 from ai_gateway.models.v2.litellm_model_registry import (
     register_builtin_models,
     register_external_models,
+    register_fireworks_models,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
@@ -158,6 +160,11 @@ def _rewrite_trailing_assistant_prefill(kwargs: Dict[str, Any]) -> None:
 # registry but are absent from the pinned LiteLLM bundled `model_cost` registry
 # (e.g., Claude Opus 4.8 Bedrock until the next LiteLLM bump).
 register_builtin_models()
+
+# Register capability metadata for Fireworks models declared in the model
+# selection config, so LiteLLM does not reject `tool_choice` client-side for
+# custom deployment identifiers (see work item #2587).
+register_fireworks_models(ModelSelectionConfig.instance().get_llm_definitions())
 
 # Register any additional model metadata supplied by operators via an external
 # JSON file (path set by AIGW_LITELLM__MODEL_METADATA_FILE). It allows operators
