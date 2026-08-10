@@ -263,27 +263,24 @@ class Workflow(AbstractWorkflow):
         graph.add_node(
             "git_actions",
             RunToolNode[WorkflowState](
-                tool=tools_registry.get("run_git_command"),
+                tool=tools_registry.get("run_command"),
                 input_parser=lambda _: [
                     {
-                        "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]
-                        "command": "add",
-                        "args": "-A",
+                        "program": "git",
+                        "args": "add -A",
                     },
                     {
-                        "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]
-                        "command": "commit",
-                        "args": "-m 'Duo Agent: Convert to GitLab CI'",
+                        "program": "git",
+                        "args": "commit -m 'Duo Agent: Convert to GitLab CI'",
                     },
                     {
-                        "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]
-                        "command": "fetch",
-                        "args": "--unshallow",
+                        "program": "git",
+                        "args": "fetch --unshallow",
                     },
                     {
-                        "repository_url": (self._project["http_url_to_repo"]),  # type: ignore[index]
-                        "command": "push",
-                        "args": f"-o merge_request.create "
+                        "program": "git",
+                        "args": f"push "
+                        f"-o merge_request.create "
                         f"-o merge_request.title='Duo Agent: Convert to GitLab CI' "
                         f"-o merge_request.description='Created by Duo Agent, session: {self._workflow_id}' "
                         f"{merge_request_target}",

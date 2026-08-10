@@ -263,26 +263,23 @@ class Workflow(AbstractWorkflow):
         graph.add_node(
             "git_actions",
             RunToolNode[WorkflowState](
-                tool=tools_registry.get("run_git_command"),
+                tool=tools_registry.get("run_command"),
                 input_parser=lambda _: [
                     {
-                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
-                        "command": "add",
-                        "args": "-A",
+                        "program": "git",
+                        "args": "add -A",
                     },
                     {
-                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
-                        "command": "commit",
-                        "args": f"-m 'Duo Workflow: Resolve issue #{issue_iid}'",
+                        "program": "git",
+                        "args": f"commit -m 'Duo Workflow: Resolve issue #{issue_iid}'",
                     },
                     {
-                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
-                        "command": "fetch",
-                        "args": "--unshallow",
+                        "program": "git",
+                        "args": "fetch --unshallow",
                     },
                     {
-                        "repository_url": self._project["http_url_to_repo"],  # type: ignore[index]
-                        "command": "push",
+                        "program": "git",
+                        "args": "push",
                     },
                 ],
                 output_parser=_git_output,  # type: ignore

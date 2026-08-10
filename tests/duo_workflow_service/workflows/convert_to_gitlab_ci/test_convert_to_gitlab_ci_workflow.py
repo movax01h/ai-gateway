@@ -170,14 +170,15 @@ async def test_git_push_with_source_branch(
         workflow_with_source_branch,
     )
 
-    expected_args = (
+    expected_mr_args = (
         "-o merge_request.create "
         "-o merge_request.title='Duo Agent: Convert to GitLab CI' "
         "-o merge_request.description='Created by Duo Agent, session: test_id' "
         "-o merge_request.target=feature-branch"
     )
-    assert push_command["command"] == "push"
-    assert push_command["args"].strip() == expected_args
+    assert push_command["program"] == "git"
+    assert push_command["args"].strip().startswith("push ")
+    assert push_command["args"].strip()[len("push ") :].strip() == expected_mr_args
 
 
 @pytest.mark.asyncio
@@ -196,13 +197,14 @@ async def test_git_push_without_source_branch(
         workflow,
     )
 
-    expected_args = (
+    expected_mr_args = (
         "-o merge_request.create "
         "-o merge_request.title='Duo Agent: Convert to GitLab CI' "
         "-o merge_request.description='Created by Duo Agent, session: test_id'"
     )
-    assert push_command["command"] == "push"
-    assert push_command["args"].strip() == expected_args
+    assert push_command["program"] == "git"
+    assert push_command["args"].strip().startswith("push ")
+    assert push_command["args"].strip()[len("push ") :].strip() == expected_mr_args
 
 
 def _get_push_command(
@@ -235,7 +237,15 @@ def _get_push_command(
 
     git_commands = git_call.kwargs["input_parser"](None)
 
-    push_cmd = next((cmd for cmd in git_commands if cmd["command"] == "push"), None)
+    push_cmd = next(
+        (
+            cmd
+            for cmd in git_commands
+            if cmd.get("program") == "git"
+            and cmd.get("args", "").strip().startswith("push")
+        ),
+        None,
+    )
     if push_cmd is None:
         raise ValueError("No push command found in git commands")
 
