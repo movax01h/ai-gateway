@@ -409,6 +409,10 @@ configurable_unit_primitives:
       - "claude_sonnet_5_vertex"
       - "gpt_5_2"
       - "gpt_5_3_codex"
+    deprecated_models:
+      - identifier: "claude_sonnet_4_5_20250929"
+        deprecation_date: "2026-08-10"
+        removal_version: "19.5"
 
   - feature_setting: "sast_vulnerability_fp_detection"
     unit_primitives: []
