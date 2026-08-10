@@ -477,6 +477,20 @@ class ToolsRegistry:
 
         return True
 
+    def mcp_tool_names(self) -> list[str]:
+        """Return the names of all MCP tools registered in this session.
+
+        Callers that want to include MCP tools in a toolset must explicitly
+        request them by passing the result of this method into ``toolset()``.
+        MCP tools are no longer injected unconditionally by ``toolset()`` —
+        each consumer opts in deliberately.
+
+        Returns:
+            A list of MCP tool name strings (may be empty when no MCP tools
+            are connected to the session).
+        """
+        return list(self._mcp_tool_names)
+
     def toolset(
         self,
         tool_names: list[str],
@@ -486,15 +500,14 @@ class ToolsRegistry:
 
         Args:
             tool_names: A list of tool names to include in the Toolset.
+                MCP tools are NOT added automatically; callers that want them
+                must include ``tools_registry.mcp_tool_names()`` in this list.
             tool_options: Optional dict mapping tool names to their option overrides.
                 Example: {"create_merge_request_note": {"force_internal": True}}
 
         Returns:
             A new Toolset instance containing the requested tools.
         """
-
-        # MCP tools if there are any are added to toolset
-        tool_names += self._mcp_tool_names
 
         if self._denied_tools:
             tool_names = [t for t in tool_names if t not in self._denied_tools]

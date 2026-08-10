@@ -506,6 +506,9 @@ class Flow(AbstractWorkflow):
                     if options:
                         tool_options[tool_name] = options
 
+        if self._config.should_auto_inject_mcp_tools():
+            tool_names += tools_registry.mcp_tool_names()
+
         return tools_registry.toolset(tool_names, tool_options=tool_options)
 
     @override

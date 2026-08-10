@@ -153,6 +153,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         ) as mock_tools_registry_class:
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
+            mock_tools_registry.mcp_tool_names.return_value = []
             mock_tools_registry_class.configure = AsyncMock(
                 return_value=mock_tools_registry
             )
@@ -1137,6 +1138,83 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             else:
                 # When neither toolset nor tool_name is specified, toolset shouldn't be called
                 mock_tools_registry.toolset.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "environment,mcp_names,expected_tool_names",
+        [
+            # chat environment: MCP tools are auto-injected
+            (
+                "chat",
+                ["mcp_tool_a", "mcp_tool_b"],
+                ["read_file", "mcp_tool_a", "mcp_tool_b"],
+            ),
+            # chat environment with no MCP tools: no change
+            ("chat", [], ["read_file"]),
+            # ambient environment: MCP tools are NOT injected
+            ("ambient", ["mcp_tool_a", "mcp_tool_b"], ["read_file"]),
+            # ambient environment with no MCP tools: no change
+            ("ambient", [], ["read_file"]),
+        ],
+        ids=[
+            "chat_with_mcp_tools",
+            "chat_without_mcp_tools",
+            "ambient_with_mcp_tools",
+            "ambient_without_mcp_tools",
+        ],
+    )
+    @pytest.mark.usefixtures("mock_checkpointer", "mock_state_graph")
+    async def test_parse_toolset_mcp_injection_by_environment(
+        self,
+        environment,
+        mcp_names,
+        expected_tool_names,
+        mock_flow_metadata,
+        user,
+        mock_tools_registry,
+        flow_type: GLReportingEventContext,
+    ):
+        """MCP tools are auto-injected only for 'chat' environment flows.
+
+        Flows with ``environment: ambient`` must NOT receive MCP tools unless
+        they are explicitly listed in the YAML toolset declaration.  This is
+        the core invariant introduced by the Phase 1 fix (work item #2412).
+        """
+        config = FlowConfig(
+            flow={"entry_point": "agent"},  # type: ignore[arg-type]
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "prompt_id": "test/prompt",
+                    "inputs": ["context:goal"],
+                    "toolset": ["read_file"],
+                }
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment=environment,
+            version="v1",
+        )
+
+        mock_tools_registry.mcp_tool_names.return_value = mcp_names
+        mock_tools_registry.toolset.return_value = []
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-mcp-injection",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+            )
+            await flow.run("test goal")
+
+        mock_tools_registry.toolset.assert_called_once_with(
+            expected_tool_names, tool_options={}
+        )
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""

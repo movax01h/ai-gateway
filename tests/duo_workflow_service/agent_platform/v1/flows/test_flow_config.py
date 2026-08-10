@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +15,7 @@ from duo_workflow_service.agent_platform.v1.components import (
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
+    FlowConfigMetadata,
     _safe_resolve,
     list_configs,
     load_component_class,
@@ -580,6 +581,33 @@ class TestVersionConstraintsByCategory:
             "agent_platform_standard_context": "^1.1.0",
             "file": None,
         }
+
+
+class TestShouldAutoInjectMcpTools:
+    """Test BaseFlowConfig.should_auto_inject_mcp_tools()."""
+
+    @staticmethod
+    def _make_config(environment: Literal["ambient", "chat", "chat-partial"]):
+        return FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment=environment,
+            version="v1",
+        )
+
+    @pytest.mark.parametrize(
+        "environment,expected",
+        [
+            ("chat", True),
+            ("ambient", False),
+            ("chat-partial", True),
+        ],
+    )
+    def test_should_auto_inject_mcp_tools_by_environment(self, environment, expected):
+        """should_auto_inject_mcp_tools returns True for chat and chat-partial environments."""
+        config = self._make_config(environment)
+        assert config.should_auto_inject_mcp_tools() == expected
 
 
 class TestListConfigs:

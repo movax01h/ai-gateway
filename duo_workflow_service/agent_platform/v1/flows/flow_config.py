@@ -30,6 +30,7 @@ logger = structlog.stdlib.get_logger(__name__)
 
 INPUT_JSONSCHEMA_VERSION = "https://json-schema.org/draft/2020-12/schema#"
 DEFAULT_FLOW_VERSION = "1.0.0"
+MCP_AUTO_INJECT_ENVIRONMENTS = frozenset(("chat", "chat-partial"))
 
 
 def _safe_resolve(path: Path, base_path: Path) -> Path:
@@ -133,6 +134,21 @@ class BaseFlowConfig(BaseModel):
         if not self.flow.inputs:
             return {}
         return {item.category: item.version_constraint for item in self.flow.inputs}
+
+    def should_auto_inject_mcp_tools(self) -> bool:
+        """Return whether MCP tools should be automatically injected into this flow's toolset.
+
+        MCP auto-injection is enabled for ``chat`` and ``chat-partial`` environment flows
+        that power interactive chat assistants (e.g. Duo CLI, Interactive Developer,
+        Software Development, Agentic Chat, Support Assistant, Analytics Agent).
+        ``ambient`` flows receive only the tools explicitly declared in
+        their YAML ``toolset:`` — the toolset is fully deterministic.
+
+        Returns:
+            ``True`` when the flow's ``environment`` is ``"chat"`` or ``"chat-partial"``,
+            ``False`` otherwise.
+        """
+        return self.environment in MCP_AUTO_INJECT_ENVIRONMENTS
 
     @classmethod
     def from_yaml_config(cls, flow_id: str, flow_version: Optional[str] = None) -> Self:
