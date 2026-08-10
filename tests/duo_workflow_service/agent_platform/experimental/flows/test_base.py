@@ -135,6 +135,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         ) as mock_tools_registry_class:
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
+            mock_tools_registry.mcp_tool_names.return_value = []
             mock_tools_registry_class.configure = AsyncMock(
                 return_value=mock_tools_registry
             )
@@ -762,6 +763,53 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             else:
                 # When neither toolset nor tool_name is specified, toolset shouldn't be called
                 mock_tools_registry.toolset.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_checkpointer", "mock_state_graph")
+    async def test_parse_toolset_injects_mcp_tools_for_chat_environment(
+        self,
+        mock_flow_metadata,
+        user,
+        mock_tools_registry,
+        flow_type: GLReportingEventContext,
+    ):
+        """_parse_toolset appends MCP tool names when environment is 'chat'."""
+        mcp_tool_name = "mcp_search"
+        mock_tools_registry.mcp_tool_names.return_value = [mcp_tool_name]
+        mock_tools_registry.toolset.return_value = ["read_file", mcp_tool_name]
+
+        config = FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[
+                {
+                    "name": "agent",
+                    "type": "AgentComponent",
+                    "inputs": ["context:goal"],
+                    "toolset": ["read_file"],
+                }
+            ],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="chat",
+            version="experimental",
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-mcp",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+            )
+            await flow.run("test goal")
+
+        mock_tools_registry.mcp_tool_names.assert_called_once()
+        mock_tools_registry.toolset.assert_called_once_with(
+            ["read_file", mcp_tool_name], tool_options={}
+        )
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""

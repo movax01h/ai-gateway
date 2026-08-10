@@ -163,6 +163,7 @@ def mock_tools_registry_fixture(tool_approval_required):
 
     mock.approval_required = AsyncMock(return_value=tool_approval_required)
     mock.is_preapproved.return_value = not bool(tool_approval_required)
+    mock.mcp_tool_names.return_value = []
 
     return mock
 

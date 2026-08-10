@@ -923,31 +923,36 @@ async def test_registry_configuration_error(
         (
             ["read_write_files", "use_git", "nonexistent_privilege"],
             ["read_files", "create_file_with_contents"],
-            ["read_files", "create_file_with_contents", "extra_tool"],
+            # MCP tools are NOT automatically appended; caller must opt in explicitly
+            ["read_files", "create_file_with_contents"],
             {"read_files", "create_file_with_contents"},
         ),
         (
             ["read_write_files", "use_git", "run_mcp_tools"],
             ["read_files", "create_file_with_contents"],
-            ["read_files", "create_file_with_contents", "extra_tool"],
+            # MCP tools are NOT automatically appended; caller must opt in explicitly
+            ["read_files", "create_file_with_contents"],
             {"read_files", "create_file_with_contents"},
         ),
         (
             ["read_write_files", "use_git"],
             ["run_git_command"],
-            ["run_git_command", "extra_tool"],
+            # MCP tools are NOT automatically appended; caller must opt in explicitly
+            ["run_git_command"],
             set(),
         ),
         (
             ["read_write_files", "use_git"],
             ["read_files", "run_git_command"],
-            ["read_files", "run_git_command", "extra_tool"],
+            # MCP tools are NOT automatically appended; caller must opt in explicitly
+            ["read_files", "run_git_command"],
             {"read_files"},
         ),
         (
             ["read_write_files", "use_git"],
             ["nonexistent_tool"],  # Nonexistent tool should be filtered out
-            ["nonexistent_tool", "extra_tool"],
+            # MCP tools are NOT automatically appended; caller must opt in explicitly
+            ["nonexistent_tool"],
             set(),
         ),
     ],
@@ -997,6 +1002,66 @@ def test_toolset_method(
         assert toolset == mock_toolset
 
 
+def test_toolset_does_not_inject_mcp_tools_automatically(tool_metadata, mcp_tools):
+    """MCP tools must NOT be injected into toolsets automatically.
+
+    Callers that want MCP tools must explicitly include them via
+    ``tools_registry.mcp_tool_names()``.  This test verifies the fix for the
+    bug described in https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2412.
+    """
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=mcp_tools,
+    )
+
+    # Requesting only a native tool — MCP tools must NOT appear
+    toolset = registry.toolset(["read_file"])
+
+    assert "extra_tool" not in toolset._all_tools
+    assert "read_file" in toolset._all_tools
+
+
+def test_mcp_tool_names_accessor(tool_metadata, mcp_tools):
+    """mcp_tool_names() returns the names of all registered MCP tools."""
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=mcp_tools,
+    )
+
+    assert registry.mcp_tool_names() == ["extra_tool"]
+
+
+def test_mcp_tool_names_accessor_empty_when_no_mcp_tools(tool_metadata):
+    """mcp_tool_names() returns an empty list when no MCP tools are registered."""
+    registry = ToolsRegistry(
+        enabled_tools=[],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=None,
+    )
+
+    assert registry.mcp_tool_names() == []
+
+
+def test_toolset_with_explicit_mcp_tools(tool_metadata, mcp_tools):
+    """Callers that explicitly include mcp_tool_names() receive MCP tools in the toolset."""
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=mcp_tools,
+    )
+
+    toolset = registry.toolset(["read_file"] + registry.mcp_tool_names())
+
+    assert "extra_tool" in toolset._all_tools
+    assert "read_file" in toolset._all_tools
+
+
 def test_toolset_filters_denied_tools(tool_metadata):
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "read_only_gitlab"],
@@ -1013,6 +1078,7 @@ def test_toolset_filters_denied_tools(tool_metadata):
 
 
 def test_toolset_filters_denied_mcp_tools(tool_metadata, mcp_tools):
+    """Denied MCP tools are excluded even when the caller explicitly requests them."""
     registry = ToolsRegistry(
         enabled_tools=["read_write_files", "run_mcp_tools"],
         preapproved_tools=[],
@@ -1021,7 +1087,8 @@ def test_toolset_filters_denied_mcp_tools(tool_metadata, mcp_tools):
         denied_tools=["extra_tool"],
     )
 
-    toolset = registry.toolset(["read_file"])
+    # Caller explicitly opts in to MCP tools via mcp_tool_names()
+    toolset = registry.toolset(["read_file"] + registry.mcp_tool_names())
 
     assert "extra_tool" not in toolset._all_tools
     assert "read_file" in toolset._all_tools

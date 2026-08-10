@@ -834,6 +834,13 @@ class Flow(AbstractWorkflow):
         1. Simple string: "tool_name"
         2. Dict with options: {"tool_name": {"option": "value"}}
 
+        For flows with ``environment: chat``, all MCP tools connected to the
+        session are automatically appended to the toolset, preserving the
+        pre-Phase-1 behaviour for interactive chat assistants (e.g. Duo CLI,
+        Interactive Developer, Software Development).  Flows with
+        ``environment: ambient`` receive only the tools explicitly declared in
+        their YAML config.
+
         Returns a Toolset with the appropriate tool options applied.
         """
         tool_names: list[str] = []
@@ -847,6 +854,9 @@ class Flow(AbstractWorkflow):
                     tool_names.append(tool_name)
                     if options:
                         tool_options[tool_name] = options
+
+        if self._config.should_auto_inject_mcp_tools():
+            tool_names += tools_registry.mcp_tool_names()
 
         return tools_registry.toolset(tool_names, tool_options=tool_options)
 

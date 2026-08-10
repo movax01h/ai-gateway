@@ -7,6 +7,7 @@ from duo_workflow_service.agent_platform.experimental.components import (
     ComponentRegistry,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    MCP_AUTO_INJECT_ENVIRONMENTS,
     BaseFlowConfig,
     FlowConfigInput,
     FlowConfigMetadata,
@@ -22,10 +23,27 @@ __all__ = [
     "load_component_class",
 ]
 
+_EXPERIMENTAL_MCP_AUTO_INJECT_ENVIRONMENTS = MCP_AUTO_INJECT_ENVIRONMENTS | frozenset(
+    ("ide",)
+)
+
 
 class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
+
+    def should_auto_inject_mcp_tools(self) -> bool:
+        """Return whether MCP tools should be automatically injected into this flow's toolset.
+
+        Extends the base behaviour by also enabling MCP auto-injection for ``ide``
+        environment flows, which support human-in-the-loop interactions via
+        :class:`HumanInputComponent` and require access to session-connected MCP tools.
+
+        Returns:
+            ``True`` when the flow's ``environment`` is ``"chat"``, ``"chat-partial"``,
+            or ``"ide"``; ``False`` otherwise.
+        """
+        return self.environment in _EXPERIMENTAL_MCP_AUTO_INJECT_ENVIRONMENTS
 
 
 class PartialFlowConfig(FlowConfig):

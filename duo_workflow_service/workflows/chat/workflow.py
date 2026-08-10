@@ -388,7 +388,7 @@ class Workflow(AbstractWorkflow):
         else:
             tools = self._get_tools()
 
-        agents_toolset = tools_registry.toolset(tools)
+        agents_toolset = tools_registry.toolset(tools + tools_registry.mcp_tool_names())
 
         self._agent: ChatAgent = create_agent(
             user=self._user,

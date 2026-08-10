@@ -603,6 +603,7 @@ def test_tools_registry_interaction(
     workflow = workflow_with_project
     workflow._workflow_config = workflow_config
     tools_registry = MagicMock(spec=ToolsRegistry)
+    tools_registry.mcp_tool_names.return_value = []
 
     workflow._compile("Test goal", tools_registry, mock_checkpointer)
 
@@ -1261,6 +1262,7 @@ async def test_compile_with_tools_override_and_flow_config(
 
     tools_registry = MagicMock()
     tools_registry.toolset.return_value = mock_agents_toolset
+    tools_registry.mcp_tool_names.return_value = []
 
     user = CloudConnectorUser(
         authenticated=True,
@@ -1301,6 +1303,7 @@ async def test_compile_without_overrides(
 
     tools_registry = MagicMock()
     tools_registry.toolset.return_value = mock_agents_toolset
+    tools_registry.mcp_tool_names.return_value = []
 
     workflow_with_project._compile("Test goal", tools_registry, mock_checkpointer)
 

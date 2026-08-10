@@ -230,12 +230,18 @@ class Workflow(AbstractWorkflow):
 
         last_node_name = self._add_context_builder_nodes(graph, tools_registry)
 
+        # The Software Development flow is a legacy chat-environment workflow.
+        # MCP tools connected to the session are auto-injected into every agent's
+        # toolset to preserve backward compatibility for users who have MCP servers
+        # configured via .gitlab/duo/mcp.json.
+        mcp_tools = tools_registry.mcp_tool_names()
+
         planner_component = PlannerComponent(
             user=self._user,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
-            planner_toolset=tools_registry.toolset(PLANNER_TOOLS),
-            executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
+            planner_toolset=tools_registry.toolset(PLANNER_TOOLS + mcp_tools),
+            executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS + mcp_tools),
             tools_registry=tools_registry,
             goal=goal,
             project=self._project,  # type: ignore[arg-type]
@@ -275,13 +281,13 @@ class Workflow(AbstractWorkflow):
             workflow_id=self._workflow_id,
             approved_agent_name="executor",
             approved_agent_state=WorkflowStatusEnum.EXECUTION,
-            toolset=tools_registry.toolset(EXECUTOR_TOOLS),
+            toolset=tools_registry.toolset(EXECUTOR_TOOLS + mcp_tools),
         )
 
         executor_component = ExecutorComponent(
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
-            executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS),
+            executor_toolset=tools_registry.toolset(EXECUTOR_TOOLS + mcp_tools),
             tools_registry=tools_registry,
             goal=goal,
             project=self._project,  # type: ignore[arg-type]
@@ -351,7 +357,9 @@ class Workflow(AbstractWorkflow):
         )
 
     def _setup_context_builder(self, tools_registry: ToolsRegistry):
-        context_builder_toolset = tools_registry.toolset(CONTEXT_BUILDER_TOOLS)
+        context_builder_toolset = tools_registry.toolset(
+            CONTEXT_BUILDER_TOOLS + tools_registry.mcp_tool_names()
+        )
 
         context_builder = build_agent(
             "context_builder",

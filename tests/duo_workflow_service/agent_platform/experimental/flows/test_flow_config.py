@@ -14,6 +14,7 @@ from duo_workflow_service.agent_platform.experimental.components import (
 )
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
+    FlowConfigMetadata,
     list_configs,
     load_component_class,
 )
@@ -479,6 +480,35 @@ class TestFlowConfig:
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
             config = FlowConfig.from_yaml_config(safe_path)
             assert config.flow.entry_point == "test_agent"
+
+
+class TestShouldAutoInjectMcpTools:
+    """Test FlowConfig.should_auto_inject_mcp_tools() for the experimental registry."""
+
+    @staticmethod
+    def _make_config(environment: str) -> FlowConfig:
+        return FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment=environment,
+            version="experimental",
+        )
+
+    @pytest.mark.parametrize(
+        "environment,expected",
+        [
+            ("chat", True),
+            ("chat-partial", True),
+            ("ide", True),
+            ("remote", False),
+            ("ambient", False),
+        ],
+    )
+    def test_should_auto_inject_mcp_tools_by_environment(self, environment, expected):
+        """should_auto_inject_mcp_tools returns True for chat, chat-partial, and ide environments."""
+        config = self._make_config(environment)
+        assert config.should_auto_inject_mcp_tools() == expected
 
 
 class TestLoadComponentClass:
