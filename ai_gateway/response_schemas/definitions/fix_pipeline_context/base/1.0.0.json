@@ -6,7 +6,7 @@
     "properties": {
         "failure_category": {
             "type": "string",
-            "description": "The pipeline failure or investigation outcome category. Use the most specific category that fits.",
+            "description": "The pipeline failure or investigation outcome category. Use 'agents_rule_match' only when every discovered blocking failing job matched an AGENTS.md job-name filter. Otherwise, classify only the unfiltered jobs.",
             "enum": [
                 "runner_system_failure",
                 "environment_failure",
@@ -40,19 +40,19 @@
         },
         "decision": {
             "type": "string",
-            "description": "Use 'create_plan' when confident a fix can be created and validation via local execution is warranted. Use 'direct_code_suggestions' ONLY when (a) a merge_request_url is provided AND (b) confidence is 'high' AND (c) the fix is narrow enough that the model can write the corrected lines straight from the summary without executing them; the flow then bypasses execution and posts inline suggestions directly. Use 'add_comment' when not confident or unable to create a fix. Use 'no_action' when the failure requires no intervention or an AGENTS.md job-name stop rule matches.",
+            "description": "Use 'create_plan' when confident a fix can be created and validation via local execution is warranted. Use 'direct_code_suggestions' ONLY when (a) a merge_request_url is provided AND (b) confidence is 'high' AND (c) the fix is narrow enough that the model can write the corrected lines straight from the summary without executing them; the flow then bypasses execution and posts inline suggestions directly. Use 'add_comment' when not confident or unable to create a fix. Use 'no_action' when the failure requires no intervention or every discovered blocking failing job matched an AGENTS.md job-name filter. Partial filter matches do not determine the decision.",
             "enum": ["add_comment", "create_plan", "direct_code_suggestions", "no_action"],
             "examples": ["add_comment", "create_plan", "direct_code_suggestions", "no_action"]
         },
         "confidence": {
             "type": "string",
-            "description": "Set 'high' for narrow, well-understood fixes (e.g. lint_failure or ci_config_error on a single file with the failing rule visible in the trace). Set 'low' for multi-file test failures, build failures, anything with insufficient_context, or whenever the agents_dot_md content directs you to always validate. Only 'high' permits 'direct_code_suggestions'.",
+            "description": "Set 'high' for a narrow, well-understood unfiltered failure, such as lint_failure or ci_config_error in one file with the failing rule visible in the trace. Set 'low' for multi-file test failures, build failures, insufficient_context, when every failing job was filtered, or whenever agents_dot_md requires validation. Filtered jobs do not otherwise affect confidence. Only 'high' permits 'direct_code_suggestions'.",
             "enum": ["high", "low"],
             "examples": ["high", "low"]
         },
         "summary": {
             "type": "string",
-            "description": "Self-contained description of the investigation and decision. Include each discussed job's name and URL. For an AGENTS.md job-name stop, identify the matching job and rule and state that log and root-cause investigation was intentionally skipped. Otherwise, include the observed errors, root cause, and implicated files or lines."
+            "description": "Self-contained description of the investigation and decision. Separate filtered and investigated jobs when both are present. For each filtered job, include its name, URL, matched AGENTS.md rule, and state that logs and root-cause investigation were skipped. For each unfiltered job, include its name, URL, observed errors, root cause, and implicated files or lines. Downstream components must be able to identify which jobs are eligible for fixes."
         }
     },
     "required": ["failure_category", "suggested_fix_type", "decision", "summary"]
