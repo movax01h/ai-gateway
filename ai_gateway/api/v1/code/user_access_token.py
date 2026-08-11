@@ -20,6 +20,11 @@ from ai_gateway.async_dependency_resolver import (
 from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
+from lib.jwt import (
+    GITLAB_ROOT_NAMESPACE_ID_CLAIM,
+    root_namespace_id_from_claims_extra,
+    root_namespace_id_from_header,
+)
 from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
@@ -84,13 +89,26 @@ async def user_access_token(
     # We can only trust the provided headers when the auth token is from SaaS
     # Otherwise, a user can perform a direct call to AIGW and specify arbitrary values
     if user_claims.gitlab_realm == "saas":
+        root_namespace_id = root_namespace_id_from_claims_extra(extra_claims)
+        if root_namespace_id is None:
+            root_namespace_id = root_namespace_id_from_header(
+                x_gitlab_root_namespace_id
+            )
+            log.warning(
+                "gitlab_root_namespace_id claim unusable, falling back to header",
+                claim_value=extra_claims.get(GITLAB_ROOT_NAMESPACE_ID_CLAIM),
+                header_value=x_gitlab_root_namespace_id,
+                resolved=root_namespace_id,
+            )
+
         extra_claims.update(
             {
                 "gitlab_project_id": x_gitlab_project_id,
                 "gitlab_namespace_id": x_gitlab_namespace_id,
-                "gitlab_root_namespace_id": x_gitlab_root_namespace_id,
+                "gitlab_root_namespace_id": root_namespace_id,
             }
         )
+
     elif user_claims.gitlab_realm == "self-managed":
         extra_claims.update({"gitlab_instance_uid": user_claims.gitlab_instance_uid})
 

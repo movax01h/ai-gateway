@@ -737,31 +737,60 @@ async def test_middleware_set_context_root_namespace_id(
 @pytest.mark.parametrize(
     "jwt_extra, header_value, expected",
     [
-        ({"gitlab_root_namespace_id": 42}, b"999", 999),
+        # For SaaS, a usable JWT claim is authoritative; the header is ignored
+        # entirely, even when present, empty, or the "null" sentinel.
+        ({"gitlab_root_namespace_id": 42}, b"999", 42),
         ({"gitlab_root_namespace_id": 77}, None, 77),
-        ({"gitlab_root_namespace_id": 42.0}, None, 42),
+        ({"gitlab_root_namespace_id": "77"}, None, 77),
+        ({"gitlab_root_namespace_id": 42.0}, None, None),
         ({"gitlab_root_namespace_id": "not-a-number"}, None, None),
+        ({"gitlab_root_namespace_id": True}, None, None),
+        ({"gitlab_root_namespace_id": -1}, None, None),
         ({}, None, None),
         ({"gitlab_root_namespace_id": None}, None, None),
-        ({"gitlab_root_namespace_id": 42}, b"", None),
-        ({"gitlab_root_namespace_id": 42}, b"null", None),
+        ({"gitlab_root_namespace_id": 42}, b"", 42),
+        ({"gitlab_root_namespace_id": 42}, b"null", 42),
+        # While the claim rolls out, SaaS requests whose claim is absent or
+        # unusable fall back to the header.
+        ({}, b"888", 888),
+        ({"gitlab_root_namespace_id": "not-a-number"}, b"888", 888),
+        ({}, b"not-a-number", None),
+        # No claims (bypass_auth paths) still fall back to the header, which is
+        # validated the same way as the claim: anything that is not a positive
+        # decimal integer is dropped rather than raising.
         (None, b"888", 888),
         (None, None, None),
+        (None, b"", None),
+        (None, b"null", None),
+        (None, b"not-a-number", None),
+        (None, b"0", None),
+        (None, b"-1", None),
     ],
     ids=[
-        "header_wins_over_jwt",
-        "jwt_fallback_no_header",
-        "jwt_float_normalised",
-        "jwt_invalid_string_no_crash",
-        "jwt_missing_key_no_header",
-        "jwt_null_no_header",
-        "empty_header_no_jwt_fallback",
-        "null_sentinel_header_no_jwt_fallback",
-        "no_claims_header",
+        "saas_jwt_wins_over_header",
+        "saas_jwt_no_header",
+        "saas_jwt_string_coerced",
+        "saas_jwt_float_rejected",
+        "saas_jwt_invalid_string_rejected",
+        "saas_jwt_bool_rejected",
+        "saas_jwt_negative_rejected",
+        "saas_jwt_missing_key",
+        "saas_jwt_null",
+        "saas_empty_header_ignored_uses_jwt",
+        "saas_null_sentinel_header_ignored_uses_jwt",
+        "saas_missing_claim_falls_back_to_header",
+        "saas_invalid_claim_falls_back_to_header",
+        "saas_missing_claim_invalid_header",
+        "no_claims_uses_header",
         "no_claims_no_header",
+        "no_claims_empty_header",
+        "no_claims_null_sentinel_header",
+        "no_claims_non_numeric_header",
+        "no_claims_zero_header",
+        "no_claims_negative_header",
     ],
 )
-async def test_middleware_root_namespace_id_header_first_jwt_fallback(
+async def test_middleware_root_namespace_id_jwt_authoritative_for_saas(
     internal_event_middleware, jwt_extra, header_value, expected
 ):
     claims = (

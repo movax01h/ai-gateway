@@ -579,6 +579,115 @@ def test_x_gitlab_subject_type_constant_is_lowercase():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_claims,expected_namespace_id",
+    [
+        pytest.param({"gitlab_root_namespace_id": 42}, 42, id="claim_integer"),
+        pytest.param({"gitlab_root_namespace_id": "77"}, 77, id="claim_string_coerced"),
+        pytest.param({"gitlab_root_namespace_id": True}, None, id="claim_bool_ignored"),
+        pytest.param(
+            {"gitlab_root_namespace_id": 42.9}, None, id="claim_float_ignored"
+        ),
+        pytest.param(
+            {"gitlab_root_namespace_id": "42.9"}, None, id="claim_float_string_ignored"
+        ),
+        pytest.param(
+            {"gitlab_root_namespace_id": "0"}, None, id="claim_zero_string_ignored"
+        ),
+        pytest.param(
+            {"gitlab_root_namespace_id": -1}, None, id="claim_negative_ignored"
+        ),
+        pytest.param(None, None, id="no_claims_yields_none"),
+    ],
+)
+async def test_interceptor_root_namespace_id_from_jwt(
+    interceptor,
+    mock_continuation,
+    extra_claims,
+    expected_namespace_id,
+):
+    """ultimate_parent_namespace_id comes from JWT extra claims when no header is sent."""
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=[],
+            subject="1234",
+            gitlab_realm="saas",
+            gitlab_instance_uid="00000000-1111-2222-3333-000000000000",
+            extra=extra_claims,
+        ),
+    )
+    metadata = {
+        "x-gitlab-realm": "saas",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(user)
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert (
+        current_event_context.get().ultimate_parent_namespace_id
+        == expected_namespace_id
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_claims,header,expected_namespace_id",
+    [
+        pytest.param({"gitlab_root_namespace_id": 42}, "99", 42, id="claim_wins"),
+        pytest.param(None, "99", 99, id="no_claim_falls_back_to_header"),
+        pytest.param(
+            {"gitlab_root_namespace_id": "not-a-number"},
+            "99",
+            99,
+            id="invalid_claim_falls_back_to_header",
+        ),
+        pytest.param(None, "not-a-number", None, id="invalid_header_rejected"),
+        pytest.param(None, "-1", None, id="negative_header_rejected"),
+        pytest.param(None, "0", None, id="zero_header_rejected"),
+    ],
+)
+async def test_interceptor_root_namespace_id_header_fallback(
+    interceptor,
+    mock_continuation,
+    extra_claims,
+    header,
+    expected_namespace_id,
+):
+    """The client-supplied header is only used when the JWT claim is unusable."""
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=[],
+            subject="1234",
+            gitlab_realm="saas",
+            gitlab_instance_uid="00000000-1111-2222-3333-000000000000",
+            extra=extra_claims,
+        ),
+    )
+    metadata = {
+        "x-gitlab-realm": "saas",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+        "x-gitlab-root-namespace-id": header,
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(user)
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert (
+        current_event_context.get().ultimate_parent_namespace_id
+        == expected_namespace_id
+    )
+
+
+@pytest.mark.asyncio
 async def test_interceptor_with_both_versions(
     interceptor, mock_continuation, mock_user
 ):
@@ -789,23 +898,32 @@ async def test_interceptor_logs_per_field_info_when_contextual_fields_missing(
 
 @pytest.mark.asyncio
 async def test_interceptor_no_logs_when_all_fields_present(
-    interceptor, mock_continuation, mock_user
+    interceptor, mock_continuation
 ):
     """Test that no logs are emitted when all fields are present."""
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=[],
+            subject="1234",
+            gitlab_realm="saas",
+            gitlab_instance_uid="00000000-1111-2222-3333-000000000000",
+            extra={"gitlab_root_namespace_id": 99},
+        ),
+    )
     metadata = {
-        "x-gitlab-realm": "test-realm",
+        "x-gitlab-realm": "saas",
         "x-gitlab-instance-id": "test-instance-id",
         "x-gitlab-global-user-id": "test-global-user-id",
         "x-gitlab-host-name": "test-host",
         "x-gitlab-deployment-type": ".com",
         "x-gitlab-feature-enabled-by-namespace-ids": "1,2,3",
         "x-gitlab-is-a-gitlab-member": "true",
-        "x-gitlab-root-namespace-id": "99",
         "x-gitlab-project-id": "42",
         "x-gitlab-namespace-id": "7",
     }
     handler_call_details = create_handler_call_details(metadata)
-    current_user.set(mock_user)
+    current_user.set(user)
 
     with patch("lib.internal_events.context_validator.log") as mock_log:
         await interceptor.intercept_service(mock_continuation, handler_call_details)

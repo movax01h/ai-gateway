@@ -37,6 +37,10 @@ from lib.internal_events import (
     tracked_internal_events,
     validate_event_context,
 )
+from lib.jwt import (
+    root_namespace_id_from_claims_extra,
+    root_namespace_id_from_header,
+)
 
 
 class InternalEventMiddleware:
@@ -88,21 +92,14 @@ class InternalEventMiddleware:
             else None
         )
 
-        root_namespace_id_str = request.headers.get(X_GITLAB_ROOT_NAMESPACE_ID)
-        root_namespace_id = (
-            int(root_namespace_id_str)
-            if root_namespace_id_str and root_namespace_id_str != "null"
-            else None
-        )
-        if root_namespace_id_str is None and claims and claims.gitlab_realm == "saas":
-            jwt_root_namespace_id = (
-                claims.extra.get("gitlab_root_namespace_id") if claims.extra else None
+        root_namespace_id = None
+        if claims and claims.gitlab_realm == "saas":
+            root_namespace_id = root_namespace_id_from_claims_extra(claims.extra)
+
+        if root_namespace_id is None:
+            root_namespace_id = root_namespace_id_from_header(
+                request.headers.get(X_GITLAB_ROOT_NAMESPACE_ID)
             )
-            if jwt_root_namespace_id is not None:
-                try:
-                    root_namespace_id = int(jwt_root_namespace_id)
-                except (ValueError, TypeError):
-                    pass
 
         organization_id_str = request.headers.get(X_GITLAB_ORGANIZATION_ID)
         organization_id = (

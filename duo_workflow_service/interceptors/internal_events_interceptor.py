@@ -36,6 +36,10 @@ from lib.internal_events import (
     parse_tracking_context,
     validate_event_context,
 )
+from lib.jwt import (
+    root_namespace_id_from_claims_extra,
+    root_namespace_id_from_header,
+)
 
 
 def convert_feature_enabled_string_to_list(
@@ -102,10 +106,17 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
         instance_version_value = gitlab_version.get()
 
         unique_instance_id = None
+        root_namespace_id = None
 
         user = current_user.get()
         if hasattr(user, "claims") and user.claims:
             unique_instance_id = getattr(user.claims, "gitlab_instance_uid", None)
+            root_namespace_id = root_namespace_id_from_claims_extra(user.claims.extra)
+
+        if root_namespace_id is None:
+            root_namespace_id = root_namespace_id_from_header(
+                metadata.get(X_GITLAB_ROOT_NAMESPACE_ID)
+            )
 
         context = EventContext(
             realm=metadata.get(X_GITLAB_REALM_HEADER),
@@ -128,8 +139,7 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             ),
             feature_enablement_type=metadata.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE),
             namespace_id=namespace_id,
-            ultimate_parent_namespace_id=metadata.get(X_GITLAB_ROOT_NAMESPACE_ID, None)
-            or None,
+            ultimate_parent_namespace_id=root_namespace_id,
             is_gitlab_team_member=is_gitlab_member,
             deployment_type=metadata.get(X_GITLAB_DEPLOYMENT_TYPE),
             extra=extra,
