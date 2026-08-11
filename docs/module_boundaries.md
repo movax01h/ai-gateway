@@ -23,7 +23,6 @@ ai/
   features/                   # feature consumers: each owns its full definition
     pipeline/                 #   capability area (stable name, NOT a team name)
       fix_pipeline/           #     feature (flow)
-      fix_pipeline_next/      #     feature (flow)
       pipeline_summary/       #     feature (prompt-only)
     code/
       code_completion/        #     feature (prompt-only): classic suggestions
@@ -323,5 +322,3 @@ ai/features/pipeline/fix_pipeline/
   identifier provides uniqueness.
 - Shared prompts it uses (`commit_changes`, `create_repository_branch`) live in
   `ai/shared/`, since several flows reference them.
-- `fix_pipeline_next` is a separate feature with its own directory and CODEOWNERS
-  entry.
