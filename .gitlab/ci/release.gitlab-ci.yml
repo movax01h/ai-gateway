@@ -5,6 +5,7 @@
     - docker pull "${TARGET_IMAGE}"
     - docker tag "${TARGET_IMAGE}" "${RELEASE_VERSION}"
     - docker push "${RELEASE_VERSION}"
+    - if [ -n "${SIGN_RELEASE}" ]; then apk add --update cosign && cosign sign "${RELEASE_VERSION}"; fi
 
 .docker-hub-release:
   extends: .docker-release
@@ -44,9 +45,18 @@ release-docker-hub-image:self-managed-tag:
 release-gitlab-registry-self-hosted-fips-image:tag:
   extends: .docker-release
   stage: release
+  # The image is pushed before it is signed, so a transient Fulcio failure would
+  # leave a published unsigned tag that Dedicated's resolver may select.
+  retry: 2
+  # See https://docs.gitlab.com/ci/yaml/signing_examples/
+  id_tokens:
+    SIGSTORE_ID_TOKEN: # Used by Cosign to get certificate from Fulcio
+      aud: sigstore
   rules:
     - if: $CI_COMMIT_TAG =~ /^self-hosted-/
   variables:
+    COSIGN_YES: "true" # Used by Cosign to skip confirmation prompts for non-destructive operations
+    SIGN_RELEASE: "true"
     TARGET_IMAGE: "${SELF_HOSTED_FIPS_TARGET_IMAGE}"
     RELEASE_VERSION: "${DOCKER_MODEL_GATEWAY}/self-hosted-fips:${CI_COMMIT_TAG}"
   needs:

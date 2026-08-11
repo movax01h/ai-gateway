@@ -52,6 +52,23 @@ FIPS images are available at:
 
 Prefer pulling from the GitLab Container Registry. DockerHub is a mirror and may not be reachable in restricted environments.
 
+### Verifying image signatures
+
+Tagged `self-hosted-fips` images in the GitLab Container Registry are signed with
+[cosign](https://github.com/sigstore/cosign) using [keyless signing](https://docs.gitlab.com/ci/yaml/signing_examples/),
+so the signing identity is the CI configuration that produced the image rather than a published key.
+The DockerHub mirror and the non-FIPS images are not signed.
+
+```shell
+cosign verify \
+  --certificate-oidc-issuer https://gitlab.com \
+  --certificate-identity "https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist//.gitlab-ci.yml@refs/tags/self-hosted-v19.2.0-ee" \
+  registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway/self-hosted-fips:self-hosted-v19.2.0-ee
+```
+
+The double slash before `.gitlab-ci.yml` is required. Signatures are stored beside the image as a
+`sha256-<digest>.sig` tag, so a mirror that copies only the release tag drops them; use `cosign copy`.
+
 ## Self-hosted AI Gateway release process
 
 When a new minor GitLab version is released (vX.Y.0-ee), a new branch with the name `stable-{gitlab-major}-{gitlab-minor}-ee` is created by [the script in GitLab-Rails](https://gitlab.com/gitlab-org/gitlab/-/blob/master/scripts/aigw-tagging.sh) that runs in tag pipelines. Creating the branch triggers a pipeline in this project that cuts the baseline `self-hosted-vX.Y.0-ee` tag (see [`scripts/tag_stable_patch.py`](../../scripts/tag_stable_patch.py)), which in turn triggers the release of a new image. Users on self-hosted environments can use this to download a version of AI Gateway that is compatible with their GitLab installation. These images are available both on
