@@ -435,6 +435,10 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 start_workflow_request.startRequest.preapproved_tools
             ),
             streaming=start_workflow_request.startRequest.streaming,
+            # Proto3 yields "" for an unset optional string; normalize to None so
+            # the workflow only pins a checkpoint when one was actually requested.
+            resume_checkpoint_ts=start_workflow_request.startRequest.resume_checkpoint_ts
+            or None,
         )
 
         workflow_task = asyncio.create_task(workflow.run(goal))

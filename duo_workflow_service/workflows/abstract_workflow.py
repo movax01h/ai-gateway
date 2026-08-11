@@ -169,11 +169,13 @@ class AbstractWorkflow(ABC):
         audit_event_max_retries: int = Provide[
             ContainerApplication.audit_event.config.max_retries  # type: ignore[attr-defined]
         ],
+        resume_checkpoint_ts: Optional[str] = None,
     ):
         self._outbox = Outbox()
         self._workflow_id = workflow_id
         self._workflow_metadata = workflow_metadata
         self._user = user
+        self._resume_checkpoint_ts = resume_checkpoint_ts
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
         self._http_client = ExecutorGitLabHttpClient(self._outbox)
         self._workflow_type = workflow_type
@@ -427,6 +429,18 @@ class AbstractWorkflow(ABC):
         )
 
         try:
+            resume_checkpoint_ts = self._resolve_resume_checkpoint_ts()
+            if resume_checkpoint_ts:
+                # Resume at the requested checkpoint instead of the latest one.
+                # The client picks an earlier checkpoint to retry a turn, or the tip
+                # of an existing branch to continue that branch.
+                graph_config["configurable"]["checkpoint_id"] = resume_checkpoint_ts
+                self.log.info(
+                    "Resuming at client-requested checkpoint instead of the latest",
+                    workflow_id=self._workflow_id,
+                    resume_checkpoint_ts=resume_checkpoint_ts,
+                )
+
             (
                 self._project,
                 self._namespace,
@@ -490,6 +504,21 @@ class AbstractWorkflow(ABC):
                         "" if checkpoint_tuple else WorkflowStatusEventEnum.START
                     )
 
+                # A missing pinned checkpoint makes LangGraph silently discard the thread.
+                # This duplicates its fetch, but it is best to keep the error logic here.
+                if (
+                    resume_checkpoint_ts
+                    and await checkpointer.aget_tuple(graph_config) is None
+                ):
+                    self.log.warning(
+                        "Requested resume checkpoint was not found",
+                        workflow_id=self._workflow_id,
+                        resume_checkpoint_ts=resume_checkpoint_ts,
+                    )
+                    raise InvalidRequestException(
+                        f"Checkpoint {resume_checkpoint_ts} was not found in this session."
+                    )
+
                 if status_event == WorkflowStatusEventEnum.STOP_RECOVERY:
                     # Resolve the DWS-internal STOP_RECOVERY signal into a concrete
                     # event *before* get_graph_input runs, so get_graph_input never
@@ -498,15 +527,19 @@ class AbstractWorkflow(ABC):
                     # subclasses keep the trivial (None, RETRY) default.
                     # Note: only GitLabWorkflow ever reports STOP_RECOVERY (offline
                     # mode yields a MemorySaver with no initial_status_event).
-                    boundary, status_event = await self._resolve_stop_recovery(
-                        checkpointer
-                    )
-                    if boundary is not None:
-                        # Pin LangGraph to the boundary checkpoint so it resumes
-                        # there, discarding all work done after the boundary.
-                        graph_config["configurable"]["checkpoint_id"] = boundary.config[
-                            "configurable"
-                        ]["checkpoint_id"]
+                    if resume_checkpoint_ts:
+                        # A client-requested checkpoint supersedes stop recovery entirely.
+                        status_event = WorkflowStatusEventEnum.RESUME
+                    else:
+                        boundary, status_event = await self._resolve_stop_recovery(
+                            checkpointer
+                        )
+                        if boundary is not None:
+                            # Pin LangGraph to the boundary checkpoint so it resumes
+                            # there, discarding all work done after the boundary.
+                            graph_config["configurable"]["checkpoint_id"] = (
+                                boundary.config["configurable"]["checkpoint_id"]
+                            )
 
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
@@ -660,6 +693,26 @@ class AbstractWorkflow(ABC):
             )
 
         raise TraceableException(e)
+
+    def _resolve_resume_checkpoint_ts(self) -> Optional[str]:
+        """Resolve the checkpoint this run resumes at, or None to continue from the latest.
+
+        Raise error when not implemented. The resume_checkpoint_ts (retry functionality) cannot be implemented in flows
+        as they pass Command(resume=) as the graph input, which makes LangGraph skip time travel entirely. Blocked by
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2678
+        """
+        if self._resume_checkpoint_ts:
+            self.log.warning(
+                "Requested resume checkpoint is not supported by this workflow type",
+                workflow_id=self._workflow_id,
+                workflow_class=self.__class__.__name__,
+                resume_checkpoint_ts=self._resume_checkpoint_ts,
+            )
+            raise InvalidRequestException(
+                f"{self.__class__.__name__} does not support resuming at a checkpoint."
+            )
+
+        return None
 
     async def _resolve_stop_recovery(
         self,

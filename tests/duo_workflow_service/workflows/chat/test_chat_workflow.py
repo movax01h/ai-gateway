@@ -1776,3 +1776,72 @@ class TestWorkflowSystemTemplatePreRender:
         )
 
         assert workflow.system_template_override == "orbit on goal={{ goal }}"
+
+
+class TestResumeCheckpointTs:
+    """Chat is the only workflow type allowed to resume at a client-requested checkpoint."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_duo_workflow_service_container",
+        "mock_tools_registry_cls",
+        "mock_fetch_workflow_and_container_data",
+        "mock_checkpoint_notifier",
+    )
+    async def test_run_pins_the_requested_checkpoint(
+        self, mock_git_lab_workflow_instance, flow_type, user
+    ):
+        """End to end: the requested checkpoint reaches LangGraph as checkpoint_id, so the graph resumes there."""
+        # The pre-flight check looks the checkpoint up before the graph runs.
+        mock_git_lab_workflow_instance.aget_tuple = AsyncMock(return_value=MagicMock())
+
+        async def empty_stream():
+            for item in []:
+                yield item
+
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            user=user,
+            resume_checkpoint_ts="cp-1",
+        )
+
+        with (
+            patch(
+                "duo_workflow_service.workflows.chat.workflow.StateGraph"
+            ) as mock_graph_cls,
+            patch(
+                "duo_workflow_service.workflows.chat.workflow.create_agent",
+                return_value=MagicMock(),
+            ),
+        ):
+            compiled_graph = MagicMock()
+            compiled_graph.astream = MagicMock(return_value=empty_stream())
+            mock_graph_cls.return_value.compile.return_value = compiled_graph
+
+            await workflow.run("Test chat goal")
+
+        config = compiled_graph.astream.call_args.kwargs["config"]
+        assert config["configurable"]["checkpoint_id"] == "cp-1"
+
+    def test_honours_the_requested_checkpoint(self, flow_type):
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            resume_checkpoint_ts="cp-1",
+        )
+
+        assert workflow._resolve_resume_checkpoint_ts() == "cp-1"
+
+    def test_resumes_from_the_latest_checkpoint_when_none_was_requested(
+        self, flow_type
+    ):
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+        )
+
+        assert workflow._resolve_resume_checkpoint_ts() is None

@@ -512,3 +512,9 @@ class Workflow(AbstractWorkflow):
     @override
     def _support_namespace_level_workflow(self) -> bool:
         return True
+
+    @override
+    def _resolve_resume_checkpoint_ts(self) -> Optional[str]:
+        """Honour the client's requested checkpoint: chat feeds the graph a state dict, never ``Command(resume=)``, so
+        LangGraph forks the pinned checkpoint as documented."""
+        return self._resume_checkpoint_ts

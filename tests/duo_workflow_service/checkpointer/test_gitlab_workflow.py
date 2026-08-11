@@ -4562,3 +4562,29 @@ async def test_workflow_context_manager_stop_recovery(
     mock_duo_workflow_metrics.count_agent_platform_session_retry.assert_called_once_with(
         flow_type=workflow_type.value,
     )
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_returns_none_for_an_absent_pin(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    """Every explicit pin (stop-recovery boundary, LangGraph replay, a client resume checkpoint) keeps the absent-means-
+    None contract; a checkpoint the client asked to resume at is validated in the workflow layer instead."""
+    call_count = 0
+
+    async def mock_aget(path, **_kwargs):  # pylint: disable=unused-argument
+        nonlocal call_count
+        call_count += 1
+        return GitLabHttpResponse(
+            status_code=200,
+            body=paginated_checkpoint_pages[call_count - 1],
+            headers={"X-Next-Page": "2" if call_count == 1 else ""},
+        )
+
+    http_client.aget = mock_aget
+
+    config: CustomRunnableConfig = {
+        "configurable": {"thread_id": "1234", "checkpoint_id": "cp-99"}
+    }
+
+    assert await gitlab_workflow.aget_tuple(config) is None

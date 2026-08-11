@@ -90,7 +90,16 @@ export interface StartWorkflowRequest {
     | string
     | undefined;
   /** streaming enables UI response streaming for this session when set to true. */
-  streaming?: boolean | undefined;
+  streaming?:
+    | boolean
+    | undefined;
+  /**
+   * resume_checkpoint_ts is the thread_ts of the checkpoint execution resumes at, and so becomes the
+   * parent of the next checkpoint written. Set it to an earlier checkpoint to retry a turn, or to the
+   * tip of an existing branch to continue that branch. When unset, execution continues from the latest
+   * checkpoint.
+   */
+  resume_checkpoint_ts?: string | undefined;
 }
 
 /** ActionResponse carries the executor's result for a previously requested action. */
@@ -812,6 +821,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     flowConfigId: undefined,
     flowVersion: undefined,
     streaming: undefined,
+    resume_checkpoint_ts: undefined,
   };
 }
 
@@ -861,6 +871,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.streaming !== undefined) {
       writer.uint32(128).bool(message.streaming);
+    }
+    if (message.resume_checkpoint_ts !== undefined) {
+      writer.uint32(138).string(message.resume_checkpoint_ts);
     }
     return writer;
   },
@@ -992,6 +1005,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.streaming = reader.bool();
           continue;
         }
+        case 17: {
+          if (tag !== 138) {
+            break;
+          }
+
+          message.resume_checkpoint_ts = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1026,6 +1047,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       flowConfigId: isSet(object.flowConfigId) ? globalThis.String(object.flowConfigId) : undefined,
       flowVersion: isSet(object.flowVersion) ? globalThis.String(object.flowVersion) : undefined,
       streaming: isSet(object.streaming) ? globalThis.Boolean(object.streaming) : undefined,
+      resume_checkpoint_ts: isSet(object.resume_checkpoint_ts)
+        ? globalThis.String(object.resume_checkpoint_ts)
+        : undefined,
     };
   },
 
@@ -1076,6 +1100,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.streaming !== undefined) {
       obj.streaming = message.streaming;
     }
+    if (message.resume_checkpoint_ts !== undefined) {
+      obj.resume_checkpoint_ts = message.resume_checkpoint_ts;
+    }
     return obj;
   },
 
@@ -1101,6 +1128,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.flowConfigId = object.flowConfigId ?? undefined;
     message.flowVersion = object.flowVersion ?? undefined;
     message.streaming = object.streaming ?? undefined;
+    message.resume_checkpoint_ts = object.resume_checkpoint_ts ?? undefined;
     return message;
   },
 };

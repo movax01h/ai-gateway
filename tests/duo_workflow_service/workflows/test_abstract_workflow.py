@@ -23,7 +23,10 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    InvalidRequestException,
+    NotifiableException,
+)
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.tracking import (
     MonitoringContext,
@@ -101,6 +104,13 @@ class ConfigCapturingGraph:
         yield "updates", {"step1": {"key": "value"}}
 
 
+class ResumingMockWorkflow(MockWorkflow):
+    """MockWorkflow that honours a requested checkpoint, mimicking ChatWorkflow's override."""
+
+    def _resolve_resume_checkpoint_ts(self):
+        return self._resume_checkpoint_ts
+
+
 class StopRecoveryMockWorkflow(MockWorkflow):
     """MockWorkflow with a _resolve_stop_recovery override, mimicking Flow's."""
 
@@ -118,6 +128,13 @@ class StopRecoveryMockWorkflow(MockWorkflow):
     ) -> tuple[Any, WorkflowStatusEventEnum]:
         self.resolve_stop_recovery_calls.append(checkpointer)
         return self.stop_recovery_resolution
+
+
+class ResumingStopRecoveryMockWorkflow(StopRecoveryMockWorkflow):
+    """Both overrides at once: the combination a stopped chat session hits."""
+
+    def _resolve_resume_checkpoint_ts(self):
+        return self._resume_checkpoint_ts
 
 
 @pytest.fixture(autouse=True)
@@ -1580,10 +1597,21 @@ def _boundary_checkpoint_tuple(checkpoint_id):
     )
 
 
-def _stop_recovery_checkpointer(mock_gitlab_workflow):
+def _checkpointer(mock_gitlab_workflow, pinned_checkpoint_found=True):
+    """Checkpointer stub whose aget_tuple answers the pre-flight resume checkpoint check."""
     mock_checkpointer = AsyncMock()
-    mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+    mock_checkpointer.aget_tuple.return_value = (
+        _boundary_checkpoint_tuple("requested-checkpoint-id")
+        if pinned_checkpoint_found
+        else None
+    )
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    return mock_checkpointer
+
+
+def _stop_recovery_checkpointer(mock_gitlab_workflow):
+    mock_checkpointer = _checkpointer(mock_gitlab_workflow)
+    mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
     return mock_checkpointer
 
 
@@ -1731,3 +1759,209 @@ async def test_compile_and_run_graph_stop_recovery_default_behaves_like_retry(
     assert graph.captured_input == expected_input
     assert "checkpoint_id" not in graph.captured_config["configurable"]
     mock_checkpointer.checkpoints_reversed.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "resume_checkpoint_ts,expected_checkpoint_id",
+    [
+        ("requested-checkpoint-id", "requested-checkpoint-id"),
+        (None, None),
+    ],
+    ids=["pins_requested_checkpoint", "no_pin_when_not_requested"],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_pins_requested_resume_checkpoint_ts(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    user,
+    resume_checkpoint_ts,
+    expected_checkpoint_id,
+):
+    """A client-requested checkpoint is passed to LangGraph as checkpoint_id, so the graph resumes at that checkpoint
+    instead of the latest one."""
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow)
+
+    workflow = ResumingMockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        resume_checkpoint_ts=resume_checkpoint_ts,
+    )
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+
+    await workflow._compile_and_run_graph("goal")
+
+    configurable = graph.captured_config["configurable"]
+    if expected_checkpoint_id is None:
+        assert "checkpoint_id" not in configurable
+    else:
+        assert configurable["checkpoint_id"] == expected_checkpoint_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.get_event",
+    new_callable=AsyncMock,
+    return_value=None,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_requested_resume_checkpoint_ts_wins_over_stop_recovery(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_get_event,
+    user,
+):
+    """When a stopped session also carries a client-requested checkpoint, the requested one is used: the user chose
+    where to resume, so it takes precedence over the recovered boundary."""
+    mock_tools_registry.return_value = MagicMock()
+    _stop_recovery_checkpointer(mock_gitlab_workflow)
+
+    workflow = ResumingStopRecoveryMockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        resume_checkpoint_ts="requested-checkpoint-id",
+    )
+    workflow.stop_recovery_resolution = (
+        _boundary_checkpoint_tuple("boundary-checkpoint-id"),
+        WorkflowStatusEventEnum.RESUME,
+    )
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+    workflow.get_graph_input = AsyncMock(return_value=None)
+
+    await workflow._compile_and_run_graph("new goal after stop")
+
+    assert (
+        graph.captured_config["configurable"]["checkpoint_id"]
+        == "requested-checkpoint-id"
+    )
+    # Superseded outright: the boundary walk never runs, and the turn resumes rather
+    # than retrying from the latest checkpoint.
+    assert workflow.resolve_stop_recovery_calls == []
+    assert workflow.get_graph_input.await_args.args[1] == WorkflowStatusEventEnum.RESUME
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_refuses_a_requested_checkpoint_it_cannot_resume_at(
+    mock_tools_registry,
+    mock_gitlab_workflow,  # pylint: disable=unused-argument  # patched to avoid HTTP
+    user,
+):
+    """Only chat honours a requested checkpoint.
+
+    Every other type feeds the graph Command(resume=), which LangGraph refuses to fork, so the run would silently
+    continue from the latest checkpoint instead -- see
+    https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2678.
+    Refusing keeps that
+    from reaching the user as a misdelivered message.
+    """
+    mock_tools_registry.return_value = MagicMock()
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        resume_checkpoint_ts="requested-checkpoint-id",
+    )
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+
+    with capture_logs() as logs:
+        with pytest.raises(
+            TraceableException, match="does not support resuming"
+        ) as raised:
+            await workflow._compile_and_run_graph("goal")
+
+    assert isinstance(raised.value.original_exception, InvalidRequestException)
+    # The gRPC layer logs nothing itself, so this warning is the only record of it.
+    assert {
+        "event": "Requested resume checkpoint is not supported by this workflow type",
+        "log_level": "warning",
+        "workflow_id": "id",
+        "workflow_class": "MockWorkflow",
+        "resume_checkpoint_ts": "requested-checkpoint-id",
+    } in logs
+    # Refused before the graph ran, so no checkpoint was written on either branch.
+    assert graph.captured_config is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_rejects_a_requested_checkpoint_that_was_never_written(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    user,
+):
+    """A resume checkpoint absent from the session is rejected before the graph runs.
+
+    Letting it through would hand LangGraph an empty_checkpoint(), so the run would start from scratch and read back as
+    a wiped conversation.
+    """
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow, pinned_checkpoint_found=False)
+
+    workflow = ResumingMockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        resume_checkpoint_ts="never-written",
+    )
+    workflow._compile = MagicMock(return_value=ConfigCapturingGraph())
+
+    with capture_logs() as logs:
+        with pytest.raises(TraceableException, match="never-written") as raised:
+            await workflow._compile_and_run_graph("goal")
+
+    # Wrapped as an invalid request, so the gRPC layer answers INVALID_ARGUMENT and no
+    # error is written to the chat log.
+    assert isinstance(raised.value.original_exception, InvalidRequestException)
+    # The gRPC layer logs nothing itself, so this warning is the only record of the id.
+    assert {
+        "event": "Requested resume checkpoint was not found",
+        "log_level": "warning",
+        "workflow_id": "id",
+        "resume_checkpoint_ts": "never-written",
+    } in logs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_skips_the_resume_checkpoint_check_without_a_request(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    user,
+):
+    """Without a client-requested checkpoint there is nothing to validate, so the extra lookup is skipped."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = _checkpointer(mock_gitlab_workflow)
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    workflow._compile = MagicMock(return_value=ConfigCapturingGraph())
+
+    await workflow._compile_and_run_graph("goal")
+
+    mock_checkpointer.aget_tuple.assert_not_called()
