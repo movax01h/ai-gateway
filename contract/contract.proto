@@ -81,6 +81,11 @@ message StartWorkflowRequest {
     optional string flowVersion = 15;     // Semver flow version, e.g. "1.0.0". Required when flowConfigId is set.
     // streaming enables UI response streaming for this session when set to true.
     optional bool streaming = 16;
+    // resume_checkpoint_ts is the thread_ts of the checkpoint execution resumes at, and so becomes the
+    // parent of the next checkpoint written. Set it to an earlier checkpoint to retry a turn, or to the
+    // tip of an existing branch to continue that branch. When unset, execution continues from the latest
+    // checkpoint.
+    optional string resume_checkpoint_ts = 17 [json_name = "resume_checkpoint_ts"];
 }
 
 // ActionResponse carries the executor's result for a previously requested action.

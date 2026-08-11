@@ -2024,6 +2024,7 @@ async def test_execute_workflow_missing_workflow_metadata(
         language_server_version=None,
         preapproved_tools=[],
         streaming=False,
+        resume_checkpoint_ts=None,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
@@ -2101,9 +2102,64 @@ async def test_execute_workflow_valid_workflow_metadata(
         language_server_version=None,
         preapproved_tools=preapproved_tools,
         streaming=False,
+        resume_checkpoint_ts=None,
     )
 
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.OK)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_request_kwargs,expected_resume_checkpoint_ts",
+    [
+        ({"resume_checkpoint_ts": "1f0a-checkpoint-id"}, "1f0a-checkpoint-id"),
+        ({"resume_checkpoint_ts": ""}, None),
+        ({}, None),
+    ],
+    ids=["forwards_requested_checkpoint", "none_when_empty", "none_when_unset"],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_forwards_resume_checkpoint_ts(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    start_request_kwargs,
+    expected_resume_checkpoint_ts,
+):
+    """The requested checkpoint reaches the workflow.
+
+    Proto3 reports an unset optional string as "", so an absent field must arrive as None rather than an empty string
+    that would be treated as a checkpoint.
+    """
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = None
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123", **start_request_kwargs
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    _args, kwargs = mock_abstract_workflow_class.call_args
+    assert kwargs["resume_checkpoint_ts"] == expected_resume_checkpoint_ts
 
 
 @pytest.mark.parametrize(
