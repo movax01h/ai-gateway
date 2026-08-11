@@ -1071,3 +1071,84 @@ class TestShippedConfigRouterIndentation:
         assert not offenders, "Misindented default_route(s) found:\n" + "\n".join(
             offenders
         )
+
+
+class TestShippedConfigOptionalStateLookups:
+    """Regression guard for the no-MR ``KeyError`` in the fix_pipeline flows.
+
+    ``IOKey.value_from_state`` resolves non-optional subkeys with ``current[key]``,
+    which raises when the key is absent. Collectors omit whole context envelopes
+    (rather than sending them with blank values), so any config that reads a
+    subkey of an envelope that is not always present must mark the lookup
+    ``optional: True``. Without it the flow raises ``KeyError`` on the outer
+    envelope name — for fix_pipeline this happened in the first router, before
+    any agent ran, surfacing only as a generic error message.
+
+    ``merge_request`` is the known-omitted envelope: a pipeline can fail with no
+    associated merge request. This walks every shipped v1 flow config and fails
+    if a router condition or component input reads into it without ``optional``.
+    """
+
+    ALWAYS_OPTIONAL_PREFIX = "context:inputs.merge_request."
+
+    def test_router_conditions_reading_merge_request_are_optional(self):
+        """Every router condition reading into merge_request must be optional."""
+        offenders = []
+
+        for config_file in sorted(FlowConfig.DIRECTORY_PATH.glob("*/*.yml")):
+            config = yaml.safe_load(config_file.read_text()) or {}
+            for router in config.get("routers") or []:
+                condition = router.get("condition")
+                if not isinstance(condition, dict):
+                    continue
+
+                spec = condition.get("input")
+                # The plain-string form has no way to express optionality, so it
+                # is always unsafe for a possibly-absent envelope.
+                if isinstance(spec, str):
+                    if spec.startswith(self.ALWAYS_OPTIONAL_PREFIX):
+                        offenders.append(
+                            f"{config_file.parent.name}/{config_file.stem} (router from "
+                            f"'{router.get('from')}'): reads '{spec}' as a plain "
+                            "string; use the mapping form with optional: True"
+                        )
+                elif isinstance(spec, dict):
+                    from_ = spec.get("from", "")
+                    if from_.startswith(self.ALWAYS_OPTIONAL_PREFIX) and not spec.get(
+                        "optional"
+                    ):
+                        offenders.append(
+                            f"{config_file.parent.name}/{config_file.stem} (router from "
+                            f"'{router.get('from')}'): reads '{from_}' without "
+                            "optional: True"
+                        )
+
+        assert not offenders, (
+            "Router condition(s) may raise KeyError when the merge_request "
+            "context is absent:\n" + "\n".join(offenders)
+        )
+
+    def test_component_inputs_reading_merge_request_are_optional(self):
+        """Every component input reading into merge_request must be optional."""
+        offenders = []
+
+        for config_file in sorted(FlowConfig.DIRECTORY_PATH.glob("*/*.yml")):
+            config = yaml.safe_load(config_file.read_text()) or {}
+            for component in config.get("components") or []:
+                for input_spec in component.get("inputs") or []:
+                    if not isinstance(input_spec, dict):
+                        continue
+                    from_ = input_spec.get("from", "")
+                    if from_.startswith(
+                        self.ALWAYS_OPTIONAL_PREFIX
+                    ) and not input_spec.get("optional"):
+                        offenders.append(
+                            f"{config_file.parent.name}/{config_file.stem} "
+                            f"(component '{component.get('name')}'): reads "
+                            f"'{from_}' without optional: True"
+                        )
+
+        assert not offenders, (
+            "Component input(s) may raise KeyError when the merge_request "
+            "context is absent:\n" + "\n".join(offenders)
+        )

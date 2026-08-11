@@ -341,18 +341,15 @@ class TestRouter:
     def test_router_route_with_empty_string_input_takes_explicit_empty_route(self):
         """Router selects the explicit "" branch when a nested input resolves to "".
 
-        This is the mechanism the fix_pipeline_next flow uses to skip the
-        fetch_mr_diffs step when a pipeline has no associated merge request: the
-        merge_request envelope is present but ``url`` is an empty string, so the
-        router routes straight to the next component instead of running the step
-        that would fail tool validation.
+        This covers callers that do send a merge_request envelope with a blank
+        ``url``. The absent-envelope case is covered separately below.
         """
         from_component = self.create_mock_component("fetch_failing_bridge_jobs")
         skip_component = self.create_mock_component("fix_pipeline_next_context")
         run_component = self.create_mock_component("fetch_mr_diffs")
 
         router = Router(
-            input="context:inputs.merge_request.url",
+            input={"from": "context:inputs.merge_request.url", "optional": True},
             from_component=from_component,
             to_component={
                 "": skip_component,
@@ -367,6 +364,47 @@ class TestRouter:
         assert result == "fix_pipeline_next_context_entry_hook"
         skip_component.__entry_hook__.assert_called_once()
         run_component.__entry_hook__.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "inputs,expected_route",
+        [
+            ({}, "fix_pipeline_next_context_entry_hook"),
+            ({"merge_request": {"url": ""}}, "fix_pipeline_next_context_entry_hook"),
+            (
+                {"merge_request": {"url": "https://gitlab.com/g/p/-/merge_requests/1"}},
+                "fetch_mr_diffs_entry_hook",
+            ),
+        ],
+    )
+    def test_router_route_skips_mr_step_when_merge_request_context_absent(
+        self, inputs, expected_route
+    ):
+        """Router skips fetch_mr_diffs when the merge_request context is absent.
+
+        This is the mechanism the fix_pipeline and fix_pipeline_next flows use for
+        pipelines with no associated merge request. Collectors omit the
+        merge_request context entirely rather than sending a blank ``url``, so the
+        key is absent from state. Without ``optional: True`` the lookup raises
+        ``KeyError: 'merge_request'``, which previously crashed the flow in its
+        first router before any agent ran. An absent key resolves to ``None``,
+        which BaseRouter stringifies to ``"None"``, so both that and ``""`` route
+        past the step that would fail tool validation without a url.
+        """
+        from_component = self.create_mock_component("fetch_failing_bridge_jobs")
+        skip_component = self.create_mock_component("fix_pipeline_next_context")
+        run_component = self.create_mock_component("fetch_mr_diffs")
+
+        router = Router(
+            input={"from": "context:inputs.merge_request.url", "optional": True},
+            from_component=from_component,
+            to_component={
+                "None": skip_component,
+                "": skip_component,
+                BaseRouter.DEFAULT_ROUTE: run_component,
+            },
+        )
+
+        assert router.route({"context": {"inputs": inputs}}) == expected_route
 
     def test_router_allowed_input_targets(self):
         """Test that Router has correct allowed input targets."""
