@@ -589,6 +589,52 @@ export function approval_ApprovalSourceToJSON(object: Approval_ApprovalSource): 
   }
 }
 
+/**
+ * PolicyRef identifies the policy artifact that produced an automatic approval
+ * decision, carrying its provenance alongside the ApprovalSource mechanism.
+ * Informational only: all values are client-provided and are not verified server-side.
+ *
+ * PolicyRef complements ApprovalSource rather than replacing it: ApprovalSource
+ * names the decision mechanism while PolicyRef names the matched policy. For
+ * example, a PreToolUse hook approval matched against GitLab's distributed
+ * default policy is reported as APPROVAL_SOURCE_PRETOOLUSE_HOOK with
+ * policy_ref.origin = "gitlab_default"; APPROVAL_SOURCE_PREAPPROVED_CONFIG
+ * remains reserved for preapprovals from the user's own settings file.
+ */
+export interface Approval_PolicyRef {
+  /**
+   * origin classifies who authored or distributed the matched policy. It is a
+   * free-form string with a well-known vocabulary: "gitlab_default" (GitLab's
+   * distributed default policy), "customer_policy" (a customer-authored
+   * policy), and "user_settings" (the user's own settings-file configuration).
+   * Unknown values are carried through as-is.
+   */
+  origin?:
+    | string
+    | undefined;
+  /**
+   * file is the workspace-relative path of the matched policy file
+   * (e.g. ".gitlab/duo/pretooluse.rego"), when the policy came from a file.
+   */
+  file?:
+    | string
+    | undefined;
+  /**
+   * hash is a content digest of the matched policy artifact. By convention it
+   * is prefixed with the algorithm, e.g. "sha256:<hex>"; the format is
+   * documented but not validated server-side.
+   */
+  hash?:
+    | string
+    | undefined;
+  /**
+   * version is the version identifier of the matched policy artifact, as
+   * reported by the policy's distribution channel (e.g. a release tag or
+   * bundle version of the distributed policy).
+   */
+  version?: string | undefined;
+}
+
 /** Approved signals that the user has approved the pending action. */
 export interface Approval_Approved {
   /** remember_approval indicates whether this approval should be remembered for future identical actions. */
@@ -607,7 +653,15 @@ export interface Approval_Approved {
    * approval_source identifies who or what the client reports made this approval decision.
    * Informational only: the value is client-provided and is not verified server-side.
    */
-  approval_source?: Approval_ApprovalSource | undefined;
+  approval_source?:
+    | Approval_ApprovalSource
+    | undefined;
+  /**
+   * policy_ref carries the provenance of the policy artifact that produced
+   * this approval decision, when the client reports one. Informational only:
+   * the value is client-provided and is not verified server-side.
+   */
+  policy_ref?: Approval_PolicyRef | undefined;
 }
 
 /** Rejected signals that the user has rejected the pending action. */
@@ -4639,8 +4693,122 @@ export const Approval: MessageFns<Approval> = {
   },
 };
 
+function createBaseApproval_PolicyRef(): Approval_PolicyRef {
+  return { origin: undefined, file: undefined, hash: undefined, version: undefined };
+}
+
+export const Approval_PolicyRef: MessageFns<Approval_PolicyRef> = {
+  encode(message: Approval_PolicyRef, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.origin !== undefined) {
+      writer.uint32(10).string(message.origin);
+    }
+    if (message.file !== undefined) {
+      writer.uint32(18).string(message.file);
+    }
+    if (message.hash !== undefined) {
+      writer.uint32(26).string(message.hash);
+    }
+    if (message.version !== undefined) {
+      writer.uint32(34).string(message.version);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Approval_PolicyRef {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseApproval_PolicyRef();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.origin = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.file = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.hash = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.version = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Approval_PolicyRef {
+    return {
+      origin: isSet(object.origin) ? globalThis.String(object.origin) : undefined,
+      file: isSet(object.file) ? globalThis.String(object.file) : undefined,
+      hash: isSet(object.hash) ? globalThis.String(object.hash) : undefined,
+      version: isSet(object.version) ? globalThis.String(object.version) : undefined,
+    };
+  },
+
+  toJSON(message: Approval_PolicyRef): unknown {
+    const obj: any = {};
+    if (message.origin !== undefined) {
+      obj.origin = message.origin;
+    }
+    if (message.file !== undefined) {
+      obj.file = message.file;
+    }
+    if (message.hash !== undefined) {
+      obj.hash = message.hash;
+    }
+    if (message.version !== undefined) {
+      obj.version = message.version;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Approval_PolicyRef>, I>>(base?: I): Approval_PolicyRef {
+    return Approval_PolicyRef.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Approval_PolicyRef>, I>>(object: I): Approval_PolicyRef {
+    const message = createBaseApproval_PolicyRef();
+    message.origin = object.origin ?? undefined;
+    message.file = object.file ?? undefined;
+    message.hash = object.hash ?? undefined;
+    message.version = object.version ?? undefined;
+    return message;
+  },
+};
+
 function createBaseApproval_Approved(): Approval_Approved {
-  return { remember_approval: undefined, tool_name: undefined, tool_args_json: undefined, approval_source: undefined };
+  return {
+    remember_approval: undefined,
+    tool_name: undefined,
+    tool_args_json: undefined,
+    approval_source: undefined,
+    policy_ref: undefined,
+  };
 }
 
 export const Approval_Approved: MessageFns<Approval_Approved> = {
@@ -4656,6 +4824,9 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     }
     if (message.approval_source !== undefined) {
       writer.uint32(32).int32(message.approval_source);
+    }
+    if (message.policy_ref !== undefined) {
+      Approval_PolicyRef.encode(message.policy_ref, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -4699,6 +4870,14 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
           message.approval_source = reader.int32() as any;
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.policy_ref = Approval_PolicyRef.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4716,6 +4895,7 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
       approval_source: isSet(object.approval_source)
         ? approval_ApprovalSourceFromJSON(object.approval_source)
         : undefined,
+      policy_ref: isSet(object.policy_ref) ? Approval_PolicyRef.fromJSON(object.policy_ref) : undefined,
     };
   },
 
@@ -4733,6 +4913,9 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     if (message.approval_source !== undefined) {
       obj.approval_source = approval_ApprovalSourceToJSON(message.approval_source);
     }
+    if (message.policy_ref !== undefined) {
+      obj.policy_ref = Approval_PolicyRef.toJSON(message.policy_ref);
+    }
     return obj;
   },
 
@@ -4745,6 +4928,9 @@ export const Approval_Approved: MessageFns<Approval_Approved> = {
     message.tool_name = object.tool_name ?? undefined;
     message.tool_args_json = object.tool_args_json ?? undefined;
     message.approval_source = object.approval_source ?? undefined;
+    message.policy_ref = (object.policy_ref !== undefined && object.policy_ref !== null)
+      ? Approval_PolicyRef.fromPartial(object.policy_ref)
+      : undefined;
     return message;
   },
 };

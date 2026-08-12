@@ -426,17 +426,30 @@ class Approval(_message.Message):
     APPROVAL_SOURCE_PRETOOLUSE_HOOK: Approval.ApprovalSource
     APPROVAL_SOURCE_AUTO_MODE: Approval.ApprovalSource
     APPROVAL_SOURCE_PREAPPROVED_CONFIG: Approval.ApprovalSource
+    class PolicyRef(_message.Message):
+        __slots__ = ("origin", "file", "hash", "version")
+        ORIGIN_FIELD_NUMBER: _ClassVar[int]
+        FILE_FIELD_NUMBER: _ClassVar[int]
+        HASH_FIELD_NUMBER: _ClassVar[int]
+        VERSION_FIELD_NUMBER: _ClassVar[int]
+        origin: str
+        file: str
+        hash: str
+        version: str
+        def __init__(self, origin: _Optional[str] = ..., file: _Optional[str] = ..., hash: _Optional[str] = ..., version: _Optional[str] = ...) -> None: ...
     class Approved(_message.Message):
-        __slots__ = ("remember_approval", "tool_name", "tool_args_json", "approval_source")
+        __slots__ = ("remember_approval", "tool_name", "tool_args_json", "approval_source", "policy_ref")
         REMEMBER_APPROVAL_FIELD_NUMBER: _ClassVar[int]
         TOOL_NAME_FIELD_NUMBER: _ClassVar[int]
         TOOL_ARGS_JSON_FIELD_NUMBER: _ClassVar[int]
         APPROVAL_SOURCE_FIELD_NUMBER: _ClassVar[int]
+        POLICY_REF_FIELD_NUMBER: _ClassVar[int]
         remember_approval: bool
         tool_name: str
         tool_args_json: str
         approval_source: Approval.ApprovalSource
-        def __init__(self, remember_approval: bool = ..., tool_name: _Optional[str] = ..., tool_args_json: _Optional[str] = ..., approval_source: _Optional[_Union[Approval.ApprovalSource, str]] = ...) -> None: ...
+        policy_ref: Approval.PolicyRef
+        def __init__(self, remember_approval: bool = ..., tool_name: _Optional[str] = ..., tool_args_json: _Optional[str] = ..., approval_source: _Optional[_Union[Approval.ApprovalSource, str]] = ..., policy_ref: _Optional[_Union[Approval.PolicyRef, _Mapping]] = ...) -> None: ...
     class Rejected(_message.Message):
         __slots__ = ("message",)
         MESSAGE_FIELD_NUMBER: _ClassVar[int]

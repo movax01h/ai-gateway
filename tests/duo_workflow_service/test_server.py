@@ -2189,6 +2189,10 @@ def test_clean_start_request(has_flow_config):
             approval=contract_pb2.Approval.Approved(
                 tool_name="create_file_with_contents",
                 tool_args_json='{"contents": "sensitive user content"}',
+                policy_ref=contract_pb2.Approval.PolicyRef(
+                    origin="gitlab_default",
+                    file=".gitlab/duo/pretooluse.rego",
+                ),
             )
         )
     )
@@ -2212,6 +2216,12 @@ def test_clean_start_request(has_flow_config):
     assert not cleaned_request.startRequest.HasField("flowConfig")
     assert not cleaned_request.startRequest.HasField("approval")
     assert client_event.startRequest.HasField("approval")
+    # policy_ref rides inside approval: clearing approval drops it from the
+    # log copy while the original keeps it for the workflow.
+    assert client_event.startRequest.approval.approval.HasField("policy_ref")
+    assert client_event.startRequest.approval.approval.policy_ref.origin == (
+        "gitlab_default"
+    )
 
     # Verify hasFlowConfig reflects the original state
     assert extra["hasFlowConfig"] is has_flow_config

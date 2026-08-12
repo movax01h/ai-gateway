@@ -12,6 +12,7 @@ from duo_workflow_service.entities.state import (
     _conversation_history_reducer,
     _ui_chat_log_reducer,
     build_tool_info,
+    policy_ref_to_log_dict,
 )
 
 
@@ -58,6 +59,53 @@ class TestApprovalSourceFromProto:
 
     def test_unknown_value_does_not_raise(self):
         assert ApprovalSource.from_proto(99) == "unknown(99)"
+
+
+class TestPolicyRefToLogDict:
+    """Documents the PolicyRef -> log dict conversion.
+
+    Like ApprovalSource, PolicyRef values are client-provided and informational only; the helper is presence-aware so
+    logs distinguish "client set this field" from proto3 empty-string defaults.
+    """
+
+    def test_all_fields_set(self):
+        policy_ref = contract_pb2.Approval.PolicyRef(
+            origin="gitlab_default",
+            file=".gitlab/duo/pretooluse.rego",
+            hash="sha256:deadbeef",
+            version="1.2.3",
+        )
+        assert policy_ref_to_log_dict(policy_ref) == {
+            "origin": "gitlab_default",
+            "file": ".gitlab/duo/pretooluse.rego",
+            "hash": "sha256:deadbeef",
+            "version": "1.2.3",
+        }
+
+    def test_partial_fields_only_includes_set_fields(self):
+        policy_ref = contract_pb2.Approval.PolicyRef(
+            origin="customer_policy",
+            file="policies/custom.rego",
+        )
+        assert policy_ref_to_log_dict(policy_ref) == {
+            "origin": "customer_policy",
+            "file": "policies/custom.rego",
+        }
+
+    def test_empty_message_maps_to_empty_dict(self):
+        # A present-but-empty PolicyRef maps to {}, keeping "client sent an
+        # empty policy_ref" distinguishable from "client never sent one"
+        # (callers log None for the absent-submessage case).
+        assert policy_ref_to_log_dict(contract_pb2.Approval.PolicyRef()) == {}
+
+    def test_explicitly_set_empty_string_is_kept_but_unset_fields_are_omitted(self):
+        # Proto3 optional tracks presence: an explicitly-set empty string is
+        # emitted, while unset fields never surface as "".
+        policy_ref = contract_pb2.Approval.PolicyRef(origin="")
+        result = policy_ref_to_log_dict(policy_ref)
+        assert result == {"origin": ""}
+        for unset in ("file", "hash", "version"):
+            assert unset not in result
 
 
 class TestConversationHistoryReducer:

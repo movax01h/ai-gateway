@@ -54,6 +54,7 @@ from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
     UiChatLog,
+    policy_ref_to_log_dict,
 )
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
@@ -193,6 +194,13 @@ class AbstractWorkflow(ABC):
                 approval_source=(
                     ApprovalSource.from_proto(approved.approval_source)
                     if approved.HasField("approval_source")
+                    else None
+                ),
+                # Same presence rule for the provenance submessage: None means
+                # the client never sent policy_ref.
+                policy_ref=(
+                    policy_ref_to_log_dict(approved.policy_ref)
+                    if approved.HasField("policy_ref")
                     else None
                 ),
             )

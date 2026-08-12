@@ -316,6 +316,71 @@ def test_init_logs_approval_source(user, approval_source_value, expected_logged_
     assert entry["tool_name"] == "run_command"
 
 
+@pytest.mark.parametrize(
+    "policy_ref,expected_logged_policy_ref",
+    [
+        (
+            contract_pb2.Approval.PolicyRef(
+                origin="customer_policy",
+                file="policies/custom.rego",
+                hash="sha256:deadbeef",
+                version="1.2.3",
+            ),
+            {
+                "origin": "customer_policy",
+                "file": "policies/custom.rego",
+                "hash": "sha256:deadbeef",
+                "version": "1.2.3",
+            },
+        ),
+        (
+            contract_pb2.Approval.PolicyRef(origin="gitlab_default"),
+            {"origin": "gitlab_default"},
+        ),
+        # present-but-empty logs {} so it stays distinguishable from absent
+        (contract_pb2.Approval.PolicyRef(), {}),
+        (None, None),  # submessage never set by the client (old clients)
+    ],
+    ids=["all_fields", "origin_only", "empty_message", "unset"],
+)
+def test_init_logs_policy_ref(user, policy_ref, expected_logged_policy_ref):
+    """Client approvals are logged with a presence-aware policy_ref dict.
+
+    Regression for hybrid enforcement: a PreToolUse hook approval that matched
+    GitLab's distributed default policy is reported as
+    APPROVAL_SOURCE_PRETOOLUSE_HOOK plus policy_ref.origin="gitlab_default";
+    both must survive into the log entry together.
+    """
+    approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            tool_name="run_command",
+            approval_source=(
+                contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_PRETOOLUSE_HOOK
+            ),
+        )
+    )
+    if policy_ref is not None:
+        approval.approval.policy_ref.CopyFrom(policy_ref)
+
+    with capture_logs() as cap_logs:
+        MockWorkflow(
+            "test-workflow-id",
+            {"key": "value"},
+            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            user,
+            approval=approval,
+        )
+
+    entry = next(
+        e for e in cap_logs if e["event"] == "Received tool call approval from client"
+    )
+    assert entry["policy_ref"] == expected_logged_policy_ref
+    # The mechanism (approval_source) and the provenance (policy_ref) are
+    # logged side by side, never one replacing the other.
+    assert entry["approval_source"] == "pretooluse_hook"
+    assert entry["tool_name"] == "run_command"
+
+
 @pytest.mark.asyncio
 async def test_get_from_outbox(workflow, mock_action):
     # Put an item in the outbox
