@@ -9,7 +9,7 @@ models:
     model_class_provider: litellm
     use_model_max_tokens: true
     params:
-      model: "accounts/gitlab/deployments/z6hbhxrt"
+      model: "accounts/fireworks/models/kimi-k2p6"
       custom_llm_provider: "fireworks_ai"
       temperature: 0.0
       max_tokens: 32_766
@@ -35,7 +35,7 @@ models:
     max_context_tokens: 196000
     model_class_provider: litellm
     params:
-      model: "accounts/gitlab/deployments/t2nlxzj3"
+      model: "accounts/fireworks/models/minimax-m2p7"
       custom_llm_provider: "fireworks_ai"
       temperature: 0.0
       max_tokens: 65_536
@@ -48,7 +48,7 @@ models:
     max_context_tokens: 1_000_000
     model_class_provider: litellm
     params:
-      model: "accounts/gitlab/deployments/e0cdhz2n"
+      model: "accounts/fireworks/models/glm-5p2"
       custom_llm_provider: "fireworks_ai"
       temperature: 0.0
       max_tokens: 8_192
