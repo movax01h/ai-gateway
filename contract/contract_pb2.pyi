@@ -57,14 +57,16 @@ class StartWorkflowRequest(_message.Message):
     def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
-    __slots__ = ("requestID", "plainTextResponse", "httpResponse")
+    __slots__ = ("requestID", "plainTextResponse", "httpResponse", "scheduleNotificationResponse")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     PLAINTEXTRESPONSE_FIELD_NUMBER: _ClassVar[int]
     HTTPRESPONSE_FIELD_NUMBER: _ClassVar[int]
+    SCHEDULENOTIFICATIONRESPONSE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     plainTextResponse: PlainTextResponse
     httpResponse: HttpResponse
-    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ...) -> None: ...
+    scheduleNotificationResponse: ScheduleNotificationResponse
+    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ..., scheduleNotificationResponse: _Optional[_Union[ScheduleNotificationResponse, _Mapping]] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("timestamp",)
@@ -105,8 +107,18 @@ class HttpResponse(_message.Message):
     error: str
     def __init__(self, headers: _Optional[_Mapping[str, str]] = ..., statusCode: _Optional[int] = ..., body: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
 
+class ScheduleNotificationResponse(_message.Message):
+    __slots__ = ("accepted", "reason", "fires_at")
+    ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    FIRES_AT_FIELD_NUMBER: _ClassVar[int]
+    accepted: bool
+    reason: str
+    fires_at: str
+    def __init__(self, accepted: bool = ..., reason: _Optional[str] = ..., fires_at: _Optional[str] = ...) -> None: ...
+
 class Action(_message.Message):
-    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint", "listDirectory", "grep", "findFiles", "runMCPTool", "mkdir", "runReadFiles", "runShellCommand", "trackLlmCallForSelfHosted")
+    __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint", "listDirectory", "grep", "findFiles", "runMCPTool", "mkdir", "runReadFiles", "runShellCommand", "trackLlmCallForSelfHosted", "scheduleNotification")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     RUNCOMMAND_FIELD_NUMBER: _ClassVar[int]
     RUNHTTPREQUEST_FIELD_NUMBER: _ClassVar[int]
@@ -123,6 +135,7 @@ class Action(_message.Message):
     RUNREADFILES_FIELD_NUMBER: _ClassVar[int]
     RUNSHELLCOMMAND_FIELD_NUMBER: _ClassVar[int]
     TRACKLLMCALLFORSELFHOSTED_FIELD_NUMBER: _ClassVar[int]
+    SCHEDULENOTIFICATION_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     runCommand: RunCommandAction
     runHTTPRequest: RunHTTPRequest
@@ -139,7 +152,18 @@ class Action(_message.Message):
     runReadFiles: ReadFiles
     runShellCommand: RunShellCommand
     trackLlmCallForSelfHosted: TrackLlmCallForSelfHosted
-    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ..., newCheckpoint: _Optional[_Union[NewCheckpoint, _Mapping]] = ..., listDirectory: _Optional[_Union[ListDirectory, _Mapping]] = ..., grep: _Optional[_Union[Grep, _Mapping]] = ..., findFiles: _Optional[_Union[FindFiles, _Mapping]] = ..., runMCPTool: _Optional[_Union[RunMCPTool, _Mapping]] = ..., mkdir: _Optional[_Union[Mkdir, _Mapping]] = ..., runReadFiles: _Optional[_Union[ReadFiles, _Mapping]] = ..., runShellCommand: _Optional[_Union[RunShellCommand, _Mapping]] = ..., trackLlmCallForSelfHosted: _Optional[_Union[TrackLlmCallForSelfHosted, _Mapping]] = ...) -> None: ...
+    scheduleNotification: ScheduleNotification
+    def __init__(self, requestID: _Optional[str] = ..., runCommand: _Optional[_Union[RunCommandAction, _Mapping]] = ..., runHTTPRequest: _Optional[_Union[RunHTTPRequest, _Mapping]] = ..., runReadFile: _Optional[_Union[ReadFile, _Mapping]] = ..., runWriteFile: _Optional[_Union[WriteFile, _Mapping]] = ..., runGitCommand: _Optional[_Union[RunGitCommand, _Mapping]] = ..., runEditFile: _Optional[_Union[EditFile, _Mapping]] = ..., newCheckpoint: _Optional[_Union[NewCheckpoint, _Mapping]] = ..., listDirectory: _Optional[_Union[ListDirectory, _Mapping]] = ..., grep: _Optional[_Union[Grep, _Mapping]] = ..., findFiles: _Optional[_Union[FindFiles, _Mapping]] = ..., runMCPTool: _Optional[_Union[RunMCPTool, _Mapping]] = ..., mkdir: _Optional[_Union[Mkdir, _Mapping]] = ..., runReadFiles: _Optional[_Union[ReadFiles, _Mapping]] = ..., runShellCommand: _Optional[_Union[RunShellCommand, _Mapping]] = ..., trackLlmCallForSelfHosted: _Optional[_Union[TrackLlmCallForSelfHosted, _Mapping]] = ..., scheduleNotification: _Optional[_Union[ScheduleNotification, _Mapping]] = ...) -> None: ...
+
+class ScheduleNotification(_message.Message):
+    __slots__ = ("task_id", "condition", "message")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    CONDITION_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    condition: str
+    message: str
+    def __init__(self, task_id: _Optional[str] = ..., condition: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
 class TrackLlmCallForSelfHosted(_message.Message):
     __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem")
