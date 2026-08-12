@@ -473,6 +473,36 @@ message Approval {
         APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4;
     }
 
+    // PolicyRef identifies the policy artifact that produced an automatic approval
+    // decision, carrying its provenance alongside the ApprovalSource mechanism.
+    // Informational only: all values are client-provided and are not verified server-side.
+    //
+    // PolicyRef complements ApprovalSource rather than replacing it: ApprovalSource
+    // names the decision mechanism while PolicyRef names the matched policy. For
+    // example, a PreToolUse hook approval matched against GitLab's distributed
+    // default policy is reported as APPROVAL_SOURCE_PRETOOLUSE_HOOK with
+    // policy_ref.origin = "gitlab_default"; APPROVAL_SOURCE_PREAPPROVED_CONFIG
+    // remains reserved for preapprovals from the user's own settings file.
+    message PolicyRef {
+        // origin classifies who authored or distributed the matched policy. It is a
+        // free-form string with a well-known vocabulary: "gitlab_default" (GitLab's
+        // distributed default policy), "customer_policy" (a customer-authored
+        // policy), and "user_settings" (the user's own settings-file configuration).
+        // Unknown values are carried through as-is.
+        optional string origin = 1;
+        // file is the workspace-relative path of the matched policy file
+        // (e.g. ".gitlab/duo/pretooluse.rego"), when the policy came from a file.
+        optional string file = 2;
+        // hash is a content digest of the matched policy artifact. By convention it
+        // is prefixed with the algorithm, e.g. "sha256:<hex>"; the format is
+        // documented but not validated server-side.
+        optional string hash = 3;
+        // version is the version identifier of the matched policy artifact, as
+        // reported by the policy's distribution channel (e.g. a release tag or
+        // bundle version of the distributed policy).
+        optional string version = 4;
+    }
+
     // Approved signals that the user has approved the pending action.
     message Approved {
         // remember_approval indicates whether this approval should be remembered for future identical actions.
@@ -484,6 +514,10 @@ message Approval {
         // approval_source identifies who or what the client reports made this approval decision.
         // Informational only: the value is client-provided and is not verified server-side.
         optional ApprovalSource approval_source = 4 [json_name = "approval_source"];
+        // policy_ref carries the provenance of the policy artifact that produced
+        // this approval decision, when the client reports one. Informational only:
+        // the value is client-provided and is not verified server-side.
+        optional PolicyRef policy_ref = 5 [json_name = "policy_ref"];
     }
 
     // Rejected signals that the user has rejected the pending action.

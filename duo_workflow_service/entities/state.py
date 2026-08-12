@@ -107,6 +107,23 @@ class ApprovalSource(StrEnum):
         return member.value if member is not None else name.lower()
 
 
+def policy_ref_to_log_dict(
+    policy_ref: contract_pb2.Approval.PolicyRef,
+) -> Dict[str, str]:
+    """Convert a contract_pb2.Approval.PolicyRef into a loggable dict.
+
+    The dict contains only the fields the client explicitly set (checked per-field with HasField), so unset optional
+    fields are omitted instead of surfacing as empty strings. An empty message (no fields set) maps to {}, keeping
+    "client sent an empty policy_ref" distinguishable from "client never sent one" (callers log None for the latter).
+    Like ApprovalSource, the values are client-provided and informational only; they are not verified server-side.
+    """
+    return {
+        name: getattr(policy_ref, name)
+        for name in ("origin", "file", "hash", "version")
+        if policy_ref.HasField(name)
+    }
+
+
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
 TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
