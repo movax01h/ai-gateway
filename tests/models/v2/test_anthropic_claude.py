@@ -127,6 +127,11 @@ class TestChatAnthropic:
                 [
                     {"name": "get_issue", "input_schema": []},
                     {"type": "web_search_20250305", "name": "web_search"},
+                    {
+                        "type": "web_fetch_20250910",
+                        "name": "web_fetch",
+                        "max_uses": 5,
+                    },
                 ],
             ),
             ({}, [{"name": "get_issue", "input_schema": []}]),
@@ -135,7 +140,7 @@ class TestChatAnthropic:
     def test_bind_tools_with_web_search_options(
         self, bind_tools_params, expected_tools
     ):
-        """Test that web search tool is added when web_search_options is in bind_tools_params."""
+        """Test that web search and web fetch tools are added when web_search_options is in bind_tools_params."""
         chat = ChatAnthropic(
             async_client=AsyncAnthropic(),
             model="claude-3-5-sonnet-20241022",
@@ -149,6 +154,36 @@ class TestChatAnthropic:
 
         assert isinstance(result, Runnable)
         assert result.kwargs["tools"] == expected_tools
+
+    @pytest.mark.parametrize(
+        ("betas", "expected_betas"),
+        [
+            (None, ["web-fetch-2025-09-10"]),
+            (
+                ["context-1m-2025-08-07"],
+                ["context-1m-2025-08-07", "web-fetch-2025-09-10"],
+            ),
+            (["web-fetch-2025-09-10"], ["web-fetch-2025-09-10"]),
+        ],
+    )
+    def test_web_fetch_beta_is_negotiated_in_payload(self, betas, expected_betas):
+        """`web_fetch` requires the `web-fetch-2025-09-10` beta.
+
+        langchain_anthropic derives it from the bound tool type, so no explicit beta config is needed. This pins that
+        behaviour: a langchain upgrade dropping it would otherwise fail only at request time against the live API.
+        """
+        chat = ChatAnthropic(
+            async_client=AsyncAnthropic(api_key="test"),
+            model="claude-3-5-sonnet-20241022",
+            betas=betas,
+        )
+
+        bound = chat.bind_tools(tools=[], web_search_options={})
+        payload = chat._get_request_payload(
+            [HumanMessage(content="hello")], **bound.kwargs
+        )
+
+        assert payload["betas"] == expected_betas
 
     @pytest.mark.parametrize(
         ("model", "expect_rewrite"),

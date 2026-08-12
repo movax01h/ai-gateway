@@ -20,6 +20,26 @@ from ai_gateway.models.v2._model_compat import (
 
 __all__ = ["ChatAnthropic"]
 
+_WEB_SEARCH_TOOL: dict[str, Any] = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+}
+
+_WEB_FETCH_MAX_USES = 5
+"""Cap on `web_fetch` invocations per request.
+
+Unlike `web_search`, `web_fetch` retrieves arbitrary URLs chosen by the model, and those
+URLs routinely originate from untrusted content (search results, tool output, user-supplied
+text). That makes the tool a prompt-injection sink, so the cap bounds both cost and blast
+radius of a single request.
+"""
+
+_WEB_FETCH_TOOL: dict[str, Any] = {
+    "type": "web_fetch_20250910",
+    "name": "web_fetch",
+    "max_uses": _WEB_FETCH_MAX_USES,
+}
+
 
 class ChatAnthropic(_LChatAnthropic):
     """A wrapper around `langchain_anthropic.ChatAnthropic` that accepts the Anthropic asynchronous client as an input
@@ -121,7 +141,8 @@ class ChatAnthropic(_LChatAnthropic):
         tools_list = list(tools)
         web_search_options = kwargs.pop("web_search_options", None)
         if web_search_options is not None:
-            tools_list.append({"type": "web_search_20250305", "name": "web_search"})
+            tools_list.append(dict(_WEB_SEARCH_TOOL))
+            tools_list.append(dict(_WEB_FETCH_TOOL))
 
         return super().bind_tools(
             tools_list,
