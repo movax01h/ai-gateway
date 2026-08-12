@@ -345,7 +345,7 @@ class TestRouter:
         ``url``. The absent-envelope case is covered separately below.
         """
         from_component = self.create_mock_component("fetch_failing_bridge_jobs")
-        skip_component = self.create_mock_component("fix_pipeline_next_context")
+        skip_component = self.create_mock_component("fix_pipeline_context")
         run_component = self.create_mock_component("fetch_mr_diffs")
 
         router = Router(
@@ -361,15 +361,15 @@ class TestRouter:
 
         result = router.route(no_mr_state)
 
-        assert result == "fix_pipeline_next_context_entry_hook"
+        assert result == "fix_pipeline_context_entry_hook"
         skip_component.__entry_hook__.assert_called_once()
         run_component.__entry_hook__.assert_not_called()
 
     @pytest.mark.parametrize(
         "inputs,expected_route",
         [
-            ({}, "fix_pipeline_next_context_entry_hook"),
-            ({"merge_request": {"url": ""}}, "fix_pipeline_next_context_entry_hook"),
+            ({}, "fix_pipeline_context_entry_hook"),
+            ({"merge_request": {"url": ""}}, "fix_pipeline_context_entry_hook"),
             (
                 {"merge_request": {"url": "https://gitlab.com/g/p/-/merge_requests/1"}},
                 "fetch_mr_diffs_entry_hook",
@@ -381,7 +381,7 @@ class TestRouter:
     ):
         """Router skips fetch_mr_diffs when the merge_request context is absent.
 
-        This is the mechanism the fix_pipeline and fix_pipeline_next flows use for
+        This is the mechanism the fix_pipeline flow uses for
         pipelines with no associated merge request. Collectors omit the
         merge_request context entirely rather than sending a blank ``url``, so the
         key is absent from state. Without ``optional: True`` the lookup raises
@@ -391,7 +391,7 @@ class TestRouter:
         past the step that would fail tool validation without a url.
         """
         from_component = self.create_mock_component("fetch_failing_bridge_jobs")
-        skip_component = self.create_mock_component("fix_pipeline_next_context")
+        skip_component = self.create_mock_component("fix_pipeline_context")
         run_component = self.create_mock_component("fetch_mr_diffs")
 
         router = Router(
