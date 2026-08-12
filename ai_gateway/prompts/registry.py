@@ -412,6 +412,18 @@ class LocalPromptRegistry(BasePromptRegistry):
         if prompt_id.startswith("chat/") and self.duo_chat_max_tokens is not None:
             max_tokens_override = self.duo_chat_max_tokens
 
+        elif (
+            # Some models (e.g. kimi-k2p6 on Fireworks) return an empty 404 on streaming
+            # requests when max_tokens is at the model's max. When use_model_max_tokens is
+            # set, use the model's max_tokens from models.yml.
+            # We only apply this when duo_chat_max_tokens is not set, an operator-configured
+            # global cap takes precedence.
+            model_metadata
+            and model_metadata.llm_definition.use_model_max_tokens
+            and model_metadata.llm_definition.params.max_tokens is not None
+        ):
+            max_tokens_override = model_metadata.llm_definition.params.max_tokens
+
         return self._build_prompt(
             model_class_provider=model_class_provider,
             config=config,

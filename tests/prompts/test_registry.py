@@ -23,6 +23,8 @@ from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.model_selection import LLMDefinition
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
@@ -1461,6 +1463,72 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
 
         kwargs = prompt_class.call_args.kwargs
         assert kwargs.get("max_tokens_override") is None
+
+    @pytest.mark.usefixtures("mock_fs")
+    @pytest.mark.parametrize(
+        "use_model_max_tokens,model_max_tokens,duo_chat_max_tokens,expected_override",
+        [
+            # Flag on, model max_tokens set: use the model's value from models.yml.
+            (True, 16_384, None, 16_384),
+            # Flag on but no max_tokens in models.yml: no override.
+            (True, None, None, None),
+            # Flag off: no override even when max_tokens is set.
+            (False, 16_384, None, None),
+            # Operator global cap wins over the per-model flag.
+            (True, 16_384, 4096, 4096),
+        ],
+    )
+    def test_use_model_max_tokens(
+        self,
+        registry: LocalPromptRegistry,
+        model_factories: dict[ModelClassProvider, TypeModelFactory],
+        internal_event_client: Mock,
+        model_limits: ConfigModelLimits,
+        use_model_max_tokens: bool,
+        model_max_tokens: int | None,
+        duo_chat_max_tokens: int | None,
+        expected_override: int | None,
+    ):
+        # Test use_model_max_tokens uses the model's max_tokens from models.yml.
+        if duo_chat_max_tokens is not None:
+            reg = LocalPromptRegistry.from_local_yaml(
+                prompt_template_factories={},
+                model_factories=model_factories,
+                internal_event_client=internal_event_client,
+                model_limits=model_limits,
+                custom_models_enabled=False,
+                disable_streaming=False,
+                duo_chat_max_tokens=duo_chat_max_tokens,
+            )
+        else:
+            reg = registry
+
+        llm_definition = ChatLiteLLMDefinition(
+            name="Kimi K2.6",
+            gitlab_identifier="kimi_k2_6_fireworks",
+            max_context_tokens=256000,
+            use_model_max_tokens=use_model_max_tokens,
+            params=ChatLiteLLMParams(
+                model="accounts/fireworks/models/kimi-k2p6",
+                custom_llm_provider="fireworks_ai",
+                max_tokens=model_max_tokens,
+            ),
+        )
+        model_metadata = ModelMetadata(
+            provider="gitlab",
+            name="kimi_k2_6_fireworks",
+            llm_definition=llm_definition,
+        )
+
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            reg.get(
+                prompt_id="chat/react",
+                prompt_version="^1.0.0",
+                model_metadata=model_metadata,
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("max_tokens_override") == expected_override
 
 
 class TestGetRequiredVariables:
