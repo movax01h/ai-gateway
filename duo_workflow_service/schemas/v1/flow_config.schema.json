@@ -258,6 +258,7 @@
         "malware_advisories",
         "measure_comment_temperature",
         "observability_all",
+        "package_licenses",
         "refactor_code",
         "resolve_vulnerability",
         "review_merge_request",
