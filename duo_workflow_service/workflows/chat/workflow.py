@@ -401,6 +401,7 @@ class Workflow(AbstractWorkflow):
             system_template_override=self.system_template_override,
             agent_name_override=self._agent_name_override,
             compaction=CompactionConfig(trim_threshold=0.7),
+            web_search_enabled=self._workflow_config.get("web_search_enabled", False),
         )
 
         tools_runner = ToolsExecutor(

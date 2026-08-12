@@ -61,6 +61,7 @@ class WorkflowConfig(TypedDict):
     mcp_enabled: bool
     incremental_checkpoints_enabled: bool
     allow_agent_to_request_user: bool
+    web_search_enabled: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
     latest_checkpoint: Optional[Checkpoint]
@@ -167,6 +168,7 @@ async def fetch_workflow_and_container_data(
             "incrementalCheckpointsEnabled", False
         ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
+        web_search_enabled=workflow.get("webSearchEnabled", False),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
         gitlab_host=gitlab_host,
@@ -222,4 +224,5 @@ def empty_workflow_config() -> WorkflowConfig:
         "prompt_injection_protection_level": PromptInjectionProtectionLevel.LOG_ONLY,
         "archived": False,
         "stalled": False,
+        "web_search_enabled": False,
     }

@@ -447,6 +447,7 @@ async def test_workflow_run(
                 system_template_override=workflow.system_template_override,
                 agent_name_override=None,  # Default workflow has no override
                 compaction=ANY,
+                web_search_enabled=False,
             )
 
             mock_user_interface_instance.send_event.assert_called_with(
@@ -526,6 +527,7 @@ async def test_workflow_run_with_agent_name_override(
                 system_template_override=None,
                 agent_name_override="348/0",  # Should pass the override
                 compaction=ANY,
+                web_search_enabled=False,
             )
 
 
