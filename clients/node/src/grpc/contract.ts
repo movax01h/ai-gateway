@@ -111,7 +111,11 @@ export interface ActionResponse {
     | PlainTextResponse
     | undefined;
   /** httpResponse carries the result of an HTTP request action. */
-  httpResponse?: HttpResponse | undefined;
+  httpResponse?:
+    | HttpResponse
+    | undefined;
+  /** scheduleNotificationResponse acknowledges a ScheduleNotification action. */
+  scheduleNotificationResponse?: ScheduleNotificationResponse | undefined;
 }
 
 /** HeartbeatRequest is sent periodically by the client to keep the session alive. */
@@ -149,6 +153,22 @@ export interface HttpResponse {
 export interface HttpResponse_HeadersEntry {
   key: string;
   value: string;
+}
+
+/**
+ * ScheduleNotificationResponse acknowledges a ScheduleNotification action. Nothing is
+ * scheduled unless accepted is true.
+ */
+export interface ScheduleNotificationResponse {
+  /** accepted reports whether the executor registered the notification. */
+  accepted: boolean;
+  /** reason explains why the notification was not accepted; empty when it was. */
+  reason: string;
+  /**
+   * fires_at is when the executor expects to deliver the message, as an RFC3339 UTC
+   * timestamp. Empty when the notification was not accepted.
+   */
+  fires_at: string;
 }
 
 /** Action is a server-initiated request for the executor to perform a specific operation. */
@@ -212,7 +232,40 @@ export interface Action {
     | RunShellCommand
     | undefined;
   /** trackLlmCallForSelfHosted asks the client to record an LLM call for self-hosted billing. */
-  trackLlmCallForSelfHosted?: TrackLlmCallForSelfHosted | undefined;
+  trackLlmCallForSelfHosted?:
+    | TrackLlmCallForSelfHosted
+    | undefined;
+  /**
+   * scheduleNotification asks the executor to deliver a message into this session
+   * once a condition occurs.
+   */
+  scheduleNotification?: ScheduleNotification | undefined;
+}
+
+/**
+ * ScheduleNotification asks that a message be delivered into this session once a condition
+ * occurs. Delivery targets the agent, not the user: this is not a user notification and must
+ * not be surfaced as one. A session may have several notifications outstanding at once.
+ *
+ * The executor acknowledges with ActionResponse.scheduleNotificationResponse.
+ */
+export interface ScheduleNotification {
+  /**
+   * task_id identifies this notification, so that a delivery, a cancellation or a status
+   * display can refer to it. It is assigned by the server.
+   */
+  task_id: string;
+  /**
+   * condition is the JSON-encoded condition to wait for, for example
+   * {"type":"timer","deadline":"2026-01-01T10:00:00Z"}. The "type" member is an open enum;
+   * an executor that does not support a given type must refuse it in the acknowledgment.
+   */
+  condition: string;
+  /**
+   * message is delivered into the session once the condition occurs. It is written by the
+   * model for its future self, not for display.
+   */
+  message: string;
 }
 
 /**
@@ -1188,7 +1241,12 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
 };
 
 function createBaseActionResponse(): ActionResponse {
-  return { requestID: "", plainTextResponse: undefined, httpResponse: undefined };
+  return {
+    requestID: "",
+    plainTextResponse: undefined,
+    httpResponse: undefined,
+    scheduleNotificationResponse: undefined,
+  };
 }
 
 export const ActionResponse: MessageFns<ActionResponse> = {
@@ -1201,6 +1259,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.httpResponse !== undefined) {
       HttpResponse.encode(message.httpResponse, writer.uint32(34).fork()).join();
+    }
+    if (message.scheduleNotificationResponse !== undefined) {
+      ScheduleNotificationResponse.encode(message.scheduleNotificationResponse, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -1236,6 +1297,14 @@ export const ActionResponse: MessageFns<ActionResponse> = {
           message.httpResponse = HttpResponse.decode(reader, reader.uint32());
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.scheduleNotificationResponse = ScheduleNotificationResponse.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1252,6 +1321,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
         ? PlainTextResponse.fromJSON(object.plainTextResponse)
         : undefined,
       httpResponse: isSet(object.httpResponse) ? HttpResponse.fromJSON(object.httpResponse) : undefined,
+      scheduleNotificationResponse: isSet(object.scheduleNotificationResponse)
+        ? ScheduleNotificationResponse.fromJSON(object.scheduleNotificationResponse)
+        : undefined,
     };
   },
 
@@ -1265,6 +1337,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.httpResponse !== undefined) {
       obj.httpResponse = HttpResponse.toJSON(message.httpResponse);
+    }
+    if (message.scheduleNotificationResponse !== undefined) {
+      obj.scheduleNotificationResponse = ScheduleNotificationResponse.toJSON(message.scheduleNotificationResponse);
     }
     return obj;
   },
@@ -1281,6 +1356,10 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     message.httpResponse = (object.httpResponse !== undefined && object.httpResponse !== null)
       ? HttpResponse.fromPartial(object.httpResponse)
       : undefined;
+    message.scheduleNotificationResponse =
+      (object.scheduleNotificationResponse !== undefined && object.scheduleNotificationResponse !== null)
+        ? ScheduleNotificationResponse.fromPartial(object.scheduleNotificationResponse)
+        : undefined;
     return message;
   },
 };
@@ -1680,6 +1759,98 @@ export const HttpResponse_HeadersEntry: MessageFns<HttpResponse_HeadersEntry> = 
   },
 };
 
+function createBaseScheduleNotificationResponse(): ScheduleNotificationResponse {
+  return { accepted: false, reason: "", fires_at: "" };
+}
+
+export const ScheduleNotificationResponse: MessageFns<ScheduleNotificationResponse> = {
+  encode(message: ScheduleNotificationResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.accepted !== false) {
+      writer.uint32(8).bool(message.accepted);
+    }
+    if (message.reason !== "") {
+      writer.uint32(18).string(message.reason);
+    }
+    if (message.fires_at !== "") {
+      writer.uint32(26).string(message.fires_at);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ScheduleNotificationResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseScheduleNotificationResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.accepted = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.fires_at = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ScheduleNotificationResponse {
+    return {
+      accepted: isSet(object.accepted) ? globalThis.Boolean(object.accepted) : false,
+      reason: isSet(object.reason) ? globalThis.String(object.reason) : "",
+      fires_at: isSet(object.fires_at) ? globalThis.String(object.fires_at) : "",
+    };
+  },
+
+  toJSON(message: ScheduleNotificationResponse): unknown {
+    const obj: any = {};
+    if (message.accepted !== false) {
+      obj.accepted = message.accepted;
+    }
+    if (message.reason !== "") {
+      obj.reason = message.reason;
+    }
+    if (message.fires_at !== "") {
+      obj.fires_at = message.fires_at;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ScheduleNotificationResponse>, I>>(base?: I): ScheduleNotificationResponse {
+    return ScheduleNotificationResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ScheduleNotificationResponse>, I>>(object: I): ScheduleNotificationResponse {
+    const message = createBaseScheduleNotificationResponse();
+    message.accepted = object.accepted ?? false;
+    message.reason = object.reason ?? "";
+    message.fires_at = object.fires_at ?? "";
+    return message;
+  },
+};
+
 function createBaseAction(): Action {
   return {
     requestID: "",
@@ -1698,6 +1869,7 @@ function createBaseAction(): Action {
     runReadFiles: undefined,
     runShellCommand: undefined,
     trackLlmCallForSelfHosted: undefined,
+    scheduleNotification: undefined,
   };
 }
 
@@ -1750,6 +1922,9 @@ export const Action: MessageFns<Action> = {
     }
     if (message.trackLlmCallForSelfHosted !== undefined) {
       TrackLlmCallForSelfHosted.encode(message.trackLlmCallForSelfHosted, writer.uint32(130).fork()).join();
+    }
+    if (message.scheduleNotification !== undefined) {
+      ScheduleNotification.encode(message.scheduleNotification, writer.uint32(138).fork()).join();
     }
     return writer;
   },
@@ -1889,6 +2064,14 @@ export const Action: MessageFns<Action> = {
           message.trackLlmCallForSelfHosted = TrackLlmCallForSelfHosted.decode(reader, reader.uint32());
           continue;
         }
+        case 17: {
+          if (tag !== 138) {
+            break;
+          }
+
+          message.scheduleNotification = ScheduleNotification.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1917,6 +2100,9 @@ export const Action: MessageFns<Action> = {
       runShellCommand: isSet(object.runShellCommand) ? RunShellCommand.fromJSON(object.runShellCommand) : undefined,
       trackLlmCallForSelfHosted: isSet(object.trackLlmCallForSelfHosted)
         ? TrackLlmCallForSelfHosted.fromJSON(object.trackLlmCallForSelfHosted)
+        : undefined,
+      scheduleNotification: isSet(object.scheduleNotification)
+        ? ScheduleNotification.fromJSON(object.scheduleNotification)
         : undefined,
     };
   },
@@ -1971,6 +2157,9 @@ export const Action: MessageFns<Action> = {
     if (message.trackLlmCallForSelfHosted !== undefined) {
       obj.trackLlmCallForSelfHosted = TrackLlmCallForSelfHosted.toJSON(message.trackLlmCallForSelfHosted);
     }
+    if (message.scheduleNotification !== undefined) {
+      obj.scheduleNotification = ScheduleNotification.toJSON(message.scheduleNotification);
+    }
     return obj;
   },
 
@@ -2022,6 +2211,101 @@ export const Action: MessageFns<Action> = {
       (object.trackLlmCallForSelfHosted !== undefined && object.trackLlmCallForSelfHosted !== null)
         ? TrackLlmCallForSelfHosted.fromPartial(object.trackLlmCallForSelfHosted)
         : undefined;
+    message.scheduleNotification = (object.scheduleNotification !== undefined && object.scheduleNotification !== null)
+      ? ScheduleNotification.fromPartial(object.scheduleNotification)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseScheduleNotification(): ScheduleNotification {
+  return { task_id: "", condition: "", message: "" };
+}
+
+export const ScheduleNotification: MessageFns<ScheduleNotification> = {
+  encode(message: ScheduleNotification, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.task_id !== "") {
+      writer.uint32(10).string(message.task_id);
+    }
+    if (message.condition !== "") {
+      writer.uint32(18).string(message.condition);
+    }
+    if (message.message !== "") {
+      writer.uint32(26).string(message.message);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ScheduleNotification {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseScheduleNotification();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.task_id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.condition = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ScheduleNotification {
+    return {
+      task_id: isSet(object.task_id) ? globalThis.String(object.task_id) : "",
+      condition: isSet(object.condition) ? globalThis.String(object.condition) : "",
+      message: isSet(object.message) ? globalThis.String(object.message) : "",
+    };
+  },
+
+  toJSON(message: ScheduleNotification): unknown {
+    const obj: any = {};
+    if (message.task_id !== "") {
+      obj.task_id = message.task_id;
+    }
+    if (message.condition !== "") {
+      obj.condition = message.condition;
+    }
+    if (message.message !== "") {
+      obj.message = message.message;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ScheduleNotification>, I>>(base?: I): ScheduleNotification {
+    return ScheduleNotification.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ScheduleNotification>, I>>(object: I): ScheduleNotification {
+    const message = createBaseScheduleNotification();
+    message.task_id = object.task_id ?? "";
+    message.condition = object.condition ?? "";
+    message.message = object.message ?? "";
     return message;
   },
 };

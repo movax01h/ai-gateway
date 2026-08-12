@@ -100,6 +100,8 @@ message ActionResponse {
         PlainTextResponse plainTextResponse = 3;
         // httpResponse carries the result of an HTTP request action.
         HttpResponse httpResponse = 4;
+        // scheduleNotificationResponse acknowledges a ScheduleNotification action.
+        ScheduleNotificationResponse scheduleNotificationResponse = 5;
     };
 }
 
@@ -133,6 +135,18 @@ message HttpResponse {
     string body = 3;
     // error describes any transport or execution error; empty on success.
     string error = 4;
+}
+
+// ScheduleNotificationResponse acknowledges a ScheduleNotification action. Nothing is
+// scheduled unless accepted is true.
+message ScheduleNotificationResponse {
+    // accepted reports whether the executor registered the notification.
+    bool accepted = 1;
+    // reason explains why the notification was not accepted; empty when it was.
+    string reason = 2;
+    // fires_at is when the executor expects to deliver the message, as an RFC3339 UTC
+    // timestamp. Empty when the notification was not accepted.
+    string fires_at = 3 [json_name = "fires_at"];
 }
 
 // Action is a server-initiated request for the executor to perform a specific operation.
@@ -171,7 +185,28 @@ message Action {
         RunShellCommand runShellCommand = 15;
         // trackLlmCallForSelfHosted asks the client to record an LLM call for self-hosted billing.
         TrackLlmCallForSelfHosted trackLlmCallForSelfHosted = 16;
+        // scheduleNotification asks the executor to deliver a message into this session
+        // once a condition occurs.
+        ScheduleNotification scheduleNotification = 17;
     };
+}
+
+// ScheduleNotification asks that a message be delivered into this session once a condition
+// occurs. Delivery targets the agent, not the user: this is not a user notification and must
+// not be surfaced as one. A session may have several notifications outstanding at once.
+//
+// The executor acknowledges with ActionResponse.scheduleNotificationResponse.
+message ScheduleNotification {
+    // task_id identifies this notification, so that a delivery, a cancellation or a status
+    // display can refer to it. It is assigned by the server.
+    string task_id = 1 [json_name = "task_id"];
+    // condition is the JSON-encoded condition to wait for, for example
+    // {"type":"timer","deadline":"2026-01-01T10:00:00Z"}. The "type" member is an open enum;
+    // an executor that does not support a given type must refuse it in the acknowledgment.
+    string condition = 2;
+    // message is delivered into the session once the condition occurs. It is written by the
+    // model for its future self, not for display.
+    string message = 3;
 }
 
 // TrackLlmCallForSelfHosted is sent by the self-hosted DWS to Workhorse before each LLM call,
