@@ -160,35 +160,42 @@ class TestCreateAgent:
         assert call_kwargs["bind_tools_params"] == {}
 
     @pytest.mark.parametrize(
-        "feature_enabled,client_capable,expected_params,should_check_capability,test_description",
+        "feature_enabled,client_capable,web_search_enabled,expected_params,test_description",
         [
             (
                 True,
                 True,
+                True,
                 {"web_search_options": {}},
+                "all three conditions met",
+            ),
+            (
                 True,
-                "both feature flag and client capability enabled",
+                True,
+                False,
+                {},
+                "feature and capability enabled but workflow toggle off",
             ),
             (
                 False,
                 True,
+                True,
                 {},
-                False,
-                "feature flag disabled but client capable",
+                "feature flag disabled",
             ),
             (
                 True,
                 False,
-                {},
                 True,
-                "feature flag enabled but client not capable",
+                {},
+                "client not capable",
             ),
             (
                 False,
                 False,
-                {},
                 False,
-                "both feature flag and client capability disabled",
+                {},
+                "all conditions disabled",
             ),
         ],
     )
@@ -204,11 +211,11 @@ class TestCreateAgent:
         mock_local_prompt_registry,
         feature_enabled,
         client_capable,
+        web_search_enabled,
         expected_params,
-        should_check_capability,
         test_description,
     ):
-        """Test that web_search_options is conditionally included based on feature flag and client capability."""
+        """Test that web_search_options requires feature flag, client capability, and workflow toggle."""
         mock_is_feature_enabled.return_value = feature_enabled
         mock_is_client_capable.return_value = client_capable
 
@@ -221,6 +228,7 @@ class TestCreateAgent:
             workflow_id="workflow_123",
             workflow_type=CategoryEnum.WORKFLOW_CHAT,
             system_template_override=None,
+            web_search_enabled=web_search_enabled,
         )
 
         assert isinstance(agent, ChatAgent)
@@ -233,7 +241,7 @@ class TestCreateAgent:
         assert mock_is_feature_enabled.call_count == 1
         mock_is_feature_enabled.assert_any_call(FeatureFlag.DAP_WEB_SEARCH)
 
-        if should_check_capability:
+        if feature_enabled:
             mock_is_client_capable.assert_called_once_with("web_search")
         else:
             mock_is_client_capable.assert_not_called()

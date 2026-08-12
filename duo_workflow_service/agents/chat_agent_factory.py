@@ -52,14 +52,18 @@ def create_agent(
     system_template_override: str | None,
     agent_name_override: str | None = None,
     compaction: CompactionConfig | None = None,
+    web_search_enabled: bool = False,
 ) -> ChatAgent:
     # Use agent_name_override for chat-partial flows, default to "chat"
     agent_name = agent_name_override if agent_name_override else "chat"
 
-    # Include web_search_options conditionally based on feature flag and client capability
+    # Include web_search_options when the feature flag is on, the client can
+    # render search results, AND the user enabled web search for this session.
     bind_tools_params: dict[str, dict] = {}
-    if is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH) and is_client_capable(
-        "web_search"
+    if (
+        is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH)
+        and is_client_capable("web_search")
+        and web_search_enabled
     ):
         bind_tools_params["web_search_options"] = {}
 
