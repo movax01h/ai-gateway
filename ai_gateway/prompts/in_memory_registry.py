@@ -77,15 +77,20 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         raw_data = self._process_prompt_data(prompt_id)
 
         model_params: dict[str, Any]
+        model_from_prompt = cast(dict, raw_data.get("model"))
 
         if model_metadata:
             model_params = {}
             model_class_provider = model_metadata.llm_definition.model_class_provider
-        elif model_from_prompt := cast(dict, raw_data.get("model")):
+        elif model_from_prompt:
             model_params = model_from_prompt["params"]
             model_class_provider = model_params.pop("model_class_provider")
         else:
             raise ValueError(f"Model config not provided for prompt {prompt_id}")
+
+        # provider_params are provider-conditional, so they apply regardless of
+        # whether the model comes from the flow config or from model_metadata.
+        provider_params = (model_from_prompt or {}).get("provider_params")
 
         unit_primitives = raw_data.get("unit_primitives")
         prompt_template = raw_data["prompt_template"]
@@ -96,7 +101,10 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             prompt_template = self._join_system_messages(prompt_template)
         prompt_config = PromptConfig(
             name=prompt_id,
-            model=ModelConfig(params=model_params),  # type: ignore[arg-type]
+            model=ModelConfig(
+                params=model_params,  # type: ignore[arg-type]
+                provider_params=provider_params,
+            ),
             unit_primitive=(
                 GitLabUnitPrimitive(unit_primitives[0])
                 if unit_primitives

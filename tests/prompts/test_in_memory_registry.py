@@ -9,10 +9,19 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     PromptParams,
 )
-from ai_gateway.model_selection.models import BaseModelParams, ChatLiteLLMParams
+from ai_gateway.model_selection.models import (
+    BaseModelParams,
+    ChatLiteLLMParams,
+    OpenAIProviderParams,
+    OpenAIReasoningParams,
+)
 from ai_gateway.prompts.base import Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
-from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
+from ai_gateway.prompts.config.base import (
+    ModelConfig,
+    PromptConfig,
+    PromptProviderParams,
+)
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from lib.internal_events.client import InternalEventsClient
@@ -162,6 +171,69 @@ class TestInMemoryPromptRegistry:
             model_metadata=None,
             tool_choice=None,
             tools=None,
+        )
+
+    def test_provider_params_forwarded_from_flow_model(
+        self, in_memory_registry, mock_shared_registry, sample_prompt_data
+    ):
+        prompt_id = "test_prompt"
+        prompt_data = {
+            **sample_prompt_data,
+            "model": {
+                **sample_prompt_data["model"],
+                "provider_params": {
+                    "openai": {
+                        "verbosity": "low",
+                        "reasoning": {"summary": "auto", "effort": 8},
+                    }
+                },
+            },
+        }
+
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+        in_memory_registry.get(prompt_id, prompt_version=None)
+
+        config = mock_shared_registry._build_prompt.call_args.kwargs["config"]
+        assert config.model.provider_params == PromptProviderParams(
+            openai=OpenAIProviderParams(
+                verbosity="low",
+                reasoning=OpenAIReasoningParams(summary="auto", effort=8),
+            )
+        )
+
+    def test_provider_params_forwarded_when_model_metadata_present(
+        self, in_memory_registry, mock_shared_registry, sample_prompt_data
+    ):
+        # model_metadata makes the flow's params ignored, but provider_params
+        # are provider-conditional and must still be forwarded.
+        prompt_id = "test_prompt"
+        prompt_data = {
+            **sample_prompt_data,
+            "model": {
+                **sample_prompt_data["model"],
+                "provider_params": {"openai": {"verbosity": "low"}},
+            },
+        }
+        model_metadata = ModelMetadata(
+            name="test",
+            provider="test",
+            llm_definition=ChatLiteLLMDefinition(
+                gitlab_identifier="claude",
+                name="claude",
+                max_context_tokens=200000,
+                params=ChatLiteLLMParams(model="claude-sonnet-4-5-20250929"),
+            ),
+        )
+
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+        in_memory_registry.get(
+            prompt_id, prompt_version=None, model_metadata=model_metadata
+        )
+
+        config = mock_shared_registry._build_prompt.call_args.kwargs["config"]
+        assert config.model.params == BaseModelParams()
+        assert config.model.provider_params == PromptProviderParams(
+            openai=OpenAIProviderParams(verbosity="low")
         )
 
     def test_get_local_prompt_missing_model_key(self, in_memory_registry):
