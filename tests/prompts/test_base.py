@@ -35,10 +35,11 @@ from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
+    FireworksModelMetadata,
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection import PromptParams
+from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatAnthropicDefinition,
@@ -1847,6 +1848,13 @@ models:
     gitlab_identifier: model_c
     model_class_provider: amazon_q
     max_context_tokens: 1000
+  - name: Model Fireworks
+    gitlab_identifier: model_fireworks
+    model_class_provider: litellm
+    max_context_tokens: 1000
+    params:
+      model: "accounts/fireworks/models/some-model"
+      custom_llm_provider: "fireworks_ai"
   - name: "text-embedding-005 - Vertex"
     provider: "Vertex"
     gitlab_identifier: text_embedding_005_vertex
@@ -1880,8 +1888,10 @@ configurable_unit_primitives:
       - "code_suggestions"
     default_models:
       - "model_b"
+      - "model_fireworks"
     selectable_models:
       - "model_b"
+      - "model_fireworks"
   - feature_setting: "c"
     unit_primitives:
       - "complete_code"
@@ -1915,16 +1925,16 @@ configurable_unit_primitives:
                 result = await registry.validate_default_models()
 
         assert result is True
-        # Should validate both unique default models
-        assert mock_ainvoke.call_count == 2
+        # Should validate unique default models
+        assert mock_ainvoke.call_count == 3
 
-        # Verify logging - should have 2 log entries for the 2 models
+        # Verify logging - should have 3 log entries for the 3 models
         log_messages = [
             log for log in cap_logs if log.get("event") == "Validating default model"
         ]
-        assert len(log_messages) == 2
+        assert len(log_messages) == 3
         logged_models = {log["model"] for log in log_messages}
-        assert logged_models == {"model_a", "model_b"}
+        assert logged_models == {"model_a", "model_b", "model_fireworks"}
 
     @pytest.mark.asyncio
     async def test_skips_embedding_model_in_validation(
@@ -1939,7 +1949,7 @@ configurable_unit_primitives:
             for call in mock_get.mock_calls
             if call.args and call.args[0] == "model_configuration/check"
         }
-        assert validated_models == {"model_a", "model_b"}
+        assert validated_models == {"model_a", "model_b", "model_fireworks"}
         assert registry.validations is not None
         assert "text_embedding_005_vertex" in registry.validations
 
@@ -1981,7 +1991,7 @@ configurable_unit_primitives:
     ):
         """Test that validations are cached per model.
 
-        Validating model_a first, then all models should only validate model_b on second call.
+        Validating model_a first, then all models should only validate model_b and model_fireworks on the second call.
         """
         with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
             # First call - validate only model_a
@@ -1994,14 +2004,14 @@ configurable_unit_primitives:
             # Second call - validate all models, but model_a is already cached
             result2 = await registry.validate_default_models()
             assert result2 is True
-            # Should be 2 total (1 from first call + 1 new for model_b)
-            assert mock_ainvoke.call_count == 2
+            # Should be 3 total (1 from first call + 2 new for model_b and model_fireworks)
+            assert mock_ainvoke.call_count == 3
 
             # Third call - validate all models, but all models are cached
             result2 = await registry.validate_default_models()
             assert result2 is True
             # Call count shouldn't have changed
-            assert mock_ainvoke.call_count == 2
+            assert mock_ainvoke.call_count == 3
 
     @pytest.mark.asyncio
     async def test_calls_get_with_correct_params(
@@ -2011,12 +2021,23 @@ configurable_unit_primitives:
     ):
         """Test that validate_default_models calls get() with correct parameters.
 
-        Should call get() twice (once for model_a, once for model_b) with proper metadata.
+        Should call get() three times (once for model_a, model_b and model_fireworks) with proper metadata, including
+        the injected Fireworks provider key.
         """
-        with mock.patch.object(registry, "get", return_value=prompt) as mock_get:
+        mock_config = mock.Mock()
+        mock_config.model_keys.model_dump.return_value = {
+            "fireworks_provider_api_key": "test-key"
+        }
+        mock_config.fireworks_api_base_url = "https://api.fireworks.ai/inference/v1"
+        mock_config.mock_model_responses = False
+
+        with (
+            mock.patch("ai_gateway.prompts.base.get_config", return_value=mock_config),
+            mock.patch.object(registry, "get", return_value=prompt) as mock_get,
+        ):
             await registry.validate_default_models()
 
-            # Verify get was called twice (once per unique default model)
+            # Verify get was called once per unique non-embedding default model
             mock_get.assert_has_calls(
                 [
                     mock.call(
@@ -2047,6 +2068,21 @@ configurable_unit_primitives:
                             ),
                         ),
                     ),
+                    mock.call(
+                        "model_configuration/check",
+                        registry._DEFAULT_VERSION,
+                        model_metadata=FireworksModelMetadata(
+                            provider="fireworks_ai",
+                            name="model_fireworks",
+                            friendly_name="Model Fireworks",
+                            endpoint=AnyUrl("https://api.fireworks.ai/inference/v1"),
+                            api_key="test-key",
+                            model_identifier="accounts/fireworks/models/some-model",
+                            llm_definition=ModelSelectionConfig.instance().get_model(
+                                "model_fireworks"
+                            ),
+                        ),
+                    ),
                 ]
             )
 
@@ -2062,14 +2098,38 @@ configurable_unit_primitives:
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
 
-            # Tried to validate both models independently, both failed
-            assert mock_ainvoke.call_count == 2
+            # Tried to validate all three models independently, all failed
+            assert mock_ainvoke.call_count == 3
 
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
 
-            # Doesn't cache the failed results, tries to validate both models again
-            assert mock_ainvoke.call_count == 4
+            # Doesn't cache the failed results, tries to validate all models again
+            assert mock_ainvoke.call_count == 6
+
+    @pytest.mark.asyncio
+    async def test_fireworks_model_gets_provider_key(
+        self,
+        prompt: Prompt,
+        registry: BasePromptRegistry,
+    ):
+        """Fireworks-backed default models are validated with the provider API key injected."""
+        mock_config = mock.Mock()
+        mock_config.model_keys.model_dump.return_value = {
+            "fireworks_provider_api_key": "test-key"
+        }
+        mock_config.fireworks_api_base_url = "https://api.fireworks.ai/inference/v1"
+        mock_config.mock_model_responses = False
+
+        with (
+            mock.patch("ai_gateway.prompts.base.get_config", return_value=mock_config),
+            mock.patch.object(registry, "get", return_value=prompt) as mock_get,
+        ):
+            await registry.validate_model("model_fireworks")
+
+        metadata = mock_get.call_args.kwargs["model_metadata"]
+        assert metadata.provider == "fireworks_ai"
+        assert metadata.api_key == "test-key"
 
 
 @pytest.mark.skipif(

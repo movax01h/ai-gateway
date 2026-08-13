@@ -48,9 +48,12 @@ from tenacity import (
     wait_exponential,
 )
 
-from ai_gateway.config import ConfigModelLimits, ModelLimits
+from ai_gateway.config import ConfigModelLimits, ModelLimits, get_config
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
-from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
+from ai_gateway.model_metadata import (
+    TypeModelMetadata,
+    resolve_provider_aware_metadata,
+)
 from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
 from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
@@ -833,17 +836,34 @@ class BasePromptRegistry(ABC):
         return variables
 
     async def validate_model(self, model: str):
+
+        llm_def = ModelSelectionConfig.instance().get_model(model)
+
+        if llm_def.model_class_provider == ModelClassProvider.LITE_LLM_EMBEDDING:
+            log.info("Skipping validation for embedding model", model=model)
+            if self.validations is not None:
+                self.validations.add(model)
+            return
+
         log.info("Validating default model", model=model)
+
+        config = get_config()
+        model_metadata = resolve_provider_aware_metadata(
+            llm_def,
+            provider_keys=config.model_keys.model_dump(),
+            fireworks_api_base_url=config.fireworks_api_base_url,
+            mock_model_responses=config.mock_model_responses,
+        )
 
         prompt = self.get(
             "model_configuration/check",
             self._DEFAULT_VERSION,
-            model_metadata=create_model_metadata({"provider": "gitlab", "name": model}),
+            model_metadata=model_metadata,
         )
 
         await prompt.ainvoke({})
 
-        if self.validations:
+        if self.validations is not None:
             # Persist validations so we don't incur in multiple 3rd party LLM calls from multiple invocations
             self.validations.add(model)
 
@@ -853,18 +873,7 @@ class BasePromptRegistry(ABC):
         model_selection_config = ModelSelectionConfig.instance()
 
         if self.validations is None:
-            # TODO: Remove this exception once the prompt registry properly supports Fireworks.
-            # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/906
-            self.validations = set(
-                {
-                    "codestral_2501_fireworks",
-                    "codestral_2508_fireworks",
-                    "text_embedding_005_vertex",
-                    "glm_5_2_fireworks",
-                    "kimi_k2_6_fireworks",
-                    "minimax_m2_7_fireworks",
-                }
-            )
+            self.validations = set()
 
         # Collect invocations to execute them in parallel
         tasks = []

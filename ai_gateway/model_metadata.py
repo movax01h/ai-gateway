@@ -175,7 +175,7 @@ def build_model_metadata_by_tag(
     Returns an empty dict when `feature_setting` is `None` or has no `models_for_tags` entry,
     in which case tag lookups fall back to the `default` model.
 
-    Each tag's model is resolved through `_resolve_provider_aware_metadata` - the same
+    Each tag's model is resolved through `resolve_provider_aware_metadata` - the same
     provider-detection logic used for the default model - so a tag pointing at a Fireworks- or
     Mistral-backed model gets its API key wired in instead of silently being treated as a
     gitlab-provider model.
@@ -194,7 +194,7 @@ def build_model_metadata_by_tag(
         for tag, model_id in unit_primitive_config.models_for_tags.items():
             try:
                 llm_def = configs.get_model(model_id)
-                by_tag[tag] = _resolve_provider_aware_metadata(
+                by_tag[tag] = resolve_provider_aware_metadata(
                     llm_def,
                     provider_keys=provider_keys or {},
                     fireworks_api_base_url=fireworks_api_base_url,
@@ -336,7 +336,7 @@ def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
     )
 
 
-def _resolve_provider_aware_metadata(
+def resolve_provider_aware_metadata(
     llm_def: LLMDefinition,
     provider_keys: Dict[str, Any],
     fireworks_api_base_url: str,
@@ -470,7 +470,7 @@ def build_default_feature_setting_metadata(
     else:
         raise ValueError("Either identifier or feature_setting must be provided.")
 
-    return _resolve_provider_aware_metadata(
+    return resolve_provider_aware_metadata(
         llm_def,
         provider_keys=model_keys,
         fireworks_api_base_url=fireworks_api_base_url,
