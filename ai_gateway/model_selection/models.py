@@ -12,6 +12,8 @@ __all__ = [
     "CompletionLiteLLMParams",
     "CompletionType",
     "ModelClassProvider",
+    "OpenAIProviderParams",
+    "OpenAIReasoningParams",
 ]
 
 
@@ -61,8 +63,40 @@ class ChatAmazonQParams(BaseModelParams):
     default_headers: Mapping[str, str] | None = None
 
 
-class ChatOpenAIParams(BaseModelParams):
+class OpenAIReasoningParams(BaseModel):
+    """Reasoning config for the OpenAI Responses API; unset fields use API defaults.
+
+    The int form of `effort` is deprecated: an account-specific scale kept
+    only for Duo Chat's legacy latency tuning (8, below "low").
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    effort: str | int | None = None
+    summary: str | None = None
+
+    @model_validator(mode="after")
+    def validate_not_empty(self) -> "OpenAIReasoningParams":
+        if self.effort is None and self.summary is None:
+            raise ValueError(
+                "reasoning must set at least one of effort/summary; "
+                "omit the block entirely to use API defaults"
+            )
+        return self
+
+
+class OpenAIProviderParams(BaseModel):
+    """OpenAI-only params, declared once so the models.yml layer (ChatOpenAIParams) and the prompt layer
+    (PromptProviderParams.openai) cannot drift apart."""
+
+    model_config = ConfigDict(extra="forbid")
+
     verbosity: str | None = None
+    reasoning: OpenAIReasoningParams | None = None
+
+
+class ChatOpenAIParams(BaseModelParams, OpenAIProviderParams):
+    """Base model params plus the shared OpenAI provider mixin."""
 
 
 class ChatGoogleGenAIParams(BaseModelParams):

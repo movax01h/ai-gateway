@@ -58,6 +58,13 @@ flow:
 prompts:
   - name: "chat_agent_prompt"
     prompt_id: "chat_agent_prompt"
+    model:
+      provider_params:
+        openai:
+          verbosity: low
+          reasoning:
+            summary: auto
+            effort: 8
     unit_primitives:
       - duo_chat
     prompt_template:

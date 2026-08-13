@@ -46,9 +46,13 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
 )
 from ai_gateway.model_selection.models import (
+    BaseModelParams,
     ChatAnthropicParams,
     ChatLiteLLMParams,
+    ChatOpenAIParams,
     ModelClassProvider,
+    OpenAIProviderParams,
+    OpenAIReasoningParams,
 )
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.prompts import (
@@ -64,7 +68,11 @@ from ai_gateway.prompts.base import (
     parse_json,
 )
 from ai_gateway.prompts.bind_tools_cache import NoOpBindToolsCache
-from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
+from ai_gateway.prompts.config.base import (
+    ModelConfig,
+    PromptConfig,
+    PromptProviderParams,
+)
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
@@ -1299,6 +1307,168 @@ class TestPromptTimeout:
             )
 
 
+class TestPromptProviderParams:
+    """Config-level guarantees of the provider_params block."""
+
+    def test_field_names_match_provider_enum_values(self):
+        # _build_model resolves blocks via getattr, so field names must be exact
+        # ModelClassProvider values (e.g. litellm, not lite_llm)
+        provider_values = {provider.value for provider in ModelClassProvider}
+
+        assert set(PromptProviderParams.model_fields) <= provider_values
+
+    def test_rejects_no_blocks(self):
+        with pytest.raises(ValidationError, match="at least one provider block"):
+            PromptProviderParams()
+
+    def test_rejects_empty_block(self):
+        with pytest.raises(ValidationError, match="must not be empty"):
+            PromptProviderParams(openai={})
+
+    def test_rejects_unknown_provider_key(self):
+        with pytest.raises(ValidationError):
+            PromptProviderParams(banana={"verbosity": "low"})
+
+    def test_accepts_valid_block(self):
+        params = PromptProviderParams(
+            openai={"verbosity": "low", "reasoning": {"summary": "auto", "effort": 8}}
+        )
+
+        assert params.openai == OpenAIProviderParams(
+            verbosity="low",
+            reasoning=OpenAIReasoningParams(summary="auto", effort=8),
+        )
+
+
+class TestProviderParamsMerge:
+    """provider_params blocks apply only when the resolved provider matches; mismatches are skipped, never an error."""
+
+    @pytest.fixture(name="capturing_model_factory")
+    def capturing_model_factory_fixture(self, model: FakeModel):
+        class CapturingFactory:
+            def __init__(self):
+                self.captured_kwargs: dict[str, Any] = {}
+
+            def __call__(self, **kwargs: Any) -> FakeModel:
+                self.captured_kwargs.update(kwargs)
+                return model
+
+        return CapturingFactory()
+
+    @pytest.fixture(name="model_config")
+    def model_config_fixture(self):
+        return ModelConfig(
+            params=BaseModelParams(model="test_model", max_tokens=100),
+            provider_params=PromptProviderParams(
+                openai=OpenAIProviderParams(
+                    verbosity="low",
+                    reasoning=OpenAIReasoningParams(summary="auto", effort=8),
+                )
+            ),
+        )
+
+    def test_applied_when_provider_matches(self, capturing_model_factory, model_config):
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=model_config,
+            model_metadata=None,
+            disable_streaming=False,
+            model_provider=ModelClassProvider.OPENAI,
+        )
+
+        assert capturing_model_factory.captured_kwargs["verbosity"] == "low"
+        assert capturing_model_factory.captured_kwargs["reasoning"] == {
+            "summary": "auto",
+            "effort": 8,
+        }
+
+    def test_skipped_when_provider_does_not_match(
+        self, capturing_model_factory, model_config
+    ):
+        with capture_logs() as cap_logs:
+            Prompt._build_model(
+                Prompt,
+                model_factory=capturing_model_factory,
+                config=model_config,
+                model_metadata=None,
+                disable_streaming=False,
+                model_provider=ModelClassProvider.ANTHROPIC,
+            )
+
+        assert "verbosity" not in capturing_model_factory.captured_kwargs
+        assert "reasoning" not in capturing_model_factory.captured_kwargs
+        assert any("no block matches" in log["event"] for log in cap_logs)
+
+    def test_overrides_models_yml_llm_params_wholesale(
+        self, capturing_model_factory, model_config
+    ):
+        model_metadata = Mock()
+        model_metadata.llm_definition.params = ChatOpenAIParams(
+            model="gpt-5.6",
+            reasoning=OpenAIReasoningParams(effort="high"),
+        )
+        model_metadata.to_params = Mock(return_value={})
+
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=model_config,
+            model_metadata=model_metadata,
+            disable_streaming=False,
+            model_provider=ModelClassProvider.OPENAI,
+        )
+
+        assert capturing_model_factory.captured_kwargs["reasoning"] == {
+            "summary": "auto",
+            "effort": 8,
+        }
+
+    def test_partial_block_merges_per_field_with_models_yml(
+        self, capturing_model_factory
+    ):
+        model_metadata = Mock()
+        model_metadata.llm_definition.params = ChatOpenAIParams(
+            model="gpt-5.6",
+            reasoning=OpenAIReasoningParams(effort="high"),
+        )
+        model_metadata.to_params = Mock(return_value={})
+
+        config = ModelConfig(
+            params=BaseModelParams(model="test_model"),
+            provider_params=PromptProviderParams(
+                openai=OpenAIProviderParams(verbosity="low")
+            ),
+        )
+
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=config,
+            model_metadata=model_metadata,
+            disable_streaming=False,
+            model_provider=ModelClassProvider.OPENAI,
+        )
+
+        assert capturing_model_factory.captured_kwargs["verbosity"] == "low"
+        assert capturing_model_factory.captured_kwargs["reasoning"] == {
+            "effort": "high"
+        }
+
+    def test_no_provider_params_leaves_kwargs_untouched(self, capturing_model_factory):
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=ModelConfig(params=BaseModelParams(model="test_model")),
+            model_metadata=None,
+            disable_streaming=False,
+            model_provider=ModelClassProvider.OPENAI,
+        )
+
+        assert "verbosity" not in capturing_model_factory.captured_kwargs
+        assert "reasoning" not in capturing_model_factory.captured_kwargs
+
+
 class TestPromptCaching:
     @pytest.mark.asyncio
     @mock.patch("ai_gateway.prompts.base.filter_cache_control_injection_points")
@@ -2323,6 +2493,7 @@ class TestBuildModelExtraHeaders:
             model_metadata=None,
             disable_streaming=False,
             custom_models_extra_headers=None,
+            model_provider=ModelClassProvider.LITE_LLM,
         )
 
         assert "extra_headers" not in capturing_model_factory.captured_kwargs
@@ -2341,6 +2512,7 @@ class TestBuildModelExtraHeaders:
             model_metadata=None,
             disable_streaming=False,
             custom_models_extra_headers={},
+            model_provider=ModelClassProvider.LITE_LLM,
         )
 
         assert "extra_headers" not in capturing_model_factory.captured_kwargs
@@ -2372,6 +2544,7 @@ class TestBuildModelExtraHeaders:
             model_metadata=None,
             disable_streaming=False,
             custom_models_extra_headers=env_headers,
+            model_provider=ModelClassProvider.LITE_LLM,
         )
 
         result_headers = capturing_model_factory.captured_kwargs["extra_headers"]
@@ -2397,6 +2570,7 @@ class TestBuildModelExtraHeaders:
             model_metadata=None,
             disable_streaming=False,
             custom_models_extra_headers=env_headers,
+            model_provider=ModelClassProvider.LITE_LLM,
         )
 
         result_headers = capturing_model_factory.captured_kwargs["extra_headers"]
@@ -2429,6 +2603,7 @@ class TestBuildModelExtraHeaders:
                 model_metadata=None,
                 disable_streaming=False,
                 custom_models_extra_headers=env_headers,
+                model_provider=ModelClassProvider.LITE_LLM,
             )
 
         warning_logs = [log for log in cap_logs if log.get("log_level") == "warning"]

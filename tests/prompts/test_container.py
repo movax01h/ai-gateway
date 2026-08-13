@@ -14,7 +14,12 @@ from ai_gateway.model_selection.model_selection_config import ModelSelectionConf
 from ai_gateway.model_selection.models import EmbeddingLiteLLMParams
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.prompts import Prompt
-from ai_gateway.prompts.config import ChatOpenAIParams, ModelClassProvider, PromptConfig
+from ai_gateway.prompts.config import (
+    ChatOpenAIParams,
+    ModelClassProvider,
+    OpenAIReasoningParams,
+    PromptConfig,
+)
 from ai_gateway.prompts.registry import (
     LEGACY_MODEL_MAPPING,
     LocalPromptRegistry,
@@ -172,6 +177,58 @@ def test_container_openai_model_factory_exists(
     assert model.max_tokens == 1_028
     assert model.max_retries == 1
     assert model.output_version == "responses/v1"
+    assert model.reasoning is None
+    assert model.verbosity is None
+
+
+def test_container_openai_model_factory_accepts_reasoning_params(
+    mock_ai_gateway_container: containers.DeclarativeContainer,
+):
+    from langchain_openai import ChatOpenAI  # pylint: disable=import-outside-toplevel
+
+    prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
+    registry = cast(LocalPromptRegistry, prompts.prompt_registry())
+    factory = registry.model_factories[ModelClassProvider.OPENAI]
+    assert isinstance(factory, Factory)
+
+    params = ChatOpenAIParams(
+        verbosity="low",
+        reasoning=OpenAIReasoningParams(summary="auto", effort=8),
+    )
+    model: ChatOpenAI = factory(
+        model="gpt-5.6-terra", **params.model_dump(exclude_none=True)
+    )
+
+    assert model.verbosity == "low"
+    assert model.reasoning == {"summary": "auto", "effort": 8}
+
+
+def test_openai_reasoning_params_scoped_to_duo_chat(
+    mock_ai_gateway_container: containers.DeclarativeContainer,
+):
+    """Chat keeps its gpt_5 tuning; agentic prompts use the OpenAI defaults."""
+    from langchain_openai import ChatOpenAI  # pylint: disable=import-outside-toplevel
+
+    prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
+    registry = cast(LocalPromptRegistry, prompts.prompt_registry())
+
+    model_metadata = create_model_metadata(
+        {"provider": "gitlab", "identifier": "gpt_5_6_terra"}
+    )
+
+    chat_model = registry.get(
+        "chat/agent", "^1.0.0", model_metadata=model_metadata
+    ).model
+    assert isinstance(chat_model, ChatOpenAI)
+    assert chat_model.reasoning == {"summary": "auto", "effort": 8}
+    assert chat_model.verbosity == "low"
+
+    executor_model = registry.get(
+        "workflow/executor", "^1.0.0", model_metadata=model_metadata
+    ).model
+    assert isinstance(executor_model, ChatOpenAI)
+    assert executor_model.reasoning is None
+    assert executor_model.verbosity is None
 
 
 def test_container_lite_llm_embedding_model_factory_exists(

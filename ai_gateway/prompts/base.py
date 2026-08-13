@@ -366,6 +366,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             disable_streaming,
             max_tokens_override,
             custom_models_extra_headers,
+            model_provider=model_provider,
         )
 
         if tools and isinstance(model, BaseChatModel):
@@ -496,6 +497,8 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         disable_streaming: bool,
         max_tokens_override: Optional[int] = None,
         custom_models_extra_headers: Optional[dict[str, str]] = None,
+        *,
+        model_provider: ModelClassProvider,
     ) -> Model:
         # The params in the prompt file have higher precedence than the ones in the model definition
         llm_params = (
@@ -517,11 +520,20 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     "custom_llm_provider"
                 ]
 
-        # Precedence (highest wins): config.params > dynamic_params > llm_params
-        # - llm_params: static params from models.yml
-        # - dynamic_params: extracted from model identifier (e.g., custom_llm_provider)
-        # - AIGW_CUSTOM_MODELS__EXTRA_HEADERS: environment defaults for `extra_headers` (merged)
-        # - config.params: prompt-specific configuration from YAML files
+        provider_overrides: dict[str, Any] = {}
+        if config.provider_params:
+            # ModelClassProvider is a StrEnum, so members work as attribute names
+            block = getattr(config.provider_params, model_provider, None)
+            if block is None:
+                log.debug(
+                    "provider_params set but no block matches the resolved provider",
+                    provider=str(model_provider),
+                )
+            else:
+                provider_overrides = block.model_dump(exclude_none=True, by_alias=True)
+
+        # Precedence (highest wins): provider_params > config.params > dynamic_params > llm_params.
+        # max_tokens_override and the extra_headers merge below apply after this spread.
         model_factory_args = {
             "disable_streaming": disable_streaming,
             **llm_params,
@@ -529,6 +541,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             **config.params.model_dump(
                 exclude={"model_class_provider"}, exclude_none=True, by_alias=True
             ),
+            **provider_overrides,
         }
 
         if max_tokens_override is not None:

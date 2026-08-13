@@ -3,6 +3,13 @@ name: Chat Agent
 model:
   params:
     max_tokens: 8_192
+  provider_params:
+    openai:
+      # Duo Chat latency tuning: effort 8 is an account-specific scale below "low".
+      verbosity: low
+      reasoning:
+        summary: auto
+        effort: 8
 unit_primitive: duo_chat
 prompt_template:
   system_static: |

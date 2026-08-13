@@ -54,11 +54,7 @@ class ContainerPrompts(containers.DeclarativeContainer):
             ModelClassProvider.ANTHROPIC: providers.Factory(
                 models.anthropic_claude_chat_fn
             ),
-            ModelClassProvider.OPENAI: providers.Factory(
-                models.openai_chat_fn,
-                verbosity="low",
-                reasoning={"summary": "auto", "effort": 8},
-            ),
+            ModelClassProvider.OPENAI: providers.Factory(models.openai_chat_fn),
             ModelClassProvider.LITE_LLM: providers.Factory(models.lite_llm_chat_fn),
             ModelClassProvider.AMAZON_Q: providers.Factory(models.amazon_q_chat_fn),
             ModelClassProvider.LITE_LLM_COMPLETION: providers.Factory(

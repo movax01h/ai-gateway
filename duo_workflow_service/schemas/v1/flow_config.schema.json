@@ -396,9 +396,86 @@
             "max_retries": 1,
             "extra_headers": null
           }
+        },
+        "provider_params": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptProviderParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "ModelConfig",
+      "type": "object"
+    },
+    "OpenAIProviderParams": {
+      "additionalProperties": false,
+      "description": "OpenAI-only params, declared once so the models.yml layer (ChatOpenAIParams) and the prompt layer\n(PromptProviderParams.openai) cannot drift apart.",
+      "properties": {
+        "verbosity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verbosity"
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenAIReasoningParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "OpenAIProviderParams",
+      "type": "object"
+    },
+    "OpenAIReasoningParams": {
+      "additionalProperties": false,
+      "description": "Reasoning config for the OpenAI Responses API; unset fields use API defaults.\n\nThe int form of `effort` is deprecated: an account-specific scale kept\nonly for Duo Chat's legacy latency tuning (8, below \"low\").",
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effort"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        }
+      },
+      "title": "OpenAIReasoningParams",
       "type": "object"
     },
     "PromptParams": {
@@ -486,6 +563,25 @@
         }
       },
       "title": "PromptParams",
+      "type": "object"
+    },
+    "PromptProviderParams": {
+      "additionalProperties": false,
+      "description": "Provider-conditional model params in a prompt definition.\n\nPlacement rule: set model params in models.yml unless the value must\ndiffer per feature; only then use this block.\n\nA block applies only when the prompt resolves to that provider; otherwise\nit is skipped, never an error (models served through LiteLLM never match\n`openai`). Each set field replaces its models.yml counterpart whole \u2014\nunset fields are left alone, nested objects are not deep-merged, and a\nvalue cannot be cleared back to unset.",
+      "properties": {
+        "openai": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenAIProviderParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "PromptProviderParams",
       "type": "object"
     }
   },
