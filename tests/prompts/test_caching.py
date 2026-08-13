@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
@@ -11,8 +13,16 @@ from ai_gateway.prompts.caching import (
     CacheControlInjectionPointsConverter,
     default_cache_control_injection_points,
     filter_cache_control_injection_points,
+    should_inject_default_cache_control,
 )
 from lib.prompts.caching import set_prompt_caching_enabled_to_current_request
+
+
+@pytest.fixture(autouse=True)
+def reset_prompt_cache_context():
+    """Reset the prompt-caching ContextVar after each test to keep the suite order-independent."""
+    yield
+    set_prompt_caching_enabled_to_current_request(None)
 
 
 class TestFilterCacheControlInjectionPoints:
@@ -286,6 +296,50 @@ class TestDefaultCacheControlAppliedToPrompts:
             {"location": "message", "index": 0},
         ]
 
+    def test_gemini_on_litellm_vertex_does_not_get_default_cache_control(self):
+        """Gemini on Vertex via LiteLLM must NOT receive default cache_control injection points, because LiteLLM would
+        translate them into Vertex's cachedContent, which is mutually exclusive with tools/system_instruction."""
+
+        set_prompt_caching_enabled_to_current_request("true")
+
+        model_metadata = Mock()
+        model_metadata.to_params.return_value = {
+            "model": "vertex_ai/gemini-3.1-pro-preview",
+            "custom_llm_provider": "vertex_ai",
+        }
+
+        model_kwargs = Prompt._build_model_kwargs(
+            params=PromptParams(timeout=60),
+            model_metadata=model_metadata,
+            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            model_class_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
+
+    def test_claude_on_litellm_vertex_still_gets_default_cache_control(self):
+        """Anthropic models served via Vertex through LiteLLM keep their native Anthropic cache semantics, so defaults
+        must still be injected."""
+        set_prompt_caching_enabled_to_current_request("true")
+
+        model_metadata = Mock()
+        model_metadata.to_params.return_value = {
+            "model": "vertex_ai/claude-sonnet-4",
+            "custom_llm_provider": "vertex_ai",
+        }
+
+        model_kwargs = Prompt._build_model_kwargs(
+            params=PromptParams(timeout=60),
+            model_metadata=model_metadata,
+            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            model_class_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] == [
+            {"location": "message", "index": 0},
+            {"location": "message", "index": -1},
+        ]
+
 
 class TestCacheControlInjectionPointsConverter:
     @pytest.fixture(name="model_class_provider")
@@ -361,3 +415,87 @@ class TestCacheControlInjectionPointsConverter:
                 str(ex)
                 == "cache_control_injection_points is specified but conversion method is not defined"
             )
+
+
+class TestShouldInjectDefaultCacheControl:
+    """Unit tests for `should_inject_default_cache_control`.
+
+    The function decides whether default cache_control_injection_points should
+    be injected based on (a) the model provider class and (b) for LiteLLM, the
+    concrete model/route, since Gemini on Vertex AI cannot be used together
+    with `cachedContent` + tools/system_instruction.
+    """
+
+    @pytest.mark.parametrize(
+        "model_class_provider,model_kwargs,expected",
+        [
+            # Anthropic always gets defaults, regardless of model_kwargs.
+            (ModelClassProvider.ANTHROPIC, {}, True),
+            (ModelClassProvider.ANTHROPIC, {"model": "anything"}, True),
+            # LiteLLM with no model info -> safe default, inject.
+            (ModelClassProvider.LITE_LLM, {}, True),
+            # LiteLLM + Claude-on-Vertex must keep native Anthropic caching.
+            (
+                ModelClassProvider.LITE_LLM,
+                {
+                    "custom_llm_provider": "vertex_ai",
+                    "model": "vertex_ai/claude-sonnet-4",
+                },
+                True,
+            ),
+            # Gemini on Vertex via the model prefix.
+            (
+                ModelClassProvider.LITE_LLM,
+                {"model": "vertex_ai/gemini-3.1-pro-preview"},
+                False,
+            ),
+            # Gemini on Google AI Studio via the model prefix.
+            (
+                ModelClassProvider.LITE_LLM,
+                {"model": "gemini/gemini-2.0-flash"},
+                False,
+            ),
+            # Gemini detected via custom_llm_provider + bare model id.
+            (
+                ModelClassProvider.LITE_LLM,
+                {
+                    "custom_llm_provider": "vertex_ai",
+                    "model": "gemini-3.1-pro-preview",
+                },
+                False,
+            ),
+            (
+                ModelClassProvider.LITE_LLM,
+                {"custom_llm_provider": "gemini", "model": "gemini-2.0-flash"},
+                False,
+            ),
+            # Case-insensitivity guard.
+            (
+                ModelClassProvider.LITE_LLM,
+                {
+                    "custom_llm_provider": "VERTEX_AI",
+                    "model": "GEMINI-3.1-PRO",
+                },
+                False,
+            ),
+            # Non-Gemini model on a Google route still gets defaults.
+            (
+                ModelClassProvider.LITE_LLM,
+                {"custom_llm_provider": "vertex_ai", "model": "llama-3"},
+                True,
+            ),
+            # All other providers never get defaults.
+            (ModelClassProvider.OPENAI, {}, False),
+            (ModelClassProvider.AMAZON_Q, {}, False),
+            (ModelClassProvider.GOOGLE_GENAI, {}, False),
+            (ModelClassProvider.LITE_LLM_COMPLETION, {}, False),
+            (None, {}, False),
+        ],
+    )
+    def test_should_inject_default_cache_control(
+        self, model_class_provider, model_kwargs, expected
+    ):
+        assert (
+            should_inject_default_cache_control(model_class_provider, model_kwargs)
+            is expected
+        )
