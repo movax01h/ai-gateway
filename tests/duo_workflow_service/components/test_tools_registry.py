@@ -43,6 +43,7 @@ from duo_workflow_service.tools.mr_discussions import (
     SetDiscussionResolved,
 )
 from duo_workflow_service.tools.mr_review import SubmitMrReview
+from duo_workflow_service.tools.notify_me_when import NotifyMeWhen
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
@@ -1253,6 +1254,37 @@ class TestCapabilityDependentTools:
         )
 
         assert "run_command" not in registry._enabled_tools
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_notify_me_when_enabled_when_capable(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """notify_me_when is registered when the client declares the capability."""
+        mock_is_client_capable.side_effect = lambda cap: "schedule_notification" in cap
+
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert "notify_me_when" in registry._enabled_tools
+        assert isinstance(registry._enabled_tools["notify_me_when"], NotifyMeWhen)
+
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_notify_me_when_absent_without_capability(
+        self, mock_is_client_capable, tool_metadata
+    ):
+        """notify_me_when is not registered when the client lacks the capability."""
+        mock_is_client_capable.return_value = False
+
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert "notify_me_when" not in registry._enabled_tools
 
     def test_capability_dependent_tool_missing_required_capability_raises_error(
         self, tool_metadata

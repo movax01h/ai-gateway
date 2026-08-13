@@ -21,6 +21,7 @@ from .job import *
 from .mcp_tools import *
 from .merge_request import *
 from .merge_request_notes import *
+from .notify_me_when import *
 from .pipeline import *
 from .planner import *
 from .project import *

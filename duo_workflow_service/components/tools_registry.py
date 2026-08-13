@@ -74,6 +74,7 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.ShellCommand,
     tools.AdvanceBlobSearch,
     tools.ReadFileChunked,
+    tools.NotifyMeWhen,
 ]
 
 _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
