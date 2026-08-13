@@ -5,6 +5,9 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langgraph.types import interrupt
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowEvent,
     FlowEventType,
@@ -12,6 +15,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     RuntimeIOKey,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
+from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
 
 
 class ToolApprovalFetchNode:
@@ -33,6 +37,9 @@ class ToolApprovalFetchNode:
         conversation_history_key: RuntimeIOKey for conversation history
         status_key: RuntimeIOKey for workflow status
         approval_decision_key: RuntimeIOKey for storing approval decision
+        tracker: Optional tool event tracker for approval-resolution events
+        approval_requests_key: Optional RuntimeIOKey shared with
+            ToolApprovalRequestNode; reads which tool calls required approval.
     """
 
     def __init__(
@@ -42,11 +49,39 @@ class ToolApprovalFetchNode:
         conversation_history_key: RuntimeIOKey,
         status_key: RuntimeIOKey,
         approval_decision_key: RuntimeIOKey,
+        tracker: ToolEventTracker | None = None,
+        approval_requests_key: RuntimeIOKey | None = None,
     ):
         self.name = name
         self._conversation_history_key = conversation_history_key
         self._status_key = status_key
         self._approval_decision_key = approval_decision_key
+        self._tracker = tracker
+        self._approval_requests_key = approval_requests_key
+
+    def _track_approval_resolved(
+        self, state: FlowState, outcome: EventPropertyEnum
+    ) -> None:
+        """Track resolution events only for the tool calls the request node persisted as needing approval.
+
+        The skip checks are network-backed and non-deterministic, so they are deliberately not re-run here.
+        """
+        if self._tracker is None or self._approval_requests_key is None:
+            return
+
+        requested_calls = self._approval_requests_key.value_from_state(state) or []
+
+        for requested_call in requested_calls:
+            tool_name = (
+                requested_call.get("name") if isinstance(requested_call, dict) else None
+            )
+            if not tool_name:
+                continue
+            self._tracker.track_tool_governance_event(
+                event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED,
+                tool_name=tool_name,
+                outcome=outcome.value,
+            )
 
     @staticmethod
     def _build_rejection_messages(tool_calls: list[ToolCall]) -> list[ToolMessage]:
@@ -84,6 +119,9 @@ class ToolApprovalFetchNode:
 
         if event["event_type"] == FlowEventType.APPROVE:
             # User approved - UI resolves the approval box, no UI log needed
+            self._track_approval_resolved(
+                state, EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_APPROVAL
+            )
             return {
                 **self._status_key.to_nested_dict(WorkflowStatusEnum.EXECUTION, state),
                 **approval_decision_iokey.to_nested_dict(FlowEventType.APPROVE),
@@ -96,6 +134,10 @@ class ToolApprovalFetchNode:
             if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
                 # Should not happen - request node validated this
                 raise RuntimeError("No tool calls found to reject")
+
+            self._track_approval_resolved(
+                state, EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_REJECTION
+            )
 
             rejection_messages = self._build_rejection_messages(last_message.tool_calls)
 
@@ -122,6 +164,10 @@ class ToolApprovalFetchNode:
                 raise ValueError(
                     "MODIFY event must include a message with user feedback"
                 )
+
+            self._track_approval_resolved(
+                state, EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_MODIFICATION
+            )
 
             rejection_messages = self._build_rejection_messages(last_message.tool_calls)
             user_feedback = HumanMessage(content=event["message"])

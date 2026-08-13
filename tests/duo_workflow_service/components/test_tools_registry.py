@@ -998,6 +998,7 @@ def test_toolset_method(
             all_tools=expected_all_tools,
             tool_options={},
             approval_policy=registry,
+            denied_tools=set(),
         )
         assert toolset == mock_toolset
 
@@ -1075,6 +1076,24 @@ def test_toolset_filters_denied_tools(tool_metadata):
     assert "read_file" not in toolset._all_tools
     assert "list_issues" not in toolset._all_tools
     assert "edit_file" in toolset._all_tools
+    # The denied set is exposed on the toolset so executors can report
+    # attempts to call governance-denied tools.
+    assert toolset.denied_tools == {"read_file", "list_issues"}
+
+
+def test_toolset_denied_set_excludes_tools_the_flow_never_had(tool_metadata):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        denied_tools=["read_file", "list_issues"],
+    )
+
+    toolset = registry.toolset(["read_file", "edit_file"])
+
+    # list_issues is denied instance-wide but was never part of this toolset,
+    # so an attempt to call it is not a rule-blocked invocation for this flow.
+    assert toolset.denied_tools == {"read_file"}
 
 
 def test_toolset_filters_denied_mcp_tools(tool_metadata, mcp_tools):

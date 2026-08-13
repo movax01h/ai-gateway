@@ -26,6 +26,7 @@ from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (
     assert_security_called_with,
@@ -632,6 +633,55 @@ class TestToolNodeEventTracking:
         additional_props = call_args[1]["additional_properties"]
         assert hasattr(additional_props, "property")
         assert additional_props.property == mock_tool.name
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
+    async def test_run_denied_tool_tracks_block_event(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_toolset,
+        mock_internal_event_client,
+        mock_prompt_security,
+        flow_id,
+        flow_type,
+    ):
+        """A call to a tool stripped by governance deny rules tracks a block event."""
+        mock_toolset.__contains__ = Mock(return_value=False)
+        mock_toolset.denied_tools = {"test_tool"}
+
+        await tool_node.run(flow_state_with_tool_calls)
+
+        mock_internal_event_client.track_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_BLOCKED.value,
+            additional_properties=InternalEventAdditionalProperties(
+                label=flow_type.value,
+                property="test_tool",
+                value=flow_id,
+                tool_name="test_tool",
+            ),
+            category=flow_type.value,
+        )
+        # Response text stays byte-identical
+        security_args = mock_prompt_security.call_args
+        assert security_args[1]["response"] == "Tool test_tool not found"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
+    async def test_run_unknown_tool_does_not_track_block_event(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_toolset,
+        mock_internal_event_client,
+    ):
+        """A hallucinated/unknown tool that was not stripped by deny rules tracks no block event."""
+        mock_toolset.__contains__ = Mock(return_value=False)
+        mock_toolset.denied_tools = {"some_other_denied_tool"}
+
+        await tool_node.run(flow_state_with_tool_calls)
+
+        mock_internal_event_client.track_event.assert_not_called()
 
 
 class TestToolNodeComponentIdentity:

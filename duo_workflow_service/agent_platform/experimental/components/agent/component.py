@@ -29,6 +29,7 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes imp
     ToolApprovalFetchNode,
     ToolApprovalRequestNode,
     ToolNode,
+    approval_requests_key_for,
 )
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
@@ -688,6 +689,10 @@ class AgentComponent(AgentComponentBase):
 
         # Conditionally add tool approval nodes
         if self.require_tool_approval:
+            approval_requests_key = approval_requests_key_for(
+                self._tool_approval_decision_key
+            )
+
             node_tool_approval_request = ToolApprovalRequestNode(
                 name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request",
                 conversation_history_key=self._conversation_history_key,
@@ -707,6 +712,8 @@ class AgentComponent(AgentComponentBase):
                     ),
                 ),
                 session_id_key=self._session_id_key,
+                tracker=tracker,
+                approval_requests_key=approval_requests_key,
             )
 
             node_tool_approval_fetch = ToolApprovalFetchNode(
@@ -717,6 +724,8 @@ class AgentComponent(AgentComponentBase):
                     factory=lambda _: IOKey(target="status"),
                 ),
                 approval_decision_key=self._tool_approval_decision_key,
+                tracker=tracker,
+                approval_requests_key=approval_requests_key,
             )
 
             # Add approval nodes to graph

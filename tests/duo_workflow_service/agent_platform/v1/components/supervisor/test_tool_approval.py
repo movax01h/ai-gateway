@@ -7,13 +7,20 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowEventType, FlowStateKeys
+from duo_workflow_service.agent_platform.v1.state import (
+    FlowEventType,
+    FlowStateKeys,
+    RuntimeIOKey,
+)
 from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
 from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
 
@@ -391,3 +398,26 @@ class TestSupervisorAgentComponentToolApproval:
         assert ui_history.log._component_name == supervisor_name
         assert ui_history.log._ui_roles_as == MessageTypeEnum.REQUEST
         # pylint: enable=protected-access
+
+    def test_tracker_and_shared_key_forwarded_to_approval_nodes(
+        self,
+        all_approval_node_mocks,  # pylint: disable=unused-argument
+        mock_tool_approval_request_node_cls,
+        mock_tool_approval_fetch_node_cls,
+        mock_router,
+        make_supervisor,
+    ):
+        """Both supervisor approval nodes receive one shared tracker and one shared approval-requests key."""
+        supervisor = make_supervisor(require_tool_approval=True, pre_approved_tools=[])
+        _compile(supervisor, mock_router)
+
+        request_kwargs = mock_tool_approval_request_node_cls.call_args[1]
+        fetch_kwargs = mock_tool_approval_fetch_node_cls.call_args[1]
+
+        assert isinstance(request_kwargs["tracker"], ToolEventTracker)
+        assert request_kwargs["tracker"] is fetch_kwargs["tracker"]
+        assert isinstance(request_kwargs["approval_requests_key"], RuntimeIOKey)
+        assert (
+            request_kwargs["approval_requests_key"]
+            is fetch_kwargs["approval_requests_key"]
+        )

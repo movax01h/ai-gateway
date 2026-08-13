@@ -2133,3 +2133,100 @@ def test_create_tool_ui_chat_log_omits_version_when_tool_absent():
     )
 
     assert "tool_version" not in log["tool_info"]
+
+
+def _governance_executor(
+    toolset: Toolset,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+) -> ToolsExecutor:
+    return ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+        internal_event_client=internal_event_client,
+    )
+
+
+def _tool_call_state(workflow_state, tool_name: str, args: dict):
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content="test",
+            tool_calls=[
+                {
+                    "id": "call-1",
+                    "name": tool_name,
+                    "args": args,
+                    "type": "tool_call",
+                }
+            ],
+        ),
+    ]
+    return workflow_state
+
+
+@pytest.mark.asyncio
+async def test_denied_tool_call_tracks_block_event(
+    workflow_state,
+    all_tools: dict[str, ToolType],
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+):
+    """A call to a tool stripped by governance deny rules tracks a block event."""
+    toolset = Toolset(
+        pre_approved=set(),
+        all_tools=all_tools,
+        denied_tools={"denied_tool"},
+    )
+    tools_executor = _governance_executor(toolset, internal_event_client, flow_type)
+    state = _tool_call_state(
+        workflow_state, "denied_tool", {"secret_arg": "sensitive-value"}
+    )
+
+    result = await tools_executor.run(state)
+
+    internal_event_client.track_event.assert_called_once_with(
+        event_name=EventEnum.WORKFLOW_TOOL_BLOCKED.value,
+        additional_properties=InternalEventAdditionalProperties(
+            label=flow_type.value,
+            property="denied_tool",
+            value="123",
+            tool_name="denied_tool",
+        ),
+        category=flow_type.value,
+    )
+    # Privacy: tool arguments must never appear in the payload
+    assert "sensitive-value" not in str(
+        internal_event_client.track_event.call_args.kwargs
+    )
+    # Response text stays byte-identical
+    assert (
+        result[0]["conversation_history"]["planner"][0].content
+        == "Tool denied_tool not found"
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_call_does_not_track_block_event(
+    workflow_state,
+    all_tools: dict[str, ToolType],
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+):
+    """A hallucinated/unknown tool that was not stripped by deny rules tracks no block event."""
+    toolset = Toolset(
+        pre_approved=set(),
+        all_tools=all_tools,
+        denied_tools={"denied_tool"},
+    )
+    tools_executor = _governance_executor(toolset, internal_event_client, flow_type)
+    state = _tool_call_state(workflow_state, "hallucinated_tool", {})
+
+    result = await tools_executor.run(state)
+
+    internal_event_client.track_event.assert_not_called()
+    assert (
+        result[0]["conversation_history"]["planner"][0].content
+        == "Tool hallucinated_tool not found"
+    )

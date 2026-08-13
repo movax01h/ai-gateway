@@ -2,6 +2,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import (
     _extract_manual_compactor,
@@ -50,6 +53,7 @@ class TestCreateAgent:
     ):
         mock_is_feature_enabled.return_value = False
         mock_is_client_capable.return_value = False
+        tracker = Mock(spec=ToolEventTracker)
 
         agent = create_agent(
             user=user,
@@ -60,11 +64,13 @@ class TestCreateAgent:
             workflow_id="workflow_123",
             workflow_type=CategoryEnum.WORKFLOW_CHAT,
             system_template_override="test_system_template",
+            tracker=tracker,
         )
 
         assert isinstance(agent, ChatAgent)
         assert agent.name == prompt.name
         assert agent.system_template_override == "test_system_template"
+        assert agent._tracker is tracker
 
         mock_local_prompt_registry.get_on_behalf.assert_called_once_with(
             user=user,

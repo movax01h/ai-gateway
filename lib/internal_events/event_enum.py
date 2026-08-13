@@ -15,6 +15,9 @@ class EventEnum(StrEnum):
     WORKFLOW_FINISH_FAILURE = "request_duo_workflow_failure"
     WORKFLOW_TOOL_FAILURE = "duo_workflow_tool_failure"
     WORKFLOW_TOOL_SUCCESS = "duo_workflow_tool_success"
+    WORKFLOW_TOOL_APPROVAL_REQUESTED = "request_duo_workflow_tool_approval"
+    WORKFLOW_TOOL_APPROVAL_RESOLVED = "resolve_duo_workflow_tool_approval"
+    WORKFLOW_TOOL_BLOCKED = "block_denied_duo_workflow_tool"
     WORKFLOW_ROUTE_DECISION = "duo_workflow_flow_route_decision"
     WORKFLOW_RESPONSE_SCHEMA_OUTPUT = "duo_workflow_response_schema_output"
     ORBIT_DAP_TOOL_CALLED = "orbit_dap_tool_called"
@@ -59,6 +62,10 @@ class EventPropertyEnum(StrEnum):
     )
 
     WORKFLOW_MESSAGE_BY_USER = "message_request_by_user_duo_workflow"
+
+    WORKFLOW_TOOL_APPROVAL_APPROVAL = "approval"
+    WORKFLOW_TOOL_APPROVAL_REJECTION = "rejection"
+    WORKFLOW_TOOL_APPROVAL_MODIFICATION = "modification"
 
 
 # Deprecated: Use FlowType from duo_workflow_service.entities.flow instead

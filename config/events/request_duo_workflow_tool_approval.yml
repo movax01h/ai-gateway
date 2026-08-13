@@ -1,0 +1,21 @@
+---
+description: Tracks each Duo Workflow tool call that requires human approval before execution. Delivery is best-effort at-least-once, and legacy pre-v1 flows do not emit this event
+internal_events: true
+action: request_duo_workflow_tool_approval
+product_group: compliance
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Flow type (e.g. chat, software_development)
+  property:
+    description: Name of the tool that requires approval
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen during the same workflow.
+  tool_name:
+    description: Name of the tool that requires approval
+milestone: '19.3'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6429
+tiers:
+  - premium
+  - ultimate

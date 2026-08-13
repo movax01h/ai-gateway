@@ -13,6 +13,9 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import PromptConfig
 from ai_gateway.prompts.typing import TypeModelFactory
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -44,6 +47,7 @@ from duo_workflow_service.workflows.chat.workflow import (
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.feature_flags import current_feature_flag_context
+from lib.internal_events import InternalEventAdditionalProperties
 from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
 
@@ -448,6 +452,15 @@ async def test_workflow_run(
                 agent_name_override=None,  # Default workflow has no override
                 compaction=ANY,
                 web_search_enabled=False,
+                tracker=workflow._tracker,
+            )
+
+            # The workflow's own tracker must be bound to this workflow's identity
+            assert workflow._tracker._flow_id == workflow._workflow_id
+            assert workflow._tracker._flow_type == workflow._workflow_type
+            assert (
+                workflow._tracker._internal_event_client
+                is workflow._internal_event_client
             )
 
             mock_user_interface_instance.send_event.assert_called_with(
@@ -528,6 +541,7 @@ async def test_workflow_run_with_agent_name_override(
                 agent_name_override="348/0",  # Should pass the override
                 compaction=ANY,
                 web_search_enabled=False,
+                tracker=workflow._tracker,
             )
 
 
@@ -1850,3 +1864,116 @@ class TestResumeCheckpointTs:
         )
 
         assert workflow._resolve_resume_checkpoint_ts() is None
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_resume_with_approval_tracks_resolution(
+    workflow_with_approval,
+):
+    """Approving pending tool calls tracks a resolution event with outcome approval."""
+    internal_event_client = Mock()
+    workflow_with_approval._tracker = ToolEventTracker(
+        flow_id=workflow_with_approval._workflow_id,
+        flow_type=workflow_with_approval._workflow_type,
+        internal_event_client=internal_event_client,
+    )
+
+    await workflow_with_approval.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, None
+    )
+
+    internal_event_client.track_event.assert_called_once_with(
+        event_name="resolve_duo_workflow_tool_approval",
+        additional_properties=InternalEventAdditionalProperties(
+            label="chat",
+            property="approval",
+            value="1234",
+        ),
+        category="chat",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_resume_with_rejection_feedback_tracks_modification(
+    workflow_with_project,
+):
+    """Rejecting with feedback matches v1's MODIFY semantics and tracks modification.
+
+    The rejection message text must never appear in the payload.
+    """
+    rejection_message = "Do not run this, it touches /etc/passwd"
+    internal_event_client = Mock()
+    workflow_with_project._tracker = ToolEventTracker(
+        flow_id=workflow_with_project._workflow_id,
+        flow_type=workflow_with_project._workflow_type,
+        internal_event_client=internal_event_client,
+    )
+    workflow_with_project._approval = contract_pb2.Approval(
+        rejection=contract_pb2.Approval.Rejected(message=rejection_message)
+    )
+
+    await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, None
+    )
+
+    internal_event_client.track_event.assert_called_once_with(
+        event_name="resolve_duo_workflow_tool_approval",
+        additional_properties=InternalEventAdditionalProperties(
+            label="chat",
+            property="modification",
+            value="1234",
+        ),
+        category="chat",
+    )
+    assert rejection_message not in str(internal_event_client.track_event.call_args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rejection_message", ["", "null"])
+async def test_get_graph_input_resume_with_plain_rejection_tracks_rejection(
+    workflow_with_project, rejection_message
+):
+    """Rejecting without feedback tracks outcome rejection."""
+    internal_event_client = Mock()
+    workflow_with_project._tracker = ToolEventTracker(
+        flow_id=workflow_with_project._workflow_id,
+        flow_type=workflow_with_project._workflow_type,
+        internal_event_client=internal_event_client,
+    )
+    workflow_with_project._approval = contract_pb2.Approval(
+        rejection=contract_pb2.Approval.Rejected(message=rejection_message)
+    )
+
+    await workflow_with_project.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, None
+    )
+
+    internal_event_client.track_event.assert_called_once_with(
+        event_name="resolve_duo_workflow_tool_approval",
+        additional_properties=InternalEventAdditionalProperties(
+            label="chat",
+            property="rejection",
+            value="1234",
+        ),
+        category="chat",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_resume_without_approval_tracks_nothing(
+    workflow_with_project,
+):
+    """Resuming without a pending approval decision tracks no resolution event."""
+    internal_event_client = Mock()
+    workflow_with_project._tracker = ToolEventTracker(
+        flow_id=workflow_with_project._workflow_id,
+        flow_type=workflow_with_project._workflow_type,
+        internal_event_client=internal_event_client,
+    )
+    workflow_with_project._approval = None
+
+    await workflow_with_project.get_graph_input(
+        "hello", WorkflowStatusEventEnum.RESUME, None
+    )
+
+    internal_event_client.track_event.assert_not_called()

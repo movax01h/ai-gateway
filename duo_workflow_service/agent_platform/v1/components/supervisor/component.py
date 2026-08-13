@@ -783,6 +783,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             graph,
             conversation_history_key=supervisor_history_key,
             session_id_key=DEFAULT_SESSION_ID_KEY,
+            tracker=tracker,
         )
 
         # --- Supervisor edges ---

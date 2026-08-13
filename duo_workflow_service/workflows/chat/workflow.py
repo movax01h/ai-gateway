@@ -21,6 +21,9 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts.base import PromptSandboxedEnvironment as _JinjaEnv
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.chat_agent_factory import create_agent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
@@ -49,6 +52,7 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
 from lib.mcp_server_tools.context import get_enabled_mcp_server_tools
 
 logger = get_logger("chat.workflow")
@@ -258,6 +262,12 @@ class Workflow(AbstractWorkflow):
             **kwargs,
         )
 
+        self._tracker = ToolEventTracker(
+            flow_id=workflow_id,
+            flow_type=workflow_type,
+            internal_event_client=self._internal_event_client,
+        )
+
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
             return Routes.STOP
@@ -335,10 +345,19 @@ class Workflow(AbstractWorkflow):
                 match self._approval and self._approval.WhichOneof("user_decision"):
                     case "approval":
                         next_step = "run_tools"
+                        self._track_tool_approval_resolved(
+                            EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_APPROVAL
+                        )
                     case "rejection":
                         new_chat_message = self._approval.rejection.message  # type: ignore
                         state_update["approval"] = ApprovalStateRejection(
                             message=new_chat_message
+                        )
+                        # Rejection with feedback matches v1's MODIFY semantics.
+                        self._track_tool_approval_resolved(
+                            EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_MODIFICATION
+                            if new_chat_message and new_chat_message != "null"
+                            else EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_REJECTION
                         )
                     case _:
                         if goal:
@@ -368,6 +387,13 @@ class Workflow(AbstractWorkflow):
                     state_update["ui_chat_log"] = [new_message_chat_log]
 
                 return Command(goto=next_step, update=state_update)
+
+    def _track_tool_approval_resolved(self, outcome: EventPropertyEnum) -> None:
+        """Track that a pending tool approval was resolved."""
+        self._tracker.track_tool_governance_event(
+            EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED,
+            outcome=outcome.value,
+        )
 
     def _compile(
         self,
@@ -402,6 +428,7 @@ class Workflow(AbstractWorkflow):
             agent_name_override=self._agent_name_override,
             compaction=CompactionConfig(trim_threshold=0.7),
             web_search_enabled=self._workflow_config.get("web_search_enabled", False),
+            tracker=self._tracker,
         )
 
         tools_runner = ToolsExecutor(

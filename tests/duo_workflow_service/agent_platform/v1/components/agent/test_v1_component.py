@@ -2304,6 +2304,38 @@ class TestAgentComponentToolApprovalExecutionFlow:
         call_kwargs = mock_tool_approval_request_node_cls.call_args[1]
         assert call_kwargs["session_id_key"] is session_id_key
 
+    @pytest.mark.usefixtures("all_node_mocks")
+    def test_attach_passes_tracker_and_shared_key_to_approval_nodes(
+        self,
+        mock_tool_approval_request_node_cls,
+        mock_tool_approval_fetch_node_cls,
+        agent_component_with_tool_approval,
+        mock_state_graph,
+        mock_router,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+    ):
+        """Both approval nodes receive the same tracker (bound to the internal event client) and the same shared
+        approval-requests key."""
+        agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
+
+        request_kwargs = mock_tool_approval_request_node_cls.call_args[1]
+        fetch_kwargs = mock_tool_approval_fetch_node_cls.call_args[1]
+
+        for node_kwargs in (request_kwargs, fetch_kwargs):
+            tracker = node_kwargs["tracker"]
+            assert tracker._flow_id == flow_id
+            assert tracker._flow_type == flow_type
+            assert tracker._internal_event_client == mock_internal_event_client
+        assert request_kwargs["tracker"] is fetch_kwargs["tracker"]
+
+        assert isinstance(request_kwargs["approval_requests_key"], RuntimeIOKey)
+        assert (
+            request_kwargs["approval_requests_key"]
+            is fetch_kwargs["approval_requests_key"]
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests for _agent_node_invoke_config TAG_NOSTREAM logic

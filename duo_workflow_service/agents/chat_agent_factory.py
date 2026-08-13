@@ -1,6 +1,9 @@
 from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.prompts import BasePromptRegistry, Prompt
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import DefaultPromptAdapter
 from duo_workflow_service.client_capabilities import is_client_capable
@@ -53,6 +56,7 @@ def create_agent(
     agent_name_override: str | None = None,
     compaction: CompactionConfig | None = None,
     web_search_enabled: bool = False,
+    tracker: ToolEventTracker | None = None,
 ) -> ChatAgent:
     # Use agent_name_override for chat-partial flows, default to "chat"
     agent_name = agent_name_override if agent_name_override else "chat"
@@ -103,4 +107,5 @@ def create_agent(
         toolset=tools,
         optimizer_pipeline=optimizer_pipeline,
         manual_compactor=manual_compactor,
+        tracker=tracker,
     )

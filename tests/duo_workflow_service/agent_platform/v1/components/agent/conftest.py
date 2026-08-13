@@ -42,6 +42,17 @@ def component_name_fixture():
     return "test_component"
 
 
+@pytest.fixture(name="approval_requests_key")
+def approval_requests_key_fixture(component_name):
+    """Fixture for the approval-requests key shared between the approval nodes."""
+    static_key = IOKey(
+        target="context",
+        subkeys=[component_name, "tool_approval_requests"],
+        optional=True,
+    )
+    return RuntimeIOKey(alias="tool_approval_requests", factory=lambda _: static_key)
+
+
 @pytest.fixture(name="flow_type")
 def flow_type_fixture() -> GLReportingEventContext:
     """Fixture for flow type."""
@@ -311,6 +322,7 @@ def mock_toolset_fixture(mock_tool):
     mock_toolset.__contains__ = Mock(return_value=True)
     mock_toolset.__getitem__ = Mock(return_value=mock_tool)
     mock_toolset.bindable = [mock_tool]
+    mock_toolset.denied_tools = set()
     return mock_toolset
 
 

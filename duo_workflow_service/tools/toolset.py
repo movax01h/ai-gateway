@@ -39,6 +39,7 @@ class Toolset(collections.abc.Mapping):
     _executable_tools: dict[str, BaseTool]
     _tool_options: dict[str, dict[str, Any]]
     _approval_policy: Optional[ApprovalPolicy]
+    _denied_tools: set[str]
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class Toolset(collections.abc.Mapping):
         all_tools: dict[str, ToolType],
         tool_options: Optional[dict[str, dict[str, Any]]] = None,
         approval_policy: Optional[ApprovalPolicy] = None,
+        denied_tools: Optional[set[str]] = None,
     ):
         """Initialize a Toolset with pre-approved tools and all available tools.
 
@@ -55,11 +57,15 @@ class Toolset(collections.abc.Mapping):
             tool_options: Optional dict mapping tool names to their option overrides.
             approval_policy: Optional policy consulted for per-call approval
                 decisions (e.g. session approvals persisted on the GitLab instance).
+            denied_tools: Optional set of tool names stripped from this toolset by
+                governance deny rules. Used only for tracking when the LLM still
+                attempts to call one of them; never affects execution.
         """
         self._all_tools = all_tools
         self._pre_approved = pre_approved
         self._tool_options = tool_options or {}
         self._approval_policy = approval_policy
+        self._denied_tools = set(denied_tools or set())
 
         # Validate and apply tool options to each tool instance.
         # Tools with options should already be cloned by ToolsRegistry.toolset()
@@ -84,6 +90,11 @@ class Toolset(collections.abc.Mapping):
     @property
     def bindable(self) -> list[ToolType]:
         return list(self._all_tools.values())
+
+    @property
+    def denied_tools(self) -> set[str]:
+        """Tool names stripped from this toolset by governance deny rules."""
+        return self._denied_tools
 
     def __getitem__(self, tool_name: str) -> BaseTool:
         """Get an executable tool by name.
