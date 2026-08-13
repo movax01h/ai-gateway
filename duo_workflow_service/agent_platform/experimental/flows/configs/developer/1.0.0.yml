@@ -79,6 +79,7 @@ components:
       - "create_work_item_note"
       - "create_merge_request"
       - "update_merge_request"
+      - "notify_me_when"
 
     ui_log_events:
       - "on_tool_execution_success"
