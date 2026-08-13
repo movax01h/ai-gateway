@@ -28,6 +28,7 @@ from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+from pydantic import ValidationError as PydanticValidationError
 
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
@@ -170,6 +171,51 @@ CUSTOMERSDOT_URL: str | None = (
 )
 
 
+# Pydantic prefixes messages raised from custom validators, e.g. a
+# `raise ValueError("toolset is required")` inside a `model_validator` surfaces as
+# "Value error, toolset is required". The prefix adds nothing once the exception type
+# is already reported alongside the message, so it is stripped.
+_PYDANTIC_MSG_PREFIXES = ("Value error, ", "Assertion failed, ")
+
+# Cap on the number of individual validation errors surfaced in the gRPC details.
+_MAX_PYDANTIC_ERRORS = 3
+
+
+def _format_pydantic_validation_error(error: PydanticValidationError) -> str:
+    """Collapse a Pydantic ValidationError to its stable, low-cardinality parts.
+
+    ``str(ValidationError)`` embeds the offending input for every error, e.g.::
+
+        1 validation error for DeterministicStepComponent
+        Value error, toolset is required [type=value_error, input_value={'name':
+        'git_unshallow', ...object at 0x7fd3bc43c4a0>}, input_type=dict]
+        For further information visit https://errors.pydantic.dev/2.13/v/value_error
+
+    That payload holds per-request values and object reprs with memory addresses, so it
+    fragments log/SLO grouping and leaks internals to the client. Only the model title,
+    the field location and the message are kept, producing e.g.
+    "DeterministicStepComponent: toolset is required".
+    """
+    errors = error.errors()
+    parts: list[str] = []
+
+    for err in errors[:_MAX_PYDANTIC_ERRORS]:
+        msg = str(err.get("msg", ""))
+        for prefix in _PYDANTIC_MSG_PREFIXES:
+            msg = msg.removeprefix(prefix)
+
+        # Model-level validators report an empty `loc`; field errors report the path.
+        loc = ".".join(str(item) for item in err.get("loc", ()))
+        parts.append(f"{loc}: {msg}" if loc else msg)
+
+    if len(errors) > _MAX_PYDANTIC_ERRORS:
+        parts.append(f"(+{len(errors) - _MAX_PYDANTIC_ERRORS} more)")
+
+    message = "; ".join(part for part in parts if part)
+
+    return f"{error.title}: {message}" if message else error.title
+
+
 def _extract_error_message(error: BaseException) -> str:
     """Extract a clean, normalized error message from a workflow error.
 
@@ -227,6 +273,11 @@ def _extract_error_message(error: BaseException) -> str:
         # that has status finished'}"), which fragments log grouping. Keep only the
         # stable part; both are available as attributes on the exception.
         message = "Session status cannot be updated due to bad status event"
+    elif isinstance(error, PydanticValidationError):
+        # Component/flow construction failures raised straight from a Pydantic model
+        # (e.g. a DeterministicStepComponent whose tool isn't enabled for the flow).
+        # str(error) embeds the whole offending input dict, so keep only the stable part.
+        message = _format_pydantic_validation_error(error)
     elif re.match(
         r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
         str(error),

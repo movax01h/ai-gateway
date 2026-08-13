@@ -22,6 +22,8 @@ from grpc_health.v1 import health, health_pb2
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from packaging.version import Version
+from pydantic import BaseModel, model_validator
+from pydantic import ValidationError as PydanticValidationError
 
 from ai_gateway.config import (
     Config,
@@ -3701,6 +3703,59 @@ def test_extract_error_message_graphql_errors_collapse(message, expected):
     # that fragments SLO grouping; only the stable "GraphQL errors" label (with any
     # leading prefix preserved) should be surfaced.
     assert _extract_error_message(Exception(message)) == expected
+
+
+class _ComponentLike(BaseModel):
+    """Stand-in for a component model whose validator rejects the config."""
+
+    name: str
+    tool_name: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate(cls, data):
+        if not data.get("toolset"):
+            raise ValueError("toolset is required")
+        return data
+
+
+def test_extract_error_message_pydantic_validation_error_drops_offending_input():
+    # str(ValidationError) embeds the whole input dict, including object reprs with
+    # memory addresses, so only the model title and message may be surfaced.
+    with pytest.raises(PydanticValidationError) as exc_info:
+        _ComponentLike(name="git_unshallow", tool_name="run_command", toolset={})
+
+    result = _extract_error_message(exc_info.value)
+
+    assert result == "_ComponentLike: toolset is required"
+    assert "input_value" not in result
+
+
+def test_extract_error_message_pydantic_validation_error_includes_field_location():
+    with pytest.raises(PydanticValidationError) as exc_info:
+        _ComponentLike(name="git_unshallow", toolset={"run_command": object()})
+
+    assert (
+        _extract_error_message(exc_info.value)
+        == "_ComponentLike: tool_name: Field required"
+    )
+
+
+def test_extract_error_message_pydantic_validation_error_caps_error_count():
+    class _ManyFields(BaseModel):
+        a: int
+        b: int
+        c: int
+        d: int
+        e: int
+
+    with pytest.raises(PydanticValidationError) as exc_info:
+        _ManyFields()
+
+    assert _extract_error_message(exc_info.value) == (
+        "_ManyFields: a: Field required; b: Field required; c: Field required; "
+        "(+2 more)"
+    )
 
 
 def test_extract_error_message_bedrock_api_connection_error_collapses_to_stable_prefix():
