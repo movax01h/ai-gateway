@@ -88,6 +88,20 @@ class TestToolset:
             "mock_tool_with_params",
         }
 
+    def test_denied_tools_default_empty(self, toolset):
+        """Toolsets expose an empty denied set by default."""
+        assert toolset.denied_tools == set()
+
+    def test_denied_tools_exposed(self, mock_all_tools, mock_pre_approved):
+        """Toolsets expose the governance-denied tool names they were built with."""
+        toolset = Toolset(
+            pre_approved=mock_pre_approved,
+            all_tools=mock_all_tools,
+            denied_tools={"denied_tool"},
+        )
+
+        assert toolset.denied_tools == {"denied_tool"}
+
     def test_tool_options_validation_valid_key(self):
         """Test that valid tool option keys are accepted."""
         tool = CreateMergeRequestNote(

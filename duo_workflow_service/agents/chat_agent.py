@@ -7,6 +7,9 @@ import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agents.project_utils import resolve_project_name_for_tool
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.agents.tool_call_validator import (
@@ -51,6 +54,7 @@ from duo_workflow_service.slash_commands.goal_parser import parse as slash_comma
 from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import LLMFinishReason, extract_finish_reason
+from lib.internal_events.event_enum import EventEnum
 
 log = structlog.stdlib.get_logger("chat_agent")
 
@@ -117,6 +121,7 @@ class ChatAgent:
         system_template_override: str | None,
         optimizer_pipeline: HistoryOptimizerPipeline,
         manual_compactor: CompactionOptimizer | None = None,
+        tracker: ToolEventTracker | None = None,
     ):
         self.name = name
         self.prompt_adapter = prompt_adapter
@@ -125,6 +130,7 @@ class ChatAgent:
         self._optimizer_pipeline = optimizer_pipeline
         self._manual_compactor = manual_compactor
         self.toolset = toolset
+        self._tracker = tracker
 
     async def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
@@ -149,6 +155,12 @@ class ChatAgent:
 
             if needs_approval:
                 approval_required = True
+
+                if self._tracker:
+                    self._tracker.track_tool_governance_event(
+                        EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED,
+                        tool_name=tool_name,
+                    )
 
                 project_name = resolve_project_name_for_tool(state.get("project"), call)
                 if project_name:
@@ -602,6 +614,15 @@ class ChatAgent:
                         self.toolset, agent_response
                     )
                     if validation_errors:
+                        # Denied tools are stripped from the toolset, so attempts
+                        # to call them surface here as validation errors.
+                        if self._tracker:
+                            for call in agent_response.tool_calls:
+                                if call["name"] in self.toolset.denied_tools:
+                                    self._tracker.track_tool_governance_event(
+                                        EventEnum.WORKFLOW_TOOL_BLOCKED,
+                                        tool_name=call["name"],
+                                    )
                         agent_response = await retry_malformed_tool_calls(
                             toolset=self.toolset,
                             agent_response=agent_response,

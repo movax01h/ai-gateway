@@ -1,0 +1,21 @@
+---
+description: Tracks LLM attempts to call a tool that was removed from the toolset by governance deny rules. Agent Platform surfaces count each attempt; in chat, retried model responses within one agent turn are not counted separately. Tool names may include customer-defined MCP tool names
+internal_events: true
+action: block_denied_duo_workflow_tool
+product_group: compliance
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Flow type (e.g. chat, software_development)
+  property:
+    description: Name of the denied tool the LLM attempted to call
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen during the same workflow.
+  tool_name:
+    description: Name of the denied tool the LLM attempted to call
+milestone: '19.3'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6429
+tiers:
+  - premium
+  - ultimate

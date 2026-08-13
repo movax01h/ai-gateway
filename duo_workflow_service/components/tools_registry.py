@@ -510,8 +510,16 @@ class ToolsRegistry:
             A new Toolset instance containing the requested tools.
         """
 
-        if self._denied_tools:
-            tool_names = [t for t in tool_names if t not in self._denied_tools]
+        # Only tools this toolset would otherwise include count as denied for
+        # it; a deny rule for a tool the flow never had is not a block.
+        denied_tools = {
+            t
+            for t in tool_names
+            if t in self._denied_tools and t in self._enabled_tools
+        }
+
+        if denied_tools:
+            tool_names = [t for t in tool_names if t not in denied_tools]
 
         all_tools = {}
         for tool_name in tool_names:
@@ -542,4 +550,5 @@ class ToolsRegistry:
             all_tools=all_tools,
             tool_options=tool_options or {},
             approval_policy=self,
+            denied_tools=denied_tools,
         )

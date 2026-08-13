@@ -5,6 +5,9 @@ from unittest.mock import Mock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node import (
     ToolApprovalFetchNode,
 )
@@ -16,6 +19,8 @@ from duo_workflow_service.agent_platform.v1.state.base import (
     RuntimeIOKey,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
+from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import EventEnum
 
 
 @pytest.fixture(name="conversation_history_key")
@@ -331,3 +336,271 @@ class TestToolApprovalFetchNodeUnknownEvent:
                 match="Unexpected event type for tool approval: unknown_type. Expected APPROVE, REJECT, or MODIFY.",
             ):
                 await tool_approval_fetch_node.run(state)
+
+
+class TestToolApprovalFetchNodeTracking:
+    """Test suite for approval-resolution internal event tracking."""
+
+    @pytest.fixture(name="tracking_fetch_node")
+    def tracking_fetch_node_fixture(
+        self,
+        conversation_history_key,
+        status_key,
+        approval_requests_key,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+    ):
+        """Fixture for ToolApprovalFetchNode with a real tracker and mock event client."""
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
+        return ToolApprovalFetchNode(
+            name="test_agent#tool_approval_fetch",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            approval_decision_key=RuntimeIOKey(
+                alias="tool_approval_decision",
+                factory=lambda _: IOKey(
+                    target="context", subkeys=["test_agent", "tool_approval_decision"]
+                ),
+            ),
+            tracker=tracker,
+            approval_requests_key=approval_requests_key,
+        )
+
+    @pytest.fixture(name="state_with_tool_calls")
+    def state_with_tool_calls_fixture(
+        self, base_flow_state, component_name, mock_ai_message_with_tool_calls
+    ):
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_with_tool_calls]
+        }
+        # Both tool calls were persisted by the request node as needing approval
+        state[FlowStateKeys.CONTEXT] = {
+            **state.get(FlowStateKeys.CONTEXT, {}),
+            component_name: {
+                "tool_approval_requests": [
+                    {"id": "call_123", "name": "test_tool"},
+                    {"id": "call_456", "name": "another_tool"},
+                ]
+            },
+        }
+        return state
+
+    def _expected_properties(self, flow_type, flow_id, tool_name, outcome):
+        return InternalEventAdditionalProperties(
+            label=flow_type.value,
+            property=outcome,
+            value=flow_id,
+            tool_name=tool_name,
+        )
+
+    @pytest.mark.asyncio
+    async def test_approve_tracks_resolution_with_approval_outcome(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        mock_internal_event_client,
+        flow_id,
+        flow_type,
+    ):
+        """APPROVE tracks one resolution event per pending tool call with outcome approval."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.APPROVE)
+
+            await tracking_fetch_node.run(state_with_tool_calls)
+
+        assert mock_internal_event_client.track_event.call_count == 2
+        for tool_name in ("test_tool", "another_tool"):
+            mock_internal_event_client.track_event.assert_any_call(
+                event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
+                additional_properties=self._expected_properties(
+                    flow_type, flow_id, tool_name, "approval"
+                ),
+                category=flow_type.value,
+            )
+
+    @pytest.mark.asyncio
+    async def test_reject_tracks_resolution_with_rejection_outcome(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        mock_internal_event_client,
+        flow_id,
+        flow_type,
+    ):
+        """REJECT tracks resolution events with outcome rejection."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.REJECT)
+
+            await tracking_fetch_node.run(state_with_tool_calls)
+
+        assert mock_internal_event_client.track_event.call_count == 2
+        mock_internal_event_client.track_event.assert_any_call(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
+            additional_properties=self._expected_properties(
+                flow_type, flow_id, "test_tool", "rejection"
+            ),
+            category=flow_type.value,
+        )
+
+    @pytest.mark.asyncio
+    async def test_modify_tracks_modification_and_omits_user_feedback(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        mock_internal_event_client,
+        flow_id,
+        flow_type,
+    ):
+        """MODIFY tracks outcome modification; user feedback text never appears in the payload."""
+        feedback = "please use --dry-run instead of --force"
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.MODIFY, message=feedback
+            )
+
+            await tracking_fetch_node.run(state_with_tool_calls)
+
+        assert mock_internal_event_client.track_event.call_count == 2
+        mock_internal_event_client.track_event.assert_any_call(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
+            additional_properties=self._expected_properties(
+                flow_type, flow_id, "test_tool", "modification"
+            ),
+            category=flow_type.value,
+        )
+        # Privacy: the user feedback and tool args must never appear in payloads
+        all_calls = str(mock_internal_event_client.track_event.call_args_list)
+        assert feedback not in all_calls
+        assert "--dry-run" not in all_calls
+        assert "param" not in all_calls  # tool call args
+        assert "'bar'" not in all_calls  # tool call args
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_tracks_resolution_only_for_requested_calls(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        component_name,
+        mock_internal_event_client,
+        flow_id,
+        flow_type,
+    ):
+        """Only the persisted requested subset is resolved: a pre-approved call in the same batch (present in the
+        AIMessage but never requested) tracks no resolve event."""
+        state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_requests": [{"id": "call_456", "name": "another_tool"}]
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.APPROVE)
+
+            await tracking_fetch_node.run(state_with_tool_calls)
+
+        mock_internal_event_client.track_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
+            additional_properties=self._expected_properties(
+                flow_type, flow_id, "another_tool", "approval"
+            ),
+            category=flow_type.value,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "requests_context",
+        [
+            {},
+            {"tool_approval_requests": []},
+        ],
+        ids=["missing", "empty"],
+    )
+    async def test_missing_or_empty_requested_calls_tracks_nothing(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        component_name,
+        mock_internal_event_client,
+        requests_context,
+    ):
+        """Missing or empty persisted approval-requests state tracks no events and does not crash."""
+        state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = requests_context
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.APPROVE)
+
+            result = await tracking_fetch_node.run(state_with_tool_calls)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        mock_internal_event_client.track_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tracking_failure_does_not_break_approval_flow(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        mock_internal_event_client,
+    ):
+        """A failing event client is swallowed by the emitter; the approval flow completes normally."""
+        mock_internal_event_client.track_event.side_effect = RuntimeError("boom")
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.APPROVE)
+
+            result = await tracking_fetch_node.run(state_with_tool_calls)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        assert mock_internal_event_client.track_event.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_malformed_persisted_entries_are_skipped(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        component_name,
+        mock_internal_event_client,
+        flow_id,
+        flow_type,
+    ):
+        """Malformed persisted entries are skipped; only the valid entry tracks a resolve event."""
+        state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_requests": [
+                {"id": "call_123"},  # dict without a name
+                "call_456",  # not a dict at all
+                {"id": "call_456", "name": "another_tool"},
+            ]
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.APPROVE)
+
+            result = await tracking_fetch_node.run(state_with_tool_calls)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        mock_internal_event_client.track_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
+            additional_properties=self._expected_properties(
+                flow_type, flow_id, "another_tool", "approval"
+            ),
+            category=flow_type.value,
+        )

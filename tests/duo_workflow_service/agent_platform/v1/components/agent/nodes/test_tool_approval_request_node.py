@@ -5,8 +5,12 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_request_node import (
     ToolApprovalRequestNode,
+    approval_requests_key_for,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -31,6 +35,7 @@ from duo_workflow_service.tools import (
     Toolset,
     UnknownToolError,
 )
+from lib.internal_events.event_enum import EventEnum
 
 _APPROVAL_EVENTS = [UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST]
 
@@ -756,3 +761,279 @@ class TestToolApprovalRequestNodeEdgeCases:
             result = await tool_approval_request_node.run(state)
 
         assert [entry["message_id"] for entry in result["ui_chat_log"]] == ["call_3"]
+
+
+class TestToolApprovalRequestNodeTracking:
+    """Test suite for approval-request internal event tracking."""
+
+    @pytest.fixture(name="mock_tracker")
+    def mock_tracker_fixture(self):
+        """Fixture for mock tool event tracker."""
+        return Mock(spec=ToolEventTracker)
+
+    @pytest.fixture(name="tracking_node")
+    def tracking_node_fixture(
+        self,
+        conversation_history_key,
+        status_key,
+        approval_requests_key,
+        mock_toolset,
+        ui_history,
+        mock_tracker,
+    ):
+        """Fixture for ToolApprovalRequestNode instance with a tracker."""
+        return ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=[],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+            tracker=mock_tracker,
+            approval_requests_key=approval_requests_key,
+        )
+
+    @pytest.mark.asyncio
+    async def test_tracks_one_request_event_per_tool_needing_approval(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_tracker,
+    ):
+        """A batch of two tools needing approval tracks two request events."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "test_tool", "args": {"param": "value"}},
+            {"id": "call_2", "name": "another_tool", "args": {"foo": "bar"}},
+        ]
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components."
+            "agent.nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.return_value = "Execute tool"
+
+            result = await tracking_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
+        assert mock_tracker.track_tool_governance_event.call_count == 2
+        mock_tracker.track_tool_governance_event.assert_any_call(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED,
+            tool_name="test_tool",
+        )
+        mock_tracker.track_tool_governance_event.assert_any_call(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED,
+            tool_name="another_tool",
+        )
+        # Privacy: tool arguments must never appear in the tracking calls
+        assert "value" not in str(
+            mock_tracker.track_tool_governance_event.call_args_list
+        )
+        # Persisted for the fetch node
+        assert result["context"][component_name]["tool_approval_requests"] == [
+            {"id": "call_1", "name": "test_tool"},
+            {"id": "call_2", "name": "another_tool"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_tracks_and_persists_only_unapproved_calls(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_tracker,
+    ):
+        """A mixed batch (one session-approved, one needing approval) tracks exactly one request event and persists only
+        the call that needs approval."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "approved_tool", "args": {"cmd": "approved"}},
+            {"id": "call_2", "name": "unapproved_tool", "args": {"cmd": "unapproved"}},
+        ]
+
+        # Only the first call is session-approved
+        mock_toolset.resolve_approval_source.side_effect = lambda name, _args: (
+            ApprovalSource.SESSION_APPROVAL if name == "approved_tool" else None
+        )
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components."
+            "agent.nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.return_value = "Execute tool"
+
+            result = await tracking_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value
+        mock_tracker.track_tool_governance_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED,
+            tool_name="unapproved_tool",
+        )
+        assert result["context"][component_name]["tool_approval_requests"] == [
+            {"id": "call_2", "name": "unapproved_tool"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_request_event_when_all_tools_pre_approved(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_tracker,
+        mock_ai_message_with_tool_calls,
+    ):
+        """Pre-approved tools track no approval-request event."""
+        mock_toolset.resolve_approval_source.return_value = (
+            ApprovalSource.SESSION_APPROVAL
+        )
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_with_tool_calls]
+        }
+
+        result = await tracking_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        mock_tracker.track_tool_governance_event.assert_not_called()
+        # Nothing is persisted when nothing required approval
+        assert "context" not in result
+
+    @pytest.mark.asyncio
+    async def test_no_request_events_when_nothing_renders(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_tracker,
+    ):
+        """A failed render raises without emitting request events for a prompt the user never saw."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "test_tool", "args": {"param": "value"}}
+        ]
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components."
+            "agent.nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.return_value = None
+
+            with pytest.raises(
+                RuntimeError, match="No valid tool calls found to display for approval"
+            ):
+                await tracking_node.run(state)
+
+        mock_tracker.track_tool_governance_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_denied_tool_tracks_block_event(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_tracker,
+    ):
+        """Denied tools are stripped from the toolset, so attempts surface here as invalid calls."""
+        denied_call = {"id": "call_1", "name": "denied_tool", "args": {"cmd": "rm"}}
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [denied_call]
+        mock_toolset.denied_tools = {"denied_tool"}
+        mock_toolset.validate_tool_call.side_effect = MalformedToolCallError(
+            "Tool: 'denied_tool' not found", tool_call=denied_call
+        )
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        result = await tracking_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        mock_tracker.track_tool_governance_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+            tool_name="denied_tool",
+        )
+        # Privacy: tool arguments must never appear in the tracking calls
+        assert "rm" not in str(mock_tracker.track_tool_governance_event.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_invalid_non_denied_tool_does_not_track_block_event(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_tracker,
+    ):
+        """A hallucinated tool that no deny rule covers tracks no block event."""
+        invalid_call = {"id": "call_1", "name": "hallucinated_tool", "args": {}}
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [invalid_call]
+        mock_toolset.denied_tools = {"some_other_denied_tool"}
+        mock_toolset.validate_tool_call.side_effect = MalformedToolCallError(
+            "Tool: 'hallucinated_tool' not found", tool_call=invalid_call
+        )
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        result = await tracking_node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        mock_tracker.track_tool_governance_event.assert_not_called()
+
+
+class TestApprovalRequestsKeyFor:
+    """Test suite for the shared approval-requests key builder."""
+
+    def test_resolves_beside_component_scoped_decision_key(self):
+        decision_static = IOKey(
+            target="context",
+            subkeys=["agent", "tool_approval_decision"],
+            optional=True,
+        )
+        decision_key = RuntimeIOKey(
+            alias="tool_approval_decision", factory=lambda _: decision_static
+        )
+
+        resolved = approval_requests_key_for(decision_key).to_iokey({})
+
+        assert resolved.target == "context"
+        assert resolved.subkeys == ["agent", "tool_approval_requests"]
+        assert resolved.optional
+
+    def test_follows_subsession_scoped_decision_key(self):
+        """Under a supervisor the decision key is subsession-scoped; the requests key must follow it."""
+        decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda state: IOKey(
+                target="context",
+                subkeys=["supervisor", state["subsession"], "tool_approval_decision"],
+                optional=True,
+            ),
+        )
+
+        resolved = approval_requests_key_for(decision_key).to_iokey(
+            {"subsession": "subsession_1"}
+        )
+
+        assert resolved.subkeys == [
+            "supervisor",
+            "subsession_1",
+            "tool_approval_requests",
+        ]

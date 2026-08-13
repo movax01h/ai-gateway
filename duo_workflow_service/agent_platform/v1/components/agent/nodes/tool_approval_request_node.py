@@ -1,4 +1,4 @@
-__all__ = ["ToolApprovalRequestNode"]
+__all__ = ["ToolApprovalRequestNode", "approval_requests_key_for"]
 
 import asyncio
 from typing import Any, Optional
@@ -6,6 +6,9 @@ from typing import Any, Optional
 import structlog.stdlib
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
     resolve_session_id,
@@ -16,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     FlowStateKeys,
+    IOKey,
     RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
@@ -31,8 +35,28 @@ from duo_workflow_service.tools import (
     UnknownToolError,
     format_tool_display_message,
 )
+from lib.internal_events.event_enum import EventEnum
 
 log = structlog.stdlib.get_logger(__name__)
+
+
+def approval_requests_key_for(decision_key: RuntimeIOKey) -> RuntimeIOKey:
+    """Build the requests key the request node shares with the fetch node.
+
+    The key resolves beside the decision key (same parent subkeys), so it inherits the decision key's subsession scoping
+    under a supervisor.
+    """
+
+    def _factory(state: FlowState) -> IOKey:
+        decision_iokey = decision_key.to_iokey(state)
+        parent_subkeys = (decision_iokey.subkeys or [])[:-1]
+        return IOKey(
+            target=decision_iokey.target,
+            subkeys=[*parent_subkeys, "tool_approval_requests"],
+            optional=True,
+        )
+
+    return RuntimeIOKey(alias="tool_approval_requests", factory=_factory)
 
 
 class ToolApprovalRequestNode:
@@ -60,6 +84,9 @@ class ToolApprovalRequestNode:
         ui_history: UI logging history. Its events must include
             ``ON_TOOL_APPROVAL_REQUEST``; ``run`` raises if nothing survives.
         session_id_key: IOKey resolving the active subsession ID.
+        tracker: Optional tool event tracker for approval-request and blocked-tool events
+        approval_requests_key: Optional RuntimeIOKey shared with
+            ToolApprovalFetchNode; persists which tool calls required approval.
     """
 
     def __init__(
@@ -72,6 +99,8 @@ class ToolApprovalRequestNode:
         status_key: RuntimeIOKey,
         ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
+        tracker: ToolEventTracker | None = None,
+        approval_requests_key: RuntimeIOKey | None = None,
     ):
         self.name = name
         self._conversation_history_key = conversation_history_key
@@ -80,6 +109,8 @@ class ToolApprovalRequestNode:
         self._status_key = status_key
         self._ui_history = ui_history
         self._session_id_key = session_id_key
+        self._tracker = tracker
+        self._approval_requests_key = approval_requests_key
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Validate tool calls and request approval."""
@@ -111,6 +142,17 @@ class ToolApprovalRequestNode:
 
         # If any tool calls are invalid, reject the entire batch.
         if invalid_calls:
+            # Denied tools are stripped from the toolset, so attempts to call
+            # them surface here as invalid calls rather than in the tool node.
+            if self._tracker:
+                for error in invalid_calls:
+                    blocked_name = error.tool_call.get("name")
+                    if blocked_name in self._toolset.denied_tools:
+                        self._tracker.track_tool_governance_event(
+                            event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+                            tool_name=blocked_name,
+                        )
+
             invalid_by_id = {e.tool_call["id"]: e for e in invalid_calls}
             error_messages = [
                 ToolMessage(
@@ -161,10 +203,28 @@ class ToolApprovalRequestNode:
             WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, state
         )
 
+        # Persist which calls required approval so the fetch node resolves exactly this set (ids/names only).
+        if self._approval_requests_key is not None:
+            requested_calls = [
+                {"id": call.get("id"), "name": call["name"]} for call in needs_approval
+            ]
+            result = {
+                **result,
+                **self._approval_requests_key.to_nested_dict(requested_calls, state),
+            }
+
         # Guard on what survived the event filter, not on what was written.
         updates = self._ui_history.pop_state_updates()
         if not updates[FlowStateKeys.UI_CHAT_LOG]:
             raise RuntimeError("No valid tool calls found to display for approval")
+
+        # Emitted after the guard so a failed render cannot orphan request events.
+        if self._tracker:
+            for call in needs_approval:
+                self._tracker.track_tool_governance_event(
+                    event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED,
+                    tool_name=call["name"],
+                )
 
         return {**result, **updates}
 

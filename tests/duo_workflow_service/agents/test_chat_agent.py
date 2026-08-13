@@ -13,6 +13,9 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
+    ToolEventTracker,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
 from duo_workflow_service.components.tools_registry import ToolsRegistry
@@ -40,7 +43,9 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
-from duo_workflow_service.tools import Toolset
+from duo_workflow_service.tools import MalformedToolCallError, Toolset
+from lib.events import GLReportingEventContext
+from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -1840,3 +1845,202 @@ class TestServerToolResponse:
             if e["message_type"] == MessageTypeEnum.TOOL
         ]
         assert tool_entries == []
+
+
+class TestToolApprovalRequestTracking:
+    """Test suite for approval-request internal event tracking in ChatAgent."""
+
+    @staticmethod
+    def _make_agent(mock_toolset, internal_event_client, approval_side_effect):
+        mock_model = Mock()
+        mock_model._is_auto_approved_by_agentic_mock_model = False
+
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_model.return_value = mock_model
+
+        mock_tools_registry = Mock(spec=ToolsRegistry)
+        mock_tools_registry.approval_required.side_effect = approval_side_effect
+
+        return ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=mock_tools_registry,
+            system_template_override=None,
+            toolset=mock_toolset,
+            optimizer_pipeline=_make_passthrough_pipeline(),
+            tracker=ToolEventTracker(
+                flow_id="wf-123",
+                flow_type=GLReportingEventContext.from_workflow_definition("chat"),
+                internal_event_client=internal_event_client,
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_needing_approval_tracks_request_event(
+        self, input, mock_toolset, internal_event_client
+    ):
+        """A tool call requiring approval tracks one request event with no tool args."""
+        chat_agent = self._make_agent(
+            mock_toolset, internal_event_client, lambda *_args, **_kwargs: True
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(
+                content="I need to use a tool",
+                tool_calls=[
+                    {
+                        "name": "run_command",
+                        "args": {"command": "rm -rf /tmp/secret-path"},
+                        "id": "call_123",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        )
+
+        result = await chat_agent.run(input)
+
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+        internal_event_client.track_event.assert_called_once_with(
+            event_name="request_duo_workflow_tool_approval",
+            additional_properties=InternalEventAdditionalProperties(
+                label="chat",
+                property="run_command",
+                value="wf-123",
+                tool_name="run_command",
+            ),
+            category="chat",
+        )
+        # Privacy: command text must never appear in the payload
+        assert "rm -rf" not in str(internal_event_client.track_event.call_args.kwargs)
+
+    @pytest.mark.asyncio
+    async def test_batch_of_two_tools_needing_approval_tracks_two_request_events(
+        self, input, mock_toolset, internal_event_client
+    ):
+        """Two tools needing approval track two request events."""
+        chat_agent = self._make_agent(
+            mock_toolset, internal_event_client, lambda *_args, **_kwargs: True
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(
+                content="I need to use two tools",
+                tool_calls=[
+                    {
+                        "name": "run_command",
+                        "args": {"command": "ls"},
+                        "id": "call_1",
+                        "type": "tool_call",
+                    },
+                    {
+                        "name": "edit_file",
+                        "args": {"path": "a.py"},
+                        "id": "call_2",
+                        "type": "tool_call",
+                    },
+                ],
+            )
+        )
+
+        result = await chat_agent.run(input)
+
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+        assert internal_event_client.track_event.call_count == 2
+        tracked_tools = [
+            call.kwargs["additional_properties"].extra["tool_name"]
+            for call in internal_event_client.track_event.call_args_list
+        ]
+        assert tracked_tools == ["run_command", "edit_file"]
+
+    @pytest.mark.asyncio
+    async def test_denied_tool_call_tracks_block_event(
+        self, input, mock_toolset, internal_event_client
+    ):
+        """A response calling a denied tool tracks one block event at validation time."""
+        chat_agent = self._make_agent(
+            mock_toolset, internal_event_client, lambda *_args, **_kwargs: True
+        )
+        denied_call = {
+            "name": "denied_tool",
+            "args": {"command": "rm -rf /tmp/secret-path"},
+            "id": "call_1",
+            "type": "tool_call",
+        }
+        mock_toolset.denied_tools = {"denied_tool"}
+        mock_toolset.validate_tool_call.side_effect = MalformedToolCallError(
+            "Tool: 'denied_tool' not found", tool_call=denied_call
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="I need a tool", tool_calls=[denied_call])
+        )
+
+        await chat_agent.run(input)
+
+        block_calls = [
+            call
+            for call in internal_event_client.track_event.call_args_list
+            if call.kwargs["event_name"] == "block_denied_duo_workflow_tool"
+        ]
+        assert len(block_calls) == 1
+        assert block_calls[0].kwargs[
+            "additional_properties"
+        ] == InternalEventAdditionalProperties(
+            label="chat",
+            property="denied_tool",
+            value="wf-123",
+            tool_name="denied_tool",
+        )
+        # Privacy: command text must never appear in the payload
+        assert "rm -rf" not in str(internal_event_client.track_event.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_invalid_non_denied_tool_tracks_no_block_event(
+        self, input, mock_toolset, internal_event_client
+    ):
+        """A malformed call to a tool no deny rule covers tracks no block event."""
+        chat_agent = self._make_agent(
+            mock_toolset, internal_event_client, lambda *_args, **_kwargs: True
+        )
+        invalid_call = {
+            "name": "hallucinated_tool",
+            "args": {},
+            "id": "call_1",
+            "type": "tool_call",
+        }
+        mock_toolset.denied_tools = {"some_other_denied_tool"}
+        mock_toolset.validate_tool_call.side_effect = MalformedToolCallError(
+            "Tool: 'hallucinated_tool' not found", tool_call=invalid_call
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="I need a tool", tool_calls=[invalid_call])
+        )
+
+        await chat_agent.run(input)
+
+        internal_event_client.track_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pre_approved_tool_tracks_no_request_event(
+        self, input, mock_toolset, internal_event_client
+    ):
+        """A tool call not requiring approval tracks no request event."""
+        chat_agent = self._make_agent(
+            mock_toolset, internal_event_client, lambda *_args, **_kwargs: False
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(
+                content="I need to use a tool",
+                tool_calls=[
+                    {
+                        "name": "read_file",
+                        "args": {"path": "a.py"},
+                        "id": "call_123",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        )
+
+        result = await chat_agent.run(input)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION
+        internal_event_client.track_event.assert_not_called()

@@ -42,6 +42,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     ToolApprovalFetchNode,
     ToolApprovalRequestNode,
     ToolNode,
+    approval_requests_key_for,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -483,6 +484,7 @@ class AgentComponentBase(BaseComponent):
         graph: StateGraph,
         conversation_history_key: RuntimeIOKey,
         session_id_key: BaseIOKey,
+        tracker: ToolEventTracker,
     ) -> None:
         """Add tool approval nodes and edges to the graph when ``require_tool_approval`` is True.
 
@@ -499,9 +501,14 @@ class AgentComponentBase(BaseComponent):
                 conversation-history slot at runtime.
             session_id_key: ``IOKey`` resolving the active subsession ID, so the
                 prompt is attributed to the subagent that raised it.
+            tracker: Tool event tracker shared with the component's other nodes.
         """
         if not self.require_tool_approval:
             return
+
+        approval_requests_key = approval_requests_key_for(
+            self._tool_approval_decision_key
+        )
 
         node_tool_approval_request = ToolApprovalRequestNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request",
@@ -524,6 +531,8 @@ class AgentComponentBase(BaseComponent):
                 ),
             ),
             session_id_key=session_id_key,
+            tracker=tracker,
+            approval_requests_key=approval_requests_key,
         )
 
         node_tool_approval_fetch = ToolApprovalFetchNode(
@@ -534,6 +543,8 @@ class AgentComponentBase(BaseComponent):
                 factory=lambda _: IOKey(target="status"),
             ),
             approval_decision_key=self._tool_approval_decision_key,
+            tracker=tracker,
+            approval_requests_key=approval_requests_key,
         )
 
         graph.add_node(node_tool_approval_request.name, node_tool_approval_request.run)
@@ -879,6 +890,7 @@ class AgentComponent(AgentComponentBase):
             graph,
             conversation_history_key=self._conversation_history_key,
             session_id_key=self._session_id_key,
+            tracker=tracker,
         )
 
         graph.add_conditional_edges(

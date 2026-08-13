@@ -35,6 +35,7 @@ from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.tool_governance import track_tool_governance_event
 from lib.context import client_capabilities, extract_finish_reason, tool_executions
 from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
@@ -116,6 +117,14 @@ class ToolsExecutor:
             tool_name = tool_call["name"]
 
             if tool_name not in self._toolset:
+                if tool_name in self._toolset.denied_tools:
+                    track_tool_governance_event(
+                        self._internal_event_client,
+                        EventEnum.WORKFLOW_TOOL_BLOCKED,
+                        flow_type=self._workflow_type.value,
+                        flow_id=self._workflow_id,
+                        tool_name=tool_name,
+                    )
                 responses.append(
                     self._process_response(tool_call, f"Tool {tool_name} not found")
                 )

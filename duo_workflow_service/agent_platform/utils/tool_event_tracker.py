@@ -2,6 +2,7 @@ from langchain_core.tools import BaseTool, ToolException
 from pydantic_core import ValidationError
 
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.tracking.tool_governance import track_tool_governance_event
 from lib.context import client_capabilities, tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -54,6 +55,22 @@ class ToolEventTracker:
             event_name=event_name.value,
             additional_properties=additional_properties,
             category=self._flow_type.value,
+        )
+
+    def track_tool_governance_event(
+        self,
+        event_name: EventEnum,
+        tool_name: str | None = None,
+        outcome: str | None = None,
+    ) -> None:
+        """Track a tool-governance internal event (approval requested/resolved, denied tool blocked)."""
+        track_tool_governance_event(
+            self._internal_event_client,
+            event_name,
+            flow_type=self._flow_type.value,
+            flow_id=self._flow_id,
+            tool_name=tool_name,
+            outcome=outcome,
         )
 
     def _record_metric(

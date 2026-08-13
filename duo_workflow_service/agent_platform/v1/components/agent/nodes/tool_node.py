@@ -168,6 +168,11 @@ class ToolNode:
         tool_call_id = tool_call.get("id")
 
         if tool_name not in self._toolset:
+            if tool_name in self._toolset.denied_tools:
+                self._tracker.track_tool_governance_event(
+                    event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+                    tool_name=tool_name,
+                )
             response: str | list | dict = f"Tool {tool_name} not found"
         else:
             response = await self._execute_tool(
