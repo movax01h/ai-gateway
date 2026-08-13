@@ -208,3 +208,104 @@ async def test_intercept_service_auth_enabled(
     user = current_user.get()
     assert user.is_authenticated
     mock_cloud_connector_ready.assert_called_once()
+
+
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_claims",
+    [
+        pytest.param(None, id="no_extra_claims"),
+        pytest.param({}, id="empty_extra_claims"),
+        pytest.param({"gitlab_root_namespace_id": None}, id="claim_is_none"),
+        pytest.param(
+            {"gitlab_root_namespace_id": "not-a-number"}, id="claim_is_invalid"
+        ),
+        pytest.param({"gitlab_root_namespace_id": True}, id="claim_is_bool"),
+        pytest.param({"gitlab_root_namespace_id": 0}, id="claim_is_zero"),
+        pytest.param({"gitlab_root_namespace_id": -1}, id="claim_is_negative"),
+    ],
+)
+async def test_intercept_service_allows_saas_without_root_namespace_id(
+    _mock_cloud_connector_ready,
+    mock_continuation,
+    handler_call_details,
+    extra_claims,
+):
+    with patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+        return_value=(
+            CloudConnectorUser(
+                True, claims=UserClaims(gitlab_realm="saas", extra=extra_claims)
+            ),
+            None,
+        ),
+    ):
+        interceptor = AuthenticationInterceptor()
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    mock_continuation.assert_awaited_once()
+
+
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_claims",
+    [
+        pytest.param({"gitlab_root_namespace_id": 42}, id="claim_integer"),
+        pytest.param({"gitlab_root_namespace_id": "77"}, id="claim_string"),
+    ],
+)
+async def test_intercept_service_accepts_saas_with_root_namespace_id(
+    _mock_cloud_connector_ready,
+    mock_continuation,
+    handler_call_details,
+    extra_claims,
+):
+    with patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+        return_value=(
+            CloudConnectorUser(
+                True, claims=UserClaims(gitlab_realm="saas", extra=extra_claims)
+            ),
+            None,
+        ),
+    ):
+        interceptor = AuthenticationInterceptor()
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    mock_continuation.assert_awaited_once()
+
+
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.asyncio
+async def test_intercept_service_accepts_non_saas_without_root_namespace_id(
+    _mock_cloud_connector_ready,
+    mock_continuation,
+    handler_call_details,
+):
+    with patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+        return_value=(
+            CloudConnectorUser(
+                True, claims=UserClaims(gitlab_realm="self-managed", extra=None)
+            ),
+            None,
+        ),
+    ):
+        interceptor = AuthenticationInterceptor()
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    mock_continuation.assert_awaited_once()

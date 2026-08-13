@@ -8,6 +8,7 @@ import grpc
 import structlog
 from gitlab_cloud_connector import (
     AuthProvider,
+    CloudConnectorUser,
     CompositeProvider,
     GitLabOidcProvider,
     LocalAuthProvider,
@@ -19,6 +20,10 @@ from grpc.aio import ServicerContext
 
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from lib.context import cloud_connector_token_context_var
+from lib.jwt import (
+    GITLAB_ROOT_NAMESPACE_ID_CLAIM,
+    root_namespace_id_from_claims_extra,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -75,8 +80,29 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
                 grpc.StatusCode.UNAUTHENTICATED, cloud_connector_error.error_message
             )
 
+        # This check runs only for authenticated users; the error check above
+        # ensures cloud_connector_user is valid before we inspect its claims.
+        if not self._has_valid_saas_root_namespace_claim(cloud_connector_user):
+            claims = cloud_connector_user.claims
+            logger.warning(
+                "gitlab_root_namespace_id claim unusable for SaaS request",
+                global_user_id=cloud_connector_user.global_user_id,
+                claim_value=(
+                    claims.extra.get(GITLAB_ROOT_NAMESPACE_ID_CLAIM)
+                    if claims and claims.extra
+                    else None
+                ),
+            )
+
         current_user.set(cloud_connector_user)
         return await continuation(handler_call_details)
+
+    def _has_valid_saas_root_namespace_claim(self, user: CloudConnectorUser) -> bool:
+        claims = user.claims
+        if not claims or claims.gitlab_realm != "saas":
+            return True
+
+        return root_namespace_id_from_claims_extra(claims.extra) is not None
 
     def _abort_handler(
         self, code: grpc.StatusCode, details: str

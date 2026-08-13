@@ -149,6 +149,7 @@ class TestUserAccessTokenSuccessSaas:
             scopes=["complete_code", "ai_gateway_model_provider_proxy"],
             gitlab_realm="saas",
             gitlab_instance_id="1234",
+            extra={"gitlab_root_namespace_id": "3456"},
         )
         return CloudConnectorUser(authenticated=True, claims=claims)
 
@@ -364,12 +365,20 @@ class TestUserAccessTokenJwtGenerationFailed:
 
 class TestSaasExtraClaims:
     @pytest.fixture(name="auth_user")
-    def auth_user_fixture(self):
+    def auth_user_fixture(self, request):
+        extra = getattr(
+            request,
+            "param",
+            {
+                SKIP_USAGE_CUTOFF_CLAIM: "true",
+                "gitlab_root_namespace_id": "3456",
+            },
+        )
         claims = UserClaims(
             scopes=["complete_code", "ai_gateway_model_provider_proxy"],
             gitlab_realm="saas",
             gitlab_instance_id="1234",
-            extra={SKIP_USAGE_CUTOFF_CLAIM: "true"},
+            extra=extra,
         )
         return CloudConnectorUser(authenticated=True, claims=claims)
 
@@ -400,10 +409,68 @@ class TestSaasExtraClaims:
         assert decoded_token["gitlab_realm"] == "saas"
         assert decoded_token["gitlab_project_id"] == "5678"
         assert decoded_token["gitlab_namespace_id"] == "9012"
-        assert decoded_token["gitlab_root_namespace_id"] == "3456"
+        # gitlab_root_namespace_id is normalized to int by the strict validator,
+        # regardless of whether the incoming JWT claim was a string or an int.
+        assert decoded_token["gitlab_root_namespace_id"] == 3456
         assert decoded_token["skip_usage_cutoff"] == "true"
 
-    def test_user_access_token_saas_without_extra_claims(self, mock_client: TestClient):
+    @pytest.mark.parametrize(
+        ("auth_user", "header", "expected"),
+        [
+            pytest.param({}, "3456", 3456, id="no_claim_falls_back_to_header"),
+            pytest.param(
+                {"gitlab_root_namespace_id": "not-a-number"},
+                "3456",
+                3456,
+                id="invalid_claim_falls_back_to_header",
+            ),
+            pytest.param({}, None, None, id="no_claim_and_no_header"),
+            pytest.param({}, "not-a-number", None, id="invalid_header_rejected"),
+            pytest.param({}, "-1", None, id="negative_header_rejected"),
+            pytest.param({}, "0", None, id="zero_header_rejected"),
+        ],
+        indirect=["auth_user"],
+    )
+    def test_root_namespace_id_header_fallback(
+        self, mock_client: TestClient, header, expected
+    ):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "saas",
+        }
+        if header is not None:
+            headers["X-Gitlab-Root-Namespace-Id"] = header
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert _decode_token(response)["gitlab_root_namespace_id"] == expected
+
+
+def _decode_token(response):
+    return jwt.decode(
+        response.json()["token"],
+        TEST_PUBLIC_KEY,
+        audience="gitlab-ai-gateway",
+        algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
+    )
+
+
+class TestSaasRootNamespaceIdFromJwt:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(
+            scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+            gitlab_realm="saas",
+            gitlab_instance_id="1234",
+            extra={"gitlab_root_namespace_id": "42"},
+        )
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    def test_gitlab_root_namespace_id_uses_jwt_claim(self, mock_client: TestClient):
         headers = {
             "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
             "Authorization": "Bearer 12345",
@@ -415,17 +482,50 @@ class TestSaasExtraClaims:
         response = mock_client.post("/code/user_access_token", headers=headers)
 
         assert response.status_code == status.HTTP_200_OK
+        # The string claim "42" is normalized to int 42 by the strict validator.
+        assert _decode_token(response)["gitlab_root_namespace_id"] == 42
 
-        parsed_response = response.json()
-        decoded_token = jwt.decode(
-            parsed_response["token"],
-            TEST_PUBLIC_KEY,
-            audience="gitlab-ai-gateway",
-            algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
+    def test_gitlab_root_namespace_id_ignores_conflicting_header(
+        self, mock_client: TestClient
+    ):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "saas",
+            "X-Gitlab-Root-Namespace-Id": "99",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert _decode_token(response)["gitlab_root_namespace_id"] == 42
+
+
+class TestSaasRootNamespaceIdFromJwtInteger:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(
+            scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+            gitlab_realm="saas",
+            gitlab_instance_id="1234",
+            extra={"gitlab_root_namespace_id": 42},
         )
+        return CloudConnectorUser(authenticated=True, claims=claims)
 
-        assert decoded_token["gitlab_realm"] == "saas"
-        # Extra claims should be None if not provided
-        assert decoded_token["gitlab_project_id"] is None
-        assert decoded_token["gitlab_namespace_id"] is None
-        assert decoded_token["gitlab_root_namespace_id"] is None
+    def test_gitlab_root_namespace_id_accepts_integer_claim(
+        self, mock_client: TestClient
+    ):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "saas",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert _decode_token(response)["gitlab_root_namespace_id"] == 42

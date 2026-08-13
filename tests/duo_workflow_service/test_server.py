@@ -10,15 +10,22 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import grpc
 import litellm
 import pytest
+import structlog
 from anthropic import APIStatusError
 from dependency_injector import providers
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
+    CloudConnectorUser,
+    CompositeProvider,
     GitLabUnitPrimitive,
+    LocalAuthProvider,
+    TokenAuthority,
+    UserClaims,
 )
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
+from jose import jwt
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from packaging.version import Version
@@ -92,6 +99,52 @@ from lib.internal_events.event_enum import (
     EventPropertyEnum,
 )
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
+
+# Real RSA key pair, used only by tests that exercise the actual Cloud Connector
+# encode/decode path instead of stubbing claims. Same pair as tests/api/v1/test_v1_code.py.
+# JSON Web Key can be generated via https://mkjwk.org/
+TEST_PRIVATE_KEY = """
+-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDOSYeAVOeCI7uY
+/b32rEmj2uh39z0pLLJ3UbkX+Ukxe2hnnpFqzcgCcpA+XXu8Nepfw/pOcXavb5Jm
+1sI3Cm7mjLe+s2+lvTp5PpUh4GMP26J2HRU9NBQdzRVzEYM5DzC9H75GCjF3POSO
+sf4ouzCnsNgpDHuKm3yT0Ck1SvR/87iBYOF2xnbfegJO+O4USKZnlYythkDgkR7r
+9Ris+JzbIKKOHQf/w+GPYwvL6eM8LyTb5fVZGilCzm4H9onErhJc8fQijNJSwPUn
++Md/+Uu1pmE9raHHTe9cD+QXEupJn0NWU+bXFVJochYvm8ULP4AlGpfvf3CxGg08
+pyAfq+BhAgMBAAECggEATxjgjPOBRWRAJVx9/1x2bA6e/ojdebE6yQeb6jZau09v
+a/PgHEzFOTMGXfNoY3Vk5c12Z6eX85LbVvVXyNUGSv5/4e5Zi/pvtlepxTCNq2Hy
+/EkQgMQ8RmUBqXp4j2Nks8+9HIwCBY9ir9hN9P45nMLxT2QK5s3RybeSZW3VLE3u
+IGV+S8N4K4WhSzyNdZ7hvHTzvIi8s05KAGPAAGqZyF7WNiQhIlFSI8jGj7aNx9+5
+zQ5Dify1c1jRORvxdMPE5FumumLghf869Nhu8h/7NlJVokgIdVhcCcMIQlW0VZdC
+uFpGfCXmEf7iSaRFjRs4De1JLCEb6BLKwxnU2BVstQKBgQDnF9lvn8SzrCFEXZhc
+vhsm//xoAvLSw00ObfEUyDnnjmu5tyBncJiPe6J+aO+StI7yXzELRr+yiCky5/MJ
+QqRSgKEzrl6OAiTvZqMOG5ee5gW62GQp81549ZUCyYMVsfP+DDyMQaHYWi4T8wq0
+hV4uuvTQNmqzGs45Ell0fyAuAwKBgQDkhUDB2W8TB4W4qspBV9hRIUHVv998s8kJ
+sLiX+fL1H8tORrqzlbcRMTxGb7X+G+3jz9NG6tqrDRmLlg3D4WPhlGgxMqDtZaDu
+7KXZuKm0+nCTcNUuYgBB9uA+rWAA+eFIANLA2eLnmi4p+4t1oR+p2ap7DFHVkQMS
+YYia83/MywKBgF+YCAQazR2d6K0FIo/KvCSn49uKzLPOwkNjy0RTh1B4I6vRSwA/
+HXzNIey0r9W6Bx/PrNQDUi0iEhjSxkBgZuUR/J0KVmbcEDdP98dQNqoucNRXyydn
+Wv8iZ5+diDIjSNEgcrN6Ot7qfwEVmqoOOWWPRNIUkJLCVehZ5NNB+yfNAoGAB04X
+LtsziMkxxiB3jLUxLg7BGwMiMstQfuXOUNVlpd5ZUmxCZaFAk+UeByZlC/V6mlC3
+cUnqqZMmoOawE/XtinWDCyeSK2SXS2v3NUmI60ciOCRgPDZXycQJkRdbvUw/nlyg
+YBfXAA5WsXLgF2eKKpTRtVNEfm4/SeQiSMnF6RcCgYBq1nGimrNcjKOs0dxuzG6F
+PO/rnSfjDo0kziQWSZa1VSX169+QRlyuonKsZlJDh9uvzsGliTmF7Q1rYGz7LdKn
+8iTBxQ+vGwmSXnWU1lYxeGAzzdd3jdobmXBlXafpfNALSFMfX0AoXaZmrERrSCUd
+OI8NZeUpzWYJEt7fPfKP2g==
+-----END PRIVATE KEY-----
+"""
+
+TEST_PUBLIC_KEY = """
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzkmHgFTngiO7mP299qxJ
+o9rod/c9KSyyd1G5F/lJMXtoZ56Ras3IAnKQPl17vDXqX8P6TnF2r2+SZtbCNwpu
+5oy3vrNvpb06eT6VIeBjD9uidh0VPTQUHc0VcxGDOQ8wvR++RgoxdzzkjrH+KLsw
+p7DYKQx7ipt8k9ApNUr0f/O4gWDhdsZ233oCTvjuFEimZ5WMrYZA4JEe6/UYrPic
+2yCijh0H/8Phj2MLy+njPC8k2+X1WRopQs5uB/aJxK4SXPH0IozSUsD1J/jHf/lL
+taZhPa2hx03vXA/kFxLqSZ9DVlPm1xVSaHIWL5vFCz+AJRqX739wsRoNPKcgH6vg
+YQIDAQAB
+-----END PUBLIC KEY-----
+"""
 
 
 @pytest.fixture(autouse=True)
@@ -1466,6 +1519,68 @@ async def test_generate_token_propagates_gitlab_root_namespace_id(
         )
     else:
         assert "gitlab_root_namespace_id" not in kwargs["extra_claims"]
+
+
+@pytest.mark.asyncio
+@patch.dict(
+    os.environ,
+    {
+        "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
+        "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
+    },
+)
+async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
+    mock_context,
+):
+    """Mints an incoming token through the real Cloud Connector encode/decode path (no mocked claims, no mocked
+    TokenAuthority) and asserts the outgoing workload token still carries `gitlab_root_namespace_id`.
+
+    Unlike the
+    stubbed-claims tests above, this fails if the claim key used by the
+    encoder ever drifts from the key `_PROPAGATED_EXTRA_CLAIMS` and
+    `root_namespace_id_from_claims_extra` read on decode.
+    """
+    incoming_user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
+    )
+    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+        "user-1",
+        "saas",
+        incoming_user,
+        "1234",
+        ["duo_agent_platform"],
+        # Override "iss" to simulate a Rails-issued token — GenerateToken
+        # disallows tokens self-issued by this service via `disallowed_issuers`.
+        extra_claims={"iss": "gitlab-rails", "gitlab_root_namespace_id": "123"},
+    )
+
+    provider = CompositeProvider(
+        [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
+    )
+    decoded_user = provider.authenticate(incoming_token)
+    assert decoded_user.authenticated
+    assert decoded_user.claims.extra["gitlab_root_namespace_id"] == "123"
+
+    current_user.set(decoded_user)
+    servicer = DuoWorkflowService()
+    mock_context.invocation_metadata.return_value = [
+        ("x-gitlab-global-user-id", "user-1"),
+        ("x-gitlab-realm", "saas"),
+        ("x-gitlab-instance-id", "1234"),
+    ]
+
+    response = await servicer.GenerateToken(
+        contract_pb2.GenerateTokenRequest(), mock_context
+    )
+
+    outgoing_claims = jwt.decode(
+        response.token,
+        TEST_PUBLIC_KEY,
+        audience="gitlab-duo-workflow-service",
+        algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
+    )
+    assert outgoing_claims["gitlab_root_namespace_id"] == "123"
 
 
 @pytest.mark.asyncio
