@@ -12,6 +12,7 @@ from pydantic_core import ValidationError
 
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput
+from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
@@ -38,7 +39,8 @@ from duo_workflow_service.errors.error_handler import (
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
-from lib.internal_events import InternalEventsClient
+from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError"]
 
@@ -325,6 +327,26 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             },
         )
 
+    def _track_max_cycles_reached(self, cycle_count: int) -> None:
+        """Emit an internal event recording that this agent hit its ``max_cycles`` soft limit.
+
+        Fired only on the first crossing, so the count reads as sessions, not cycles. ``self.name`` is the runtime
+        node name (``{component}#agent``); the label is the design-time component name, matching how
+        ``duo_workflow_compaction_executed`` labels the same agent.
+        """
+        additional_properties = InternalEventAdditionalProperties(
+            label=component_name_from_node(self.name),
+            property="workflow_id",
+            value=self._flow_id,
+            max_cycles=self._max_cycles,
+            cycle_count=cycle_count,
+        )
+        self._internal_event_client.track_event(
+            event_name=EventEnum.WORKFLOW_MAX_CYCLES_REACHED.value,
+            additional_properties=additional_properties,
+            category=self._flow_type.value,
+        )
+
     def _iteration_warning_message(self, cycles_remaining: int) -> str:
         """Return the approaching-soft-limit warning message."""
         return self._ITERATION_WARNING_MESSAGE.format(cycles_remaining=cycles_remaining)
@@ -368,6 +390,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 max_cycles=self._max_cycles,
             )
             await self._tag_langsmith_soft_limit(cycle_count)
+
+            if cycle_count == self._max_cycles:
+                self._track_max_cycles_reached(cycle_count)
             history = [*history, HumanMessage(content=self._wrap_up_message())]
         elif (
             self._max_cycles is not None

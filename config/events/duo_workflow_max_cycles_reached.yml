@@ -1,0 +1,23 @@
+---
+description: Tracks when an agent component reaches its max_cycles soft iteration limit
+internal_events: true
+action: duo_workflow_max_cycles_reached
+product_group: agent_execution
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: The agent component name that reached the limit
+  property:
+    description: Hardcoded string workflow_id
+  value:
+    description: Workflow Id
+  max_cycles:
+    description: The configured soft limit for the component
+  cycle_count:
+    description: The cycle count at which the limit was crossed (equals max_cycles)
+milestone: '19.3'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6463
+tiers:
+  - premium
+  - ultimate
