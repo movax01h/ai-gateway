@@ -2962,6 +2962,34 @@ def test_dict_of_list_delta_unchanged_returns_none():
     assert _dict_of_list_delta(prev, current) is None
 
 
+def test_dict_of_list_delta_dropped_key_stores_full():
+    """A removed key must produce a full replacement.
+
+    The read side only writes the keys the delta carries, so a per-key delta cannot express a removal and the reader
+    would keep the dropped key forever.
+    """
+    prev = {"id": "1", "message": "hi", "correlation_id": "abc"}
+    current = {"id": "2", "message": "hi"}
+
+    delta = _dict_of_list_delta(prev, current)
+
+    assert delta is not None
+    assert delta.values == current
+    assert delta.is_append is False
+
+
+def test_dict_of_list_delta_dropped_key_stores_full_for_dict_of_lists():
+    """The dropped-key replacement also covers list-valued keys, whose per-key append could not remove them either."""
+    prev = {"planner": ["a"], "executor": ["b"]}
+    current = {"planner": ["a", "c"]}
+
+    delta = _dict_of_list_delta(prev, current)
+
+    assert delta is not None
+    assert delta.values == current
+    assert delta.is_append is False
+
+
 def test_serialize_channel_blobs_only_changed_channels():
     import base64
 
@@ -2983,24 +3011,60 @@ def test_serialize_channel_blobs_only_changed_channels():
     assert base64.b64decode(blobs[0]["data"])
 
 
-def test_serialize_channel_blobs_skips_scalar_channels():
+def test_serialize_channel_blobs_includes_scalar_channels():
+    """Every changed channel is blobbed, whatever its type.
+
+    Under write-incremental-only there is no full checkpoint row, so a dropped scalar is lost on reconstruction. This
+    matters most for `branch:to:*`, LangGraph's run queue, whose absence makes a resumed graph see zero armed tasks.
+    """
+    import base64
+
     checkpoint = {
         "id": "ckpt1",
         "channel_values": {
             "messages": ["a", "b"],
             "status": "running",
             "goal": "fix the bug",
+            "branch:to:build_context": None,
         },
     }
-    new_versions = ChannelVersions({"messages": "2.0", "status": "1.0", "goal": "1.0"})
+    new_versions = ChannelVersions(
+        {
+            "messages": "2.0",
+            "status": "1.0",
+            "goal": "1.0",
+            "branch:to:build_context": "1.0",
+        }
+    )
 
-    blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, {})
+    blobs, is_compaction = _serialize_channel_blobs(checkpoint, new_versions, {})
 
-    channels = [b["channel"] for b in blobs]
-    assert "goal" not in channels
-    assert "messages" in channels
-    # status is always blobbed for reconstruction, even though it is a scalar
-    assert "status" in channels
+    by_channel = {b["channel"]: b for b in blobs}
+    assert set(by_channel) == {
+        "messages",
+        "status",
+        "goal",
+        "branch:to:build_context",
+    }
+    assert is_compaction is False
+
+    for blob in blobs:
+        assert blob["write_type"] == "json"
+
+    assert (
+        json.loads(
+            zlib.decompress(base64.b64decode(by_channel["goal"]["data"])),
+        )
+        == "fix the bug"
+    )
+    assert (
+        json.loads(
+            zlib.decompress(
+                base64.b64decode(by_channel["branch:to:build_context"]["data"])
+            ),
+        )
+        is None
+    )
 
 
 def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
@@ -3174,6 +3238,36 @@ def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
     assert blobs[0]["step_action"] == "compaction"
 
 
+def test_serialize_channel_blobs_dict_channel_dropped_key_stores_full():
+    """A dict channel that replaces its value wholesale with fewer keys sends the full value.
+
+    `last_human_input` holds an events-API payload, so consecutive events can carry different keys. A per-key delta
+    cannot say "this key is gone", so the reader would keep the stale key.
+    """
+    import base64
+
+    prev_channel_values = {
+        "last_human_input": {"id": "1", "message": "go", "correlation_id": "abc"}
+    }
+    checkpoint = {
+        "id": "ckpt10",
+        "channel_values": {"last_human_input": {"id": "2", "message": "go"}},
+    }
+    new_versions = ChannelVersions({"last_human_input": "2.0"})
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert len(blobs) == 1
+    assert blobs[0]["step_action"] == "compaction"
+    assert is_compaction
+    assert json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"]))) == {
+        "id": "2",
+        "message": "go",
+    }
+
+
 def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
     import base64
 
@@ -3263,9 +3357,9 @@ def test_thread_started_at_from_id_returns_none_for_malformed():
     assert _thread_started_at_from_id("not-a-uuid") is None
 
 
-def test_serialize_all_channels_full_reseeds_and_drops_non_status_scalars():
-    """Group-start snapshot: list/dict channels and the status scalar are re-seeded as
-    full 'compaction' blobs (versions from the checkpoint); other scalars are dropped."""
+def test_serialize_all_channels_full_reseeds_every_channel():
+    """Group-start snapshot: every channel is re-seeded as a full 'compaction' blob, scalars included, with versions
+    taken from the checkpoint."""
     import base64
 
     checkpoint = {
@@ -3273,25 +3367,37 @@ def test_serialize_all_channels_full_reseeds_and_drops_non_status_scalars():
             "messages": ["a", "b"],
             "conversation_history": {"planner": [1, 2]},
             "status": "Execution",
-            "plan_step": 3,  # non-status scalar -> dropped
+            "plan_step": 3,
+            "branch:to:build_context": None,
         },
         "channel_versions": {
             "messages": "2",
             "conversation_history": "1",
             "status": "1",
             "plan_step": "1",
+            "branch:to:build_context": "1",
         },
     }
 
     blobs = _serialize_all_channels_full(checkpoint)
 
     by_channel = {b["channel"]: b for b in blobs}
-    assert set(by_channel) == {"messages", "conversation_history", "status"}
+    assert set(by_channel) == {
+        "messages",
+        "conversation_history",
+        "status",
+        "plan_step",
+        "branch:to:build_context",
+    }
     assert all(b["step_action"] == "compaction" for b in blobs)
     assert by_channel["messages"]["version"] == "2"
     assert json.loads(
         zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
     ) == ["a", "b"]
+    assert (
+        json.loads(zlib.decompress(base64.b64decode(by_channel["plan_step"]["data"])))
+        == 3
+    )
 
 
 def test_serialize_all_channels_full_version_defaults_to_empty_when_absent():
