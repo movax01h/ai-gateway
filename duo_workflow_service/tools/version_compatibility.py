@@ -1,4 +1,4 @@
-"""Version compatibility utilities for work item GraphQL queries."""
+"""Version compatibility utilities for GraphQL queries."""
 
 import structlog
 from packaging.version import InvalidVersion, Version
@@ -17,6 +17,7 @@ DEVELOPMENT_WIDGET_VERSION = Version("18.9.0")
 LICENSED_FEATURE_AVAILABILITY_VERSION = Version("18.11.0")
 AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
+SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
 
 
 def get_gitlab_version() -> Version:
@@ -97,3 +98,23 @@ def supports_group_level_custom_instructions() -> bool:
         True if group level custom instructions are supported, False otherwise.
     """
     return get_gitlab_version() >= GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION
+
+
+def supports_set_reviewers_mutation() -> bool:
+    """Check if mergeRequestSetReviewers accepts an ai_workflows-scoped token.
+
+    The mutation dates to 15.3, but the ai_workflows scope a flow's token carries was
+    only allowed for it in 19.2. Older instances reject it outright.
+
+    An instance that reports no version is treated as supported: the fallback
+    get_gitlab_version() returns predates 19.2, so gating on it would disable the
+    mutation on instances that do support it. GitLab rejects the call if it is
+    genuinely too old.
+
+    Returns:
+        True if the mutation is callable with an ai_workflows token, False otherwise.
+    """
+    if not gitlab_version.get():
+        return True
+
+    return get_gitlab_version() >= SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION

@@ -28,12 +28,10 @@ components:
         as: "merge_request_iid"
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:inputs.reviewer_data"
-        as: "reviewer_data"
       - from: "context:post_recommendation.tool_responses"
         as: "comment_data"
     toolset:
-      - "update_merge_request"
+      - "add_merge_request_reviewers"
     max_correction_attempts: 3
     ui_log_events:
       - "on_tool_execution_success"

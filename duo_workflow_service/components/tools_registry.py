@@ -172,6 +172,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.CreateMergeRequestNote,
         tools.CreateMergeRequestDiffNote,
         tools.UpdateMergeRequest,
+        tools.AddMergeRequestReviewers,
         tools.CreateEpic,
         tools.UpdateEpic,
         tools.CreateCommit,
