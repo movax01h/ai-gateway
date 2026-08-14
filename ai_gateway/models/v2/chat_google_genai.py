@@ -5,7 +5,6 @@ from google.genai.types import HttpOptions
 from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_google_genai import ChatGoogleGenerativeAI as _LCChatGoogleGenerativeAI
 from langchain_google_genai._common import get_user_agent
-from langchain_google_genai.chat_models import _is_gemini_3_or_later
 from pydantic import model_validator
 
 from ai_gateway.models.base import validate_custom_endpoint
@@ -35,6 +34,9 @@ class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
     custom_models_enabled: bool = False
     """Whether custom model endpoints are allowed."""
 
+    temperature: float | None = None  # type: ignore[assignment]
+    """Omitted from the request when unset, letting Google apply its recommended default of 1.0 for Gemini 3+ models."""
+
     @model_validator(mode="after")
     @override
     def validate_environment(self) -> Self:
@@ -43,11 +45,6 @@ class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
         if self.temperature is not None and not 0 <= self.temperature <= 2.0:
             msg = "temperature must be in the range [0.0, 2.0]"
             raise ValueError(msg)
-
-        if "temperature" not in self.model_fields_set and _is_gemini_3_or_later(
-            self.model
-        ):
-            self.temperature = 1.0
 
         if self.top_p is not None and not 0 <= self.top_p <= 1:
             msg = "top_p must be in the range [0.0, 1.0]"
