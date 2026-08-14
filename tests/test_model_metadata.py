@@ -78,13 +78,52 @@ def fireworks_model_fixture():
     )
 
 
+@pytest.fixture(name="gitlab_vertex_model")
+def gitlab_vertex_model_fixture():
+    return ChatLiteLLMDefinition(
+        gitlab_identifier="claude_sonnet_4_6_vertex",
+        name="Claude Sonnet 4.6 Vertex",
+        max_context_tokens=1000000,
+        family=["claude"],
+        params={
+            "model": "claude-sonnet-4-6",
+            "custom_llm_provider": "vertex_ai",
+        },
+        prompt_params={"timeout": 10},
+    )
+
+
+@pytest.fixture(name="gitlab_bedrock_model")
+def gitlab_bedrock_model_fixture():
+    return ChatLiteLLMDefinition(
+        gitlab_identifier="claude_sonnet_4_6_bedrock",
+        name="Claude Sonnet 4.6 Bedrock",
+        max_context_tokens=1000000,
+        family=["claude"],
+        params={
+            "model": "claude-sonnet-4-6",
+            "custom_llm_provider": "bedrock",
+        },
+        prompt_params={"timeout": 10},
+    )
+
+
 @pytest.fixture(name="mock_models")
-def mock_models_fixture(gitlab_model1, gitlab_model2, amazon_q_model, fireworks_model):
+def mock_models_fixture(
+    gitlab_model1,
+    gitlab_model2,
+    amazon_q_model,
+    fireworks_model,
+    gitlab_vertex_model,
+    gitlab_bedrock_model,
+):
     return {
         "gitlab_model1": gitlab_model1,
         "gitlab_model2": gitlab_model2,
         "amazon_q": amazon_q_model,
         "test_model": fireworks_model,
+        "claude_sonnet_4_6_vertex": gitlab_vertex_model,
+        "claude_sonnet_4_6_bedrock": gitlab_bedrock_model,
     }
 
 
@@ -344,6 +383,54 @@ class TestModelMetadataToParams:
             "model": "model/identifier",
             "api_key": "abcde",
             "custom_llm_provider": "vertex_ai",
+            "timeout": 10,
+        }
+
+    @pytest.mark.parametrize(
+        "name", ["claude_sonnet_4_6_vertex", "claude_sonnet_4_6_bedrock"]
+    )
+    def test_managed_provider_drops_client_endpoint_without_identifier(self, name):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "gitlab",
+                "name": name,
+                "endpoint": HttpUrl("https://client-endpoint.example.com/vertex"),
+            }
+        )
+
+        assert "api_base" not in model_metadata.to_params()
+
+    @pytest.mark.parametrize(
+        "name", ["claude_sonnet_4_6_vertex", "claude_sonnet_4_6_bedrock"]
+    )
+    def test_managed_provider_drops_client_endpoint_with_identifier(self, name):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "gitlab",
+                "name": name,
+                "endpoint": HttpUrl("https://client-endpoint.example.com/vertex"),
+                "identifier": name,
+            }
+        )
+
+        assert "api_base" not in model_metadata.to_params()
+
+    def test_self_hosted_openai_payload_preserves_endpoint(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "openai",
+                "name": "gitlab_model1",
+                "endpoint": HttpUrl("https://self-hosted.internal/v1"),
+                "api_key": "admin-token",
+                "identifier": "mixtral-8x7b",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://self-hosted.internal/v1",
+            "api_key": "admin-token",
+            "model": "mixtral-8x7b",
+            "custom_llm_provider": "custom_openai",
             "timeout": 10,
         }
 

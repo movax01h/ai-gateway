@@ -67,3 +67,40 @@ class TestChatLiteLLMSSRFProtection:
 
         bound = model.bind(custom_llm_provider="mistral", api_key="mistral-key")
         assert bound is not None
+
+    def test_bind_tools_rejects_api_base_when_custom_models_disabled(self):
+        """.bind_tools() rejects a client-supplied api_base when custom models are disabled."""
+        model = ChatLiteLLM(model="gpt-4", custom_models_enabled=False)
+
+        with pytest.raises(
+            ValueError, match="specifying custom models endpoint is disabled"
+        ):
+            model.bind_tools([], api_base="http://client-endpoint.example.com")
+
+    def test_validate_endpoint_kwargs_rejects_api_base_when_custom_models_disabled(
+        self,
+    ):
+        """The shared guard rejects api_base regardless of which bind path invokes it."""
+        model = ChatLiteLLM(model="gpt-4", custom_models_enabled=False)
+
+        with pytest.raises(
+            ValueError, match="specifying custom models endpoint is disabled"
+        ):
+            model.validate_endpoint_kwargs(
+                {"api_base": "http://client-endpoint.example.com"}
+            )
+
+    def test_tool_bound_wrapper_bind_does_not_validate_so_base_guard_is_required(self):
+        """A tool-bound RunnableBinding wrapper's .bind() does not run the guard, so callers must run
+        validate_endpoint_kwargs on the base model before the final bind."""
+        model = ChatLiteLLM(model="gpt-4", custom_models_enabled=False)
+
+        wrapper = model.bind_tools([])
+        client_kwargs = {"api_base": "http://client-endpoint.example.com"}
+
+        wrapper.bind(**client_kwargs)
+
+        with pytest.raises(
+            ValueError, match="specifying custom models endpoint is disabled"
+        ):
+            model.validate_endpoint_kwargs(client_kwargs)
