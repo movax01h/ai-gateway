@@ -1,4 +1,4 @@
-* @gitlab-org/maintainers/ai-gateway @gitlab-org/maintainers/duo-workflow-service
+* @gitlab-org/maintainers/duo-workflow-service
 
 # Fix Pipeline flows can be approved by all Verify maintainers
 /docs/workflows/fix_pipeline.md @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
@@ -12,13 +12,8 @@
 /lib/context/orbit.py @gitlab-org/orbit
 
 ^[Development]
-# https://gitlab.com/groups/gitlab-org/maintainers/ai-gateway/-/group_members?with_inherited_permissions=exclude
-* @gitlab-org/maintainers/ai-gateway
-
-[Duo Workflow Service] @gitlab-org/maintainers/duo-workflow-service
-/duo_workflow_service/
-/clients/
-/contract/
+# https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
+* @gitlab-org/maintainers/duo-workflow-service
 
 # Fix Pipeline flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
@@ -27,18 +22,14 @@
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
 /duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
 
-[AI Gateway] @gitlab-org/maintainers/ai-gateway
-/ai_gateway/
-/tests/ai_gateway/
-
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 /ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
-^[Model Configuration] @gitlab-org/maintainers/ai-gateway
+^[Model Configuration] @gitlab-org/maintainers/duo-workflow-service
 /ai_gateway/model_selection/models.yml @gitlab-org/fulfillment/utilization
 
-^[Security - AppSec Approval Required] @gitlab-org/maintainers/ai-gateway @gitlab-org/security/appsec
+^[Security - AppSec Approval Required] @gitlab-org/maintainers/duo-workflow-service @gitlab-org/security/appsec
 # Security module - all changes require AppSec approval
 /duo_workflow_service/security/
 
