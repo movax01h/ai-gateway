@@ -1,0 +1,12 @@
+# Append reviewers to a merge request without removing existing ones.
+# operationMode APPEND unions the given usernames with the merge request's live
+# reviewers server-side, so the assignment is atomic and never drops reviewers.
+#
+# Only `errors` is selected. The payload's `mergeRequest` field does not opt into
+# the ai_workflows scope the flow's token carries, so it always resolves to null
+# here; the caller reports the usernames it sent instead.
+mutation setReviewers($input: MergeRequestSetReviewersInput!) {
+  mergeRequestSetReviewers(input: $input) {
+    errors
+  }
+}

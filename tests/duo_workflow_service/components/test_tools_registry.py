@@ -210,6 +210,7 @@ _outbox = MagicMock(spec=Outbox)
                 "create_merge_request_diff_note",
                 "list_all_merge_request_notes",
                 "update_merge_request",
+                "add_merge_request_reviewers",
                 "get_pipeline_failing_jobs",
                 "get_downstream_pipelines",
                 "get_failing_bridge_jobs",
@@ -432,6 +433,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
+        "add_merge_request_reviewers": tools.AddMergeRequestReviewers(
+            metadata=tool_metadata
+        ),
         "get_pipeline_failing_jobs": tools.GetPipelineFailingJobs(
             metadata=tool_metadata
         ),
