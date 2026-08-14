@@ -26,6 +26,7 @@ class EventEnum(StrEnum):
     COMPACTION_EXECUTED = "duo_workflow_compaction_executed"
     LEGACY_TRIM_EXECUTED = "duo_workflow_legacy_trim_executed"
     WORKFLOW_MAX_CYCLES_REACHED = "duo_workflow_max_cycles_reached"
+    WORKFLOW_MERGE_REQUEST_CREATED = "duo_workflow_merge_request_created"
 
 
 class EventLabelEnum(StrEnum):

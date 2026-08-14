@@ -415,6 +415,10 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
                 tool_name=tool.name,
             )
 
+            self._tracker.track_merge_request_created(
+                tool_name=tool.name, tool_response=tool_call_result
+            )
+
             self._ui_history.log.success(
                 tool=tool,
                 tool_call_args=tool_call_args,

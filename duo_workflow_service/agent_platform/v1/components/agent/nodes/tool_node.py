@@ -217,6 +217,10 @@ class ToolNode:
                 tool_name=tool.name,
             )
 
+            self._tracker.track_merge_request_created(
+                tool_name=tool.name, tool_response=tool_call_result
+            )
+
             if is_orbit_tool(tool.name):
                 self._tracker.track_internal_event(
                     event_name=EventEnum.ORBIT_DAP_TOOL_CALLED,

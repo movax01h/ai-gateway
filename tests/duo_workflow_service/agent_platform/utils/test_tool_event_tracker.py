@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -201,3 +202,71 @@ class TestHandleToolException:
         assert (
             call_kwargs["additional_properties"].extra["error_type"] == "ToolException"
         )
+
+
+CREATED_MERGE_REQUEST = {
+    "id": 4242,
+    "iid": 7,
+    "web_url": "https://gitlab.com/namespace/project/-/merge_requests/7",
+    "source_branch": "some-source-branch",
+    "target_branch": "main",
+}
+
+
+class TestTrackMergeRequestCreated:
+    """Guard the event emitted whenever any flow calls create_merge_request.
+
+    The event keys off the tool, not the calling flow, so it reports for every flow that
+    opens a merge request. `category` is what narrows it to one flow after the fact.
+    """
+
+    def test_tracks_created_merge_request(self, tracker):
+        tracker.tracker.track_merge_request_created(
+            tool_name="create_merge_request",
+            tool_response=json.dumps({"created_merge_request": CREATED_MERGE_REQUEST}),
+        )
+
+        tracker.client.track_event.assert_called_once()
+        call_kwargs = tracker.client.track_event.call_args.kwargs
+        assert (
+            call_kwargs["event_name"] == EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value
+        )
+        assert call_kwargs["category"] == "software_development"
+
+        additional_properties = call_kwargs["additional_properties"]
+        assert additional_properties.label == "create_merge_request"
+        assert additional_properties.property == "4242"
+        assert additional_properties.value == "test-flow-123"
+        assert additional_properties.extra == {
+            "merge_request_iid": 7,
+            "created_merge_request_url": (
+                "https://gitlab.com/namespace/project/-/merge_requests/7"
+            ),
+            "source_branch": "some-source-branch",
+            "target_branch": "main",
+        }
+
+    @pytest.mark.parametrize(
+        "tool_response",
+        [
+            "not json",
+            '{"error": "branch already exists"}',
+            '{"created_merge_request": {}}',
+            None,
+        ],
+        ids=["invalid_json", "missing_key", "missing_id", "not_parseable"],
+    )
+    def test_ignores_unparseable_responses(self, tracker, tool_response):
+        tracker.tracker.track_merge_request_created(
+            tool_name="create_merge_request", tool_response=tool_response
+        )
+
+        tracker.client.track_event.assert_not_called()
+
+    def test_ignores_other_tools(self, tracker):
+        tracker.tracker.track_merge_request_created(
+            tool_name="read_file",
+            tool_response=json.dumps({"created_merge_request": CREATED_MERGE_REQUEST}),
+        )
+
+        tracker.client.track_event.assert_not_called()

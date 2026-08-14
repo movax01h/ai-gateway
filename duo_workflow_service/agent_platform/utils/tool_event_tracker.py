@@ -1,3 +1,6 @@
+import json
+from typing import Any
+
 from langchain_core.tools import BaseTool, ToolException
 from pydantic_core import ValidationError
 
@@ -9,6 +12,11 @@ from lib.internal_events import InternalEventAdditionalProperties, InternalEvent
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 
 __all__ = ["ToolEventTracker"]
+
+# The tool whose successful result means a new merge request now exists,
+# and the key it wraps the GitLab API response
+CREATE_MERGE_REQUEST_TOOL_NAME = "create_merge_request"
+_CREATED_MR_RESPONSE_KEY = "created_merge_request"
 
 
 class ToolEventTracker:
@@ -53,6 +61,38 @@ class ToolEventTracker:
         )
         self._internal_event_client.track_event(
             event_name=event_name.value,
+            additional_properties=additional_properties,
+            category=self._flow_type.value,
+        )
+
+    def track_merge_request_created(self, tool_name: str, tool_response: Any) -> None:
+        """Record which session opened a merge request, and which merge request it was."""
+
+        if tool_name != CREATE_MERGE_REQUEST_TOOL_NAME:
+            return
+
+        try:
+            payload = (
+                tool_response
+                if isinstance(tool_response, dict)
+                else json.loads(tool_response)
+            )
+            merge_request = payload[_CREATED_MR_RESPONSE_KEY]
+            merge_request_id = merge_request["id"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return
+
+        additional_properties = InternalEventAdditionalProperties(
+            label=tool_name,
+            property=str(merge_request_id),
+            value=self._flow_id,
+            merge_request_iid=merge_request.get("iid"),
+            created_merge_request_url=merge_request.get("web_url"),
+            source_branch=merge_request.get("source_branch"),
+            target_branch=merge_request.get("target_branch"),
+        )
+        self._internal_event_client.track_event(
+            event_name=EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value,
             additional_properties=additional_properties,
             category=self._flow_type.value,
         )
