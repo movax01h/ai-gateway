@@ -126,7 +126,9 @@ Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so the
 
 - **List channels** use `_list_delta`: if the previous value is a prefix of the current one, only the appended tail is sent (`step_action="conversation"`); any other change (shrink, reorder, in-place edit) sends the full list (`step_action="compaction"`).
 
-- **Dict-of-list channels** (e.g. `conversation_history`, keyed by agent) use `_dict_of_list_delta`: per-key appends are sent as a per-key dict of new items; if any key's list shrank or its prefix changed, the whole dict is sent as a compaction.
+- **Dict channels** (e.g. `conversation_history` keyed by agent, or `last_human_input` holding an events-API payload) use `_dict_of_list_delta`: per-key appends are sent as a per-key dict of new items; if any key's list shrank or its prefix changed, the whole dict is sent as a compaction.
+
+  A **dropped key** also forces the full dict. Rails' `ChannelValuesReconstructor#append` writes only the keys the delta carries, so a per-key delta cannot say "this key is gone" and the reader would keep it forever. Agent-keyed channels only gain keys, but a wholesale-replaced payload like `last_human_input` can lose one between events.
 
 `step_action` is the authoritative append-vs-replace signal for Rails. `current_thread` is a grouping hint that increments on compaction so Rails restarts reconstruction from that checkpoint rather than replaying deltas across the boundary — it cannot be authoritative because it resets to `0` on gateway restart, whereas `step_action` is derived from the channel values and stays correct.
 

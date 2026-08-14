@@ -200,12 +200,20 @@ def _list_delta(prev: List[Any], current: List[Any]) -> Optional[Delta]:
 def _dict_of_list_delta(
     prev: Dict[str, Any], current: Dict[str, Any]
 ) -> Optional[Delta]:
-    """Compute a delta for a dict-of-lists channel (e.g. conversation_history).
+    """Compute a delta for a dict channel (e.g. conversation_history, last_human_input).
 
     Returns a Delta(values, is_append) or None if unchanged. is_append=True means values is a per-key dict of only newly
-    appended items (or changed non-list values); is_append=False means values is the full current dict (a list shrunk or
-    its prefix changed for at least one key — i.e. compaction).
+    appended items (or changed non-list values); is_append=False means values is the full current dict, which the reader
+    substitutes rather than merges.
+
+    Only keys present in the delta are written on the read side (see ChannelValuesReconstructor#append in Rails), so a
+    dropped key can only be expressed as a full replacement. This matters for wholesale-replaced dict channels such as
+    last_human_input, whose key set comes from the events API and can differ between events; agent-keyed channels like
+    conversation_history only ever gain keys.
     """
+    if prev.keys() - current.keys():
+        return Delta(current, False)
+
     delta: Dict[str, Any] = {}
     for key, val in current.items():
         prev_val = prev.get(key)

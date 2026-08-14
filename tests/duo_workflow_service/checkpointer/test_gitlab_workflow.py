@@ -2962,6 +2962,34 @@ def test_dict_of_list_delta_unchanged_returns_none():
     assert _dict_of_list_delta(prev, current) is None
 
 
+def test_dict_of_list_delta_dropped_key_stores_full():
+    """A removed key must produce a full replacement.
+
+    The read side only writes the keys the delta carries, so a per-key delta cannot express a removal and the reader
+    would keep the dropped key forever.
+    """
+    prev = {"id": "1", "message": "hi", "correlation_id": "abc"}
+    current = {"id": "2", "message": "hi"}
+
+    delta = _dict_of_list_delta(prev, current)
+
+    assert delta is not None
+    assert delta.values == current
+    assert delta.is_append is False
+
+
+def test_dict_of_list_delta_dropped_key_stores_full_for_dict_of_lists():
+    """The dropped-key replacement also covers list-valued keys, whose per-key append could not remove them either."""
+    prev = {"planner": ["a"], "executor": ["b"]}
+    current = {"planner": ["a", "c"]}
+
+    delta = _dict_of_list_delta(prev, current)
+
+    assert delta is not None
+    assert delta.values == current
+    assert delta.is_append is False
+
+
 def test_serialize_channel_blobs_only_changed_channels():
     import base64
 
@@ -3208,6 +3236,36 @@ def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
     assert is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
+
+
+def test_serialize_channel_blobs_dict_channel_dropped_key_stores_full():
+    """A dict channel that replaces its value wholesale with fewer keys sends the full value.
+
+    `last_human_input` holds an events-API payload, so consecutive events can carry different keys. A per-key delta
+    cannot say "this key is gone", so the reader would keep the stale key.
+    """
+    import base64
+
+    prev_channel_values = {
+        "last_human_input": {"id": "1", "message": "go", "correlation_id": "abc"}
+    }
+    checkpoint = {
+        "id": "ckpt10",
+        "channel_values": {"last_human_input": {"id": "2", "message": "go"}},
+    }
+    new_versions = ChannelVersions({"last_human_input": "2.0"})
+
+    blobs, is_compaction = _serialize_channel_blobs(
+        checkpoint, new_versions, prev_channel_values
+    )
+
+    assert len(blobs) == 1
+    assert blobs[0]["step_action"] == "compaction"
+    assert is_compaction
+    assert json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"]))) == {
+        "id": "2",
+        "message": "go",
+    }
 
 
 def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
