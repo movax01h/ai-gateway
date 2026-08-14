@@ -122,7 +122,7 @@ Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so the
 
 `_serialize_channel_blobs` walks `new_versions` (LangGraph's set of channels changed this step) and emits one blob per changed channel:
 
-- **Scalar channels** (`goal`, `project`, …) are skipped — they're tiny, always full replacements, and always recoverable from `compressed_checkpoint`. The exception is `status`, which is always blobbed because it's required for blob reconstruction.
+- **Scalar channels** (`status`, `goal`, `branch:to:*`, …) are blobbed as full values, since they have no delta form. No channel is filtered by type: once the header is dropped (see [Gating](#gating)) a skipped scalar is simply lost, and `branch:to:*` — LangGraph's run queue — decides which tasks a resumed graph runs. Because blobs are append-only, the read path must select only the channels the checkpoint header declares live, or deleted channels linger in the reconstructed state ([GitLab issue 613956](https://gitlab.com/gitlab-org/gitlab/-/issues/613956)).
 
 - **List channels** use `_list_delta`: if the previous value is a prefix of the current one, only the appended tail is sent (`step_action="conversation"`); any other change (shrink, reorder, in-place edit) sends the full list (`step_action="compaction"`).
 
@@ -134,7 +134,7 @@ Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so the
 
 The per-step deltas above describe only the channels that changed. That's enough while Rails overlays deltas on the full-checkpoint header, but the end state drops the header (see [Gating](#gating)), and then a channel that hasn't changed since a previous `current_thread` group would have no base to fold onto — its history lived in the old group.
 
-To make each group reconstruct on its own, the **start of every group** re-seeds _all_ reconstructable channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. A group starts on:
+To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. A group starts on:
 
 - the workflow's first checkpoint (`_prev_checkpoint_id is None`),
 
@@ -142,7 +142,7 @@ To make each group reconstruct on its own, the **start of every group** re-seeds
 
 - a compaction.
 
-`_serialize_all_channels_full` mirrors `_serialize_channel_blobs`'s channel selection (list and dict channels plus the `status` scalar; other scalars are dropped as recoverable) and its JSON encoding, but takes versions from the checkpoint's `channel_versions` rather than `new_versions`, since unchanged channels must be re-seeded too. Reconstruction of a group is then: group-start full snapshots + the group's later `conversation` deltas.
+`_serialize_all_channels_full` mirrors `_serialize_channel_blobs`'s JSON encoding and also covers every channel, but takes versions from the checkpoint's `channel_versions` rather than `new_versions`, since unchanged channels must be re-seeded too. Reconstruction of a group is then: group-start full snapshots + the group's later `conversation` deltas.
 
 The group boundary is keyed on `_prev_checkpoint_id`, **not** on `current_thread_started_at`. The started-at marker is `None` for checkpoint IDs that aren't time-based, which would otherwise re-seed every step. Outside a group boundary, behavior is the per-channel deltas described above.
 

@@ -139,9 +139,6 @@ def not_implemented_sync_method(func: T) -> T:
 
 PROPERTY_MAX_LENGTH = 1000
 
-# status is required for blob reconstruction
-_ALWAYS_BLOBBED_SCALAR_CHANNELS = frozenset({"status"})
-
 
 def _attribute_dirty(
     attribute: str, writes: Sequence[Tuple[str, Any]]
@@ -256,11 +253,12 @@ def _serialize_channel_blobs(
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """Serialize only the channels that changed in this step as blobs.
 
-    Uses new_versions to identify changed channels. Scalar channels are excluded (see inline comment). Each blob carries
-    a step_action field ("conversation" for deltas, "compaction" for full replacements) which is the authoritative
-    append-vs-replace signal for Rails. current_thread in the payload is a grouping hint only — it cannot be used as the
-    sole signal because it resets to 0 on gateway restart, whereas step_action is derived from the actual channel values
-    and remains correct regardless.
+    Uses new_versions to identify changed channels; every channel is blobbed regardless of type, so a reader that has
+    only the blobs (no full checkpoint row) can rebuild the whole state. Each blob carries a step_action field
+    ("conversation" for deltas, "compaction" for full replacements) which is the authoritative append-vs-replace signal
+    for Rails. current_thread in the payload is a grouping hint only — it cannot be used as the sole signal because it
+    resets to 0 on gateway restart, whereas step_action is derived from the actual channel values and remains correct
+    regardless.
 
     When force_rewrite is True, delta computation is skipped and each blob is serialized as a full replacement with
     step_action='compaction'. is_compaction in the return is then False — the caller asked for the rewrite and is
@@ -281,14 +279,6 @@ def _serialize_channel_blobs(
             continue
 
         val = channel_values[channel]
-        # Scalars are recoverable from compressed_checkpoint, so exclude them —
-        # except those needed for blob reconstruction.
-        if (
-            not isinstance(val, (list, dict))
-            and channel not in _ALWAYS_BLOBBED_SCALAR_CHANNELS
-        ):
-            continue
-
         prev = prev_channel_values.get(channel)
         step_action = "compaction"
 
@@ -337,27 +327,20 @@ def _serialize_channel_blobs(
 def _serialize_all_channels_full(
     checkpoint: Checkpoint,
 ) -> List[Dict[str, Any]]:
-    """Serialize every reconstructable channel as a full ``compaction`` snapshot.
+    """Serialize every channel as a full ``compaction`` snapshot.
 
     Emitted at the start of a new current_thread group so the group is self-contained:
     reconstruction folds these full snapshots plus the group's later ``conversation``
     deltas, without depending on a previous group or the full-checkpoint header (see
-    https://gitlab.com/gitlab-org/gitlab/-/issues/605653). Channel selection and JSON
-    encoding mirror _serialize_channel_blobs — list/dict channels plus the status
-    scalar; other scalars are intentionally dropped. Versions come from the checkpoint
-    (not new_versions), since unchanged channels must be re-seeded too.
+    https://gitlab.com/gitlab-org/gitlab/-/issues/605653). JSON encoding mirrors
+    _serialize_channel_blobs. Versions come from the checkpoint (not new_versions),
+    since unchanged channels must be re-seeded too.
     """
     channel_values = checkpoint.get("channel_values", {})
     channel_versions = checkpoint.get("channel_versions", {})
     blobs = []
 
     for channel, val in channel_values.items():
-        if (
-            not isinstance(val, (list, dict))
-            and channel not in _ALWAYS_BLOBBED_SCALAR_CHANNELS
-        ):
-            continue
-
         bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
         blobs.append(
             {
