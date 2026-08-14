@@ -1,13 +1,19 @@
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from anthropic import AsyncAnthropic
 from httpx import AsyncClient, Limits
+from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models import ModelMetadata
-from ai_gateway.models.base import init_anthropic_client, validate_custom_endpoint
+from ai_gateway.models.base import (
+    init_anthropic_client,
+    log_request,
+    validate_custom_endpoint,
+)
 from ai_gateway.models.base_text import TextGenModelBase
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 
@@ -28,6 +34,73 @@ async def test_init_anthropic_client():
         assert limits_arg.max_connections == 1000
         assert limits_arg.max_keepalive_connections == 100
         assert limits_arg.keepalive_expiry == 30
+
+
+# httpx attaches the effective per-request timeout as an extension; this is the
+# ground truth the HTTP layer (and litellm's aiohttp transport, via the `read`
+# component) enforces.
+@pytest.mark.parametrize(
+    ("extensions", "expected_timeout"),
+    [
+        (
+            {
+                "timeout": {
+                    "connect": 5.0,
+                    "read": 30.0,
+                    "write": 30.0,
+                    "pool": 30.0,
+                }
+            },
+            {"connect": 5.0, "read": 30.0, "write": 30.0, "pool": 30.0},
+        ),
+        ({}, None),
+    ],
+)
+class TestLogRequest:
+    @pytest.mark.asyncio
+    async def test_logs_request_timeout(
+        self, extensions: dict, expected_timeout: dict | None
+    ):
+        request = httpx.Request(
+            "POST",
+            "http://example.com/v1/messages",
+            content=b"{}",
+            extensions=extensions,
+        )
+
+        with patch("ai_gateway.models.base.can_log_request_data", return_value=False):
+            with capture_logs() as cap_logs:
+                await log_request(request)
+
+        entry = next(
+            log_entry
+            for log_entry in cap_logs
+            if log_entry["event"] == "Request to LLM"
+        )
+        assert entry["request_timeout"] == expected_timeout
+
+    @pytest.mark.asyncio
+    async def test_logs_request_timeout_with_request_data_logging(
+        self, extensions: dict, expected_timeout: dict | None
+    ):
+        """The request-data-enabled branch logs via `request_log`, whose processors drop events outside a request
+        context, so assert on the logger call directly."""
+        request = httpx.Request(
+            "POST",
+            "http://example.com/v1/messages",
+            content=b"{}",
+            extensions=extensions,
+        )
+
+        with patch("ai_gateway.models.base.can_log_request_data", return_value=True):
+            with patch("ai_gateway.models.base.request_log") as mock_request_log:
+                await log_request(request)
+
+        mock_request_log.info.assert_called_once()
+        assert (
+            mock_request_log.info.call_args.kwargs["request_timeout"]
+            == expected_timeout
+        )
 
 
 class TestTextGenBaseModel:

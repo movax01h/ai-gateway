@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.model_metadata import ModelMetadata
@@ -88,6 +89,75 @@ class TestInMemoryPromptRegistry:
 
         mock_shared_registry._build_prompt.assert_called_once()
         assert result == prompt
+
+    @pytest.mark.parametrize(
+        ("inline_params", "expected_keys", "expected_timeout"),
+        [
+            # No params in the flow config: the log still signals inline resolution.
+            (None, None, None),
+            # Params without a timeout.
+            ({"stop": ["\n"]}, ["stop"], None),
+            # A bound timeout in the client-sent flow config (e.g. injected by
+            # Rails' DuoWorkflowPayloadBuilder) — the value that outranks
+            # AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT.
+            ({"timeout": 30.0}, ["timeout"], 30.0),
+            # The flow-config serializer normalizes params to the full
+            # PromptParams schema with nulls; only keys actually set are
+            # reported.
+            (
+                {
+                    "cache_control_injection_points": None,
+                    "context_management": None,
+                    "model_id": None,
+                    "stop": None,
+                    "timeout": 360.0,
+                    "vertex_location": None,
+                },
+                ["timeout"],
+                360.0,
+            ),
+        ],
+    )
+    def test_get_local_prompt_logs_inline_resolution(
+        self,
+        in_memory_registry,
+        sample_prompt_data,
+        inline_params,
+        expected_keys,
+        expected_timeout,
+    ):
+        """Resolving an inline prompt emits a structured record with the params the flow config carried."""
+        prompt_id = "test_prompt"
+        prompt_data = {**sample_prompt_data}
+        if inline_params is not None:
+            prompt_data["params"] = inline_params
+        in_memory_registry.register_prompt(prompt_id, prompt_data)
+
+        with capture_logs() as cap_logs:
+            in_memory_registry.get(prompt_id, prompt_version=None)
+
+        entry = next(
+            log_entry
+            for log_entry in cap_logs
+            if log_entry["event"] == "Resolving inline flow prompt"
+        )
+        assert entry["prompt_id"] == prompt_id
+        assert entry["inline_params_keys"] == expected_keys
+        assert entry["inline_timeout"] == expected_timeout
+        assert entry["has_model_metadata"] is False
+
+    def test_get_versioned_prompt_does_not_log_inline_resolution(
+        self, in_memory_registry, sample_prompt_data
+    ):
+        """Delegation to the file-based registry must not emit the inline-resolution record."""
+        prompt_id = "test_prompt"
+        in_memory_registry.register_prompt(prompt_id, sample_prompt_data)
+
+        with capture_logs() as cap_logs:
+            in_memory_registry.get(prompt_id, prompt_version="^1.0.0")
+
+        events = [log_entry["event"] for log_entry in cap_logs]
+        assert "Resolving inline flow prompt" not in events
 
     def test_get_local_prompt_not_found(self, in_memory_registry):
         """Test error when local prompt not found."""

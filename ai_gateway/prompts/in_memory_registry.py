@@ -1,5 +1,6 @@
 from typing import Any, Optional, cast, override
 
+import structlog
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import BaseTool
 
@@ -7,6 +8,8 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelConfig, PromptConfig
 from ai_gateway.prompts.registry import LocalPromptRegistry
+
+log = structlog.stdlib.get_logger("prompts")
 
 
 class InMemoryPromptRegistry(BasePromptRegistry):
@@ -75,6 +78,31 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         factory.
         """
         raw_data = self._process_prompt_data(prompt_id)
+
+        # Signal that this request resolved to an inline (flow-config) prompt
+        # rather than a file-based prompt definition, and surface any params the
+        # flow config carried. Only keys with non-null values are reported: the
+        # flow-config serializer normalizes params to the full PromptParams
+        # schema with nulls, so key presence alone does not mean a value was
+        # set. `inline_timeout` in particular shows whether the client-sent
+        # config bound its own request timeout (which outranks
+        # AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT / the model factory default).
+        inline_params = raw_data.get("params")
+        log.info(
+            "Resolving inline flow prompt",
+            prompt_id=prompt_id,
+            inline_params_keys=(
+                sorted(key for key, value in inline_params.items() if value is not None)
+                if isinstance(inline_params, dict)
+                else None
+            ),
+            inline_timeout=(
+                inline_params.get("timeout")
+                if isinstance(inline_params, dict)
+                else None
+            ),
+            has_model_metadata=model_metadata is not None,
+        )
 
         model_params: dict[str, Any]
         model_from_prompt = cast(dict, raw_data.get("model"))

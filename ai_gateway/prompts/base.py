@@ -1,6 +1,6 @@
 import asyncio
 import json
-import logging
+import time
 from abc import ABC, abstractmethod
 from typing import (
     Any,
@@ -9,6 +9,7 @@ from typing import (
     Callable,
     List,
     MutableMapping,
+    NamedTuple,
     Optional,
     cast,
     override,
@@ -41,7 +42,7 @@ from langsmith import tracing_context
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavailableError
 from tenacity import (
-    before_sleep_log,
+    RetryCallState,
     retry,
     retry_if_exception,
     stop_after_attempt,
@@ -95,7 +96,13 @@ class TemplateNotFoundError(Exception):
     """
 
 
-_log = logging.getLogger(__name__)
+# Total attempts (initial call + retries) performed by `_ainvoke_with_retry`.
+# Named so the retry logging below can tell "will retry" apart from "gave up".
+_RETRY_STOP_AFTER_ATTEMPT = 4
+
+# aiohttp's idle-read timer message; litellm surfaces it as a generic
+# APIConnectionError, so it can't be classified by exception type alone.
+_SOCKET_READ_TIMEOUT_MESSAGE = "Timeout on reading data from socket"
 
 # Transient network errors that are safe to retry
 _RETRYABLE_NETWORK_ERRORS = (
@@ -137,12 +144,129 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
+def _is_timeout_error(exc: BaseException | None) -> bool:
+    """Best-effort check whether an exception (or its causes) is a timeout.
+
+    Covers httpx timeout classes plus the aiohttp idle-read timeout that
+    litellm wraps in ``APIConnectionError``/``MidStreamFallbackError`` with a
+    fixed message rather than a distinct type. Walks ``__cause__`` and
+    litellm's ``original_exception`` a bounded number of steps to avoid
+    reference cycles.
+    """
+    for _ in range(5):
+        if exc is None:
+            return False
+        if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+            return True
+        message = str(exc)
+        if _SOCKET_READ_TIMEOUT_MESSAGE in message or "timed out" in message.lower():
+            # NOTE: "timed out" is a broad heuristic and may over-match
+            # exceptions unrelated to the request timeout.
+            return True
+        exc = exc.__cause__ or getattr(exc, "original_exception", None)
+    return False
+
+
+# Provider chat classes name the factory-level request timeout differently:
+# ChatLiteLLM/ChatOpenAI use `request_timeout`, ChatAnthropic uses
+# `default_request_timeout`, and ChatGoogleGenerativeAI uses `timeout` (its
+# `request_timeout` is only a pydantic alias, invisible to attribute access).
+_MODEL_REQUEST_TIMEOUT_ATTRS = ("request_timeout", "default_request_timeout", "timeout")
+
+
+class _ModelRequestTimeout(NamedTuple):
+    """Factory-configured request timeout read off a provider chat model."""
+
+    value: float | None
+    """The timeout value; ``None`` with ``attr_name`` set means the attribute is present but unset, so the HTTP client
+    default governs."""
+
+    attr_name: str | None
+    """The model attribute carrying the value; ``None`` means no known timeout attribute exists on the model class, so
+    the factory channel is unknown."""
+
+
+def _model_request_timeout(model: Any) -> _ModelRequestTimeout:
+    """Return the first timeout attribute from ``_MODEL_REQUEST_TIMEOUT_ATTRS`` present on ``model``."""
+    for attr in _MODEL_REQUEST_TIMEOUT_ATTRS:
+        if hasattr(model, attr):
+            return _ModelRequestTimeout(getattr(model, attr), attr)
+    return _ModelRequestTimeout(None, None)
+
+
+def _record_attempt_start(retry_state: RetryCallState) -> None:
+    """Tenacity ``before`` hook: stamp the start of each attempt so per-attempt duration can be logged."""
+    retry_state.attempt_start_monotonic = time.monotonic()  # type: ignore[attr-defined]
+
+
+def _attempt_failure_log_fields(retry_state: RetryCallState) -> dict[str, Any] | None:
+    """Build the shared structured fields for a failed retry attempt."""
+    outcome = retry_state.outcome
+    if outcome is None or not outcome.failed:
+        return None
+
+    exc = outcome.exception()
+    attempt_start = getattr(retry_state, "attempt_start_monotonic", None)
+    attempt_duration_s = (
+        round(time.monotonic() - attempt_start, 3)
+        if attempt_start is not None
+        else None
+    )
+
+    return {
+        "attempt": retry_state.attempt_number,
+        "max_attempts": _RETRY_STOP_AFTER_ATTEMPT,
+        "attempt_duration_s": attempt_duration_s,
+        "total_elapsed_s": round(retry_state.seconds_since_start or 0.0, 3),
+        "exception_class": type(exc).__name__,
+        "exception_message": str(exc)[:200],
+        "timeout_suspected": _is_timeout_error(exc),
+    }
+
+
+def _log_before_backoff_sleep(retry_state: RetryCallState) -> None:
+    """Tenacity ``before_sleep`` hook: log every retried failure with its backoff.
+
+    ``attempt_duration_s`` together with ``timeout_suspected`` is what allows
+    correlating a failure with the request timeout in effect (e.g. an idle-read
+    timeout of N seconds shows up as attempts dying at ~N plus upstream bytes).
+    """
+    fields = _attempt_failure_log_fields(retry_state)
+    if fields is None:
+        return
+
+    fields["sleep_before_retry_s"] = (
+        round(retry_state.next_action.sleep, 3) if retry_state.next_action else None
+    )
+    log.warning("Retrying LLM invocation after failure", **fields)
+
+
+def _log_retries_exhausted(retry_state: RetryCallState) -> None:
+    """Tenacity ``after`` hook: log when the final attempt fails.
+
+    ``after`` only fires for retry-eligible failures (non-retryable exceptions
+    propagate immediately and are logged by the caller's error handling);
+    attempts followed by another retry are covered by the ``before_sleep``
+    hook, so this logs exactly once per invocation — when retries run out.
+    """
+    if retry_state.attempt_number < _RETRY_STOP_AFTER_ATTEMPT:
+        return
+
+    fields = _attempt_failure_log_fields(retry_state)
+    if fields is None:
+        return
+
+    log.warning("LLM invocation retries exhausted", **fields)
+
+
 @retry(
     reraise=True,
-    stop=stop_after_attempt(4),
+    stop=stop_after_attempt(_RETRY_STOP_AFTER_ATTEMPT),
     wait=wait_exponential(multiplier=3, min=3, max=29, exp_base=3),
     retry=retry_if_exception(_is_retryable),
-    before_sleep=before_sleep_log(_log, logging.WARNING),
+    before=_record_attempt_start,
+    after=_log_retries_exhausted,
+    before_sleep=_log_before_backoff_sleep,
 )
 async def _ainvoke_with_retry(
     invoke: Callable[[], Awaitable[BaseMessage]],
@@ -369,6 +493,11 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_provider=model_provider,
         )
 
+        # Capture before tool binding below possibly wraps `model` in a
+        # RunnableBinding, which would hide the attribute. Providers name this
+        # attribute differently; see _MODEL_REQUEST_TIMEOUT_ATTRS.
+        factory_timeout = _model_request_timeout(model)
+
         if tools and isinstance(model, BaseChatModel):
             if bind_tools_cache:
                 # Use cached bind_tools to avoid expensive repeated operations
@@ -403,10 +532,24 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_kwargs, prompt_tpl, model_provider
         )
 
-        log.debug(
+        # A timeout bound via model_kwargs (prompt-definition `params: timeout:`
+        # or a model's `prompt_params.timeout`) outranks the model factory's
+        # `request_timeout` (AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT); when neither
+        # is set, the HTTP client default applies. Note that on the litellm
+        # aiohttp path this value acts as an idle (inter-byte) timeout, not a
+        # cap on total request duration. Both channels are logged as raw
+        # observations; the resolution is intentionally not re-derived here, so
+        # the log cannot drift out of sync with the actual binding behavior.
+        bound_timeout = model_kwargs.get("timeout")
+
+        log.info(
             "Binding model kwargs to LLM",
+            prompt_name=config.name,
             model_kwargs_keys=list(model_kwargs.keys()),
             model_provider=model_provider,
+            bound_timeout=bound_timeout,
+            model_factory_request_timeout=factory_timeout.value,
+            model_factory_timeout_attr=factory_timeout.attr_name,
         )
 
         chain = cast(

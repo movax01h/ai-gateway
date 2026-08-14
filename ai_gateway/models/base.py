@@ -203,6 +203,20 @@ def grpc_connect_vertex(client_options: dict) -> PredictionServiceAsyncClient:
     return PredictionServiceAsyncClient(client_options=client_options)  # type: ignore
 
 
+def _request_timeout_extension(request: httpx.Request) -> dict | float | None:
+    """Extract the effective per-request timeout httpx attached to the request.
+
+    This is the ground-truth value the HTTP layer enforces (litellm's aiohttp
+    transport maps the ``read`` component to an idle socket-read timeout),
+    after all upstream merging of prompt params, model params and factory
+    defaults.
+    """
+    timeout = request.extensions.get("timeout")
+    if isinstance(timeout, dict):
+        return dict(timeout)
+    return timeout
+
+
 async def log_request(request: httpx.Request):
     if can_log_request_data():
         request_log.info(
@@ -210,6 +224,7 @@ async def log_request(request: httpx.Request):
             source=__name__,
             request_method=request.method,
             request_url=request.url,
+            request_timeout=_request_timeout_extension(request),
             request_content_json=json.loads(request.content.decode("utf8")),
         )
     else:
@@ -218,6 +233,7 @@ async def log_request(request: httpx.Request):
             source=__name__,
             request_method=request.method,
             request_url=request.url,
+            request_timeout=_request_timeout_extension(request),
             request_content_json={},
         )
 

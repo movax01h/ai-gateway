@@ -1,8 +1,9 @@
 # pylint: disable=too-many-lines
+import asyncio
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, Iterator, List, Optional, Type
+from typing import Any, Callable, Generator, Iterator, List, Optional, Type, cast
 from unittest import mock
 from unittest.mock import Mock, call
 
@@ -27,9 +28,10 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import MidStreamFallbackError, Timeout
-from pydantic import AnyUrl, ValidationError
+from pydantic import AnyUrl, SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 from structlog.testing import capture_logs
+from tenacity import RetryCallState
 
 from ai_gateway.config import ConfigModelLimits
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
@@ -55,6 +57,7 @@ from ai_gateway.model_selection.models import (
     OpenAIReasoningParams,
 )
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
+from ai_gateway.models.v2.chat_google_genai import ChatGoogleGenerativeAI
 from ai_gateway.prompts import (
     BasePromptCallbackHandler,
     BasePromptRegistry,
@@ -64,6 +67,11 @@ from ai_gateway.prompts import (
 from ai_gateway.prompts.base import (
     _PARSE_JSON_MAX_INPUT_LENGTH,
     TemplateNotFoundError,
+    _attempt_failure_log_fields,
+    _is_timeout_error,
+    _log_before_backoff_sleep,
+    _log_retries_exhausted,
+    _record_attempt_start,
     jinja_env,
     parse_json,
 )
@@ -197,6 +205,96 @@ configurable_unit_primitives:
         bad = prompt_config.model_dump() | {"operation_type": "bogus"}
         with pytest.raises(ValidationError):
             PromptConfig.model_validate(bad)
+
+    @pytest.mark.parametrize(
+        (
+            "params_timeout",
+            "model_builder",
+            "expected_factory_timeout",
+            "expected_attr",
+        ),
+        [
+            # Bound and factory channels are both reported, raw.
+            (
+                7.0,
+                lambda: ChatLiteLLM(model="test", request_timeout=42.0),
+                42.0,
+                "request_timeout",
+            ),
+            # No bound timeout: only the factory channel carries a value.
+            (
+                None,
+                lambda: ChatLiteLLM(model="test", request_timeout=42.0),
+                42.0,
+                "request_timeout",
+            ),
+            # Factory attribute present but unset.
+            (
+                None,
+                lambda: ChatLiteLLM(model="test"),
+                None,
+                "request_timeout",
+            ),
+            # ChatAnthropic names the factory timeout `default_request_timeout`.
+            (
+                None,
+                lambda: ChatAnthropic(
+                    async_client=AsyncAnthropic(api_key="fake"),
+                    model_name="claude-3-5-sonnet-20241022",
+                    stop=None,
+                ),
+                90.0,
+                "default_request_timeout",
+            ),
+            # ChatGoogleGenerativeAI names it `timeout`; its `request_timeout`
+            # is only a pydantic alias, invisible to attribute access.
+            (
+                None,
+                lambda: ChatGoogleGenerativeAI(
+                    model="gemini-pro",
+                    api_key=SecretStr("fake"),
+                    request_timeout=33.0,
+                ),
+                33.0,
+                "timeout",
+            ),
+            # No known timeout attribute at all (FakeModel): both fields None,
+            # signalling the factory channel is not observable.
+            (None, None, None, None),
+        ],
+    )
+    def test_construction_logs_request_timeout_channels(
+        self,
+        model_provider: ModelClassProvider,
+        model_factory: TypeModelFactory,
+        prompt_config: PromptConfig,
+        params_timeout: Optional[float],
+        model_builder: Optional[Callable[[], Any]],
+        expected_factory_timeout: Optional[float],
+        expected_attr: Optional[str],
+    ):
+        """Prompt construction logs each timeout channel raw, without re-deriving resolution."""
+        config = prompt_config.model_copy(
+            update={"params": PromptParams(timeout=params_timeout)}
+        )
+        factory: TypeModelFactory = model_factory
+        if model_builder is not None:
+            factory = cast(TypeModelFactory, lambda *_args, **_kwargs: model_builder())
+
+        with capture_logs() as cap_logs:
+            Prompt(model_provider, factory, config)
+
+        entry = next(
+            log_entry
+            for log_entry in cap_logs
+            if log_entry["event"] == "Binding model kwargs to LLM"
+        )
+        assert entry["bound_timeout"] == params_timeout
+        assert entry["model_factory_request_timeout"] == expected_factory_timeout
+        assert entry["model_factory_timeout_attr"] == expected_attr
+        # Resolution is not re-derived in the log; only raw channels appear.
+        assert "effective_request_timeout" not in entry
+        assert "request_timeout_source" not in entry
 
     def test_build_prompt_template(self, prompt_config: PromptConfig):
         prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
@@ -749,6 +847,92 @@ configurable_unit_primitives:
             with mock.patch("asyncio.sleep"):
                 with pytest.raises(httpx.ReadError):
                     await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_logs_backoff_and_final_failure_on_exhaustion(
+        self, prompt: Prompt
+    ):
+        """Every retried attempt logs a structured backoff record; exhaustion logs a terminal record."""
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+        with mock.patch.object(
+            FakeModel,
+            "ainvoke",
+            side_effect=httpx.ReadTimeout(
+                "Timeout on reading data from socket", request=request
+            ),
+        ):
+            with mock.patch("asyncio.sleep"):
+                with capture_logs() as cap_logs:
+                    with pytest.raises(httpx.ReadTimeout):
+                        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        retry_logs = [
+            log_entry
+            for log_entry in cap_logs
+            if log_entry["event"] == "Retrying LLM invocation after failure"
+        ]
+        final_logs = [
+            log_entry
+            for log_entry in cap_logs
+            if log_entry["event"] == "LLM invocation retries exhausted"
+        ]
+
+        assert [log_entry["attempt"] for log_entry in retry_logs] == [1, 2, 3]
+        assert [log_entry["sleep_before_retry_s"] for log_entry in retry_logs] == [
+            3.0,
+            9.0,
+            27.0,
+        ]
+        assert all(log_entry["timeout_suspected"] for log_entry in retry_logs)
+        assert all(
+            log_entry["exception_class"] == "ReadTimeout" for log_entry in retry_logs
+        )
+        assert all(
+            isinstance(log_entry["attempt_duration_s"], float)
+            for log_entry in retry_logs
+        )
+
+        assert len(final_logs) == 1
+        assert final_logs[0]["attempt"] == 4
+        assert final_logs[0]["timeout_suspected"] is True
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_logs_no_final_failure_on_recovery(self, prompt: Prompt):
+        """A run that recovers after retries logs backoff records but no terminal record."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise httpx.ReadError("Connection reset by peer")
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                with capture_logs() as cap_logs:
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        events = [log_entry["event"] for log_entry in cap_logs]
+        assert events.count("Retrying LLM invocation after failure") == 1
+        assert "LLM invocation retries exhausted" not in events
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_logs_nothing_for_non_retryable_error(self, prompt: Prompt):
+        """Non-retryable errors propagate immediately and emit no retry or exhaustion records; they are logged by the
+        caller's error handling instead."""
+        with mock.patch.object(
+            FakeModel, "ainvoke", side_effect=ValueError("bad input")
+        ):
+            with capture_logs() as cap_logs:
+                with pytest.raises(ValueError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        events = [log_entry["event"] for log_entry in cap_logs]
+        assert "Retrying LLM invocation after failure" not in events
+        assert "LLM invocation retries exhausted" not in events
 
     @pytest.mark.asyncio
     async def test_ainvoke_retries_on_timeout(self, prompt: Prompt):
@@ -2610,3 +2794,94 @@ class TestBuildModelExtraHeaders:
         assert len(warning_logs) == 1
         assert "overriding" in warning_logs[0]["event"].lower()
         assert warning_logs[0]["overridden_keys"] == ["x-shared"]
+
+
+def _chained_timeout_error() -> ValueError:
+    outer = ValueError("wrapper")
+    outer.__cause__ = httpx.ReadTimeout("read timed out")
+    return outer
+
+
+class TestIsTimeoutError:
+    @pytest.mark.parametrize(
+        ("exc", "expected"),
+        [
+            (httpx.ReadTimeout("read timed out"), True),
+            (asyncio.TimeoutError(), True),
+            # litellm surfaces the aiohttp idle-read timeout as a generic
+            # connection error carrying a fixed message.
+            (
+                MidStreamFallbackError(
+                    "AnthropicException - Timeout on reading data from socket",
+                    model="claude-3",
+                    llm_provider="anthropic",
+                ),
+                True,
+            ),
+            (_chained_timeout_error(), True),
+            (ValueError("boom"), False),
+            (None, False),
+        ],
+    )
+    def test_classification(self, exc: Optional[BaseException], expected: bool):
+        assert _is_timeout_error(exc) is expected
+
+    def test_loop_exhaustion_returns_false(self):
+        """A chain of 5+ non-timeout exceptions exhausts the loop and hits the final ``return False``."""
+        # Build a chain of 6 plain exceptions so the loop runs all 5 iterations
+        # without ever finding a timeout, reaching the ``return False`` after the loop.
+        exc: BaseException = ValueError("level-6")
+        for i in range(5, 0, -1):
+            wrapper = ValueError(f"level-{i}")
+            wrapper.__cause__ = exc
+            exc = wrapper
+        assert _is_timeout_error(exc) is False
+
+
+class TestRetryHooks:
+    """Unit tests for the tenacity retry hook helpers."""
+
+    def _make_retry_state(self) -> RetryCallState:
+        return RetryCallState(mock.MagicMock(), fn=None, args=(), kwargs={})
+
+    def test_record_attempt_start_stamps_monotonic(self):
+        """``_record_attempt_start`` sets ``attempt_start_monotonic`` on the retry state."""
+        state = self._make_retry_state()
+        assert not hasattr(state, "attempt_start_monotonic")
+        _record_attempt_start(state)
+        assert hasattr(state, "attempt_start_monotonic")
+        assert isinstance(state.attempt_start_monotonic, float)
+
+    def test_attempt_failure_log_fields_returns_none_when_outcome_is_none(self):
+        """``_attempt_failure_log_fields`` returns ``None`` when ``outcome`` is ``None``."""
+        state = self._make_retry_state()
+        assert state.outcome is None
+        assert _attempt_failure_log_fields(state) is None
+
+    def test_attempt_failure_log_fields_returns_none_when_outcome_succeeded(self):
+        """``_attempt_failure_log_fields`` returns ``None`` when the outcome is a success (not failed)."""
+        state = self._make_retry_state()
+        state.set_result("ok")
+        assert not state.outcome.failed
+        assert _attempt_failure_log_fields(state) is None
+
+    def test_log_before_backoff_sleep_is_noop_when_fields_none(self):
+        """``_log_before_backoff_sleep`` returns early without logging when ``_attempt_failure_log_fields`` is
+        ``None``."""
+        state = self._make_retry_state()
+        # outcome is None → _attempt_failure_log_fields returns None → early return
+        with capture_logs() as cap_logs:
+            _log_before_backoff_sleep(state)
+        assert cap_logs == []
+
+    def test_log_retries_exhausted_is_noop_when_fields_none(self):
+        """``_log_retries_exhausted`` returns early without logging when ``_attempt_failure_log_fields`` is ``None``."""
+        from ai_gateway.prompts.base import _RETRY_STOP_AFTER_ATTEMPT
+
+        state = self._make_retry_state()
+        # Simulate the final attempt so the attempt_number guard passes
+        state.attempt_number = _RETRY_STOP_AFTER_ATTEMPT
+        # outcome is None → _attempt_failure_log_fields returns None → early return
+        with capture_logs() as cap_logs:
+            _log_retries_exhausted(state)
+        assert cap_logs == []
