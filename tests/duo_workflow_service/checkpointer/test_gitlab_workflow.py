@@ -53,7 +53,12 @@ from duo_workflow_service.workflows.type_definitions import (
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.billing_events.service import LLMOperation
-from lib.context import current_model_metadata_context, llm_operations
+from lib.context import (
+    client_capabilities,
+    current_model_metadata_context,
+    gitlab_version,
+    llm_operations,
+)
 from lib.context.tool_executions import init_tool_executions, tool_executions
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -169,6 +174,20 @@ def workflow_config_fixture():
 def incremental_enabled_fixture(workflow_config):
     """Enable incremental checkpoints on the workflow_config consumed by the gitlab_workflow fixture."""
     workflow_config["incremental_checkpoints_enabled"] = True
+
+
+@pytest.fixture(name="incremental_checkpoints_only_capable")
+def incremental_checkpoints_only_capable_fixture():
+    """The instance advertises the incremental_checkpoints_only server capability.
+
+    Workhorse appends server capabilities to clientCapabilities, and is_client_capable also requires a GitLab version
+    that forwards them.
+    """
+    capabilities_token = client_capabilities.set({"incremental_checkpoints_only"})
+    version_token = gitlab_version.set("19.4.0")
+    yield
+    client_capabilities.reset(capabilities_token)
+    gitlab_version.reset(version_token)
 
 
 @pytest.fixture(name="gitlab_workflow")
@@ -3457,6 +3476,81 @@ async def test_aput_sends_full_checkpoint_and_channel_blobs(
     assert set(by_channel) == {"conversation_history", "messages", "status"}
     assert all(b["step_action"] == "compaction" for b in blobs)
     assert by_channel["messages"]["version"] == "2.1"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_sends_checkpoint_skeleton_when_instance_keeps_headers_only(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    incremental_checkpoints_only_capable,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """Phase 2: Rails persists only the header, so the payload drops channel_values.
+
+    The blobs are the sole source of state; the skeleton is what the header stores.
+    """
+    gitlab_workflow._logger = Mock()
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["messages"] = ["msg1", "msg2"]
+    checkpoint["channel_versions"] = {"messages": "2.1"}
+
+    new_versions = ChannelVersions({"messages": "2.1"})
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(config, checkpoint, checkpoint_metadata, new_versions)
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert "compressed_checkpoint" not in post_call_body
+    assert post_call_body["checkpoint"] == {
+        "id": checkpoint["id"],
+        "channel_versions": {"messages": "2.1"},
+    }
+    assert post_call_body["thread_ts"] == checkpoint["id"]
+    assert post_call_body["parent_ts"] == "parent-checkpoint"
+    assert {b["channel"] for b in post_call_body["channel_blobs"]} == {
+        "conversation_history",
+        "messages",
+    }
+    assert (
+        "?checkpoint_strategy=incremental_only"
+        in http_client.apost.call_args[1]["path"]
+    )
+    assert (
+        _checkpoint_saved_kwargs(gitlab_workflow._logger)["checkpoint_strategy"]
+        == "incremental_only"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_keeps_full_checkpoint_when_workflow_is_not_incremental(
+    _mock_duo_workflow_metrics,
+    incremental_checkpoints_only_capable,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """The capability alone changes nothing: a workflow with no blobs would lose its state."""
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
+    assert "checkpoint" not in post_call_body
+    assert "?checkpoint_strategy=full" in http_client.apost.call_args[1]["path"]
 
 
 @pytest.mark.asyncio
