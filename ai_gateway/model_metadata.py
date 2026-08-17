@@ -112,6 +112,12 @@ class ModelMetadata(BaseModelMetadata):
                 params["custom_llm_provider"] = "custom_openai"
                 params["model"] = self.identifier
 
+        managed_provider = getattr(
+            self.llm_definition.params, "custom_llm_provider", None
+        )
+        if managed_provider in PROVIDERS_WITHOUT_API_BASE:
+            params.pop("api_base", None)
+
         if self.api_key:
             params["api_key"] = self.api_key
         # Set a default dummy key to avoid LiteLLM errors

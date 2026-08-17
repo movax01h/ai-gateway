@@ -497,6 +497,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         # RunnableBinding, which would hide the attribute. Providers name this
         # attribute differently; see _MODEL_REQUEST_TIMEOUT_ATTRS.
         factory_timeout = _model_request_timeout(model)
+        base_model = model
 
         if tools and isinstance(model, BaseChatModel):
             if bind_tools_cache:
@@ -551,6 +552,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_factory_request_timeout=factory_timeout.value,
             model_factory_timeout_attr=factory_timeout.attr_name,
         )
+
+        validate_endpoint_kwargs = getattr(base_model, "validate_endpoint_kwargs", None)
+        if callable(validate_endpoint_kwargs):
+            validate_endpoint_kwargs(model_kwargs)
 
         chain = cast(
             Runnable[Any, BaseMessage],
