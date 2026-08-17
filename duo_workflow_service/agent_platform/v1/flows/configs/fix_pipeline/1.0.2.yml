@@ -111,7 +111,7 @@ components:
     toolset:
       - "build_review_merge_request_context"
       - "create_merge_request_diff_note"
-      - "run_git_command"
+      - "run_command"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
@@ -147,14 +147,12 @@ components:
 
   - name: "git_fetch_for_branch"
     type: DeterministicStepComponent
-    tool_name: "run_git_command"
+    tool_name: "run_command"
     inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "fetch"
-        as: "command"
+      - from: "git"
+        as: "program"
         literal: True
-      - from: "origin"
+      - from: "fetch origin"
         as: "args"
         literal: True
     ui_log_events:
@@ -168,7 +166,7 @@ components:
     response_schema_id: "create_repository_branch"
     response_schema_version: "^1.0.0"
     toolset:
-      - "run_git_command"
+      - "run_command"
     inputs:
       - from: "context:project_id"
         as: "project_id"
@@ -203,7 +201,7 @@ components:
         as: "repository_url"
     max_cycles: 4
     toolset:
-      - "run_git_command"
+      - "run_command"
     ui_log_events:
       - "on_agent_final_answer"
       - "on_tool_execution_success"
@@ -211,14 +209,12 @@ components:
 
   - name: "fix_pipeline_check_diff"
     type: DeterministicStepComponent
-    tool_name: "run_git_command"
+    tool_name: "run_command"
     inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "diff"
-        as: "command"
+      - from: "git"
+        as: "program"
         literal: True
-      - from: "--no-color"
+      - from: "diff --no-color"
         as: "args"
         literal: True
     ui_log_events:
@@ -271,21 +267,19 @@ components:
         as: "workspace_agent_skills"
         optional: True
     toolset:
-      - "run_git_command"
+      - "run_command"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
   - name: "git_fetch_unshallow"
     type: DeterministicStepComponent
-    tool_name: "run_git_command"
+    tool_name: "run_command"
     inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "fetch"
-        as: "command"
+      - from: "git"
+        as: "program"
         literal: True
-      - from: "--unshallow"
+      - from: "fetch --unshallow"
         as: "args"
         literal: True
     ui_log_events:
@@ -294,14 +288,12 @@ components:
 
   - name: "git_push_branch"
     type: DeterministicStepComponent
-    tool_name: "run_git_command"
+    tool_name: "run_command"
     inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "push"
-        as: "command"
+      - from: "git"
+        as: "program"
         literal: True
-      - from: "origin HEAD --no-verify"
+      - from: "push origin HEAD --no-verify"
         as: "args"
         literal: True
     ui_log_events:
@@ -311,7 +303,7 @@ components:
   - name: "fix_pipeline_create_new_mr"
     type: OneOffComponent
     prompt_id: "fix_pipeline_create_new_mr"
-    prompt_version: "1.0.0"
+    prompt_version: "1.0.2"
     max_correction_attempts: 3
     inputs:
       - from: "context:goal"
@@ -335,6 +327,9 @@ components:
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
         optional: True
+      - from: "context:inputs.merge_request.author_id"
+        as: "merge_request_author_id"
+        optional: True
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: True
@@ -349,12 +344,13 @@ components:
   - name: "fix_pipeline_new_mr_comment"
     type: AgentComponent
     prompt_id: "fix_pipeline_new_mr_comment"
-    prompt_version: "1.0.0"
+    prompt_version: "1.0.2"
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
-      - from: "context:inputs.agent_platform_standard_context.session_owner_id"
-        as: "session_owner_id"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+        optional: True
       - from: "context:fix_pipeline_create_new_mr.tool_responses"
         as: "create_mr_result"
         optional: True
@@ -363,7 +359,6 @@ components:
         optional: True
     max_cycles: 4
     toolset:
-      - run_command
       - create_merge_request_note
     ui_log_events:
       - "on_agent_final_answer"
@@ -453,6 +448,10 @@ flow:
           type: string
           format: uri
           description: The URL for the GitLab Merge Request
+        author_id:
+          type: string
+          description: ID of the Merge Request author
+          optional: true
     - category: pipeline
       version_constraint: "^1.0.0"
       input_schema:

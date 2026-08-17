@@ -1,0 +1,12 @@
+name: fix_pipeline_new_mr_comment
+model:
+  params:
+    max_tokens: 4_096
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_new_mr_comment/system/1.0.2.jinja' %}
+  user: |
+    {% include 'fix_pipeline_new_mr_comment/user/1.0.2.jinja' %}
+params:
+  timeout: 60

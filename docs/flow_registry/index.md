@@ -355,7 +355,7 @@ When making the call to the Service API, these additional context parameters are
 
 ```json
 "additional_context": [
-    {"Category": "merge_request_info", "Content": "{\"url\": \"www.example.com\", \"source_branch\": \"testbranch\"}"},
+    {"Category": "merge_request", "Content": "{\"url\": \"https://gitlab.example.com/group/project/-/merge_requests/1\", \"author_id\": \"123\"}"},
     {"Category": "pipeline_info", "Content": "{\"url\": \"www.example.com\"}"}
 ]
 ```
