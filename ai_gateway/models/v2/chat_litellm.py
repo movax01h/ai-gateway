@@ -177,8 +177,7 @@ class ChatLiteLLM(_LChatLiteLLM):
     custom_models_enabled: bool = False
     allowed_api_bases: frozenset[str] = frozenset()
 
-    @override
-    def bind(self, **kwargs: Any) -> _ChatModelBinding:
+    def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:
         validate_custom_endpoint(
             self.custom_models_enabled,
             api_base=kwargs.get("api_base"),
@@ -187,6 +186,10 @@ class ChatLiteLLM(_LChatLiteLLM):
             custom_llm_provider=kwargs.get("custom_llm_provider")
             or self.custom_llm_provider,
         )
+
+    @override
+    def bind(self, **kwargs: Any) -> _ChatModelBinding:
+        self.validate_endpoint_kwargs(kwargs)
         return super().bind(**kwargs)
 
     @override
@@ -200,6 +203,7 @@ class ChatLiteLLM(_LChatLiteLLM):
     ) -> Runnable[LanguageModelInput, AIMessage]:
         kwargs.pop("web_search_options", None)  # Not yet supported for LiteLLM
 
+        self.validate_endpoint_kwargs(kwargs)
         return super().bind_tools(tools, tool_choice=tool_choice, **kwargs)
 
     @override

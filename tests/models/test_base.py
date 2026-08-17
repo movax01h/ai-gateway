@@ -10,6 +10,7 @@ from structlog.testing import capture_logs
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models import ModelMetadata
 from ai_gateway.models.base import (
+    _TRUSTED_PROVIDERS,
     init_anthropic_client,
     log_request,
     validate_custom_endpoint,
@@ -204,6 +205,54 @@ class TestValidateCustomEndpoint:
             api_base="https://allowed.example.com",
             api_key=None,
             allowed_api_bases=allowed,
+        )
+
+    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("api_key", [None, "custom-key"])
+    def test_raises_for_non_allowlisted_api_base_with_trusted_provider(
+        self, provider, api_key
+    ):
+        # A trusted provider waives the api_key check only: api_base is still checked
+        # against allowed_api_bases.
+        with pytest.raises(ValueError, match="api_base is not allowed"):
+            validate_custom_endpoint(
+                False,
+                api_base="https://not-allowed.example.com",
+                api_key=api_key,
+                allowed_api_bases=frozenset(["https://allowed.example.com"]),
+                custom_llm_provider=provider,
+            )
+
+    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    def test_allows_trusted_provider_key_without_api_base(self, provider):
+        # Managed Mistral: server-injected provider key, no endpoint.
+        validate_custom_endpoint(
+            False,
+            api_base=None,
+            api_key="server-provider-key",
+            custom_llm_provider=provider,
+        )
+
+    def test_raises_for_untrusted_provider_key(self):
+        with pytest.raises(ValueError, match="api_key is not allowed"):
+            validate_custom_endpoint(
+                False,
+                api_base=None,
+                api_key="sk-secret",
+                custom_llm_provider="custom_openai",
+            )
+
+    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("api_base", ["https://allowed.example.com/", None])
+    def test_allows_trusted_provider_on_allowlisted_endpoint(self, provider, api_base):
+        # Managed Fireworks: endpoint comes from operator config, which the container
+        # allowlists via _compute_fireworks_allowed_api_bases.
+        validate_custom_endpoint(
+            False,
+            api_base=api_base,
+            api_key="server-provider-key",
+            allowed_api_bases=frozenset(["https://allowed.example.com"]),
+            custom_llm_provider=provider,
         )
 
 
