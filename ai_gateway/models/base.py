@@ -52,20 +52,26 @@ def validate_custom_endpoint(
     When custom_models_enabled is False, only endpoints explicitly listed in allowed_api_bases (operator-configured via
     env vars) are accepted. URLs are compared after stripping trailing slashes so that semantically equivalent bases are
     not rejected due to formatting differences.
+
+    A provider in _TRUSTED_PROVIDERS waives the api_key check only, because those models carry a server-injected
+    provider key. api_base is checked against allowed_api_bases for every provider, trusted or not.
     """
     if custom_models_enabled:
         return
-    if custom_llm_provider in _TRUSTED_PROVIDERS:
-        return
-    if api_base is not None and api_base.rstrip("/") in {
+
+    allowlisted = api_base is not None and api_base.rstrip("/") in {
         b.rstrip("/") for b in allowed_api_bases
-    }:
-        return
-    if api_base is not None:
+    }
+
+    if api_base is not None and not allowlisted:
         raise ValueError(
             "specifying custom models endpoint is disabled: api_base is not allowed"
         )
-    if api_key is not None:
+    if (
+        api_key is not None
+        and not allowlisted
+        and custom_llm_provider not in _TRUSTED_PROVIDERS
+    ):
         raise ValueError(
             "specifying custom models endpoint is disabled: api_key is not allowed"
         )
