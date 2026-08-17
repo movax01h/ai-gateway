@@ -12,6 +12,8 @@ Incremental checkpoints send only the channels that changed, and within those ch
 
 A per-workflow property gates this feature: `WorkflowConfig.incremental_checkpoints_enabled`, sourced from the workflow's `incrementalCheckpointsEnabled` field (see [`gitlab_api.py`](../duo_workflow_service/gitlab/gitlab_api.py)) and checked in `aput`. Workflows without it enabled receive the legacy payload unchanged. The current rollout is a **shadow write**: `aput` still sends the full `compressed_checkpoint` so reads keep working, and additionally sends the blobs; Rails persists both but reads from the full checkpoint.
 
+A second gate layers on top: the `incremental_checkpoints_only` server capability, which says the instance stores only the header and the blobs. `aput` then sends the checkpoint skeleton (the langgraph checkpoint minus `channel_values`) instead of `compressed_checkpoint`. Rails advertises the capability from `duo_workflow_write_incremental_only`, workhorse appends it to `clientCapabilities`, and `is_client_capable` reads it here. An instance too old to advertise it keeps receiving the full payload, and Rails accepts both shapes, so a mid-session change can't break a write.
+
 The proposed end state ([issue #605653](https://gitlab.com/gitlab-org/gitlab/-/issues/605653)) is to drop the full checkpoint from storage entirely: Rails would keep a slim **header** and reconstruct `channel_values` from the blobs on read. Storage would use two range-partitioned tables:
 
 - `p_duo_workflows_checkpoint_headers` — one row per checkpoint holding only what's needed to rebuild a `CheckpointTuple` and isn't already in the blobs: the langgraph checkpoint minus `channel_values` (`channel_versions`, `versions_seen`, `v`, `ts`, `updated_channels`) plus its `metadata`.
@@ -118,6 +120,26 @@ Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so the
 
 `current_thread_started_at` is derived from the group's first checkpoint ID (a time-ordered UUID) and omitted when the ID isn't time-based. It originally bounded the `created_at` range of the blob read query; that role is obsolete now blobs prune by the `workflow_created_at` partition key (see [Gating](#gating)), so the field is still sent but no longer read by Rails. These three (`current_thread`, `channel_blobs`, `current_thread_started_at`) are the complete set of fields incremental mode adds.
 
+When the instance also advertises `incremental_checkpoints_only`, `checkpoint` replaces `compressed_checkpoint`: the langgraph checkpoint minus `channel_values` (the same skeleton stored as the header). `current_thread`, `current_thread_started_at`, and `channel_blobs` are unchanged:
+
+```jsonc
+{
+  "checkpoint": {                       // skeleton — no channel_values
+    "id": "...",
+    "ts": "...",
+    "v": 1,
+    "channel_versions": {},
+    "versions_seen": {},
+    "updated_channels": []
+  },
+  "current_thread": 0,
+  "current_thread_started_at": "<ISO8601 timestamp>",
+  "channel_blobs": [ /* unchanged — see above */ ]
+}
+```
+
+This shape is tagged with the query parameter `checkpoint_strategy=incremental_only` (see [Monitoring which strategy is in use](#monitoring-which-strategy-is-in-use)).
+
 ## How deltas are computed
 
 `_serialize_channel_blobs` walks `new_versions` (LangGraph's set of channels changed this step) and emits one blob per changed channel:
@@ -166,7 +188,7 @@ The cache is in-memory, so a restart (or pickup by another gateway instance) wou
 
 ## Monitoring which strategy is in use
 
-Each `aput` tags its strategy (`incremental` or `full`) in two places so both sides are searchable in Kibana:
+Each `aput` tags its strategy (`incremental_only`, `incremental` or `full`) in two places so both sides are searchable in Kibana:
 
 - **Request path**: the checkpoint POST carries a `?checkpoint_strategy=` query parameter. Rails doesn't read it (it's ignored by strong parameters), but it appears in Rails/workhorse request logs, so the backend side is searchable without any Rails change.
 

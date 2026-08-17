@@ -58,6 +58,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     uncompress_checkpoint,
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     InvalidRequestException,
@@ -1462,7 +1463,18 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         incremental_enabled = self._workflow_config.get(
             "incremental_checkpoints_enabled", False
         )
-        checkpoint_strategy = "incremental" if incremental_enabled else "full"
+        # The instance advertises that it keeps only the slim header and the blobs,
+        # so channel_values in the payload are waste. Instances that don't advertise
+        # it (older, or still shadow-writing) keep the full payload.
+        write_incremental_only = incremental_enabled and is_client_capable(
+            "incremental_checkpoints_only"
+        )
+        if write_incremental_only:
+            checkpoint_strategy = "incremental_only"
+        elif incremental_enabled:
+            checkpoint_strategy = "incremental"
+        else:
+            checkpoint_strategy = "full"
 
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
@@ -1477,8 +1489,19 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "thread_ts": checkpoint["id"],
             "parent_ts": configurable.get("checkpoint_id"),
             "metadata": metadata,
-            "compressed_checkpoint": compress_checkpoint(checkpoint),
         }
+
+        if write_incremental_only:
+            # The skeleton (id, ts, v, channel_versions, versions_seen,
+            # updated_channels) is what Rails stores as the header and what LangGraph
+            # needs to rebuild a CheckpointTuple; the blobs carry the state itself.
+            payload["checkpoint"] = {
+                key: value
+                for key, value in checkpoint.items()
+                if key != "channel_values"
+            }
+        else:
+            payload["compressed_checkpoint"] = compress_checkpoint(checkpoint)
 
         if incremental_enabled:
             state = self._incremental_state
@@ -1537,9 +1560,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 thread_ts=checkpoint["id"],
                 current_thread=state.current_thread,
                 current_thread_started_at=state.current_thread_started_at,
-                compressed_checkpoint_bytes=len(payload["compressed_checkpoint"]),
+                compressed_checkpoint_bytes=(
+                    len(payload["compressed_checkpoint"])
+                    if "compressed_checkpoint" in payload
+                    else None
+                ),
                 channel_blobs_total_bytes=sum(len(b["data"]) for b in channel_blobs),
                 channel_blob_count=len(channel_blobs),
+                write_incremental_only=write_incremental_only,
             )
 
         if (model_metadata := current_model_metadata_context.get()) is not None:
