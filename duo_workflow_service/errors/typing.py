@@ -41,6 +41,13 @@ class InvalidWorkflowIdException(Exception):
     """Raised when a workflow ID is invalid or not found."""
 
 
+class CheckpointFetchError(Exception):
+    """Raised when fetching a checkpoint from the Rails API fails.
+
+    A distinct type lets callers tell a checkpoint-fetch failure apart from other runtime errors.
+    """
+
+
 class EnvelopeVersionMismatchException(Exception):
     """Raised when an additional context envelope version does not satisfy the flow's constraint.
 

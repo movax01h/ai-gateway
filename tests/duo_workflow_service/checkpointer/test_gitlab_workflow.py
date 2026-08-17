@@ -31,6 +31,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
+    CheckpointFetchError,
     InvalidRequestException,
     NotifiableException,
 )
@@ -55,6 +56,7 @@ from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.billing_events.service import LLMOperation
 from lib.context import current_model_metadata_context, llm_operations
 from lib.context.tool_executions import init_tool_executions, tool_executions
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
@@ -1468,6 +1470,215 @@ async def test_aget_tuple(
     )
     assert "accept_compressed=true" in call_kwargs["path"]
     assert call_kwargs.get("object_hook") == checkpoint_decoder
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_uses_by_thread_ts_when_flag_and_column_enabled(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+    workflow_id,
+    checkpoint_data,
+    compressed_checkpoint_data,
+):
+    current_feature_flag_context.set(
+        {
+            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
+            FeatureFlag.DW_READ_BLOBS_API.value,
+        }
+    )
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoint_data[0],
+    )
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert isinstance(result, CheckpointTuple)
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+    assert result.metadata == checkpoint_data[0]["metadata"]
+
+    http_client.aget.assert_called_once()
+    call_kwargs = http_client.aget.call_args[1]
+    assert (
+        f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/checkpoints/by_thread_ts"
+        in call_kwargs["path"]
+    )
+    assert "thread_ts=5678" in call_kwargs["path"]
+    assert "accept_compressed=true" in call_kwargs["path"]
+    assert call_kwargs.get("object_hook") == checkpoint_decoder
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_returns_none_on_404_when_reading_incremental(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+):
+    current_feature_flag_context.set(
+        {
+            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
+            FeatureFlag.DW_READ_BLOBS_API.value,
+        }
+    )
+    http_client.aget.return_value = GitLabHttpResponse(status_code=404, body={})
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is None
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" in http_client.aget.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_raises_on_non_404_when_reading_incremental(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+):
+    current_feature_flag_context.set(
+        {
+            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
+            FeatureFlag.DW_READ_BLOBS_API.value,
+        }
+    )
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=500, body={"error": "server error"}
+    )
+
+    with pytest.raises(CheckpointFetchError):
+        await gitlab_workflow.aget_tuple(config)
+
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" in http_client.aget.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_returns_none_on_empty_body_when_reading_incremental(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+):
+    current_feature_flag_context.set(
+        {
+            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
+            FeatureFlag.DW_READ_BLOBS_API.value,
+        }
+    )
+    http_client.aget.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is None
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" in http_client.aget.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_uses_list_when_column_disabled(
+    gitlab_workflow,
+    http_client,
+    config,
+    checkpoint_data,
+    compressed_checkpoint_data,
+):
+    # incremental_checkpoints_enabled defaults to False in workflow_config.
+    current_feature_flag_context.set({FeatureFlag.DW_READ_BLOBS_API.value})
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoint_data,
+    )
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_uses_list_when_flag_disabled(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+    checkpoint_data,
+    compressed_checkpoint_data,
+):
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoint_data,
+    )
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_uses_list_when_kill_switch_disabled(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+    checkpoint_data,
+    compressed_checkpoint_data,
+):
+    # dw_read_blobs_api and the column are on, but the kill switch is off, so the
+    # blob read is disabled and aget_tuple falls back to the list read.
+    current_feature_flag_context.set({FeatureFlag.DW_READ_BLOBS_API.value})
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=compressed_checkpoint_data,
+    )
+
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
+
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_logs_error_when_list_scan_returns_non_success(
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    config,
+):
+    # Flag disabled, so aget_tuple takes the paginated list-and-scan path.
+    # A failed page fetch must raise, not be reported as "checkpoint absent".
+    gitlab_workflow._logger = Mock()
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=500,
+        body=[],
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        await gitlab_workflow.aget_tuple(config)
+
+    assert str(exc_info.value) == "Failed to fetch checkpoints: []"
+    http_client.aget.assert_called_once()
+    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
+    gitlab_workflow._logger.error.assert_called_once_with(
+        "Failed to fetch checkpoint page",
+        workflow_id=gitlab_workflow._workflow_id,
+        status_code=500,
+        page="1",
+    )
 
 
 @pytest.mark.asyncio
@@ -4415,9 +4626,12 @@ async def test_iter_checkpoint_pages_shrinks_per_page_on_size_limit_error(
 
     assert len(pages) == 1
     assert [cp["thread_ts"] for cp in pages[0]] == ["cp-1"]
-    assert requested_per_page == ["8", "4", "2", "1"], (
-        "per_page must halve on each size-limit failure until the request succeeds"
-    )
+    assert requested_per_page == [
+        "8",
+        "4",
+        "2",
+        "1",
+    ], "per_page must halve on each size-limit failure until the request succeeds"
 
 
 @pytest.mark.asyncio
