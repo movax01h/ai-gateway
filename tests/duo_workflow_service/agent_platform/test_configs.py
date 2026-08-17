@@ -202,3 +202,67 @@ class TestDeclaredToolsetNames:
 
         assert names == ["read_file"]
         assert all(TOOL_NAME_PATTERN.fullmatch(name) for name in names)
+
+
+class TestFixPipelineConfig:
+    @staticmethod
+    def _config() -> FlowConfig:
+        return FlowConfig.from_yaml_config("fix_pipeline", "1.0.2")
+
+    def test_merge_request_author_id_is_optional(self):
+        config = self._config()
+        schema = config.input_json_schemas_by_category()["merge_request"]
+
+        assert schema["properties"]["author_id"] == {
+            "type": "string",
+            "description": "ID of the Merge Request author",
+        }
+        assert "author_id" not in schema["required"]
+
+    def test_create_new_mr_receives_merge_request_author_id(self):
+        config = self._config()
+        component = next(
+            component
+            for component in config.components
+            if component["name"] == "fix_pipeline_create_new_mr"
+        )
+
+        assert {
+            "from": "context:inputs.merge_request.author_id",
+            "as": "merge_request_author_id",
+            "optional": True,
+        } in component["inputs"]
+
+    def test_changed_prompts_use_exact_versions(self):
+        config = self._config()
+        components = {component["name"]: component for component in config.components}
+
+        assert components["fix_pipeline_create_new_mr"]["prompt_version"] == "1.0.2"
+        assert components["fix_pipeline_new_mr_comment"]["prompt_version"] == "1.0.2"
+
+    def test_new_mr_comment_reuses_existing_context_without_user_lookup(self):
+        config = self._config()
+        component = next(
+            component
+            for component in config.components
+            if component["name"] == "fix_pipeline_new_mr_comment"
+        )
+
+        assert component["toolset"] == ["create_merge_request_note"]
+        assert {
+            "from": "context:inputs.merge_request.url",
+            "as": "merge_request_url",
+            "optional": True,
+        } in component["inputs"]
+        assert not any(
+            component_input["as"] == "session_owner_id"
+            for component_input in component["inputs"]
+        )
+
+    @pytest.mark.parametrize("version", ["1.0.0", "1.0.1"])
+    def test_historical_flows_pin_changed_prompts(self, version: str):
+        config = FlowConfig.from_yaml_config("fix_pipeline", version)
+        components = {component["name"]: component for component in config.components}
+
+        assert components["fix_pipeline_create_new_mr"]["prompt_version"] == "1.0.0"
+        assert components["fix_pipeline_new_mr_comment"]["prompt_version"] == "1.0.0"

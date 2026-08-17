@@ -303,7 +303,7 @@ components:
   - name: "fix_pipeline_create_new_mr"
     type: OneOffComponent
     prompt_id: "fix_pipeline_create_new_mr"
-    prompt_version: "^1.0.0"
+    prompt_version: "1.0.0"
     max_correction_attempts: 3
     inputs:
       - from: "context:goal"
@@ -341,7 +341,7 @@ components:
   - name: "fix_pipeline_new_mr_comment"
     type: AgentComponent
     prompt_id: "fix_pipeline_new_mr_comment"
-    prompt_version: "^1.0.0"
+    prompt_version: "1.0.0"
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
