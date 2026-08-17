@@ -61,6 +61,7 @@ from duo_workflow_service.checkpointer.utils.serializer import CheckpointSeriali
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
+    CheckpointFetchError,
     InvalidRequestException,
     NotifiableException,
 )
@@ -102,6 +103,7 @@ from lib.context import (
 )
 from lib.context.tool_executions import get_tool_executions, init_tool_executions
 from lib.events import GLReportingEventContext
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
@@ -1034,6 +1036,54 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             )
         return checkpoint
 
+    async def _fetch_checkpoint_by_thread_ts(
+        self, thread_ts: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single checkpoint by ``thread_ts`` from the Rails API.
+
+        Rails reconstructs ``channel_values`` server-side from the incremental
+        blobs, so the returned checkpoint is complete — no client-side blob
+        reconstruction. Returns the checkpoint dict (with
+        ``checkpoint["checkpoint"]`` already decompressed) or ``None`` on 404,
+        which means no checkpoint exists for ``thread_ts``.
+        """
+        endpoint = add_compression_param(
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}"
+            f"/checkpoints/by_thread_ts?thread_ts={thread_ts}"
+        )
+        with duo_workflow_metrics.time_gitlab_response(
+            endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints/by_thread_ts",
+            method="GET",
+        ):
+            response = await self._client.aget(
+                path=endpoint,
+                object_hook=checkpoint_decoder,
+            )
+
+        if response.status_code == 404:
+            return None
+
+        if not response.is_success():
+            self._logger.error(
+                "Failed to fetch checkpoint by thread_ts",
+                workflow_id=self._workflow_id,
+                thread_ts=thread_ts,
+                status_code=response.status_code,
+                response_body=response.body,
+            )
+            raise CheckpointFetchError(
+                f"Failed to fetch checkpoint by thread_ts: {response.body}"
+            )
+
+        checkpoint = response.body
+        if not checkpoint:
+            return None
+        if "compressed_checkpoint" in checkpoint:
+            checkpoint["checkpoint"] = uncompress_checkpoint(
+                checkpoint["compressed_checkpoint"]
+            )
+        return checkpoint
+
     async def _get_latest_checkpoint_status(self) -> Optional[WorkflowStatusEnum]:
         """Return the workflow status from the most recent checkpoint.
 
@@ -1222,28 +1272,45 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # specific checkpoint is being requested in `aget_state`
         # in both case grahp_config looks like: {'configurable': {'thread_id': '1', 'checkpoint_id': 'xyz'}}
         if checkpoint_id:
-            # The Rails checkpoints endpoint is paginated (~20 per page, thread_ts DESC), so the
-            # requested checkpoint may sit outside the newest page. Page through until it is found;
-            # `_iter_checkpoint_pages` stops issuing requests as soon as we break out of the loop.
-            # Reporting a checkpoint that exists as absent makes LangGraph fall back to
-            # `empty_checkpoint()`, which silently discards all prior state (see gitlab-lsp#2775) —
-            # hence `raise_on_error`: a failed fetch must not be indistinguishable from "absent".
             checkpoint: Any = None
-            async for gl_checkpoints in self._iter_checkpoint_pages(
-                raise_on_error=True
-            ):
-                checkpoint = next(
-                    (c for c in gl_checkpoints if c["thread_ts"] == checkpoint_id), None
+            # Double-gated: the general kill switch disables the blob read for every
+            # consumer at once; dw_read_blobs_api is this consumer's own flag. When
+            # either is off, fall back to the full-checkpoint read below (no state loss).
+            read_incremental = (
+                is_feature_enabled(
+                    FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS
                 )
-                if checkpoint:
-                    break
+                and is_feature_enabled(FeatureFlag.DW_READ_BLOBS_API)
+                and self._workflow_config.get("incremental_checkpoints_enabled", False)
+            )
+            if read_incremental:
+                # The workflow has blobs, so Rails serves the reconstructed
+                # checkpoint or 404s when the thread_ts is absent. A 404 means the
+                # checkpoint does not exist, so return None instead of listing.
+                checkpoint = await self._fetch_checkpoint_by_thread_ts(checkpoint_id)
+            else:
+                # The Rails checkpoints endpoint is paginated (~20 per page, thread_ts DESC), so the
+                # requested checkpoint may sit outside the newest page. Page through until it is found;
+                # `_iter_checkpoint_pages` stops issuing requests as soon as we break out of the loop.
+                # Reporting a checkpoint that exists as absent makes LangGraph fall back to
+                # `empty_checkpoint()`, which silently discards all prior state (see gitlab-lsp#2775) —
+                # hence `raise_on_error`: a failed fetch must not be indistinguishable from "absent".
+                async for gl_checkpoints in self._iter_checkpoint_pages(
+                    raise_on_error=True
+                ):
+                    checkpoint = next(
+                        (c for c in gl_checkpoints if c["thread_ts"] == checkpoint_id),
+                        None,
+                    )
+                    if checkpoint:
+                        break
 
-            if checkpoint:
-                if "compressed_checkpoint" in checkpoint:
+                if checkpoint and "compressed_checkpoint" in checkpoint:
                     checkpoint["checkpoint"] = uncompress_checkpoint(
                         checkpoint["compressed_checkpoint"]
                     )
                 # else: checkpoint["checkpoint"] already exists from old instance, use as-is
+            if checkpoint:
                 self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
         else:
             # If the latest checkpoint is fetch, we don't need to refetch it on initialization

@@ -18,6 +18,14 @@ class FeatureFlag(StrEnum):
     # Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/gitlab_com_derisk/ai_gateway_multi_default_models.yml
     AI_GATEWAY_MULTI_DEFAULT_MODELS = "ai_gateway_multi_default_models"
+    # Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dw_read_blobs_api.yml
+    DW_READ_BLOBS_API = "dw_read_blobs_api"
+    # Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/duo_workflow_read_incremental_checkpoints.yml
+    DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS = (
+        "duo_workflow_read_incremental_checkpoints"
+    )
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
