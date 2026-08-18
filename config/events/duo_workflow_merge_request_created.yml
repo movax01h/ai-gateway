@@ -1,0 +1,27 @@
+---
+description: Tracks when a Duo Agent Platform flow creates a merge request
+internal_events: true
+action: duo_workflow_merge_request_created
+product_group: agent_execution
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Name of the tool that created the merge request
+  property:
+    description: Global ID of the created merge request, for joining to the merge request dimension
+  value:
+    description: Workflow Id that connects this event to others in the same session
+  merge_request_iid:
+    description: Project-scoped internal ID of the created merge request
+  created_merge_request_url:
+    description: Web URL of the created merge request
+  source_branch:
+    description: Source branch of the created merge request
+  target_branch:
+    description: Target branch of the created merge request
+milestone: '19.4'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6529
+tiers:
+  - premium
+  - ultimate

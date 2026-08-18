@@ -1,4 +1,5 @@
 # pylint: disable=file-naming-for-tests,line-too-long
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -477,3 +478,38 @@ class TestDeterministicStepNodeEdgeCases:
         assert FlowStateKeys.CONTEXT in result
         assert "responses" in result[FlowStateKeys.CONTEXT]
         assert result[FlowStateKeys.CONTEXT]["responses"] == sanitized_response
+
+
+class TestDeterministicStepNodeMergeRequestCreated:
+    """Merge requests created through a deterministic step are reported."""
+
+    @pytest.mark.asyncio
+    async def test_create_merge_request_is_reported(
+        self,
+        deterministic_step_node,
+        workflow_state,
+        mock_tool,
+        mock_get_vars_from_state,
+        mock_tool_monitoring,
+        mock_prompt_security,
+        mock_internal_event_client,
+        flow_id,
+    ):
+        """A successful create_merge_request reports the MR identifiers and session."""
+        mock_tool.name = "create_merge_request"
+        mock_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"created_merge_request": {"id": 4242, "iid": 7}})
+        )
+
+        await deterministic_step_node.run(workflow_state)
+
+        events = {
+            call.kwargs["event_name"]: call.kwargs["additional_properties"]
+            for call in mock_internal_event_client.track_event.call_args_list
+        }
+        assert EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value in events
+
+        reported = events[EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value]
+        assert reported.property == "4242"
+        assert reported.value == flow_id
+        assert reported.extra["merge_request_iid"] == 7

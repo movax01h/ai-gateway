@@ -1,5 +1,6 @@
 # pylint: disable=file-naming-for-tests,too-many-lines
 import asyncio
+import json
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
@@ -876,6 +877,38 @@ class TestToolNodeComponentIdentity:
         logs = result.get("ui_chat_log", [])
         assert len(logs) == 1
         assert logs[0]["subsession_id"] is None
+
+
+class TestToolNodeMergeRequestCreated:
+    """Merge requests created through the agent tool path are reported."""
+
+    @pytest.mark.asyncio
+    async def test_create_merge_request_is_reported(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_tool,
+        mock_internal_event_client,
+        flow_id,
+    ):
+        """A successful create_merge_request reports the MR identifiers and session."""
+        mock_tool.name = "create_merge_request"
+        mock_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"created_merge_request": {"id": 4242, "iid": 7}})
+        )
+
+        await tool_node.run(flow_state_with_tool_calls)
+
+        events = {
+            call.kwargs["event_name"]: call.kwargs["additional_properties"]
+            for call in mock_internal_event_client.track_event.call_args_list
+        }
+        assert EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value in events
+
+        reported = events[EventEnum.WORKFLOW_MERGE_REQUEST_CREATED.value]
+        assert reported.property == "4242"
+        assert reported.value == flow_id
+        assert reported.extra["merge_request_iid"] == 7
 
 
 class TestToolNodeOrbitTracking:
