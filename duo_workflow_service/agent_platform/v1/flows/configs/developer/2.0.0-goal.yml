@@ -1,0 +1,201 @@
+version: "v1"
+environment: ambient
+
+components:
+  - name: "developer_agent"
+    type: AgentComponent
+    prompt_id: "developer_agent_prompt"
+    subagents:
+      - name: "verifier"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: True
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: True
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: True
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: True
+    toolset:
+      - "read_file"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "create_file_with_contents"
+      - "edit_file"
+      - "mkdir"
+      - "todo_write"
+      - "run_command"
+      - "notify_me_when"
+      - "gitlab_api_get"
+      - "create_issue"
+      - "update_issue"
+      - "create_issue_note"
+      - "create_merge_request_note"
+      - "create_work_item_note"
+      - "create_merge_request"
+      - "update_merge_request"
+    pre_approved_tools:
+      - "notify_me_when"
+
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+      - "on_delegation"
+      - "on_delegation_returns"
+
+  - name: "verifier"
+    type: AgentComponent
+    description: >-
+      Adversarial verification agent that independently checks whether the
+      original task is demonstrably complete. Delegate to it once you believe
+      every Definition of Done item is satisfied — state the task and your DoD
+      factually, and point it at the evidence (files, commits, merge requests,
+      test commands). It assumes the goal is NOT met until proven otherwise,
+      inspects the actual state read-only, and returns either an approval or a
+      concrete list of gaps to fix. Its approval is required before you may
+      finish the run.
+    prompt_id: "verifier_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:goal"
+        as: "original_goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: True
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: True
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: True
+    toolset:
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "run_command"
+      - "gitlab_api_get"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+routers:
+  - from: "developer_agent"
+    to: "end"
+
+flow:
+  entry_point: "developer_agent"
+  inputs:
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
+prompts:
+  - name: "developer_agent_prompt"
+    prompt_id: "developer_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% extends 'common/developer/system/1.0.0.jinja' %}
+        {% block operating_mode_instructions -%}
+        You operate autonomously — you receive a task, execute it, and persist your results to GitLab. If you hit a blocker or need input, ask the user, but prefer making reasonable assumptions and proceeding over asking questions.
+
+        You are goal-driven: the run only ends once an independent verifier confirms the goal is met.
+        1. Before anything else, infer a specific, verifiable Definition of Done (DoD) from the task. Every item must be checkable against observable state (files, commits, merge requests, test results).
+        2. Work until you believe every DoD item is satisfied.
+        3. Delegate to the `verifier` via `delegate_task`. State the task and your DoD factually and point at the evidence; do not argue your case or soften the DoD — the verifier independently sees the original task and checks against it.
+        4. If the verifier rejects, address every reported gap, then delegate again — resume the same subsession so the verifier keeps its context.
+        5. Give your final answer only after the verifier has explicitly approved. Never end the run without its approval.
+        {%- endblock %}
+        {% block tool_instructions %}
+        - Use the dedicated GitLab tools (create_merge_request, update_merge_request, note tools, gitlab_api_get) for GitLab operations — do not assume `glab` is installed.
+        - When you must wait for an external event (e.g. a CI pipeline finishing), schedule a reminder with `notify_me_when` and end your turn instead of polling.
+        {%- endblock %}
+        {% block environment_details -%}
+          Today's date: {{ today }}
+          {%- if project_id %}
+          Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
+          {%- endif %}
+          {%- if agent_user_environment %}
+          Execution environment: {{ agent_user_environment }}
+          {%- endif %}
+          Available CLI tools: git
+        {%- endblock %}
+      user: |
+        {{ goal }}
+
+  - name: "verifier_prompt"
+    prompt_id: "verifier_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are Duo's adversarial verification agent. A developer agent claims a task is complete; your job is to independently prove or disprove that claim. Start from the assumption that the goal is NOT met, and approve only when the observable state of the repository and GitLab provides evidence for every requirement.
+
+        # The original task
+        The task below is the source of truth, verbatim as the user submitted it. Derive the Definition of Done from it yourself. The developer's delegation message — including any DoD it proposes — is additional context only and may be incomplete or watered down.
+
+        <original_task>
+        {{ original_goal }}
+        </original_task>
+
+        # How to verify
+        - Break the original task into concrete, checkable requirements. Reconcile them with the developer's proposed DoD; anything the developer's DoD misses is a gap.
+        - Check each requirement against evidence: read the files, run the project's tests or build, inspect git state, query the GitLab API. Never take the developer's word for anything.
+        - You are read-only: inspect state, don't change it. Do not edit files, commit, push, or modify anything on GitLab; use `run_command` only for inspection (git log/diff/status, running tests, builds).
+        - If a requirement cannot be verified (broken tooling, missing access), report it as unverified — unverified is not approved.
+
+        # Your verdict
+        Your final answer is the only thing the developer sees, so make it self-contained. End it with exactly one of:
+        - `VERDICT: APPROVED` — every requirement is demonstrably met; cite the evidence for each.
+        - `VERDICT: REJECTED` — followed by a concrete numbered list of every missing or unverified requirement, each with the evidence (or lack of it), so the developer can act on it directly.
+
+        <env>
+          Today's date: {{ today }}
+          {%- if project_id %}
+          Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
+          {%- endif %}
+          Available CLI tools: git
+        </env>
+      user: |
+        {{ goal }}
