@@ -19,6 +19,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
+from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
     MessageTypeEnum,
@@ -464,7 +465,7 @@ async def test_workflow_run(
             )
 
             mock_user_interface_instance.send_event.assert_called_with(
-                type="values", state=state, stream=True
+                type="values", state=state, stream=True, allow_defer=True
             )
             assert mock_user_interface_instance.send_event.call_count == 1
 
@@ -1543,9 +1544,8 @@ async def test_handle_compile_and_run_exception_converts_graph_recursion_error(
 ):
     """GraphRecursionError is converted to NotifiableException before propagating."""
 
-    notifier = MagicMock()
+    notifier = MagicMock(spec=UserInterface)
     notifier.ui_chat_log = []
-    notifier.send_event = AsyncMock()
     workflow_with_project.checkpoint_notifier = notifier
 
     with pytest.raises(TraceableException) as exc_info:

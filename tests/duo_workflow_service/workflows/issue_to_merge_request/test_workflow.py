@@ -217,7 +217,7 @@ async def test_workflow_run(
     assert mock_git_lab_workflow_instance.aget_tuple.call_count == 0
 
     mock_user_interface_instance.send_event.assert_called_with(
-        type=ANY, state=ANY, stream=False
+        type=ANY, state=ANY, stream=False, allow_defer=True
     )
     assert mock_user_interface_instance.send_event.call_count >= 2
     assert mock_run_tool_node_class.call_count == 1

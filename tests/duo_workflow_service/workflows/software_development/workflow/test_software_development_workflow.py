@@ -326,7 +326,7 @@ async def test_workflow_run(
     assert mock_gitlab_workflow_aget_tuple.call_count >= 1
 
     mock_user_interface_instance.send_event.assert_called_with(
-        type=ANY, state=ANY, stream=False
+        type=ANY, state=ANY, stream=False, allow_defer=True
     )
     assert mock_user_interface_instance.send_event.call_count >= 2
 
@@ -874,3 +874,28 @@ async def test_workflow_reject_slash_commands(
     assert state["status"] == WorkflowStatusEnum.INPUT_REQUIRED
     assert len(state["ui_chat_log"]) == 1
     assert "/nonexistent" in state["ui_chat_log"][0]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_workflow_reject_slash_commands_notifies_client(
+    mock_gitlab_workflow,
+    mock_tools_registry_cls,
+    workflow,
+):
+    """The slash-command error is an INPUT_REQUIRED event sent outside the graph, so it must not be deferred."""
+    original_put_action = workflow._outbox.put_action
+    notified_statuses = []
+
+    def record_status(action):
+        notified_statuses.append(workflow.checkpoint_notifier.status)
+        return original_put_action(action)
+
+    with patch.object(workflow._outbox, "put_action", side_effect=record_status):
+        await workflow.run("/nonexistent")
+
+    assert workflow.is_done
+    assert notified_statuses == [
+        WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.ERROR,
+    ]

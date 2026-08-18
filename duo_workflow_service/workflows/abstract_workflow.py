@@ -569,10 +569,16 @@ class AbstractWorkflow(ABC):
                         last_state = state
                         assert self.checkpoint_notifier is not None
                         await self.checkpoint_notifier.send_event(
-                            type=type, state=state, stream=self._stream
+                            type=type,
+                            state=state,
+                            stream=self._stream,
+                            allow_defer=True,
                         )
                     else:
                         await self._handle_non_values_stream_event(type, state)
+
+                # No further graph event can supersede a deferred checkpoint.
+                await self.checkpoint_notifier.flush_deferred_checkpoint()
 
                 return self._extract_trace_output(last_state)
         except BaseException as e:
@@ -613,6 +619,10 @@ class AbstractWorkflow(ABC):
         is_invalid_request = isinstance(e, InvalidRequestException)
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
+
+        # The run is ending, so any deferred checkpoint must be sent now.
+        if self.checkpoint_notifier:
+            await self.checkpoint_notifier.flush_deferred_checkpoint()
 
         # InvalidRequestException: the input itself was invalid (e.g. an empty goal
         # on resume).  We must NOT transition the workflow to FAILED — the Rails state

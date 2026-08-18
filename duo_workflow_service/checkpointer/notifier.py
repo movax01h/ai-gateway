@@ -41,6 +41,16 @@ log = structlog.stdlib.get_logger("notifier")
 
 CHECKPOINT_THROTTLE_SECONDS = 0.05
 
+# Statuses a request node writes right before the paired fetch node calls
+# interrupt(); see _should_defer.
+_PRE_INTERRUPT_STATUSES = frozenset(
+    {
+        WorkflowStatusEnum.INPUT_REQUIRED.value,
+        WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value,
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED.value,
+    }
+)
+
 _token_estimator = TokenEstimator()
 
 
@@ -88,12 +98,14 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         # Count of node-lifecycle events already sent; advances only when a
         # checkpoint is actually composed for sending (see _pop_recent_node_events).
         self._last_sent_event_count = 0
+        self._checkpoint_deferred = False
 
     async def send_event(
         self,
         type: str,
         state: Union[dict, tuple[BaseMessage, dict]],
         stream: bool,
+        allow_defer: bool = False,
     ):
         # We must increment the checkpoint_number with every new outgoing
         # message. This value is used in conjunction with
@@ -122,6 +134,11 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                     )
                 )
 
+            if allow_defer and self._should_defer(state):
+                await self._cancel_trailing_task()
+                self._checkpoint_deferred = True
+                return None
+
             return await self._execute_action(throttle=False)
 
         if not stream:
@@ -139,6 +156,18 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
             return await self._execute_action(throttle=True)
 
+    def _should_defer(self, state: dict) -> bool:
+        """Defer pre-interrupt checkpoints that may be superseded by `interrupt()`."""
+        return self.status in _PRE_INTERRUPT_STATUSES and "__interrupt__" not in state
+
+    async def flush_deferred_checkpoint(self) -> None:
+        """Send a deferred pre-interrupt checkpoint that was not superseded."""
+        if not self._checkpoint_deferred:
+            return
+
+        log.info("Flushing deferred checkpoint", workflow_id=self._workflow_id)
+        await self._execute_action(throttle=False)
+
     async def _execute_action(self, throttle: bool = False):
         # For streaming message chunks, throttle checkpoint enqueues so at most
         # one is sent per CHECKPOINT_THROTTLE_SECONDS window. This prevents
@@ -153,13 +182,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         now = asyncio.get_running_loop().time()
         elapsed = now - self._throttle.last_enqueued_at
 
-        # Cancel any pending trailing edge task - we'll reschedule it.
-        if self._throttle.trailing_task and not self._throttle.trailing_task.done():
-            self._throttle.trailing_task.cancel()
-            try:
-                await self._throttle.trailing_task
-            except asyncio.CancelledError:
-                pass
+        await self._cancel_trailing_task()
 
         if elapsed >= CHECKPOINT_THROTTLE_SECONDS:
             self._throttle.last_enqueued_at = now
@@ -172,6 +195,15 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 self._enqueue_checkpoint_after(remaining)
             )
 
+    # Cancel any pending trailing edge task - we'll reschedule it.
+    async def _cancel_trailing_task(self) -> None:
+        if self._throttle.trailing_task and not self._throttle.trailing_task.done():
+            self._throttle.trailing_task.cancel()
+            try:
+                await self._throttle.trailing_task
+            except asyncio.CancelledError:
+                pass
+
     async def _enqueue_checkpoint_after(self, delay: float):
         try:
             await asyncio.sleep(max(0, delay))
@@ -181,6 +213,8 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         await self._enqueue_checkpoint()
 
     async def _enqueue_checkpoint(self):
+        self._checkpoint_deferred = False
+
         # This is a placeholder empty message. The message will be replaced
         # with most_recent_new_checkpoint in send_events.
         action = contract_pb2.Action(
