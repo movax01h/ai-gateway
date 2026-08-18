@@ -37,6 +37,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -100,8 +101,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         # mock_compiled_graph.astream = AsyncMock(side_effect=mock_astream)
         mock_compiled_graph.astream = Mock(return_value=mock_astream())
         mock_state_graph.compile.return_value = mock_compiled_graph
-        ui_notifier = MagicMock()
-        ui_notifier.send_event = AsyncMock()
+        ui_notifier = MagicMock(spec=UserInterface)
+        ui_notifier.ui_chat_log = []
 
         with (
             patch(
@@ -1750,9 +1751,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self, flow_instance
     ):
         """GraphRecursionError is converted to NotifiableAgentException before propagating."""
-        notifier = MagicMock()
+        notifier = MagicMock(spec=UserInterface)
         notifier.ui_chat_log = []
-        notifier.send_event = AsyncMock()
         flow_instance.checkpoint_notifier = notifier
 
         compiled_graph = AsyncMock()

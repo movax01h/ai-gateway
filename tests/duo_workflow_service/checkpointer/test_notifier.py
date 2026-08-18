@@ -2027,3 +2027,169 @@ def test_server_tool_result_without_matching_use_logs_warning(checkpoint_notifie
         tool_use_id="orphan",
         block_type="web_search_tool_result",
     )
+
+
+def _values_state(status=WorkflowStatusEnum.INPUT_REQUIRED.value, interrupted=False):
+    state = {
+        "status": status,
+        "ui_chat_log": [],
+        "plan": {"steps": []},
+    }
+    if interrupted:
+        state["__interrupt__"] = (Mock(),)
+    return state
+
+
+@pytest.mark.parametrize(
+    ("status", "allow_defer", "interrupted", "expect_deferred"),
+    [
+        (WorkflowStatusEnum.INPUT_REQUIRED.value, True, False, True),
+        (WorkflowStatusEnum.INPUT_REQUIRED, True, False, True),
+        (WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED.value, True, False, True),
+        (WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED, True, False, True),
+        (WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED.value, True, False, True),
+        (WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED, True, False, True),
+        (WorkflowStatusEnum.INPUT_REQUIRED.value, True, True, False),
+        (WorkflowStatusEnum.INPUT_REQUIRED.value, False, False, False),
+        (WorkflowStatusEnum.EXECUTION, True, False, False),
+    ],
+    ids=[
+        "pause_str_status",
+        "pause_enum_status",
+        "tool_call_approval_str_status",
+        "tool_call_approval_enum_status",
+        "plan_approval_str_status",
+        "plan_approval_enum_status",
+        "interrupt_event",
+        "no_allow_defer",
+        "running",
+    ],
+)
+@pytest.mark.asyncio
+async def test_which_events_are_withheld(
+    checkpoint_notifier, outbox, status, allow_defer, interrupted, expect_deferred
+):
+    await checkpoint_notifier.send_event(
+        "values",
+        _values_state(status, interrupted=interrupted),
+        False,
+        allow_defer=allow_defer,
+    )
+
+    assert checkpoint_notifier.status == status
+    assert outbox.put_action.call_count == (0 if expect_deferred else 1)
+
+    await checkpoint_notifier.flush_deferred_checkpoint()
+    assert outbox.put_action.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_pause_then_interrupt_notifies_the_client_once(
+    checkpoint_notifier, outbox
+):
+    """A request node followed by a fetch node's interrupt() is one notification."""
+    await checkpoint_notifier.send_event(
+        "values", _values_state(), False, allow_defer=True
+    )
+    outbox.put_action.assert_not_called()
+
+    await checkpoint_notifier.send_event(
+        "values", _values_state(interrupted=True), False, allow_defer=True
+    )
+    await checkpoint_notifier.flush_deferred_checkpoint()
+
+    assert outbox.put_action.call_count == 1
+
+
+async def _next_values_event(notifier):
+    await notifier.send_event(
+        "values", _values_state(WorkflowStatusEnum.EXECUTION), False, allow_defer=True
+    )
+
+
+async def _out_of_band_event(notifier):
+    await notifier.send_event("values", _values_state(), False)
+
+
+async def _streamed_chunk(notifier):
+    await notifier.send_event(
+        "messages",
+        (AIMessageChunk(content="hello", id="chunk-1"), {"langgraph_node": "agent"}),
+        True,
+    )
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [_next_values_event, _out_of_band_event, _streamed_chunk],
+    ids=["next_values_event", "out_of_band_event", "streamed_chunk"],
+)
+@pytest.mark.asyncio
+async def test_any_enqueue_releases_the_deferred_checkpoint(
+    checkpoint_notifier, outbox, trigger
+):
+    """Outbox payloads already include the deferred state, so don't send it again."""
+    await checkpoint_notifier.send_event(
+        "values", _values_state(), False, allow_defer=True
+    )
+    outbox.put_action.assert_not_called()
+
+    await trigger(checkpoint_notifier)
+
+    assert outbox.put_action.call_count == 1
+
+    await checkpoint_notifier.flush_deferred_checkpoint()
+
+    assert outbox.put_action.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_sends_a_pause_that_nothing_superseded(checkpoint_notifier, outbox):
+    """Agentic chat and legacy tool approval end the graph on a pause status, with no interrupt event behind it."""
+    await checkpoint_notifier.send_event(
+        "values", _values_state(), False, allow_defer=True
+    )
+    outbox.put_action.assert_not_called()
+
+    await checkpoint_notifier.flush_deferred_checkpoint()
+
+    assert outbox.put_action.call_count == 1
+    assert checkpoint_notifier.most_recent_checkpoint_number() == 1
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == "INPUT_REQUIRED"
+
+
+@pytest.mark.parametrize("let_trailing_task_start", [False, True])
+@pytest.mark.asyncio
+async def test_pause_cancels_a_trailing_task_scheduled_before_it(
+    checkpoint_notifier, outbox, let_trailing_task_start
+):
+    """A trailing task predates the pause, so it must not enqueue it and release the deferral."""
+    message = AIMessageChunk(id="msg-1", content="token")
+
+    with patch(
+        "duo_workflow_service.checkpointer.notifier.CHECKPOINT_THROTTLE_SECONDS", 0.05
+    ):
+        # The first chunk opens the throttle window; only the second lands inside
+        # it and so schedules a trailing task.
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        await checkpoint_notifier.send_event("messages", (message, {}), True)
+        trailing_task = checkpoint_notifier._throttle.trailing_task
+        assert trailing_task is not None
+        assert outbox.put_action.call_count == 1
+
+        if let_trailing_task_start:
+            await asyncio.sleep(0)
+            assert not trailing_task.done()
+
+        await checkpoint_notifier.send_event(
+            "values", _values_state(), False, allow_defer=True
+        )
+        # Done without having enqueued: it was cancelled, so it can no longer fire.
+        assert trailing_task.done()
+        assert outbox.put_action.call_count == 1
+        assert checkpoint_notifier._checkpoint_deferred
+
+    await checkpoint_notifier.flush_deferred_checkpoint()
+
+    assert outbox.put_action.call_count == 2
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == "INPUT_REQUIRED"

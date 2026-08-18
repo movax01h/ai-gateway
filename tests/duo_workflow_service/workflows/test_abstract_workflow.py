@@ -927,6 +927,53 @@ def test_track_internal_event(workflow, internal_event_client: Mock):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_flushes_notifier(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_user_interface,
+    user,
+):
+    """A deferred checkpoint is flushed when the graph run ends."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    notifier = mock_user_interface.return_value
+    notifier.flush_deferred_checkpoint = AsyncMock()
+
+    workflow = MockWorkflow("id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user)
+
+    await workflow._compile_and_run_graph("Test goal")
+
+    notifier.flush_deferred_checkpoint.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        InvalidRequestException("bad input"),
+        Exception(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST),
+        Exception("boom"),
+    ],
+    ids=["invalid_request", "infra_cancel", "other_error"],
+)
+async def test_handle_compile_and_run_exception_flushes_notifier(workflow, error):
+    """Two of these paths return before sending any event, so the flush has to come first."""
+    workflow.checkpoint_notifier = AsyncMock()
+
+    with pytest.raises(TraceableException):
+        await workflow._handle_compile_and_run_exception(error, MagicMock(), {})
+
+    workflow.checkpoint_notifier.flush_deferred_checkpoint.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_with_exception(
