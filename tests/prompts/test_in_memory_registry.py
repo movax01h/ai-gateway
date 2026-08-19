@@ -75,6 +75,89 @@ class TestInMemoryPromptRegistry:
         assert prompt_id in in_memory_registry._raw_prompt_data
         assert in_memory_registry._raw_prompt_data[prompt_id] == sample_prompt_data
 
+    @staticmethod
+    def _inline_prompt_data(extra_headers):
+        """Build inline prompt data carrying the given model headers."""
+        return {
+            "model": {
+                "params": {
+                    "model_class_provider": ModelClassProvider.LITE_LLM,
+                    "model": "vertex_ai/gemini-2.5-flash",
+                    "max_tokens": 1,
+                    "max_retries": 0,
+                    "extra_headers": extra_headers,
+                },
+            },
+            "prompt_template": {"user": "say hello"},
+            "unit_primitives": ["duo_agent_platform"],
+        }
+
+    @pytest.mark.parametrize(
+        "extra_headers",
+        [
+            {"Host": "example.test"},
+            {"X-Custom-Header": "value"},
+            {"X-Goog-User-Project": "example"},
+        ],
+    )
+    def test_inline_non_allowlisted_header_is_rejected(
+        self, in_memory_registry, mock_shared_registry, extra_headers
+    ):
+        """Client-supplied inline model headers are restricted to the allowlist.
+
+        When no trusted model metadata is attached, inline model params are used as-is; only allowlisted headers
+        survive, and anything else fails the build before any model is created.
+        """
+        prompt_id = "duo_capture_prompt"
+        in_memory_registry.register_prompt(
+            prompt_id, self._inline_prompt_data(extra_headers)
+        )
+
+        with pytest.raises(ValueError, match="is not permitted"):
+            in_memory_registry.get(prompt_id, prompt_version=None)
+
+        mock_shared_registry._build_prompt.assert_not_called()
+
+    def test_inline_non_allowlisted_default_headers_is_rejected(
+        self, in_memory_registry, mock_shared_registry
+    ):
+        """Inline default_headers are validated too, not only extra_headers."""
+        prompt_id = "duo_capture_prompt"
+        in_memory_registry.register_prompt(
+            prompt_id,
+            {
+                "model": {
+                    "params": {
+                        "model_class_provider": ModelClassProvider.LITE_LLM,
+                        "model": "vertex_ai/gemini-2.5-flash",
+                        "max_tokens": 1,
+                        "default_headers": {"Host": "example.test"},
+                    },
+                },
+                "prompt_template": {"user": "say hello"},
+                "unit_primitives": ["duo_agent_platform"],
+            },
+        )
+
+        with pytest.raises(ValueError, match="is not permitted"):
+            in_memory_registry.get(prompt_id, prompt_version=None)
+
+        mock_shared_registry._build_prompt.assert_not_called()
+
+    def test_inline_allowlisted_header_is_permitted(
+        self, in_memory_registry, mock_shared_registry, prompt
+    ):
+        """An allowlisted header still passes through the inline path."""
+        prompt_id = "duo_capture_prompt"
+        in_memory_registry.register_prompt(
+            prompt_id, self._inline_prompt_data({"anthropic-beta": "feature-x"})
+        )
+
+        result = in_memory_registry.get(prompt_id, prompt_version=None)
+
+        assert result == prompt
+        mock_shared_registry._build_prompt.assert_called_once()
+
     def test_get_local_prompt_success(
         self, in_memory_registry, mock_shared_registry, sample_prompt_data, prompt
     ):

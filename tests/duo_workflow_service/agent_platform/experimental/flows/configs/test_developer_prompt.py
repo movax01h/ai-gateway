@@ -23,7 +23,8 @@ def _load_user_prompt_template(flow_name: str, flow_version: str | None = None) 
     config = FlowConfig.from_yaml_config(flow_name, flow_version)
     prompts = config.prompts
     assert prompts is not None
-    raw = prompts[0]["prompt_template"]["user"]
+    raw = prompts[0].prompt_template["user"]
+    assert isinstance(raw, str)
     # Strip Jinja includes that reference files not available in the unit test context
     lines = [
         line
@@ -90,7 +91,7 @@ class TestLangChainTemplateCompatibility:
     ) -> ChatPromptTemplate:
         config = FlowConfig.from_yaml_config(flow_name, flow_version)
         assert config.prompts is not None
-        prompt_template = config.prompts[0]["prompt_template"]
+        prompt_template = config.prompts[0].prompt_template
         messages = prompt_template_to_messages(prompt_template)
         return ChatPromptTemplate.from_messages(messages, template_format="jinja2")
 

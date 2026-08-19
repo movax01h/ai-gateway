@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Callable, ClassVar, List, Optional
 
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
@@ -30,6 +31,7 @@ _EXPERIMENTAL_MCP_AUTO_INJECT_ENVIRONMENTS = MCP_AUTO_INJECT_ENVIRONMENTS | froz
 
 class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+    prompts: Optional[list[InMemoryPromptConfig]] = None
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
 
     def should_auto_inject_mcp_tools(self) -> bool:
