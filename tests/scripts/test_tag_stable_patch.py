@@ -7,8 +7,10 @@ from unittest.mock import patch
 import pytest
 
 from scripts.tag_stable_patch import (
+    CANONICAL_PROJECT_ID,
     _request,
     head_already_tagged,
+    line_tags,
     next_tag,
     patch_numbers,
     version_line,
@@ -93,6 +95,30 @@ class TestHeadAlreadyTagged:
         assert head_already_tagged(tags, "abc123", self.PREFIX) is False
 
 
+class TestLineTags:
+    """The security fork must also count canonical's tags when numbering."""
+
+    def test_unions_tags_across_projects_without_duplicate_queries(self):
+        calls = []
+
+        def fake_request(method, path, token, project_id, params=None):
+            calls.append(project_id)
+            return [_tag(f"self-hosted-v18.2.{len(calls)}-ee", "abc")]
+
+        with patch("scripts.tag_stable_patch._request", side_effect=fake_request):
+            tags = line_tags(
+                "self-hosted-v18.2.",
+                "token",
+                ["61869127", CANONICAL_PROJECT_ID, "61869127"],
+            )
+
+        assert calls == ["61869127", CANONICAL_PROJECT_ID]
+        assert [t["name"] for t in tags] == [
+            "self-hosted-v18.2.1-ee",
+            "self-hosted-v18.2.2-ee",
+        ]
+
+
 class TestRequestFailsLoudly:
     """API failures log status and body to stderr and exit non-zero."""
 
@@ -106,7 +132,9 @@ class TestRequestFailsLoudly:
         )
         with patch("urllib.request.urlopen", side_effect=err):
             with pytest.raises(SystemExit) as exc:
-                _request("POST", "/tags", "token", {"tag_name": "t", "ref": "sha"})
+                _request(
+                    "POST", "/tags", "token", "123", {"tag_name": "t", "ref": "sha"}
+                )
 
         assert exc.value.code == 1
         stderr = capsys.readouterr().err
@@ -119,7 +147,7 @@ class TestRequestFailsLoudly:
             side_effect=urllib.error.URLError("connection refused"),
         ):
             with pytest.raises(SystemExit) as exc:
-                _request("GET", "/tags", "token")
+                _request("GET", "/tags", "token", "123")
 
         assert exc.value.code == 1
         assert "connection refused" in capsys.readouterr().err

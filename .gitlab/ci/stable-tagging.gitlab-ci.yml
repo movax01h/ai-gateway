@@ -9,4 +9,10 @@ tag-stable-patch:
   rules:
     - if: '$AIGW_TAGGING_ACCESS_TOKEN == null || $AIGW_TAGGING_ACCESS_TOKEN == ""'
       when: never
+    # Manual in the security fork so one release can group several backport
+    # MRs: run it once per branch when the release set is fully merged. One
+    # fork tag also keeps the patch number aligned with the canonical re-cut.
+    - if: '$CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH =~ /^stable-\d+-\d+-ee$/'
+      when: manual
+      allow_failure: true
     - if: $CI_COMMIT_BRANCH =~ /^stable-\d+-\d+-ee$/

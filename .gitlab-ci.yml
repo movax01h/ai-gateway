@@ -45,6 +45,11 @@ variables:
   # override $GITLAB_DEPENDENCY_PROXY_ADDRESS in workflow rules.
   GITLAB_DEPENDENCY_PROXY_ADDRESS: "${GITLAB_DEPENDENCY_PROXY}"
 
+  # For job rules only: include rules are evaluated before this block applies,
+  # so the .if-not-*-project anchors keep the literal IDs.
+  CANONICAL_PROJECT_ID: "39903947"
+  SECURITY_PROJECT_ID: "61869127"
+
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   POETRY_CACHE_DIR: "$CI_PROJECT_DIR/.cache/poetry"
   POETRY_VERSION: "2.4.1"
@@ -79,6 +84,9 @@ variables:
 .if-not-security-project: &if-not-security-project
   if: $CI_PROJECT_ID != "61869127"
 
+.if-not-canonical-nor-security-project: &if-not-canonical-nor-security-project
+  if: $CI_PROJECT_ID != "39903947" && $CI_PROJECT_ID != "61869127"
+
 .skip-when-expedited-include: &skip-when-expedited-include
   - <<: *if-merge-request-labels-pipeline-expedited
     when: never
@@ -96,6 +104,11 @@ variables:
     when: never
   - when: always
 
+.skip-if-not-canonical-nor-security: &skip-if-not-canonical-nor-security
+  - <<: *if-not-canonical-nor-security-project
+    when: never
+  - when: always
+
 include:
   - local: .gitlab/ci/build.gitlab-ci.yml
   - local: .gitlab/ci/lint.gitlab-ci.yml
@@ -107,7 +120,7 @@ include:
     rules: *skip-when-expedited-include
   - local: .gitlab/ci/release.gitlab-ci.yml
     rules:
-      - <<: *if-not-canonical-project
+      - <<: *if-not-canonical-nor-security-project
         when: never
       - <<: *if-merge-request-labels-pipeline-expedited
         when: never
@@ -115,7 +128,7 @@ include:
         when: never
       - when: always
   - local: .gitlab/ci/stable-tagging.gitlab-ci.yml
-    rules: *skip-if-not-canonical
+    rules: *skip-if-not-canonical-nor-security
   - local: .gitlab/ci/ingest.gitlab-ci.yml
     rules: *skip-when-expedited-include
   - template: Jobs/Container-Scanning.latest.gitlab-ci.yml

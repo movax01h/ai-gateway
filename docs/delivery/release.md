@@ -81,6 +81,19 @@ Stable branches will not be receiving updates from main branch. If a bug at a ve
 
 #### How to backport a fix
 
+> **Security fixes:** If you are backporting a **security fix**, do **not** open
+> backport MRs in the canonical repository. All backport MRs must be opened and
+> merged in the [security fork](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist)
+> first, targeting the stable branches there. Once all backports for the
+> release are merged, a manual `tag-stable-patch` job cuts a private patch tag
+> and pre-builds the images in the fork's registry; publishing to Docker Hub
+> is another manual job run at disclosure time, and the canonical sync then
+> re-cuts the tag and publishes the canonical-registry artifacts. See
+> [`security_fixes.md`](./security_fixes.md#process) for the full security fix
+> process.
+>
+> The steps below apply to **non-security** backports only.
+
 When you need to backport a fix to a specific AI Gateway release version:
 
 1. **Create a backport merge request**: Cherry-pick the fix from `main` to the appropriate stable branch (e.g., `stable-18-4-ee` for GitLab 18.4).
