@@ -289,6 +289,16 @@ def _build_endpoint() -> str:
     return f"{_build_location()}-aiplatform.googleapis.com"
 
 
+def _build_vertexai_location() -> Optional[str]:
+    """Reads the self-hosted Vertex AI location override from the environment.
+
+    Returns None when not configured.
+    """
+    # pylint: disable=direct-environment-variable-reference
+    return os.getenv("VERTEXAI_LOCATION") or None
+    # pylint: enable=direct-environment-variable-reference
+
+
 class ConfigGoogleCloudPlatform(BaseModel):
     project: str = ""
     service_account_json_key: str = ""
@@ -538,6 +548,18 @@ class Config(BaseSettings):
     google_cloud_platform: Annotated[
         ConfigGoogleCloudPlatform, Field(default_factory=ConfigGoogleCloudPlatform)
     ]
+    vertexai_location: Annotated[
+        Optional[str],
+        Field(
+            default_factory=_build_vertexai_location,
+            description=(
+                "Self-hosted override for the Vertex AI location, read from the "
+                "VERTEXAI_LOCATION environment variable. Sets the litellm default "
+                "location and takes precedence over the runway-region mapping "
+                "for completions. None when not configured."
+            ),
+        ),
+    ]
     amazon_q: Annotated[ConfigAmazonQ, Field(default_factory=ConfigAmazonQ)]
     custom_models: Annotated[
         ConfigCustomModels, Field(default_factory=ConfigCustomModels)
@@ -616,9 +638,7 @@ def setup_litellm(config: Config):
     # this method, we need to consider both cases.
     # Presence of VERTEXAI_LOCATION will take precedence (and hence work for self-hosted customers)
     # while "global" works for GitLab's AIGW deployments.
-    # pylint: disable=direct-environment-variable-reference
-    litellm.vertex_location = os.getenv("VERTEXAI_LOCATION") or "global"
-    # pylint: enable=direct-environment-variable-reference
+    litellm.vertex_location = config.vertexai_location or "global"
 
     _setup_litellm_mtls(config.mtls)
 

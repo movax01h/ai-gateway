@@ -1,5 +1,6 @@
 import pytest
 
+from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.base import log_request
 from ai_gateway.models.v2.container import (
     ContainerModels,
@@ -104,3 +105,34 @@ def test_lite_llm_chat_uses_configured_request_timeout():
     model = container.lite_llm_chat_fn(model="claude-sonnet-4-5")
 
     assert model.request_timeout == 45.0
+
+
+@pytest.mark.parametrize(
+    ("vertexai_location", "runway_region", "expected"),
+    [
+        (None, "europe-west9", "europe-west4"),
+        (None, "us-east4", "us-central1"),
+        ("europe-west1", "us-east4", "europe-west1"),
+    ],
+)
+def test_lite_llm_completion_resolves_vertex_location(
+    vertexai_location, runway_region, expected
+):
+    container = ContainerModels()
+    container.config.from_dict(
+        {
+            "custom_models": {"enabled": False},
+            "bedrock_guardrail_config": None,
+            "fireworks_api_base_url": "",
+            "vertex_text_model": {"location": runway_region},
+            "vertexai_location": vertexai_location,
+            "mock_model_responses": False,
+            "use_agentic_mock": False,
+        }
+    )
+
+    model = container.lite_llm_completion_fn(
+        model="codestral-2", completion_type=CompletionType.TEXT
+    )
+
+    assert model.vertex_location == expected

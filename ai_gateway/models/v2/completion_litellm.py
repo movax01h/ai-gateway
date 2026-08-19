@@ -38,9 +38,28 @@ from ai_gateway.models.fireworks_retry import (
 from ai_gateway.models.guardrails import bedrock_guardrail_params
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 
-__all__ = ["CompletionLiteLLM"]
+__all__ = ["CompletionLiteLLM", "resolve_vertex_completion_location"]
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_vertex_completion_location(
+    override: Optional[str], runway_region: str
+) -> str:
+    """Return the Vertex location for completion calls.
+
+    The override (the VERTEXAI_LOCATION setting, for self-hosted) is used
+    verbatim. Otherwise the runway region maps to the nearest region that
+    serves Codestral: europe-* to europe-west4, everything else to
+    us-central1.
+    """
+    if override:
+        return override
+
+    if runway_region.startswith("europe-"):
+        return "europe-west4"
+
+    return "us-central1"
 
 
 MODEL_STOP_TOKENS: Dict[str, List[str]] = {
@@ -100,6 +119,7 @@ class CompletionLiteLLM(BaseChatModel):
     custom_models_enabled: bool = False
     allowed_api_bases: frozenset[str] = frozenset()
     bedrock_guardrail_config: Optional[ConfigBedrockGuardrail] = None
+    vertex_location: str = "us-central1"
 
     class Config:
         arbitrary_types_allowed = True
@@ -205,8 +225,8 @@ class CompletionLiteLLM(BaseChatModel):
                 completion_args["extra_headers"]["x-session-affinity"] = session_id
 
         if self.custom_llm_provider == "vertex_ai":
-            completion_args["vertex_ai_location"] = kwargs.get(
-                "vertex_ai_location", "us-central1"
+            completion_args["vertex_ai_location"] = (
+                kwargs.get("vertex_ai_location") or self.vertex_location
             )
 
         guardrail_params = bedrock_guardrail_params(
