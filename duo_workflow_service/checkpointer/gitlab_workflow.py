@@ -1567,6 +1567,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 for key, value in checkpoint.items()
                 if key != "channel_values"
             }
+            # Rails filters the blob fold by this list: blobs are append-only and
+            # cannot express a deletion. It normally derives it from channel_values.
+            payload["channel_keys"] = list(checkpoint.get("channel_values", {}).keys())
         else:
             payload["compressed_checkpoint"] = compress_checkpoint(checkpoint)
 

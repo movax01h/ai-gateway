@@ -3,6 +3,7 @@ import asyncio
 import json
 import zlib
 from asyncio import CancelledError
+from copy import deepcopy
 from typing import Any, Optional, Sequence, TypedDict
 from unittest.mock import ANY, AsyncMock, Mock, call, patch
 from urllib.parse import parse_qs, urlparse
@@ -3678,6 +3679,8 @@ async def test_aput_sends_full_checkpoint_and_channel_blobs(
 
     # Full checkpoint must still be present (Phase 1 — backward compatible reads)
     assert post_call_body["compressed_checkpoint"] == compress_checkpoint(checkpoint)
+    # Rails derives the membership from the embedded channel_values in this mode.
+    assert "channel_keys" not in post_call_body
 
     # First checkpoint starts a self-contained group (issue 605653): every
     # reconstructable channel is re-seeded as a full compaction snapshot, not just
@@ -3724,6 +3727,7 @@ async def test_aput_sends_checkpoint_skeleton_when_instance_keeps_headers_only(
     }
     assert post_call_body["thread_ts"] == checkpoint["id"]
     assert post_call_body["parent_ts"] == "parent-checkpoint"
+    assert set(post_call_body["channel_keys"]) == {"conversation_history", "messages"}
     assert {b["channel"] for b in post_call_body["channel_blobs"]} == {
         "conversation_history",
         "messages",
@@ -3736,6 +3740,75 @@ async def test_aput_sends_checkpoint_skeleton_when_instance_keeps_headers_only(
         _checkpoint_saved_kwargs(gitlab_workflow._logger)["checkpoint_strategy"]
         == "incremental_only"
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_channel_keys_hold_live_membership_not_versions_or_blobs(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    incremental_checkpoints_only_capable,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """channel_keys carries the live membership so Rails can filter the blob fold.
+
+    Blobs are append-only and cannot express a deleted channel. Neither of the other
+    two fields describes membership: channel_versions keeps a consumed channel after
+    its value is gone, and a step blobs only the channels that changed.
+    """
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    first = checkpoint_data[0]["checkpoint"]
+    first["channel_values"]["messages"] = ["msg1"]
+    first["channel_values"]["status"] = WorkflowStatusEnum.EXECUTION
+    first["channel_versions"] = {
+        "conversation_history": "1.0",
+        "messages": "1.0",
+        "status": "1.0",
+    }
+
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        first,
+        checkpoint_metadata,
+        ChannelVersions(dict(first["channel_versions"])),
+    )
+
+    history = deepcopy(first["channel_values"]["conversation_history"])
+    history["planner"].append({"type": "AIMessage", "content": "and again"})
+    # "messages" is consumed and dropped, "status" stays live and unchanged, and
+    # only conversation_history changes.
+    second = {
+        "id": "5679",
+        "channel_values": {
+            "conversation_history": history,
+            "status": WorkflowStatusEnum.EXECUTION,
+        },
+        "channel_versions": {
+            "conversation_history": "2.0",
+            "messages": "1.0",
+            "status": "1.0",
+        },
+    }
+
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": first["id"]}},
+        second,
+        checkpoint_metadata,
+        ChannelVersions({"conversation_history": "2.0"}),
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+
+    assert set(post_call_body["channel_keys"]) == {"conversation_history", "status"}
+    # The dropped channel keeps its version, and the unchanged live channel has no
+    # blob this step, so neither field describes the membership.
+    assert "messages" in post_call_body["checkpoint"]["channel_versions"]
+    assert {b["channel"] for b in post_call_body["channel_blobs"]} == {
+        "conversation_history"
+    }
 
 
 @pytest.mark.asyncio

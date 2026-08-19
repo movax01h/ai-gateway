@@ -62,6 +62,7 @@ CREATE TABLE p_duo_workflows_checkpoint_headers (
     updated_at          timestamptz NOT NULL,
     current_thread      integer     NOT NULL DEFAULT 0,
     checkpoint          jsonb       NOT NULL,    -- HEADER only: channel_versions, versions_seen, v, ts, updated_channels (no channel_values)
+    channel_keys        text[],                  -- live channel membership; filters the blob fold (max 100 entries)
     metadata            jsonb       NOT NULL,
     thread_ts           text        NOT NULL,
     parent_ts           text
@@ -118,9 +119,9 @@ When the property is enabled, the `aput` POST body gains three fields alongside 
 
 Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so their representation matches the header's `channel_values`, which Rails also stores as JSON. Rails can then merge blob deltas onto the header without reimplementing langgraph's msgpack extension types.
 
-`current_thread_started_at` is derived from the group's first checkpoint ID (a time-ordered UUID) and omitted when the ID isn't time-based. It originally bounded the `created_at` range of the blob read query; that role is obsolete now blobs prune by the `workflow_created_at` partition key (see [Gating](#gating)), so the field is still sent but no longer read by Rails. These three (`current_thread`, `channel_blobs`, `current_thread_started_at`) are the complete set of fields incremental mode adds.
+`current_thread_started_at` is derived from the group's first checkpoint ID (a time-ordered UUID) and omitted when the ID isn't time-based. It originally bounded the `created_at` range of the blob read query; that role is obsolete now blobs prune by the `workflow_created_at` partition key (see [Gating](#gating)), so the field is still sent but no longer read by Rails. These three (`current_thread`, `channel_blobs`, `current_thread_started_at`) are the complete set of fields incremental mode adds; the incremental-only variant below adds one more.
 
-When the instance also advertises `incremental_checkpoints_only`, `checkpoint` replaces `compressed_checkpoint`: the langgraph checkpoint minus `channel_values` (the same skeleton stored as the header). `current_thread`, `current_thread_started_at`, and `channel_blobs` are unchanged:
+When the instance also advertises `incremental_checkpoints_only`, `checkpoint` replaces `compressed_checkpoint`: the langgraph checkpoint minus `channel_values` (the same skeleton stored as the header). A `channel_keys` field is added. `current_thread`, `current_thread_started_at`, and `channel_blobs` are unchanged:
 
 ```jsonc
 {
@@ -132,11 +133,14 @@ When the instance also advertises `incremental_checkpoints_only`, `checkpoint` r
     "versions_seen": {},
     "updated_channels": []
   },
+  "channel_keys": ["conversation_history", "status"],   // live channel membership
   "current_thread": 0,
   "current_thread_started_at": "<ISO8601 timestamp>",
   "channel_blobs": [ /* unchanged — see above */ ]
 }
 ```
+
+`channel_keys` is `channel_values.keys()`, captured before the skeleton drops the values. Rails stores it in `channel_keys` on `p_duo_workflows_checkpoint_headers` and uses it to select the live channels from the blob fold ([GitLab issue 613975](https://gitlab.com/gitlab-org/gitlab/-/issues/613975)). Blobs are an append-only log, so the fold is the union of every channel ever written and cannot express a deletion. Rails normally derives the list from `channel_values`, which this mode does not send, and it cannot rebuild it from the rest of the payload: `channel_versions` keeps a channel that was consumed after its value is gone, and each step blobs only the channels that changed. An instance too old to accept the field ignores it.
 
 This shape is tagged with the query parameter `checkpoint_strategy=incremental_only` (see [Monitoring which strategy is in use](#monitoring-which-strategy-is-in-use)).
 
