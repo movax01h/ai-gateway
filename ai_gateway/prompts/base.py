@@ -29,7 +29,8 @@ from gitlab_cloud_connector import (
 from jinja2 import PackageLoader, meta
 from jinja2.exceptions import SecurityError
 from jinja2.sandbox import ImmutableSandboxedEnvironment
-from langchain_core.callbacks import BaseCallbackHandler, get_usage_metadata_callback
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import UsageMetadata
@@ -37,6 +38,7 @@ from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate, string
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
+from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
@@ -727,6 +729,33 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             engine=self.model._llm_type, name=self.model_name
         )
 
+    @staticmethod
+    def _make_usage_callback(
+        config: Optional[RunnableConfig],
+    ) -> tuple[UsageMetadataCallbackHandler, RunnableConfig]:
+        """Create a usage-metadata callback and merge it into *config*.
+
+        We instantiate :class:`~langchain_core.callbacks.usage.UsageMetadataCallbackHandler`
+        directly and inject it via :func:`~langchain_core.runnables.config.merge_configs`
+        rather than using ``get_usage_metadata_callback()``.
+
+        ``get_usage_metadata_callback()`` is a context-manager that calls
+        ``ContextVar.reset(token)`` in its ``finally`` block.  That call fails
+        with a ``ValueError`` when the cleanup runs in a *different* async
+        context than where the context-manager was entered — which is exactly
+        what happens when ``langchain-core >= 1.5.5`` runs the async generator
+        inside ``_atransform_stream_with_config`` via ``coro_with_context``.
+        Passing the handler through the ``callbacks`` config key sidesteps the
+        ``ContextVar`` machinery entirely.
+
+        Returns:
+            A ``(usage_cb, merged_config)`` tuple ready for use in
+            ``ainvoke``, ``astream``, and ``atransform``.
+        """
+        usage_cb = UsageMetadataCallbackHandler()
+        merged = merge_configs(config, {"callbacks": [usage_cb]})
+        return usage_cb, merged
+
     @override
     async def ainvoke(
         self,
@@ -734,14 +763,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> BaseMessage:
-        with (
-            self.instrumentator.watch(
-                stream=False,
-                unit_primitive=self.unit_primitive,
-                internal_event_client=self.internal_event_client,
-            ) as watcher,
-            get_usage_metadata_callback() as cb,
-        ):
+        usage_cb, config = self._make_usage_callback(config)
+        with self.instrumentator.watch(
+            stream=False,
+            unit_primitive=self.unit_primitive,
+            internal_event_client=self.internal_event_client,
+        ) as watcher:
             await asyncio.gather(
                 *[cb.on_before_llm_call() for cb in self.internal_callbacks]
             )
@@ -752,7 +779,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             )
 
             watcher.register_message(result)
-            self.handle_usage_metadata(watcher, cb.usage_metadata)
+            self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
             return result
 
@@ -766,14 +793,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         # pylint: disable=contextmanager-generator-missing-cleanup,line-too-long
         # To properly address this pylint issue, the upstream function would need to be altered to ensure proper cleanup.
         # See https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/contextmanager-generator-missing-cleanup.html
-        with (
-            self.instrumentator.watch(
-                stream=True,
-                unit_primitive=self.unit_primitive,
-                internal_event_client=self.internal_event_client,
-            ) as watcher,
-            get_usage_metadata_callback() as cb,
-        ):
+        usage_cb, config = self._make_usage_callback(config)
+        with self.instrumentator.watch(
+            stream=True,
+            unit_primitive=self.unit_primitive,
+            internal_event_client=self.internal_event_client,
+        ) as watcher:
             # The usage metadata callback only totals the usage at the `on_llm_end` event, so we need to be able to
             # yield the last stream item _after_ that event. Otherwise we'd need to yield an extra event just for the
             # usage metadata. To do this, we yield with a 1-item offset.
@@ -794,7 +819,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     yield previous_item
                 previous_item = item
 
-            self.handle_usage_metadata(watcher, cb.usage_metadata)
+            self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
             # Now the usage metadata is available
             if previous_item:
@@ -810,15 +835,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> AsyncIterator[BaseMessage]:
-        # See note in `astream` about the cleanup pylint suppression
-        with (  # pylint: disable=contextmanager-generator-missing-cleanup
-            self.instrumentator.watch(
-                stream=True,
-                unit_primitive=self.unit_primitive,
-                internal_event_client=self.internal_event_client,
-            ) as watcher,
-            get_usage_metadata_callback() as cb,
-        ):
+        # See note in `astream` about the cleanup pylint suppression.
+        usage_cb, config = self._make_usage_callback(config)
+        with self.instrumentator.watch(  # pylint: disable=contextmanager-generator-missing-cleanup
+            stream=True,
+            unit_primitive=self.unit_primitive,
+            internal_event_client=self.internal_event_client,
+        ) as watcher:
             # See `astream` comments for why we yield off by one
             previous_item: BaseMessage | None = None
 
@@ -829,7 +852,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     yield previous_item
                 previous_item = item
 
-            self.handle_usage_metadata(watcher, cb.usage_metadata)
+            self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
             if previous_item:
                 yield previous_item
