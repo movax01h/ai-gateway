@@ -13,7 +13,9 @@ from duo_workflow_service.agents import (
 from duo_workflow_service.agents.agent import build_agent
 from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.base import BaseComponent
-from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    CompactionConfig,
+)
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,

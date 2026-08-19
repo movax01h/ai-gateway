@@ -34,7 +34,9 @@ from duo_workflow_service.components import (
 )
 from duo_workflow_service.components.executor.component import ExecutorComponent
 from duo_workflow_service.components.planner.component import PlannerComponent
-from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    CompactionConfig,
+)
 from duo_workflow_service.entities import (
     MessageTypeEnum,
     Plan,

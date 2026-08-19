@@ -66,9 +66,15 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
-from duo_workflow_service.conversation.compaction import (
+from duo_workflow_service.conversation.history_optimizer.builder import (
+    FlowContext,
+    build_history_optimizer_pipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
-    create_conversation_compactor,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
@@ -418,6 +424,20 @@ class AgentComponentBase(BaseComponent):
         must be all-or-nothing at the node level.
         """
         raise NotImplementedError
+
+    def _build_optimizer_pipeline(self) -> HistoryOptimizerPipeline:
+        """Build the history-optimizer pipeline for this component's AgentNode."""
+        return build_history_optimizer_pipeline(
+            compaction=self.compaction,
+            flow_context=FlowContext(
+                flow_id=self.flow_id,
+                flow_type=self.flow_type.value,
+                user=self.user,
+            ),
+            agent_name=self.name,
+            prompt_registry=self.prompt_registry,
+            internal_events_client=self.internal_event_client,
+        )
 
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
@@ -814,22 +834,7 @@ class AgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
             invoke_config=self._agent_node_invoke_config(),
             max_context_tokens=get_model_max_context_token_limit(self.model_tags),
-            compactor=(
-                create_conversation_compactor(
-                    config=(
-                        self.compaction
-                        if isinstance(self.compaction, CompactionConfig)
-                        else CompactionConfig()
-                    ),
-                    prompt_registry=self.prompt_registry,
-                    user=self.user,
-                    agent_name=self.name,
-                    workflow_id=self.flow_id,
-                    workflow_type=self.flow_type.value,
-                )
-                if self.compaction
-                else None
-            ),
+            optimizer_pipeline=self._build_optimizer_pipeline(),
             response_schema=self._response_schema,
             ui_history=UIHistory(
                 events=self.ui_log_events,

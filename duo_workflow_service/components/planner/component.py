@@ -14,7 +14,9 @@ from duo_workflow_service.components.base import BaseComponent
 from duo_workflow_service.components.human_approval.plan_approval import (
     PlanApprovalComponent,
 )
-from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    CompactionConfig,
+)
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.entities.agent_user_environment import (
     process_agent_user_environment,

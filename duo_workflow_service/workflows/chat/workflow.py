@@ -31,7 +31,9 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
-from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    CompactionConfig,
+)
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,

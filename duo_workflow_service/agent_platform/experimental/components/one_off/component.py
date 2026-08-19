@@ -40,10 +40,6 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.state import IOKey
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import ToolExecutionRetriedEvent
-from duo_workflow_service.conversation.compaction import (
-    CompactionConfig,
-    create_conversation_compactor,
-)
 
 
 @register_component(decorators=[inject])
@@ -127,22 +123,7 @@ class OneOffComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
             # OneOffComponent has no streaming-relevant ui_log_events — always suppress.
             invoke_config=self.STREAMING_DISABLED_CONFIG,
-            compactor=(
-                create_conversation_compactor(
-                    config=(
-                        self.compaction
-                        if isinstance(self.compaction, CompactionConfig)
-                        else CompactionConfig()
-                    ),
-                    prompt_registry=self.prompt_registry,
-                    user=self.user,
-                    agent_name=self.name,
-                    workflow_id=self.flow_id,
-                    workflow_type=self.flow_type.value,
-                )
-                if self.compaction
-                else None
-            ),
+            optimizer_pipeline=self._build_optimizer_pipeline(),
         )
 
         # Use enhanced tool node with error correction

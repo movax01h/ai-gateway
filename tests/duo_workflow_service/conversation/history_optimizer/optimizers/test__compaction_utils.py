@@ -12,16 +12,14 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from duo_workflow_service.conversation.compaction import (
-    CompactionConfig,
+from duo_workflow_service.conversation.history_optimizer.optimizers._compaction_utils import (
+    _format_tool_calls_as_text,
     is_turn_complete,
     resolve_recent_messages_internal,
     slice_for_summarization,
+    strip_tool_metadata,
 )
-from duo_workflow_service.conversation.compaction.utils import strip_tool_metadata
-from duo_workflow_service.conversation.history_optimizer.optimizers._compaction_utils import (
-    _format_tool_calls_as_text,
-)
+from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 
 _TOKEN_ESTIMATOR = TokenEstimator()

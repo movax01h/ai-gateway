@@ -12,6 +12,9 @@ from duo_workflow_service.agent_platform.experimental.components.agent.nodes.age
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
 from duo_workflow_service.agent_platform.experimental.state.base import RuntimeIOKey
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.internal_events.event_enum import CategoryEnum
 
@@ -28,6 +31,18 @@ def mock_prompt_fixture(mock_ai_message):
     return mock_prompt
 
 
+@pytest.fixture(name="optimizer_pipeline")
+def optimizer_pipeline_fixture():
+    """Passthrough pipeline mock: returns history unchanged with no results."""
+    pipeline = Mock(spec=HistoryOptimizerPipeline)
+
+    async def passthrough(history):
+        return history, []
+
+    pipeline.optimize = AsyncMock(side_effect=passthrough)
+    return pipeline
+
+
 @pytest.fixture(name="agent_node")
 def agent_node_fixture(
     flow_id,
@@ -35,6 +50,7 @@ def agent_node_fixture(
     inputs,
     conversation_history_key,
     mock_internal_event_client,
+    optimizer_pipeline,
 ):
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
@@ -48,6 +64,7 @@ def agent_node_fixture(
         ),
         internal_event_client=mock_internal_event_client,
         invoke_config={},
+        optimizer_pipeline=optimizer_pipeline,
     )
 
 
@@ -58,6 +75,7 @@ def agent_node_with_schema_fixture(
     inputs,
     conversation_history_key,
     mock_internal_event_client,
+    optimizer_pipeline,
 ):
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
@@ -71,6 +89,7 @@ def agent_node_with_schema_fixture(
         ),
         internal_event_client=mock_internal_event_client,
         invoke_config={},
+        optimizer_pipeline=optimizer_pipeline,
         response_schema=AgentFinalOutput,
     )
 
@@ -220,6 +239,7 @@ class TestAgentNode:
         inputs,
         conversation_history_key,
         mock_internal_event_client,
+        optimizer_pipeline,
         base_flow_state,
         mock_ai_message,
         mock_prompt,
@@ -257,6 +277,7 @@ class TestAgentNode:
                 ),
                 internal_event_client=mock_internal_event_client,
                 invoke_config={},
+                optimizer_pipeline=optimizer_pipeline,
             )
             result = await agent_node.run(base_flow_state)
 

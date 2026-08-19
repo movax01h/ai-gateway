@@ -1,10 +1,7 @@
 """Config and result types for the history optimizer abstraction.
 
 This module is the canonical home for the optimizer config types and the
-result types returned from ``HistoryOptimizer.optimize()``. The legacy
-``duo_workflow_service.conversation.compaction.schema`` module re-exports
-``CompactionConfig`` and ``CompactionResult`` from here for backwards
-compatibility while callers migrate.
+result types returned from ``HistoryOptimizer.optimize()``.
 """
 
 from dataclasses import dataclass, field

@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from duo_workflow_service.conversation.compaction import (
-    CompactionConfig,
-    create_conversation_compactor,
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    CompactionOptimizer,
 )
+from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 
 
 @pytest.fixture(name="compaction_config")
@@ -56,7 +56,7 @@ def mock_internal_events_client_fixture():
 
 @pytest.fixture(name="compactor")
 def compactor_fixture(compaction_config, mock_prompt_registry, user):
-    """Create a ConversationCompactor via the factory, using mock registry.
+    """Create a CompactionOptimizer using a mock registry.
 
     Patches get_model_metadata so the compactor doesn't depend on the gRPC model metadata context variable during tests.
     The patch stays active for the lifetime of the test because the compactor now reads model metadata lazily inside
@@ -66,7 +66,7 @@ def compactor_fixture(compaction_config, mock_prompt_registry, user):
         "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     ):
-        yield create_conversation_compactor(
+        yield CompactionOptimizer(
             config=compaction_config,
             prompt_registry=mock_prompt_registry,
             user=user,
@@ -80,7 +80,7 @@ def compactor_fixture(compaction_config, mock_prompt_registry, user):
 def compactor_with_events_fixture(
     compaction_config, mock_prompt_registry, user, mock_internal_events_client
 ):
-    """Create a ConversationCompactor with an InternalEventsClient for event testing.
+    """Create a CompactionOptimizer with an InternalEventsClient for event testing.
 
     Patches get_model_metadata so the compactor doesn't depend on the gRPC model metadata context variable during tests.
     The patch stays active for the lifetime of the test because the compactor now reads model metadata lazily inside
@@ -90,7 +90,7 @@ def compactor_with_events_fixture(
         "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,
     ):
-        yield create_conversation_compactor(
+        yield CompactionOptimizer(
             config=compaction_config,
             prompt_registry=mock_prompt_registry,
             user=user,

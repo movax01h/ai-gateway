@@ -18,7 +18,9 @@ from duo_workflow_service.agent_platform.v1.components.one_off.nodes.tool_node_w
 )
 from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
-from duo_workflow_service.conversation.compaction import CompactionConfig
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    CompactionConfig,
+)
 
 
 @pytest.fixture(name="prompt_id")
@@ -859,16 +861,12 @@ class TestOneOffComponentCompaction:
         assert component.compaction.trim_threshold == 0.8
 
     @pytest.mark.parametrize(
-        ("compaction_value", "should_create_compactor"),
-        [
-            (False, False),
-            (True, True),
-            (CompactionConfig(), True),
-        ],
+        "compaction_value",
+        [False, True, CompactionConfig()],
         ids=["disabled", "enabled_bool", "enabled_config"],
     )
     @pytest.mark.usefixtures("mock_tool_node_cls")
-    def test_attach_creates_compactor_based_on_config(
+    def test_attach_builds_optimizer_pipeline_from_config(
         self,
         component_name,
         flow_id,
@@ -881,9 +879,8 @@ class TestOneOffComponentCompaction:
         mock_state_graph,
         mock_router,
         compaction_value,
-        should_create_compactor,
     ):
-        """Test that attach creates compactor only when compaction is enabled."""
+        """Test that attach builds the optimizer pipeline from the compaction field."""
         component = OneOffComponent(
             name=component_name,
             flow_id=flow_id,
@@ -901,8 +898,8 @@ class TestOneOffComponentCompaction:
                 "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
             ) as mock_agent_node_cls,
             patch(
-                "duo_workflow_service.agent_platform.v1.components.one_off.component.create_conversation_compactor"
-            ) as mock_create_compactor,
+                "duo_workflow_service.agent_platform.v1.components.one_off.component.build_history_optimizer_pipeline"
+            ) as mock_build_pipeline,
         ):
             mock_agent_node = Mock()
             mock_agent_node.name = f"{component_name}#llm"
@@ -910,11 +907,12 @@ class TestOneOffComponentCompaction:
 
             component.attach(mock_state_graph, mock_router)
 
-            if should_create_compactor:
-                mock_create_compactor.assert_called_once()
-                agent_call_kwargs = mock_agent_node_cls.call_args[1]
-                assert agent_call_kwargs["compactor"] is not None
-            else:
-                mock_create_compactor.assert_not_called()
-                agent_call_kwargs = mock_agent_node_cls.call_args[1]
-                assert agent_call_kwargs["compactor"] is None
+            mock_build_pipeline.assert_called_once()
+            assert (
+                mock_build_pipeline.call_args.kwargs["compaction"] == compaction_value
+            )
+            agent_call_kwargs = mock_agent_node_cls.call_args[1]
+            assert (
+                agent_call_kwargs["optimizer_pipeline"]
+                is mock_build_pipeline.return_value
+            )

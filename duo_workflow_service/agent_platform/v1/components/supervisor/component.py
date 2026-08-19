@@ -51,10 +51,6 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
-from duo_workflow_service.conversation.compaction import (
-    CompactionConfig,
-    create_conversation_compactor,
-)
 from duo_workflow_service.entities.state import MessageTypeEnum
 
 __all__ = ["SubagentConfig", "SupervisorAgentComponent", "extract_subagent_names"]
@@ -662,22 +658,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
             invoke_config=self._agent_node_invoke_config(),
-            compactor=(
-                create_conversation_compactor(
-                    config=(
-                        self.compaction
-                        if isinstance(self.compaction, CompactionConfig)
-                        else CompactionConfig()
-                    ),
-                    prompt_registry=self.prompt_registry,
-                    user=self.user,
-                    agent_name=self.name,
-                    workflow_id=self.flow_id,
-                    workflow_type=self.flow_type.value,
-                )
-                if self.compaction
-                else None
-            ),
+            optimizer_pipeline=self._build_optimizer_pipeline(),
             response_schema=self._response_schema,
             ui_history=UIHistory(
                 events=agent_events,

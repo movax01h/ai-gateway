@@ -27,9 +27,11 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
-from duo_workflow_service.conversation.compaction import (
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionResult,
-    ConversationCompactor,
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
@@ -66,6 +68,7 @@ def agent_node_fixture(
     inputs,
     conversation_history_key,
     mock_internal_event_client,
+    optimizer_pipeline,
 ):
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
@@ -79,6 +82,7 @@ def agent_node_fixture(
         ),
         internal_event_client=mock_internal_event_client,
         invoke_config={},
+        optimizer_pipeline=optimizer_pipeline,
     )
 
 
@@ -89,6 +93,7 @@ def agent_node_with_schema_fixture(
     inputs,
     conversation_history_key,
     mock_internal_event_client,
+    optimizer_pipeline,
 ):
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
@@ -102,6 +107,7 @@ def agent_node_with_schema_fixture(
         ),
         internal_event_client=mock_internal_event_client,
         invoke_config={},
+        optimizer_pipeline=optimizer_pipeline,
         response_schema=AgentFinalOutput,
     )
 
@@ -125,20 +131,16 @@ def _mock_get_vars_from_state_fixture(prompt_variables):
         yield mock_get_vars_from_state
 
 
-@pytest.fixture(name="_mock_maybe_compact_history")
-def _mock_maybe_compact_history_fixture():
-    """Fixture for mocking maybe_compact_history to return input unchanged."""
-    with patch(
-        "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
-        new_callable=AsyncMock,
-    ) as mock_compact:
+@pytest.fixture(name="optimizer_pipeline")
+def optimizer_pipeline_fixture():
+    """Passthrough pipeline mock: returns history unchanged with no results."""
+    pipeline = Mock(spec=HistoryOptimizerPipeline)
 
-        async def return_history(*, compactor, history, agent_name):
-            _ = compactor, agent_name
-            return history, None
+    async def passthrough(history):
+        return history, []
 
-        mock_compact.side_effect = return_history
-        yield mock_compact
+    pipeline.optimize = AsyncMock(side_effect=passthrough)
+    return pipeline
 
 
 FAKE_RUNTIME_VARS = {
@@ -173,7 +175,6 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Test successful run with empty conversation history."""
@@ -208,10 +209,10 @@ class TestAgentNode:
         inputs,
         conversation_history_key,
         mock_internal_event_client,
+        optimizer_pipeline,
         base_flow_state,
         prompt_variables,
         mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Build-time `prompt_template_inputs` (e.g. `tools_enabled`) are merged into every prompt invocation so the
@@ -227,6 +228,7 @@ class TestAgentNode:
             ),
             internal_event_client=mock_internal_event_client,
             invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
             prompt_template_inputs={"tools_enabled": {"web_search": True}},
         )
 
@@ -253,7 +255,6 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Test successful run with existing conversation history."""
@@ -296,7 +297,6 @@ class TestAgentNode:
         component_name,
         prompt_variables,
         mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Test run method with conversation_history missing the component key."""
@@ -332,6 +332,7 @@ class TestAgentNode:
         conversation_history_key,
         component_name,
         mock_internal_event_client,
+        optimizer_pipeline,
         base_flow_state,
         mock_ai_message,
         mock_prompt,
@@ -368,6 +369,7 @@ class TestAgentNode:
                 ),
                 internal_event_client=mock_internal_event_client,
                 invoke_config={},
+                optimizer_pipeline=optimizer_pipeline,
             )
             result = await agent_node.run(base_flow_state)
 
@@ -397,6 +399,7 @@ class TestAgentNode:
         conversation_history_key,
         component_name,
         mock_internal_event_client,
+        optimizer_pipeline,
         base_flow_state,
         mock_ai_message,
         mock_prompt,
@@ -426,6 +429,7 @@ class TestAgentNode:
                 ),
                 internal_event_client=mock_internal_event_client,
                 invoke_config={},
+                optimizer_pipeline=optimizer_pipeline,
             )
             result = await agent_node.run(base_flow_state)
 
@@ -449,7 +453,6 @@ class TestAgentNode:
         base_flow_state,
         component_name,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Test run method when final_response_tool is combined with other tools."""
@@ -518,7 +521,6 @@ class TestAgentNode:
         agent_node_with_schema,
         base_flow_state,
         component_name,
-        _mock_maybe_compact_history,
     ):
         """Test run method with valid final_response_tool."""
         # Create mock AI message with valid final_response_tool
@@ -553,7 +555,6 @@ class TestAgentNode:
         agent_node_with_schema,
         base_flow_state,
         component_name,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Test run method when final_response_tool has validation error."""
@@ -612,6 +613,7 @@ class TestAgentNodeContextLimits:
         inputs,
         conversation_history_key,
         mock_internal_event_client,
+        optimizer_pipeline,
     ):
         """AgentNode constructed with an explicit per-agent max_context_tokens."""
         return AgentNode(
@@ -626,6 +628,7 @@ class TestAgentNodeContextLimits:
             ),
             internal_event_client=mock_internal_event_client,
             invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
             max_context_tokens=64000,
         )
 
@@ -636,7 +639,6 @@ class TestAgentNodeContextLimits:
         base_flow_state,
         component_name,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """The resolved max is stamped into agent_context_limits under the conversation_history key."""
@@ -646,98 +648,59 @@ class TestAgentNodeContextLimits:
         assert result[FlowStateKeys.AGENT_CONTEXT_LIMITS] == {component_name: 64000}
 
 
-class TestAgentNodeCompaction:
-    """Test suite for AgentNode compaction support."""
+class TestAgentNodeHistoryOptimization:
+    """Test suite for AgentNode history-optimizer pipeline support."""
 
-    @pytest.fixture(name="mock_compactor")
-    def mock_compactor_fixture(self):
-        """Fixture for mock ConversationCompactor."""
-        return Mock(spec=ConversationCompactor)
-
-    @pytest.fixture(name="agent_node_with_compactor")
-    def agent_node_with_compactor_fixture(
+    def test_agent_node_stores_optimizer_pipeline(
         self,
-        flow_id,
+        agent_node,
+        optimizer_pipeline,
+    ):
+        """AgentNode stores the pipeline it was constructed with."""
+        assert agent_node._optimizer_pipeline is optimizer_pipeline
+
+    @pytest.mark.asyncio
+    async def test_run_calls_optimizer_pipeline_with_history(
+        self,
+        agent_node,
+        base_flow_state,
+        optimizer_pipeline,
+        _mock_get_vars_from_state,
+    ):
+        """Run() passes the conversation history to the pipeline."""
+        await agent_node.run(base_flow_state)
+
+        optimizer_pipeline.optimize.assert_called_once_with([])
+
+    @pytest.mark.asyncio
+    async def test_run_uses_optimized_history(
+        self,
+        agent_node,
+        base_flow_state,
         mock_prompt,
-        inputs,
-        conversation_history_key,
-        mock_internal_event_client,
-        mock_compactor,
+        optimizer_pipeline,
+        prompt_variables,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
     ):
-        """Fixture for AgentNode instance with compactor."""
-        return AgentNode(
-            flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
-            name="test_agent_node",
-            prompt=mock_prompt,
-            inputs=inputs,
-            conversation_history_key=RuntimeIOKey(
-                alias="conversation_history", factory=lambda _: conversation_history_key
-            ),
-            internal_event_client=mock_internal_event_client,
-            invoke_config={},
-            compactor=mock_compactor,
+        """Run() invokes the LLM with the pipeline-optimized history."""
+        optimized = [HumanMessage(content="optimized")]
+
+        async def optimize(history):
+            return optimized, []
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        await agent_node.run(base_flow_state)
+
+        mock_prompt.ainvoke.assert_called_once_with(
+            input={
+                **prompt_variables,
+                "history": optimized,
+                **FAKE_RUNTIME_VARS,
+            },
+            config={},
         )
-
-    def test_agent_node_stores_compactor(
-        self,
-        agent_node_with_compactor,
-        mock_compactor,
-    ):
-        """Test that AgentNode stores the compactor when provided."""
-        assert agent_node_with_compactor._compactor == mock_compactor
-
-    def test_agent_node_without_compactor_has_none(
-        self,
-        agent_node,
-    ):
-        """Test that AgentNode has None compactor when not provided."""
-        assert agent_node._compactor is None
-
-    @pytest.mark.asyncio
-    async def test_run_calls_maybe_compact_history_with_compactor(
-        self,
-        agent_node_with_compactor,
-        base_flow_state,
-        mock_compactor,
-        _mock_get_vars_from_state,
-    ):
-        """Test that run() passes the compactor to maybe_compact_history."""
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
-            new_callable=AsyncMock,
-        ) as mock_compact:
-            mock_compact.return_value = ([], None)
-
-            await agent_node_with_compactor.run(base_flow_state)
-
-            mock_compact.assert_called_once_with(
-                compactor=mock_compactor,
-                history=[],
-                agent_name="test_agent_node",
-            )
-
-    @pytest.mark.asyncio
-    async def test_run_calls_maybe_compact_history_without_compactor(
-        self,
-        agent_node,
-        base_flow_state,
-        _mock_get_vars_from_state,
-    ):
-        """Test that run() passes None to maybe_compact_history when no compactor."""
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
-            new_callable=AsyncMock,
-        ) as mock_compact:
-            mock_compact.return_value = ([], None)
-
-            await agent_node.run(base_flow_state)
-
-            mock_compact.assert_called_once_with(
-                compactor=None,
-                history=[],
-                agent_name="test_agent_node",
-            )
 
     @pytest.mark.asyncio
     async def test_run_calls_restore_message_consistency(
@@ -745,9 +708,8 @@ class TestAgentNodeCompaction:
         agent_node,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
-        """restore_message_consistency is called on history after compaction."""
+        """restore_message_consistency is called on history after optimization."""
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.restore_message_consistency",
         ) as mock_restore:
@@ -774,48 +736,47 @@ class TestAgentNodeCompaction:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "compaction_result,expect_compaction_log",
+        "optimization_result,expect_compaction_log",
         [
             ("with_logs", True),
             ("no_logs", False),
-            ("none_result", False),
+            ("no_results", False),
         ],
     )
-    async def test_run_surfaces_compaction_ui_chat_logs(
+    async def test_run_surfaces_optimizer_ui_chat_logs(
         self,
-        compaction_result,
+        optimization_result,
         expect_compaction_log,
-        agent_node_with_compactor,
+        agent_node,
         base_flow_state,
-        mock_compactor,
+        optimizer_pipeline,
         compaction_ui_log,
         _mock_get_vars_from_state,
         _mock_predefined_runtime_variables,
     ):
-        """Compaction ui_chat_logs are appended to the state update when present.
+        """Optimizer ui_chat_logs are appended to the state update when present.
 
-        - ``with_logs``: CompactionResult with non-empty ui_chat_logs → card appears.
-        - ``no_logs``: CompactionResult with empty ui_chat_logs → no card.
-        - ``none_result``: maybe_compact_history returns None result → no card.
+        - ``with_logs``: a result with non-empty ui_chat_logs → card appears.
+        - ``no_logs``: a result with empty ui_chat_logs → no card.
+        - ``no_results``: pipeline returns no results → no card.
         """
-        if compaction_result == "with_logs":
+        if optimization_result == "with_logs":
             result_obj = CompactionResult(messages=[], was_modified=True)
             result_obj.ui_chat_logs = [compaction_ui_log]
-            compact_return = ([], result_obj)
-        elif compaction_result == "no_logs":
+            results = [result_obj]
+        elif optimization_result == "no_logs":
             result_obj = CompactionResult(messages=[], was_modified=False)
             result_obj.ui_chat_logs = []
-            compact_return = ([], result_obj)
-        else:  # none_result
-            compact_return = ([], None)
+            results = [result_obj]
+        else:  # no_results
+            results = []
 
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
-            new_callable=AsyncMock,
-        ) as mock_compact:
-            mock_compact.return_value = compact_return
+        async def optimize(history):
+            return history, results
 
-            result = await agent_node_with_compactor.run(base_flow_state)
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        result = await agent_node.run(base_flow_state)
 
         compaction_logs = [
             entry
@@ -830,29 +791,24 @@ class TestAgentNodeCompaction:
             assert len(compaction_logs) == 0
 
     @pytest.mark.asyncio
-    async def test_run_compaction_logs_appended_after_base_ui_logs(
+    async def test_run_optimizer_logs_appended_after_base_ui_logs(
         self,
         flow_id,
         mock_prompt,
         inputs,
         conversation_history_key,
         mock_internal_event_client,
-        mock_compactor,
+        optimizer_pipeline,
         base_flow_state,
         compaction_ui_log,
         _mock_get_vars_from_state,
         _mock_predefined_runtime_variables,
     ):
-        """Compaction tool card is appended *after* existing ui_chat_log entries.
+        """Optimizer UI entries are appended *after* existing ui_chat_log entries.
 
         The front end sorts by timestamp but silently drops compaction cards that are prepended — appending is the
         required convention (see ChatAgent._append_optimizer_ui_logs).
         """
-        from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
-            UILogEventsAgent,
-            agent_tools_ui_log_writer_class,
-        )
-
         ui_history = UIHistory(
             events=[UILogEventsAgent.ON_AGENT_REASONING],
             writer_class=agent_tools_ui_log_writer_class(component_name="test_agent"),
@@ -875,20 +831,19 @@ class TestAgentNodeCompaction:
             ),
             internal_event_client=mock_internal_event_client,
             invoke_config={},
-            compactor=mock_compactor,
+            optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history,
         )
 
         compaction_result_obj = CompactionResult(messages=[], was_modified=True)
         compaction_result_obj.ui_chat_logs = [compaction_ui_log]
 
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.maybe_compact_history",
-            new_callable=AsyncMock,
-        ) as mock_compact:
-            mock_compact.return_value = ([], compaction_result_obj)
+        async def optimize(history):
+            return history, [compaction_result_obj]
 
-            result = await node.run(base_flow_state)
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        result = await node.run(base_flow_state)
 
         ui_logs = result.get(FlowStateKeys.UI_CHAT_LOG, [])
         assert len(ui_logs) >= 2
@@ -929,7 +884,6 @@ class TestAgentNodeTruncation:
         base_flow_state,
         component_name,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Test that a truncated LLM response retries internally within AgentNode."""
@@ -1015,7 +969,6 @@ class TestAgentNodeTruncation:
         mock_prompt,
         agent_node,
         base_flow_state,
-        _mock_maybe_compact_history,
     ):
         """Test that AgentStuckError is raised after exceeding max truncation retries."""
         truncated_message = copy.copy(mock_ai_message)
@@ -1042,7 +995,6 @@ class TestAgentNodeTruncation:
         agent_node,
         base_flow_state,
         component_name,
-        _mock_maybe_compact_history,
     ):
         """Test that the truncation retry counter is local to each run() call."""
         truncated_message = copy.copy(mock_ai_message)
@@ -1085,6 +1037,7 @@ class TestAgentNodeReasoning:
         inputs,
         conversation_history_key,
         mock_internal_event_client,
+        optimizer_pipeline,
         ui_history_with_reasoning,
     ):
         """Fixture for AgentNode with ui_history enabled."""
@@ -1099,6 +1052,7 @@ class TestAgentNodeReasoning:
             ),
             internal_event_client=mock_internal_event_client,
             invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history_with_reasoning,
         )
 
@@ -1109,7 +1063,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that a text-only AIMessage (no tool calls) produces no ON_AGENT_REASONING entry.
 
@@ -1135,7 +1088,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that an AIMessage with text AND tool calls produces a reasoning log entry."""
         mixed_message = AIMessage(
@@ -1171,7 +1123,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that the reasoning log reuses the completion's AIMessage id.
 
@@ -1212,7 +1163,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that the reasoning log falls back to a random id when the completion has none.
 
@@ -1249,7 +1199,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that an AIMessage with tool calls but no text produces no reasoning log."""
         tool_only_message = AIMessage(
@@ -1280,7 +1229,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that whitespace-only content produces no reasoning log."""
         whitespace_message = AIMessage(content="   \n\t  ")
@@ -1302,7 +1250,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that list-of-blocks content with a text block produces a reasoning log."""
         list_content_message = AIMessage(
@@ -1343,7 +1290,6 @@ class TestAgentNodeReasoning:
         agent_node,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that no reasoning log is emitted when ui_history is not provided."""
         text_message = AIMessage(content="I will now look at the codebase.")
@@ -1362,9 +1308,9 @@ class TestAgentNodeReasoning:
         inputs,
         conversation_history_key,
         mock_internal_event_client,
+        optimizer_pipeline,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """Test that no reasoning log is emitted when ON_AGENT_REASONING is not in ui_history events."""
         ui_history_no_reasoning = UIHistory(
@@ -1382,6 +1328,7 @@ class TestAgentNodeReasoning:
             ),
             internal_event_client=mock_internal_event_client,
             invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
             ui_history=ui_history_no_reasoning,
         )
 
@@ -1415,7 +1362,6 @@ class TestAgentNodeReasoning:
         agent_node_with_ui_history,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """LiteLLM placeholder injected into empty text content must not appear in the UI chat log."""
         placeholder_message = AIMessage(
@@ -1468,7 +1414,6 @@ class TestPredefinedRuntimeVariables:
         agent_node,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
     ):
         """_predefined_runtime_variables keys are passed to the prompt ainvoke call."""
         await agent_node.run(base_flow_state)
@@ -1509,9 +1454,9 @@ class TestAgentNodeInvokeConfig:
         inputs,
         conversation_history_key,
         mock_internal_event_client,
+        optimizer_pipeline,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
         prompt_variables,
     ):
@@ -1529,6 +1474,7 @@ class TestAgentNodeInvokeConfig:
             ),
             internal_event_client=mock_internal_event_client,
             invoke_config=config,
+            optimizer_pipeline=optimizer_pipeline,
         )
 
         await node.run(base_flow_state)
@@ -1564,6 +1510,7 @@ def make_agent_node_fixture(
     inputs,
     conversation_history_key,
     mock_internal_event_client,
+    optimizer_pipeline,
     cycle_count_key,
 ):
     """Factory building an AgentNode with soft-cycle-limit defaults, overridable per test."""
@@ -1580,6 +1527,7 @@ def make_agent_node_fixture(
             ),
             "internal_event_client": mock_internal_event_client,
             "invoke_config": {},
+            "optimizer_pipeline": optimizer_pipeline,
             "max_cycles": 3,
             "cycle_count_key": cycle_count_key,
             "max_wrap_up_retries": 2,
@@ -1608,7 +1556,6 @@ class TestAgentNodeMaxCycles:
         base_flow_state,
         component_name,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Cycle count is written to state and accumulates across sequential calls."""
@@ -1637,7 +1584,6 @@ class TestAgentNodeMaxCycles:
         component_name,
         mock_prompt,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Wrap-up HumanMessage is injected only when cycle_count >= max_cycles."""
@@ -1665,7 +1611,6 @@ class TestAgentNodeMaxCycles:
         agent_node,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When max_cycles is not configured (None), no cycle_count is written to state."""
@@ -1682,7 +1627,6 @@ class TestAgentNodeMaxCycles:
         make_agent_node,
         state_at_limit,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Reaching max_cycles emits a structlog warning."""
@@ -1701,7 +1645,6 @@ class TestAgentNodeMaxCycles:
         state_at_limit,
         component_name,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Reaching max_cycles attaches 'soft_limit_reached' tag and metadata to the LangSmith run tree."""
@@ -1728,7 +1671,6 @@ class TestAgentNodeMaxCycles:
         make_agent_node,
         state_at_limit,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When LangSmith tracing is disabled (run tree is None), tagging is a no-op."""
@@ -1745,7 +1687,6 @@ class TestAgentNodeMaxCycles:
         make_agent_node,
         base_flow_state,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When below max_cycles, no LangSmith tag is attached."""
@@ -1835,7 +1776,6 @@ class TestAgentNodeIterationWarning:
         base_flow_state,
         component_name,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Warning HumanMessage is injected only when cycle_count == max_cycles - offset.
@@ -1885,7 +1825,6 @@ class TestAgentNodeIterationWarning:
         base_flow_state,
         component_name,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """No warning is injected when iteration_warning_offset is None (default constructor arg)."""
@@ -1911,7 +1850,6 @@ class TestAgentNodeIterationWarning:
         make_agent_node,
         state_at_limit,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When iteration_warning_offset=0 coincides with the wrap-up threshold, only the wrap-up message fires."""
@@ -1936,7 +1874,6 @@ class TestAgentNodeIterationWarning:
         base_flow_state,
         component_name,
         _mock_get_vars_from_state,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """Approaching the soft limit emits a structlog warning including cycles_remaining."""
@@ -1964,7 +1901,6 @@ class TestAgentNodeWrapUpRetries:
         state_at_limit,
         component_name,
         prompt_variables,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When agent makes non-final tool calls after max_cycles, wrap-up message is re-injected."""
@@ -2013,7 +1949,6 @@ class TestAgentNodeWrapUpRetries:
         mock_prompt,
         make_agent_node,
         state_at_limit,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """AgentStuckError is raised when agent repeatedly ignores wrap-up instructions."""
@@ -2045,7 +1980,6 @@ class TestAgentNodeWrapUpRetries:
         make_agent_node,
         state_at_limit,
         component_name,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When agent complies with wrap-up on first try, no retry occurs."""
@@ -2072,7 +2006,6 @@ class TestAgentNodeWrapUpRetries:
         mock_prompt,
         make_agent_node,
         state_at_limit,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When a response schema is configured, the wrap-up message names the schema tool."""
@@ -2125,7 +2058,6 @@ class TestAgentNodeWrapUpRetries:
         make_agent_node,
         base_flow_state,
         component_name,
-        _mock_maybe_compact_history,
         _mock_predefined_runtime_variables,
     ):
         """When below max_cycles, tool calls do not trigger wrap-up retry logic."""
