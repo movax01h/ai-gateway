@@ -1,14 +1,6 @@
 """Compaction-internal helpers (slicing, tool metadata stripping).
 
-Co-located with ``compaction.py`` because it is the sole consumer. The
-legacy ``duo_workflow_service.conversation.compaction.utils`` module
-re-exports these helpers so existing imports keep working until they
-migrate.
-
-Lives under ``history_optimizer/`` (rather than ``compaction/``) to break a
-circular import: the optimizer module needs these helpers, and the
-``compaction`` package's ``__init__.py`` eagerly imports the legacy
-``compactor`` shim that in turn re-exports from the optimizer module.
+Co-located with ``compaction.py`` because it is the sole consumer.
 """
 
 import json

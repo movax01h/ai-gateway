@@ -111,7 +111,7 @@ def conversation_history_replace_reducer(
     (existing + new messages) on each update.
 
     Processing: Only applies cheap preprocessing (deduplication). Token-based
-    trimming is deferred to agent run stage via maybe_compact_history().
+    trimming is deferred to agent run stage via the history-optimizer pipeline.
     """
     reduced = {**current}
 

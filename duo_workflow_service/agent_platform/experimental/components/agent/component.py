@@ -65,9 +65,15 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
 )
 from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.client_capabilities import is_client_capable
-from duo_workflow_service.conversation.compaction import (
+from duo_workflow_service.conversation.history_optimizer.builder import (
+    FlowContext,
+    build_history_optimizer_pipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
+)
+from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
-    create_conversation_compactor,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
@@ -288,6 +294,20 @@ class AgentComponentBase(BaseComponent):
     def _tools_enabled(self) -> dict[str, bool]:
         """Map of optional tool/capability -> active, exposed to the prompt template."""
         return {"web_search": self._web_search_enabled()}
+
+    def _build_optimizer_pipeline(self) -> HistoryOptimizerPipeline:
+        """Build the history-optimizer pipeline for this component's AgentNode."""
+        return build_history_optimizer_pipeline(
+            compaction=self.compaction,
+            flow_context=FlowContext(
+                flow_id=self.flow_id,
+                flow_type=self.flow_type.value,
+                user=self.user,
+            ),
+            agent_name=self.name,
+            prompt_registry=self.prompt_registry,
+            internal_events_client=self.internal_event_client,
+        )
 
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
@@ -619,22 +639,7 @@ class AgentComponent(AgentComponentBase):
             flow_type=self.flow_type,
             internal_event_client=self.internal_event_client,
             invoke_config=self._agent_node_invoke_config(),
-            compactor=(
-                create_conversation_compactor(
-                    config=(
-                        self.compaction
-                        if isinstance(self.compaction, CompactionConfig)
-                        else CompactionConfig()
-                    ),
-                    prompt_registry=self.prompt_registry,
-                    user=self.user,
-                    agent_name=self.name,
-                    workflow_id=self.flow_id,
-                    workflow_type=self.flow_type.value,
-                )
-                if self.compaction
-                else None
-            ),
+            optimizer_pipeline=self._build_optimizer_pipeline(),
             response_schema=self._response_schema,
             ui_history=UIHistory(
                 events=self.ui_log_events,

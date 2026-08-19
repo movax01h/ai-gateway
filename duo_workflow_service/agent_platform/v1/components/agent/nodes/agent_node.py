@@ -26,9 +26,8 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
-from duo_workflow_service.conversation.compaction import (
-    ConversationCompactor,
-    maybe_compact_history,
+from duo_workflow_service.conversation.history_optimizer.pipeline import (
+    HistoryOptimizerPipeline,
 )
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.errors.error_handler import (
@@ -127,6 +126,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             LangGraph ``messages`` stream.  Making this required ensures every
             ``AgentNode`` construction site makes a deliberate streaming
             decision rather than silently inheriting a default.
+        optimizer_pipeline: History-optimizer pipeline applied after each LLM
+            turn.  Responsible for compacting the conversation history (when
+            compaction is enabled) and trimming it to fit within the model's
+            context window.  Use ``_build_optimizer_pipeline()`` on the
+            enclosing component to construct the correct pipeline for the
+            component's configuration.
         max_context_tokens: Context-window limit of the model this agent runs on.
             When set, it is stamped into ``agent_context_limits`` (keyed by the
             agent's conversation-history slot) so checkpoints can report per-agent
@@ -150,7 +155,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _flow_id: str
     _flow_type: GLReportingEventContext
     _error_handler: ModelErrorHandler
-    _compactor: ConversationCompactor | None
+    _optimizer_pipeline: HistoryOptimizerPipeline
     _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
     _max_context_tokens: Optional[int]
     _invoke_config: RunnableConfig
@@ -169,7 +174,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         internal_event_client: InternalEventsClient,
         conversation_history_key: RuntimeIOKey,
         invoke_config: RunnableConfig,
-        compactor: ConversationCompactor | None = None,
+        optimizer_pipeline: HistoryOptimizerPipeline,
         response_schema: Optional[Type[BaseAgentOutput]] = None,
         ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]] = None,
         max_context_tokens: Optional[int] = None,
@@ -186,7 +191,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._inputs = inputs
         self._internal_event_client = internal_event_client
         self._error_handler = ModelErrorHandler()
-        self._compactor = compactor
+        self._optimizer_pipeline = optimizer_pipeline
         self._conversation_history_key = conversation_history_key
         self._response_schema = response_schema
         self._ui_history = ui_history
@@ -371,9 +376,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
 
-        history, compaction_result = await maybe_compact_history(
-            compactor=self._compactor, history=history, agent_name=self.name
-        )
+        history, optimization_results = await self._optimizer_pipeline.optimize(history)
         history = restore_message_consistency(history)
 
         cycle_count, cycle_count_state_update = self._check_and_increment_cycle_count(
@@ -497,22 +500,23 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 ui_updates = (
                     self._ui_history.pop_state_updates() if self._ui_history else {}
                 )
-                # Surface the compaction tool card when auto-compaction ran and
-                # produced UI entries.  Entries are appended *after* the base
-                # ui_chat_log entries (reasoning logs, etc.) so the front end
-                # renders them in the correct order.  Prepending causes the
-                # compaction card to be silently dropped by the client — see
-                # ChatAgent._append_optimizer_ui_logs for the same convention.
-                compaction_ui_logs = (
-                    list(compaction_result.ui_chat_logs)
-                    if compaction_result is not None and compaction_result.ui_chat_logs
-                    else []
-                )
-                if compaction_ui_logs:
+                # Surface optimizer UI entries (e.g. the compaction tool card)
+                # when optimization ran and produced any.  Entries are appended
+                # *after* the base ui_chat_log entries (reasoning logs, etc.) so
+                # the front end renders them in the correct order.  Prepending
+                # causes the compaction card to be silently dropped by the
+                # client — see ChatAgent._append_optimizer_ui_logs for the same
+                # convention.
+                optimizer_ui_logs = [
+                    entry
+                    for result in optimization_results
+                    for entry in result.ui_chat_logs
+                ]
+                if optimizer_ui_logs:
                     base_logs: list = ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
                     ui_updates = {
                         **ui_updates,
-                        FlowStateKeys.UI_CHAT_LOG: [*base_logs, *compaction_ui_logs],
+                        FlowStateKeys.UI_CHAT_LOG: [*base_logs, *optimizer_ui_logs],
                     }
                 state_update = merge_nested_dict(
                     ui_updates,

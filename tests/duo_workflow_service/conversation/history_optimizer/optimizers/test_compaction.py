@@ -11,21 +11,21 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.constants import TAG_NOSTREAM
 
-from duo_workflow_service.conversation.compaction import (
-    CompactionConfig,
-    create_conversation_compactor,
-)
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     COMPACTION_CONTINUE_MESSAGE,
     COMPACTION_PROMPT_ID,
     COMPACTION_PROMPT_MANUAL_ID,
+    CompactionOptimizer,
     CompactionStatus,
     _build_manual_compaction_ui_logs,
     _maybe_build_auto_compaction_entry,
     build_compaction_agent_message,
     build_compaction_tool_card,
 )
-from duo_workflow_service.conversation.history_optimizer.schema import CompactionResult
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    CompactionConfig,
+    CompactionResult,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -53,8 +53,8 @@ def _token_count_side_effect(history_tokens: int, per_turn_tokens: int = 100):
     ".compaction.get_current_model_max_context_token_limit"
 )
 @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
-class TestConversationCompactorShouldCompact:
-    """Test suite for ConversationCompactor.should_compact method."""
+class TestCompactionOptimizerShouldCompact:
+    """Test suite for CompactionOptimizer.should_compact method."""
 
     def test_empty_messages_returns_false(
         self, mock_count_tokens, mock_get_max_context, compactor
@@ -305,7 +305,7 @@ class TestConversationCompactorShouldCompact:
 
         messages = [HumanMessage(content=f"Message {i}") for i in range(8)]
 
-        compactor = create_conversation_compactor(
+        compactor = CompactionOptimizer(
             config=CompactionConfig(max_recent_messages=5),
             prompt_registry=mock_prompt_registry,
             user=user,
@@ -337,7 +337,7 @@ class TestConversationCompactorShouldCompact:
             for i in range(DEFAULT_MAX_RECENT_MESSAGES + 5)
         ]
 
-        compactor = create_conversation_compactor(
+        compactor = CompactionOptimizer(
             config=CompactionConfig(trim_threshold=0.5),
             prompt_registry=mock_prompt_registry,
             user=user,
@@ -352,8 +352,8 @@ class TestConversationCompactorShouldCompact:
     "duo_workflow_service.conversation.history_optimizer.optimizers"
     ".compaction.get_current_model_max_context_token_limit"
 )
-class TestConversationCompactorCompact:
-    """Test suite for ConversationCompactor.compact method."""
+class TestCompactionOptimizerCompact:
+    """Test suite for CompactionOptimizer.compact method."""
 
     @pytest.mark.asyncio
     async def test_compact_empty_messages(
@@ -469,7 +469,7 @@ class TestConversationCompactorCompact:
         mock_get_max_context.return_value = 400_000
         mock_count_tokens.return_value = int(0.8 * 400_000)
 
-        compactor = create_conversation_compactor(
+        compactor = CompactionOptimizer(
             config=CompactionConfig(
                 max_recent_messages=100, recent_messages_token_budget=1_000_000
             ),
@@ -644,7 +644,7 @@ class TestIsCompactionCallFlag:
         self, _mock_get_model_metadata, mock_prompt_registry, mock_prompt, user
     ):
         """The is_compaction_call flag should be in internal_event_extra."""
-        compactor = create_conversation_compactor(
+        compactor = CompactionOptimizer(
             config=CompactionConfig(),
             prompt_registry=mock_prompt_registry,
             user=user,
@@ -950,7 +950,7 @@ def _large_history():
     ".compaction.get_current_model_max_context_token_limit"
 )
 class TestCompactManualMode:
-    """Tests for manual-mode behaviors of ConversationCompactor.compact."""
+    """Tests for manual-mode behaviors of CompactionOptimizer.compact."""
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
@@ -1178,7 +1178,7 @@ class TestCompactorLazyPromptLoad:
     def test_init_does_not_load_any_prompt(
         self, _mock_get_model_metadata, mock_prompt_registry, user
     ):
-        create_conversation_compactor(
+        CompactionOptimizer(
             config=CompactionConfig(),
             prompt_registry=mock_prompt_registry,
             user=user,

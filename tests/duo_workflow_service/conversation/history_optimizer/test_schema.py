@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
     CompactionResult,
+    MessageSlices,
     OptimizationResult,
     TrimResult,
 )
@@ -174,3 +175,34 @@ class TestCompactionConfig:
             CompactionConfig(trim_threshold=-0.1)
         with pytest.raises(ValidationError, match="trim_threshold must be between"):
             CompactionConfig(trim_threshold=1.1)
+
+
+class TestMessageSlices:
+    """Test suite for MessageSlices dataclass."""
+
+    def test_dataclass_fields(self):
+        """Should have expected fields."""
+        slices = MessageSlices(
+            leading_context=[],
+            to_summarize=[],
+            recent_to_keep=[],
+        )
+        assert hasattr(slices, "leading_context")
+        assert hasattr(slices, "to_summarize")
+        assert hasattr(slices, "recent_to_keep")
+
+    def test_with_messages(self):
+        """Should store messages in correct fields."""
+        leading = [HumanMessage(content="initial")]
+        to_summarize = [HumanMessage(content="middle")]
+        recent = [HumanMessage(content="recent")]
+
+        slices = MessageSlices(
+            leading_context=leading,
+            to_summarize=to_summarize,
+            recent_to_keep=recent,
+        )
+
+        assert slices.leading_context == leading
+        assert slices.to_summarize == to_summarize
+        assert slices.recent_to_keep == recent

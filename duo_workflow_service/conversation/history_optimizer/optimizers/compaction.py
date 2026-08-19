@@ -1,9 +1,7 @@
 """LLM-driven compaction optimizer.
 
 This module is the canonical home for ``CompactionOptimizer`` (formerly
-``ConversationCompactor`` under ``duo_workflow_service.conversation.compaction``).
-The old module re-exports ``CompactionOptimizer`` as ``ConversationCompactor``
-for backwards compatibility while callers migrate.
+``ConversationCompactor``).
 """
 
 import time
@@ -579,28 +577,3 @@ def _build_manual_compaction_ui_logs(result: CompactionResult) -> list[UiChatLog
             "Failed to compact conversation. Please try again."
         ),
     ]
-
-
-def create_conversation_compactor(
-    config: CompactionConfig,
-    prompt_registry: BasePromptRegistry,
-    user: StarletteUser | CloudConnectorUser,
-    agent_name: str,
-    workflow_id: str,
-    workflow_type: str,
-    internal_events_client: InternalEventsClient | None = None,
-) -> CompactionOptimizer:
-    """Build a ``CompactionOptimizer``.
-
-    Preserved with its legacy name and signature so existing callers continue to work unchanged through MR 1. Migration
-    happens in MR 2 / MR 3.
-    """
-    return CompactionOptimizer(
-        prompt_registry=prompt_registry,
-        user=user,
-        config=config,
-        agent_name=agent_name,
-        workflow_id=workflow_id,
-        workflow_type=workflow_type,
-        internal_events_client=internal_events_client,
-    )

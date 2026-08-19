@@ -183,8 +183,8 @@ class TestConversationHistoryReducer:
     def test_does_not_trim_messages(self):
         """Verify the reducer appends without trimming.
 
-        Token-based trimming is deferred to agent run time via maybe_compact_history(), so the reducer should never
-        discard messages.
+        Token-based trimming is deferred to agent run time via the history-optimizer pipeline, so the reducer should
+        never discard messages.
         """
         # Build a large history that would have triggered the old trim logic
         large_history = [HumanMessage(content=f"message {i}" * 500) for i in range(100)]
