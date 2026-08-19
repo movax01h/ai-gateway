@@ -58,7 +58,11 @@ from ai_gateway.model_metadata import (
     resolve_provider_aware_metadata,
 )
 from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
-from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
+from ai_gateway.model_selection.models import (
+    BaseModelParams,
+    ModelClassProvider,
+    validate_client_headers,
+)
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
@@ -713,6 +717,14 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 **custom_models_extra_headers,
                 **yaml_headers,
             }
+
+        operator_allowed_headers = (custom_models_extra_headers or {}).keys()
+        for header_field in ("extra_headers", "default_headers"):
+            if header_field in model_factory_args:
+                validate_client_headers(
+                    model_factory_args[header_field],
+                    additional_allowed=operator_allowed_headers,
+                )
 
         return model_factory(**model_factory_args)
 

@@ -5,6 +5,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.tools import BaseTool
 
 from ai_gateway.model_metadata import TypeModelMetadata
+from ai_gateway.model_selection.models import validate_client_headers
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelConfig, PromptConfig
 from ai_gateway.prompts.registry import LocalPromptRegistry
@@ -112,6 +113,8 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             model_class_provider = model_metadata.llm_definition.model_class_provider
         elif model_from_prompt:
             model_params = model_from_prompt["params"]
+            validate_client_headers(model_params.get("extra_headers"))
+            validate_client_headers(model_params.get("default_headers"))
             model_class_provider = model_params.pop("model_class_provider")
         else:
             raise ValueError(f"Model config not provided for prompt {prompt_id}")

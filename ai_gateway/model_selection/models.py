@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Mapping
+from typing import Iterable, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -14,7 +14,59 @@ __all__ = [
     "ModelClassProvider",
     "OpenAIProviderParams",
     "OpenAIReasoningParams",
+    "validate_client_headers",
 ]
+
+
+_ALLOWED_CLIENT_HEADER_NAMES = frozenset(
+    name.lower()
+    for name in (
+        "anthropic-beta",
+        "anthropic-version",
+        "x-trace-id",
+    )
+)
+
+
+def validate_client_headers(
+    headers: Optional[Mapping[str, str]],
+    additional_allowed: Optional[Iterable[str]] = None,
+) -> Optional[Mapping[str, str]]:
+    """Enforce a fail-closed allowlist over a model request header map.
+
+    Any header name not in ``_ALLOWED_CLIENT_HEADER_NAMES`` (optionally
+    extended by ``additional_allowed``) is rejected, so the request never
+    reaches a provider transport. Header names are compared case-insensitively
+    and after stripping surrounding whitespace.
+
+    Args:
+        headers: The header map to validate. ``None`` or empty is allowed and
+            returned unchanged.
+        additional_allowed: Extra header names to permit for this call, on top
+            of the static allowlist (e.g. operator-configured header names from
+            trusted server config).
+
+    Returns:
+        The ``headers`` argument unchanged when every key is permitted.
+
+    Raises:
+        ValueError: If any header name is not on the effective allowlist.
+    """
+    if not headers:
+        return headers
+
+    allowed = _ALLOWED_CLIENT_HEADER_NAMES
+    if additional_allowed:
+        allowed = allowed | {name.strip().lower() for name in additional_allowed}
+
+    for name in headers:
+        if name.strip().lower() not in allowed:
+            raise ValueError(
+                f"Header '{name}' is not permitted. "
+                f"Permitted headers: {sorted(allowed)}"
+            )
+
+    return headers
 
 
 class ModelClassProvider(StrEnum):

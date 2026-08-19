@@ -5,7 +5,65 @@ from ai_gateway.model_selection.models import (
     ChatOpenAIParams,
     OpenAIProviderParams,
     OpenAIReasoningParams,
+    validate_client_headers,
 )
+
+
+class TestValidateClientHeaders:
+    """Fail-closed header allowlist for model header maps."""
+
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            None,
+            {},
+            {"anthropic-beta": "prompt-caching-2024-07-31"},
+            {"anthropic-version": "2023-06-01"},
+            {"X-Trace-Id": "abc"},
+            {"x-trace-id": "abc", "anthropic-beta": "x"},
+        ],
+    )
+    def test_allows_allowlisted_headers(self, headers):
+        assert validate_client_headers(headers) == headers
+
+    @pytest.mark.parametrize(
+        "forbidden",
+        [
+            "Host",
+            "host",
+            "HOST",
+            "  Host  ",
+            "X-Goog-User-Project",
+            ":authority",
+            "Authorization",
+            "Proxy-Authorization",
+            "Cookie",
+            "X-Custom-Header",
+            "User-Agent",
+            "Content-Type",
+        ],
+    )
+    def test_rejects_non_allowlisted_headers(self, forbidden):
+        with pytest.raises(ValueError, match="is not permitted"):
+            validate_client_headers({forbidden.strip(): "value"})
+
+    def test_rejects_when_one_of_many_is_not_allowlisted(self):
+        with pytest.raises(ValueError, match="Host"):
+            validate_client_headers({"anthropic-beta": "ok", "Host": "example.test"})
+
+    def test_additional_allowed_permits_extra_keys(self):
+        headers = {"X-Api-Subscription": "uuid", "anthropic-beta": "x"}
+
+        assert (
+            validate_client_headers(headers, additional_allowed=["X-Api-Subscription"])
+            == headers
+        )
+
+    def test_additional_allowed_does_not_permit_other_keys(self):
+        with pytest.raises(ValueError, match="is not permitted"):
+            validate_client_headers(
+                {"X-Other": "v"}, additional_allowed=["X-Api-Subscription"]
+            )
 
 
 class TestOpenAIReasoningParams:

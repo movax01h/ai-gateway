@@ -2714,7 +2714,7 @@ class TestBuildModelExtraHeaders:
             params=ChatLiteLLMParams(
                 model="test_model",
                 extra_headers={
-                    "x-yaml-header": "yaml-value",
+                    "anthropic-beta": "yaml-value",
                     "x-shared-header": "yaml-shared-value",
                 },
             )
@@ -2734,7 +2734,7 @@ class TestBuildModelExtraHeaders:
         # Env-only header is preserved
         assert result_headers["x-env-header"] == "env-value"
         # YAML-only header is preserved
-        assert result_headers["x-yaml-header"] == "yaml-value"
+        assert result_headers["anthropic-beta"] == "yaml-value"
         # Shared key: YAML wins over env
         assert result_headers["x-shared-header"] == "yaml-shared-value"
 
@@ -2772,7 +2772,7 @@ class TestBuildModelExtraHeaders:
             params=ChatLiteLLMParams(
                 model="test_model",
                 extra_headers={
-                    "x-yaml-only": "yaml-value",
+                    "anthropic-beta": "yaml-value",
                     "x-shared": "yaml-shared-value",
                 },
             )
@@ -2793,6 +2793,115 @@ class TestBuildModelExtraHeaders:
         assert len(warning_logs) == 1
         assert "overriding" in warning_logs[0]["event"].lower()
         assert warning_logs[0]["overridden_keys"] == ["x-shared"]
+
+    @pytest.mark.parametrize(
+        "bad_header",
+        [
+            {"Host": "example.test"},
+            {"X-Goog-User-Project": "example"},
+            {"X-Custom-Header": "value"},
+        ],
+    )
+    def test_non_allowlisted_config_header_is_rejected(
+        self, capturing_model_factory, bad_header
+    ):
+        """A config-set header outside the allowlist blocks the model build."""
+        config = ModelConfig(
+            params=ChatLiteLLMParams(model="test_model", extra_headers=bad_header)
+        )
+
+        with pytest.raises(ValueError, match="is not permitted"):
+            Prompt._build_model(
+                Prompt,
+                model_factory=capturing_model_factory,
+                config=config,
+                model_metadata=None,
+                disable_streaming=False,
+                custom_models_extra_headers=None,
+                model_provider=ModelClassProvider.LITE_LLM,
+            )
+
+    def test_allowlisted_config_header_is_allowed(self, capturing_model_factory):
+        """A config-set header on the allowlist passes."""
+        config = ModelConfig(
+            params=ChatLiteLLMParams(
+                model="test_model", extra_headers={"anthropic-beta": "x"}
+            )
+        )
+
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=config,
+            model_metadata=None,
+            disable_streaming=False,
+            custom_models_extra_headers=None,
+            model_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert capturing_model_factory.captured_kwargs["extra_headers"] == {
+            "anthropic-beta": "x"
+        }
+
+    def test_operator_env_header_is_allowed(self, capturing_model_factory):
+        """Operator-configured env headers are allowed by the allowlist union, even though the header name is not in the
+        static allowlist."""
+        config = ModelConfig(params=ChatLiteLLMParams(model="test_model"))
+
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=config,
+            model_metadata=None,
+            disable_streaming=False,
+            custom_models_extra_headers={"X-Api-Subscription": "uuid"},
+            model_provider=ModelClassProvider.LITE_LLM,
+        )
+
+        assert capturing_model_factory.captured_kwargs["extra_headers"] == {
+            "X-Api-Subscription": "uuid"
+        }
+
+    def test_non_allowlisted_default_headers_is_rejected(self, capturing_model_factory):
+        """The check also covers the default_headers field, not only extra_headers."""
+        config = ModelConfig(
+            params=ChatAnthropicParams(
+                model="test_model", default_headers={"Host": "example.test"}
+            )
+        )
+
+        with pytest.raises(ValueError, match="is not permitted"):
+            Prompt._build_model(
+                Prompt,
+                model_factory=capturing_model_factory,
+                config=config,
+                model_metadata=None,
+                disable_streaming=False,
+                custom_models_extra_headers=None,
+                model_provider=ModelClassProvider.ANTHROPIC,
+            )
+
+    def test_allowlisted_default_headers_is_allowed(self, capturing_model_factory):
+        """An allowlisted default_headers value passes the check."""
+        config = ModelConfig(
+            params=ChatAnthropicParams(
+                model="test_model", default_headers={"anthropic-version": "2023-06-01"}
+            )
+        )
+
+        Prompt._build_model(
+            Prompt,
+            model_factory=capturing_model_factory,
+            config=config,
+            model_metadata=None,
+            disable_streaming=False,
+            custom_models_extra_headers=None,
+            model_provider=ModelClassProvider.ANTHROPIC,
+        )
+
+        assert capturing_model_factory.captured_kwargs["default_headers"] == {
+            "anthropic-version": "2023-06-01"
+        }
 
 
 def _chained_timeout_error() -> ValueError:

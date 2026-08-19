@@ -24,6 +24,7 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
     CHAT_AGENT_COMPONENT_ENVIRONMENT,
     ResolvedFlow,
+    _load_flow_from_inline_config,
     _load_flow_from_registry,
     list_configs,
     resolve_flow,
@@ -746,3 +747,61 @@ class TestResolveFlowTrackingFields:
                         config_struct=mocks["struct"], schema_version="experimental"
                     )
                 )
+
+
+def _experimental_inline_config(model_params):
+    """Minimal experimental flow config with the given inline model params."""
+    return {
+        "version": "experimental",
+        "environment": "ambient",
+        "components": [
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "prompt_id": "p",
+                "toolset": [],
+                "inputs": [{"from": "context:goal", "as": "goal"}],
+            }
+        ],
+        "routers": [{"from": "agent", "to": "end"}],
+        "flow": {"entry_point": "agent"},
+        "prompts": [
+            {
+                "prompt_id": "p",
+                "name": "p",
+                "model": {"params": model_params},
+                "prompt_template": {"user": "say hello"},
+                "unit_primitives": ["duo_agent_platform"],
+            }
+        ],
+    }
+
+
+def test_load_flow_from_inline_config_rejects_untrusted_model_selection():
+    """An inline experimental config that self-specifies a model (via model_class_provider) is rejected at flow-config
+    validation, because ModelConfig.params (BaseModelParams) forbids unknown fields."""
+    struct = struct_pb2.Struct()
+    struct.update(
+        _experimental_inline_config(
+            {
+                "model_class_provider": "litellm",
+                "model": "vertex_ai/gemini-2.5-flash",
+                "max_tokens": 1,
+                "max_retries": 0,
+                "extra_headers": {"Host": "example.test"},
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="model_class_provider"):
+        _load_flow_from_inline_config(struct, "experimental")
+
+
+def test_load_flow_from_inline_config_accepts_valid_experimental_config():
+    """A well-formed experimental config (no untrusted model selection) still loads."""
+    struct = struct_pb2.Struct()
+    struct.update(_experimental_inline_config({"max_tokens": 1}))
+
+    factory = _load_flow_from_inline_config(struct, "experimental")
+
+    assert factory is not None
