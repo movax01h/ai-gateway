@@ -11,11 +11,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_ISSUES, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_type_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by work item type using the type field."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -26,7 +28,7 @@ async def test_work_item_type_filter(
         "Show me all open tasks in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -36,11 +38,13 @@ async def test_work_item_type_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_date_filters(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use date comparison operators for created and due fields."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -51,7 +55,7 @@ async def test_work_item_date_filters(
         "Show me issues created in the last month that are due within a week in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -61,11 +65,13 @@ async def test_work_item_date_filters(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_health_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by health status."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -76,7 +82,7 @@ async def test_work_item_health_filter(
         'Show me issues with health status "needs attention" in the gitlab-org group',
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -85,11 +91,13 @@ async def test_work_item_health_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_iteration_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by iteration."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -100,7 +108,7 @@ async def test_work_item_iteration_filter(
         "Show me issues in the current iteration in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -109,11 +117,13 @@ async def test_work_item_iteration_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_weight_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by weight."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -124,7 +134,7 @@ async def test_work_item_weight_filter(
         "Show me issues with weight 5 in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -133,11 +143,13 @@ async def test_work_item_weight_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_display_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use appropriate display fields for work items."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -148,7 +160,7 @@ async def test_work_item_display_fields(
         "Show me open issues in the gitlab-org group with their title, assignee, labels, milestone and due date",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -157,11 +169,13 @@ async def test_work_item_display_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_sort_by_due_date(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should sort by due date when requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -172,7 +186,7 @@ async def test_work_item_sort_by_due_date(
         "Show me open issues in the gitlab-org group sorted by due date, earliest first",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -181,11 +195,13 @@ async def test_work_item_sort_by_due_date(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_work_item_sort_by_popularity(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should sort by popularity when requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -196,7 +212,7 @@ async def test_work_item_sort_by_popularity(
         "Show me the most popular open issues in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -205,11 +221,13 @@ async def test_work_item_sort_by_popularity(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_epic_sort_by_milestone_not_supported(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should warn that milestone sort is not supported for epics."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -220,7 +238,7 @@ async def test_epic_sort_by_milestone_not_supported(
         "Can you show all epics in the gitlab-org group, sorted by milestone?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     await result.assert_llm_validates(
         [
             "The response explains that sorting by milestone "

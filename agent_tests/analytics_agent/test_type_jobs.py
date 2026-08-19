@@ -11,11 +11,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_JOBS, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_job_query_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use correct query fields for jobs: type, project, status."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_JOBS))
@@ -26,7 +28,7 @@ async def test_job_query_fields(
         "Show me failed jobs in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -37,11 +39,13 @@ async def test_job_query_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_job_kind_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use kind enum values (bridge/build) correctly."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_JOBS))
@@ -52,7 +56,7 @@ async def test_job_kind_filter(
         "Show me all bridge jobs (trigger jobs) in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -63,11 +67,13 @@ async def test_job_kind_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_job_pipeline_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter jobs by pipeline IID."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_JOBS))
@@ -78,7 +84,7 @@ async def test_job_pipeline_filter(
         "Show me all jobs in pipeline 12345 in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -89,11 +95,13 @@ async def test_job_pipeline_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_job_display_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use appropriate display fields for jobs."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_JOBS))
@@ -104,7 +112,7 @@ async def test_job_display_fields(
         "Show me jobs in project gitlab-org/gitlab with their name, stage, status and duration",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -114,11 +122,13 @@ async def test_job_display_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_job_no_sorting(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should not include sort parameter for jobs since sorting is not supported."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_JOBS))
@@ -129,7 +139,7 @@ async def test_job_no_sorting(
         "Show me jobs in project gitlab-org/gitlab sorted by duration",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -139,6 +149,7 @@ async def test_job_no_sorting(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_job_requires_project_filter(
     analytics_agent,

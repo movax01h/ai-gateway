@@ -10,6 +10,7 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_ISSUES, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_text_search_limitation_explained(
     analytics_agent,

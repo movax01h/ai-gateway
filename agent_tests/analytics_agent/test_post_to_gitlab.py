@@ -10,11 +10,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_ISSUES, SAMPLE_MRS, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_post_summary_to_issue(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Agent should query data then post to an issue."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES, count=42))
@@ -27,16 +29,18 @@ async def test_post_summary_to_issue(
         "in gitlab-org/gitlab-test",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     result.assert_has_tool_calls().assert_called_tool("create_work_item_note")
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_post_summary_to_merge_request(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Agent should query data then post to a merge request."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -49,6 +53,6 @@ async def test_post_summary_to_merge_request(
         "merge request !1 in gitlab-org/gitlab-duo",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     result.assert_has_tool_calls().assert_called_tool("create_merge_request_note")

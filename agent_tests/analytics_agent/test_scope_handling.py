@@ -15,6 +15,7 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_scope_note_when_assuming_project(
     analytics_agent,
@@ -39,11 +40,13 @@ async def test_scope_note_when_assuming_project(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_explicit_group_level_request(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should handle explicit group-level requests with group filter."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -54,7 +57,7 @@ async def test_explicit_group_level_request(
         "Show me all open MRs across the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -63,11 +66,13 @@ async def test_explicit_group_level_request(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_explicit_project_level_request(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should handle explicit project-level requests with project filter."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -78,7 +83,7 @@ async def test_explicit_project_level_request(
         "List issues in the gitlab-org/gitlab-test project",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

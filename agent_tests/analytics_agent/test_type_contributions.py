@@ -16,11 +16,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_contribution_trend_over_time(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ) -> None:
     """Agent should generate analytics-mode query for a contribution trend by month."""
     mock_glql_response(
@@ -33,7 +35,7 @@ async def test_contribution_trend_over_time(
         "What's the contribution trend over the last month?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -45,11 +47,13 @@ async def test_contribution_trend_over_time(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_unique_contributor_count(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ) -> None:
     """Agent should use usersCount to answer questions about unique contributors."""
     mock_glql_response(
@@ -62,7 +66,7 @@ async def test_unique_contributor_count(
         "How many unique contributors did this project have in the last 30 days?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

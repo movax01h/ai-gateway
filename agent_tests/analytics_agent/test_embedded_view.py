@@ -18,11 +18,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_embedded_view_has_required_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should include all required embedded view fields."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -33,7 +35,7 @@ async def test_embedded_view_has_required_fields(
         "Create a dashboard view of recent MRs in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -44,11 +46,13 @@ async def test_embedded_view_has_required_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ordered_list_display_type(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use orderedList display type for numbered lists."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -59,7 +63,7 @@ async def test_ordered_list_display_type(
         "Give me a numbered list of open issues in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -68,11 +72,13 @@ async def test_ordered_list_display_type(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_list_display_type(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use list display type for regular lists."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -83,7 +89,7 @@ async def test_list_display_type(
         "Give me a list of open MRs in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -92,11 +98,13 @@ async def test_list_display_type(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_column_chart_display_type(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use columnChart display type for visualization requests."""
     mock_glql_response(
@@ -110,7 +118,7 @@ async def test_column_chart_display_type(
         "Show me a column chart of code suggestion acceptance rates by language in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -120,11 +128,13 @@ async def test_column_chart_display_type(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_bar_chart_display_type(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use barChart display type for horizontal bar comparison requests."""
     mock_glql_response(
@@ -138,7 +148,7 @@ async def test_bar_chart_display_type(
         "Show me a horizontal bar chart of code suggestion acceptance rates by language in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -148,11 +158,13 @@ async def test_bar_chart_display_type(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_line_chart_display_type(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use lineChart display type for trends over a single dimension."""
     mock_glql_response(
@@ -166,7 +178,7 @@ async def test_line_chart_display_type(
         "Show me a line chart of pipeline success rate over time in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -177,11 +189,13 @@ async def test_line_chart_display_type(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_stat_display_type(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use stat display type for single-value requests."""
     mock_glql_response(
@@ -195,7 +209,7 @@ async def test_stat_display_type(
         "Show me the total number of code suggestions in the gitlab-org group as a single stat",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -206,11 +220,13 @@ async def test_stat_display_type(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_title_field_included_when_requested(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should include title when creating named views."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -221,7 +237,7 @@ async def test_title_field_included_when_requested(
         "Create a view called 'Critical Bugs' for high priority bugs in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

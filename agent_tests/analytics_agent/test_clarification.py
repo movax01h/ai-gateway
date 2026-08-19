@@ -15,11 +15,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ambiguous_team_triggers_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Ambiguous 'team' concept should trigger clarification without tool execution."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -31,17 +33,19 @@ async def test_ambiguous_team_triggers_clarification(
     )
 
     result.assert_not_called_tool("run_glql_query")
-    result.assert_not_called_tool("get_glql_schema")
+    result.assert_not_called_tool(schema_tool_name)
     await result.assert_llm_validates(
         ["The response asks for clarification about what 'team' means "]
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ambiguous_bugs_and_quarter_triggers_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Ambiguous 'bugs' and 'quarter' should trigger clarification without tool execution."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -52,7 +56,7 @@ async def test_ambiguous_bugs_and_quarter_triggers_clarification(
         "How many bugs were created this quarter?",
     )
 
-    result.assert_not_called_tool("get_glql_schema")
+    result.assert_not_called_tool(schema_tool_name)
     result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -62,11 +66,13 @@ async def test_ambiguous_bugs_and_quarter_triggers_clarification(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ambiguous_velocity_triggers_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Vague analytical term 'velocity' should trigger clarification without tool execution."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -77,7 +83,7 @@ async def test_ambiguous_velocity_triggers_clarification(
         "What's our team's velocity?",
     )
 
-    result.assert_not_called_tool("get_glql_schema")
+    result.assert_not_called_tool(schema_tool_name)
     result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -86,11 +92,13 @@ async def test_ambiguous_velocity_triggers_clarification(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_clear_question_proceeds_without_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Clear, unambiguous question should proceed without clarification."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS, count=7))
@@ -101,7 +109,7 @@ async def test_clear_question_proceeds_without_clarification(
         "How many merge requests with label ~bug were merged in the last 7 days in the gitlab-org group?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

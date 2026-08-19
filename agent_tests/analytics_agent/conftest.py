@@ -37,6 +37,41 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.analytics)
 
 
+# Which flow config each test runs against. The agent is served from versioned
+# configs, so a test has to say which prompt it is making claims about: they
+# differ in the tools they offer and in what the schema they read looks like.
+SCHEMA_TOOL_NAMES = {
+    "1.0.0": "get_glql_schema",
+}
+
+
+def pytest_generate_tests(metafunc):
+    """Run each test once per version in its `flow_versions` marker.
+
+    Every test that uses `flow_version` (directly or via the agent fixtures) must carry
+    the marker; a missing or empty marker fails collection instead of quietly skipping.
+    """
+    if "flow_version" not in metafunc.fixturenames:
+        return
+
+    marker = metafunc.definition.get_closest_marker("flow_versions")
+    if marker is None or not marker.args:
+        raise pytest.UsageError(
+            f"{metafunc.definition.nodeid} needs a `flow_versions` marker naming "
+            f"the flow configs it runs against, e.g. "
+            f'@pytest.mark.flow_versions("1.0.0")'
+        )
+
+    unknown = set(marker.args) - SCHEMA_TOOL_NAMES.keys()
+    if unknown:
+        raise pytest.UsageError(
+            f"{metafunc.definition.nodeid} names unknown flow "
+            f"version(s) {sorted(unknown)}"
+        )
+
+    metafunc.parametrize("flow_version", marker.args, ids=str)
+
+
 @pytest.fixture
 def mock_gitlab_client():
     """Mock GitLab client for GLQL responses.
@@ -65,11 +100,23 @@ def glql_tool(mock_gitlab_client):
 
 
 @pytest.fixture
-def glql_schema_tool():
-    """GetGlqlSchema tool (no GitLab client needed)."""
-    from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
+def schema_tool_name(flow_version):
+    """The name of the schema tool the version under test offers.
 
-    return GetGlqlSchema(metadata={})
+    Tests assert on the name rather than hardcoding it, since it differs between flow versions.
+    """
+    return SCHEMA_TOOL_NAMES[flow_version]
+
+
+@pytest.fixture
+def glql_schema_tool(flow_version):
+    """The schema tool the version under test offers."""
+    if flow_version == "1.0.0":
+        from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
+
+        return GetGlqlSchema(metadata={})
+
+    raise AssertionError(f"no schema tool for flow version {flow_version}")
 
 
 @pytest.fixture
@@ -91,7 +138,7 @@ def merge_request_note_tool(mock_gitlab_client):
 
 
 @pytest.fixture
-def analytics_system_template():
+def analytics_system_template(flow_version):
     """Load the analytics agent system template from YAML config file."""
     config_path = (
         Path(__file__).resolve().parents[2]
@@ -101,7 +148,7 @@ def analytics_system_template():
         / "flows"
         / "configs"
         / "analytics_agent"
-        / "1.0.0.yml"
+        / f"{flow_version}.yml"
     )
     with open(config_path) as f:
         config = yaml.safe_load(f)

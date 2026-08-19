@@ -16,11 +16,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_count_query_single_call(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Count-only queries should NOT paginate (single tool call)."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES, count=150))
@@ -32,7 +34,7 @@ async def test_count_query_single_call(
     )
 
     result.assert_tool_call_count("run_glql_query", 1)
-    result.assert_tool_call_count("get_glql_schema", 1)
+    result.assert_tool_call_count(schema_tool_name, 1)
     await result.assert_llm_validates(
         [
             "The response provides the correct count/number of issues 150 without paginating.",
@@ -40,11 +42,13 @@ async def test_count_query_single_call(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_limited_results_single_call(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Limited results should NOT paginate (single tool call)."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -56,7 +60,7 @@ async def test_limited_results_single_call(
     )
 
     result.assert_tool_call_count("run_glql_query", 1)
-    result.assert_tool_call_count("get_glql_schema", 1)
+    result.assert_tool_call_count(schema_tool_name, 1)
     await result.assert_llm_validates(
         [
             "The GLQL query includes 'limit: 20' or similar to respect the user's requested limit",
@@ -64,11 +68,13 @@ async def test_limited_results_single_call(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_full_analysis_paginates(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Full data analysis should paginate (multiple tool calls)."""
     page1 = glql_response(
@@ -98,7 +104,7 @@ async def test_full_analysis_paginates(
     )
 
     result.assert_tool_call_count("run_glql_query", {"min": 2})
-    result.assert_tool_call_count("get_glql_schema", 1)
+    result.assert_tool_call_count(schema_tool_name, 1)
 
     await result.assert_llm_validates(
         [
