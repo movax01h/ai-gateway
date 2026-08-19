@@ -163,12 +163,11 @@ configurable_unit_primitives:
     def _mock_usage_metadata(
         self, model_name: str, usage_metadata: UsageMetadata
     ) -> Iterator[None]:
+        mock_callback = mock.MagicMock(usage_metadata={model_name: usage_metadata})
         with mock.patch(
-            "ai_gateway.prompts.base.get_usage_metadata_callback"
-        ) as mock_get_usage_callback:
-            mock_callback = mock.MagicMock(usage_metadata={model_name: usage_metadata})
-            mock_get_usage_callback.return_value.__enter__.return_value = mock_callback
-
+            "ai_gateway.prompts.base.UsageMetadataCallbackHandler",
+            return_value=mock_callback,
+        ):
             yield
 
     def test_initialize(
