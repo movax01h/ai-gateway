@@ -46,6 +46,10 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "analytics: mark test as an analytics agent test"
     )
+    config.addinivalue_line(
+        "markers",
+        "flow_versions(*versions): flow config versions this test runs against",
+    )
     validation_model = config.getoption("--validation-model", default=None)
     if validation_model:
         from agent_tests import helpers

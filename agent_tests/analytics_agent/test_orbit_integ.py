@@ -13,6 +13,7 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_orbit_focused_question_routes_to_orbit(
     analytics_agent,
@@ -38,6 +39,7 @@ async def test_orbit_focused_question_routes_to_orbit(
     result.assert_not_called_tool("run_glql_query")
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_cross_entities_question_routes_to_orbit(
     analytics_agent,
@@ -62,6 +64,7 @@ async def test_cross_entities_question_routes_to_orbit(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_data_not_in_glql_routes_to_orbit(
     analytics_agent,
@@ -91,11 +94,13 @@ async def test_data_not_in_glql_routes_to_orbit(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_explicit_glql_request_routes_to_glql(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Explicit GLQL request must skip Orbit deep discovery entirely."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -109,11 +114,12 @@ async def test_explicit_glql_request_routes_to_glql(
         ),
     )
 
-    result.assert_called_tool("get_glql_schema")
+    result.assert_called_tool(schema_tool_name)
     result.assert_called_tool("run_glql_query")
     result.assert_not_called_tool("orbit_invoke_command")
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_orbit_unavailable_orbit_shaped_question_surfaces_limitation(
     analytics_agent_without_orbit,
@@ -139,6 +145,7 @@ async def test_orbit_unavailable_orbit_shaped_question_surfaces_limitation(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_orbit_unavailable_glql_shaped_question_still_works(
     analytics_agent_without_orbit,

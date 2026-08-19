@@ -16,11 +16,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_analytical_question_answers_first(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Analytical questions should provide answer BEFORE showing GLQL query."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS, count=15))
@@ -31,7 +33,7 @@ async def test_analytical_question_answers_first(
         "How many merge requests were merged this month in the gitlab-org group?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -41,11 +43,13 @@ async def test_analytical_question_answers_first(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_query_request_shows_embedded_view(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Query requests should show embedded view format prominently."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -56,7 +60,7 @@ async def test_query_request_shows_embedded_view(
         "Write a GLQL query for open issues in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -66,11 +70,13 @@ async def test_query_request_shows_embedded_view(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_visualization_request_shows_embedded_view(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Visualization requests should show embedded view format prominently."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -81,7 +87,7 @@ async def test_visualization_request_shows_embedded_view(
         "Show me all open issues in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -91,11 +97,13 @@ async def test_visualization_request_shows_embedded_view(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ide_analytical_question_answers_first(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """In IDE, analytical questions should answer first with Markdown, not GLQL blocks."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS, count=15))
@@ -107,7 +115,7 @@ async def test_ide_analytical_question_answers_first(
         + "How many merge requests were merged this month in the gitlab-org group?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -119,11 +127,13 @@ async def test_ide_analytical_question_answers_first(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ide_query_request_uses_markdown(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """In IDE, query requests should use standard Markdown instead of GLQL blocks."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -135,7 +145,7 @@ async def test_ide_query_request_uses_markdown(
         + "Write a GLQL query for open issues in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -146,11 +156,13 @@ async def test_ide_query_request_uses_markdown(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_ide_visualization_request_uses_markdown(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """In IDE, visualization requests should use standard Markdown instead of GLQL blocks."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -161,7 +173,7 @@ async def test_ide_visualization_request_uses_markdown(
         IDE_ADDITIONAL_CONTEXT + "Show me all open issues in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

@@ -17,11 +17,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_success_rate_by_ref(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ) -> None:
     """Agent should generate analytics-mode query for success rate by ref and surface the data."""
     mock_glql_response(
@@ -35,7 +37,7 @@ async def test_success_rate_by_ref(
         "What's the pipeline success rate by branch in project gitlab-org/gitlab?",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -49,11 +51,13 @@ async def test_success_rate_by_ref(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_failure_rate_by_status(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ) -> None:
     """Agent should generate analytics-mode query grouped by status and surface the data."""
     mock_glql_response(
@@ -67,7 +71,7 @@ async def test_pipeline_failure_rate_by_status(
         "Break down pipelines by status in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -79,11 +83,13 @@ async def test_pipeline_failure_rate_by_status(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_trends_over_time_group_scope(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ) -> None:
     """Agent should generate analytics-mode query at group scope with a time dimension."""
     mock_glql_response(
@@ -98,7 +104,7 @@ async def test_pipeline_trends_over_time_group_scope(
         "in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

@@ -11,11 +11,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_PROJECTS, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_project_query_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use correct query fields for projects: type, group scope."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PROJECTS))
@@ -26,7 +28,7 @@ async def test_project_query_fields(
         "Show me all projects in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -36,11 +38,13 @@ async def test_project_query_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_project_boolean_filters(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use boolean filter fields correctly."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PROJECTS))
@@ -51,7 +55,7 @@ async def test_project_boolean_filters(
         "Show me projects with vulnerabilities in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -62,11 +66,13 @@ async def test_project_boolean_filters(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_project_archived_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should handle archived project filtering."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PROJECTS))
@@ -77,7 +83,7 @@ async def test_project_archived_filter(
         "Show me archived projects in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -87,11 +93,13 @@ async def test_project_archived_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_project_display_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use appropriate display fields for projects."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PROJECTS))
@@ -102,7 +110,7 @@ async def test_project_display_fields(
         "Show me projects in the gitlab-org group with their name, stars, and open issues count",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -112,11 +120,13 @@ async def test_project_display_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_project_sorting(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use valid sort fields for projects (fullPath, lastActivity, path)."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PROJECTS))
@@ -127,7 +137,7 @@ async def test_project_sorting(
         "Show me projects in the gitlab-org group sorted by most recently active",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

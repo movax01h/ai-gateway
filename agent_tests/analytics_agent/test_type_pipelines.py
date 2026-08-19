@@ -11,11 +11,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_PIPELINES, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_query_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use correct query fields for pipelines: type, project, status, ref."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
@@ -26,7 +28,7 @@ async def test_pipeline_query_fields(
         'Show me failed pipelines on the "main" branch in project gitlab-org/gitlab',
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -38,11 +40,13 @@ async def test_pipeline_query_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_status_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use status enum values correctly."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
@@ -53,7 +57,7 @@ async def test_pipeline_status_filter(
         "Show me all running pipelines in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -64,11 +68,13 @@ async def test_pipeline_status_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_date_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use date comparison operators for updated field."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
@@ -79,7 +85,7 @@ async def test_pipeline_date_filter(
         "Show me pipelines created in the last week in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -90,11 +96,13 @@ async def test_pipeline_date_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_display_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use appropriate display fields for pipelines."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
@@ -105,7 +113,7 @@ async def test_pipeline_display_fields(
         "Show me recent pipelines in project gitlab-org/gitlab with their status, duration and ref",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -115,11 +123,13 @@ async def test_pipeline_display_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_no_sorting(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should not include sort parameter for pipelines since sorting is not supported."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
@@ -130,7 +140,7 @@ async def test_pipeline_no_sorting(
         "Show me pipelines in project gitlab-org/gitlab sorted by most recent",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -140,6 +150,7 @@ async def test_pipeline_no_sorting(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_pipeline_requires_project_filter(
     analytics_agent,

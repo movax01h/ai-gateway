@@ -10,11 +10,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import EMPTY_RESPONSE, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_empty_results_handled_gracefully(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should handle empty results gracefully."""
     mock_glql_response(mock_gitlab_client, glql_response(EMPTY_RESPONSE, count=0))
@@ -25,7 +27,7 @@ async def test_empty_results_handled_gracefully(
         "Show me issues with label ~nonexistent-label-xyz123 in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

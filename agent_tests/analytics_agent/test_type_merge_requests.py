@@ -11,11 +11,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_MRS, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_query_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use correct query fields for merge requests."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -26,7 +28,7 @@ async def test_mr_query_fields(
         "Show me merged MRs from the last month in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -37,11 +39,13 @@ async def test_mr_query_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_draft_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by draft status."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -52,7 +56,7 @@ async def test_mr_draft_filter(
         "Show me all draft merge requests in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -62,11 +66,13 @@ async def test_mr_draft_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_reviewer_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by reviewer."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -77,7 +83,7 @@ async def test_mr_reviewer_filter(
         "Show me merge requests I need to review in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -87,11 +93,13 @@ async def test_mr_reviewer_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_target_branch_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by target branch."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -102,7 +110,7 @@ async def test_mr_target_branch_filter(
         "Show me open MRs targeting the main branch in project gitlab-org/gitlab",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -112,11 +120,13 @@ async def test_mr_target_branch_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_approver_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by approver."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -127,7 +137,7 @@ async def test_mr_approver_filter(
         "Show me merge requests I approved in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -137,11 +147,13 @@ async def test_mr_approver_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_deployed_date_filter(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should filter by deployment date."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -152,7 +164,7 @@ async def test_mr_deployed_date_filter(
         "Show me merge requests deployed in the last week in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -162,11 +174,13 @@ async def test_mr_deployed_date_filter(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_display_fields(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use appropriate display fields for merge requests."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -177,7 +191,7 @@ async def test_mr_display_fields(
         "Show me open MRs in the gitlab-org group with their title, author, reviewer, and source branch",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -187,11 +201,13 @@ async def test_mr_display_fields(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_sort_by_merged_date(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should sort by merged date when requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -202,7 +218,7 @@ async def test_mr_sort_by_merged_date(
         "Show me recently merged MRs in the gitlab-org group, most recent first",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -212,11 +228,13 @@ async def test_mr_sort_by_merged_date(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_mr_sort_by_created(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should sort by creation date when requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_MRS))
@@ -227,7 +245,7 @@ async def test_mr_sort_by_created(
         "Show me the oldest open MRs in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

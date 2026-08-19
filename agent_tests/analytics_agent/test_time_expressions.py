@@ -10,11 +10,13 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_ISSUES, glql_response, mock_glql_response
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_relative_time_for_last_month(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use relative time expression for 'last month'."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -26,7 +28,7 @@ async def test_relative_time_for_last_month(
     )
 
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     await result.assert_llm_validates(
         [
             "The GLQL query uses relative time expression like -1m or -30d",
@@ -34,11 +36,13 @@ async def test_relative_time_for_last_month(
     )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_absolute_dates_when_explicitly_requested(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ):
     """Should use absolute dates when explicitly requested."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
@@ -49,7 +53,7 @@ async def test_absolute_dates_when_explicitly_requested(
         "Show me issues created between January 1, 2024 and January 31, 2024 in the gitlab-org group",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [

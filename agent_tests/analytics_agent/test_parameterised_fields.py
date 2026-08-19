@@ -15,11 +15,13 @@ from .helpers import (
 )
 
 
+@pytest.mark.flow_versions("1.0.0")
 @pytest.mark.asyncio
 async def test_duration_percentiles_with_aliases(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
+    schema_tool_name,
 ) -> None:
     """Agent should query duration quantiles with unique single-word aliases.
 
@@ -38,7 +40,7 @@ async def test_duration_percentiles_with_aliases(
         "gitlab-org/gitlab, sorted by median duration",
     )
 
-    result.assert_has_tool_calls().assert_called_tool("get_glql_schema")
+    result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
