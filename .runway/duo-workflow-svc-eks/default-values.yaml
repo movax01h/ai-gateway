@@ -51,15 +51,15 @@ spec:
       ephemeral-storage: "8Gi"
   startup_probe:
     period_seconds: 15
-    failure_threshold: 20 # 5 minutes (20 * 15 seconds)
+    failure_threshold: 20  # 5 minutes (20 * 15 seconds)
     timeout_seconds: 3
   liveness_probe:
     period_seconds: 15
-    failure_threshold: 4 # 60 seconds (15 * 4 seconds)
+    failure_threshold: 4  # 60 seconds (15 * 4 seconds)
     timeout_seconds: 3
   readiness_probe:
     period_seconds: 10
-    failure_threshold: 3 # 30 seconds (10 * 3 seconds)
+    failure_threshold: 3  # 30 seconds (10 * 3 seconds)
     timeout_seconds: 3
   load_balancing:
     cloudflare:

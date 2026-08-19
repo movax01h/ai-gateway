@@ -32,12 +32,12 @@ models:
     gitlab_identifier: "minimax_m3_fireworks"
     description: "Native multimodal MoE model for coding, agentic tasks, and reasoning."
     cost_indicator: "$"
-    max_context_tokens: 512_000 # https://app.fireworks.ai/models/fireworks/minimax-m3
+    max_context_tokens: 512_000  # https://app.fireworks.ai/models/fireworks/minimax-m3
     model_class_provider: litellm
     params:
       model: "accounts/fireworks/models/minimax-m3"
       custom_llm_provider: "fireworks_ai"
-      temperature: 1.0 # MiniMax vendor-recommended sampling: https://huggingface.co/MiniMaxAI/MiniMax-M3
+      temperature: 1.0  # MiniMax vendor-recommended sampling: https://huggingface.co/MiniMaxAI/MiniMax-M3
       top_p: 0.95
       max_tokens: 64_000
 
@@ -59,7 +59,7 @@ models:
     gitlab_identifier: "qwen_3_6_27b_fireworks"
     description: "Open-source model for agentic coding."
     cost_indicator: "$"
-    max_context_tokens: 262_144 # https://huggingface.co/Qwen/Qwen3.6-27B
+    max_context_tokens: 262_144  # https://huggingface.co/Qwen/Qwen3.6-27B
     model_class_provider: litellm
     strip_reasoning: true
     requires_single_system_message: true
@@ -76,7 +76,7 @@ models:
     gitlab_identifier: "devstral_2_mistral"
     description: "Mistral AI's frontier coding agent for complex software engineering tasks across codebases."
     cost_indicator: "$$"
-    max_context_tokens: 256_000 # https://docs.mistral.ai/models/model-cards/devstral-2-25-12
+    max_context_tokens: 256_000  # https://docs.mistral.ai/models/model-cards/devstral-2-25-12
     model_class_provider: litellm
     family:
       - mistral
@@ -92,7 +92,7 @@ models:
     gitlab_identifier: "codestral_2501_fireworks"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
-    max_context_tokens: 32767 # Fireworks has limited the max tokens to 32k to avoid OOM errors
+    max_context_tokens: 32767  # Fireworks has limited the max tokens to 32k to avoid OOM errors
     model_class_provider: litellm_completion
     family:
       - completion_fim
@@ -112,7 +112,7 @@ models:
     gitlab_identifier: "codestral_2508_vertex"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
-    max_context_tokens: 128000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/mistral/codestral-2
+    max_context_tokens: 128000  # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/mistral/codestral-2
     model_class_provider: litellm_completion
     family:
       - completion_text
@@ -127,7 +127,7 @@ models:
     gitlab_identifier: "codestral_2508_fireworks"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
-    max_context_tokens: 32767 # Fireworks has limited the max tokens to 32k to avoid OOM errors
+    max_context_tokens: 32767  # Fireworks has limited the max tokens to 32k to avoid OOM errors
     model_class_provider: litellm_completion
     family:
       - completion_fim
@@ -146,7 +146,7 @@ models:
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_1_5_flash_vertex"
     description: "Multimodal for high-volume tasks."
-    max_context_tokens: 1_000_000 # https://gemini-api.apidog.io/doc-965857
+    max_context_tokens: 1_000_000  # https://gemini-api.apidog.io/doc-965857
     # Note: "Gemini 1.5 Flash come with a 1-million-token context window, and Gemini 1.5 Pro comes with a 2-million-token context window.". Read the source for more information.
     model_class_provider: litellm
     params:
@@ -161,7 +161,7 @@ models:
     gitlab_identifier: "gemini_2_5_flash_vertex"
     description: "Multimodal reasoning with extended context."
     cost_indicator: "$"
-    max_context_tokens: 1_000_000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
+    max_context_tokens: 1_000_000  # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash
     model_class_provider: litellm
     params:
       model: "gemini-2.5-flash"
@@ -175,7 +175,7 @@ models:
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_1_20250805"
     description: "Superseded by Sonnet 4.5 for coding, reasoning, and agentic workflows."
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
+    max_context_tokens: 200000  # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
     model_class_provider: anthropic
     supports_assistant_prefill: true
     params:
@@ -188,7 +188,7 @@ models:
     gitlab_identifier: "claude_opus_4_5_20251101"
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
-    max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    max_context_tokens: 200000  # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
     proxy_provider: anthropic
     model_class_provider: anthropic
     supports_assistant_prefill: true
@@ -204,7 +204,7 @@ models:
     gitlab_identifier: "claude_opus_4_5_20251101_vertex"
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
-    max_context_tokens: 200000 # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    max_context_tokens: 200000  # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
     model_class_provider: litellm
     supports_assistant_prefill: true
     family:
@@ -301,7 +301,7 @@ models:
     gitlab_identifier: "claude_opus_4_7_bedrock"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
-    max_context_tokens: 1_000_000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-7
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-7
     model_class_provider: litellm
     family:
       - claude
@@ -347,7 +347,7 @@ models:
     gitlab_identifier: "claude_opus_4_8_bedrock"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
-    max_context_tokens: 1_000_000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-8
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-8
     model_class_provider: litellm
     family:
       - claude
@@ -393,7 +393,7 @@ models:
     gitlab_identifier: "claude_opus_5_bedrock"
     description: "For complex agentic coding and enterprise work."
     cost_indicator: "$$$$"
-    max_context_tokens: 1_000_000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-5
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-5
     model_class_provider: litellm
     family:
       - claude
@@ -408,7 +408,7 @@ models:
     gitlab_identifier: "claude_opus_4_6_bedrock"
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
-    max_context_tokens: 1_000_000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-6-v1
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-6-v1
     model_class_provider: litellm
     params:
       model: bedrock/global.anthropic.claude-opus-4-6-v1
@@ -515,7 +515,7 @@ models:
   - name: "Claude Sonnet 4.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
+    max_context_tokens: 200000  # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
     proxy_provider: anthropic
     model_class_provider: anthropic
     supports_assistant_prefill: true
@@ -533,7 +533,7 @@ models:
     gitlab_identifier: "claude_sonnet_4_5_20250929_vertex"
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-5
+    max_context_tokens: 200000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-5
     family:
       - claude
     model_class_provider: litellm
@@ -552,7 +552,7 @@ models:
     gitlab_identifier: "claude_sonnet_4_5_20250929_bedrock"
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
-    max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-5-20250929-v1:0
+    max_context_tokens: 200000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-5-20250929-v1:0
     family:
       - claude
     model_class_provider: litellm
@@ -567,7 +567,7 @@ models:
   - name: "Claude Haiku 4.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_haiku_4_5_20251001"
-    max_context_tokens: 200000 # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
+    max_context_tokens: 200000  # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
     proxy_provider: anthropic
     model_class_provider: anthropic
     supports_assistant_prefill: true
@@ -585,7 +585,7 @@ models:
     gitlab_identifier: "claude_haiku_4_5_20251001_vertex"
     description: "Fast, cost-effective responses."
     cost_indicator: "$"
-    max_context_tokens: 200000 # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
+    max_context_tokens: 200000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
     family:
       - claude
     model_class_provider: litellm
@@ -604,7 +604,7 @@ models:
     gitlab_identifier: "claude_haiku_4_5_20251001_bedrock"
     description: "Fast, cost-effective responses."
     cost_indicator: "$"
-    max_context_tokens: 200000 # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-4-5-20251001-v1:0
+    max_context_tokens: 200000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-4-5-20251001-v1:0
     family:
       - claude
     model_class_provider: litellm
@@ -620,7 +620,7 @@ models:
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_1_pro_preview_vertex"
     description: "Designed to deliver strong agentic capabilities (near-Pro level) at substantial speed and value."
-    cost_indicator: "$" # To be confirmed
+    cost_indicator: "$"  # To be confirmed
     max_context_tokens: 1_000_000
     model_class_provider: google_genai
     family:
@@ -635,7 +635,7 @@ models:
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_5_flash_vertex"
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
-    cost_indicator: "$" # To be confirmed
+    cost_indicator: "$"  # To be confirmed
     max_context_tokens: 1_000_000
     model_class_provider: google_genai
     family:
@@ -682,7 +682,7 @@ models:
     gitlab_identifier: "gpt_5_6_sol"
     description: "OpenAI's flagship model."
     cost_indicator: "$$$$"
-    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
+    max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-sol
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -696,7 +696,7 @@ models:
     gitlab_identifier: "gpt_5_6_terra"
     description: "OpenAI's balanced model for everyday work."
     cost_indicator: "$$$"
-    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.6-terra
+    max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-terra
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -710,7 +710,7 @@ models:
     gitlab_identifier: "gpt_5_6_luna"
     description: "OpenAI's fast and affordable model."
     cost_indicator: "$$"
-    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.6-luna
+    max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-luna
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -724,7 +724,7 @@ models:
     gitlab_identifier: "gpt_5_5"
     description: "OpenAI's most capable frontier model with tiered context-length pricing."
     cost_indicator: "$$$$"
-    max_context_tokens: 1050000 # https://platform.openai.com/docs/models/gpt-5.5
+    max_context_tokens: 1050000  # https://platform.openai.com/docs/models/gpt-5.5
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -738,7 +738,7 @@ models:
     gitlab_identifier: "gpt_5_4"
     description: "OpenAI's most capable frontier model for complex professional work."
     cost_indicator: "$$$"
-    max_context_tokens: 1050000 # https://developers.openai.com/api/docs/models/gpt-5.4
+    max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.4
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -752,14 +752,14 @@ models:
     gitlab_identifier: "gpt_5_2"
     description: "OpenAI's best general-purpose model, part of the GPT-5 flagship model family."
     cost_indicator: "$$$"
-    max_context_tokens: 400000 # https://platform.openai.com/docs/models/gpt-5
+    max_context_tokens: 400000  # https://platform.openai.com/docs/models/gpt-5
     proxy_provider: openai
     model_class_provider: "openai"
     family:
       - gpt_5
     params:
       model: gpt-5.2-2025-12-11
-      temperature: 1.0 # this model always requires temperature to be 1
+      temperature: 1.0  # this model always requires temperature to be 1
       max_tokens: 128_000
 
   - name: "GPT-5.1"
@@ -767,14 +767,14 @@ models:
     gitlab_identifier: "gpt_5"
     description: "OpenAI's flagship model for coding, reasoning, writing, and agentic tasks."
     cost_indicator: "$$"
-    max_context_tokens: 400000 # https://platform.openai.com/docs/models/gpt-5
+    max_context_tokens: 400000  # https://platform.openai.com/docs/models/gpt-5
     proxy_provider: openai
     model_class_provider: "openai"
     family:
       - gpt_5
     params:
       model: gpt-5.1-2025-11-13
-      temperature: 1.0 # this model always requires temperature to be 1
+      temperature: 1.0  # this model always requires temperature to be 1
       max_tokens: 128_000
 
   - name: "GPT-5-Mini"
@@ -782,7 +782,7 @@ models:
     gitlab_identifier: "gpt_5_mini"
     description: "Model for high-volume coding, reasoning, and routine workflows."
     cost_indicator: "$"
-    max_context_tokens: 400000 # https://platform.openai.com/docs/models/gpt-5-mini
+    max_context_tokens: 400000  # https://platform.openai.com/docs/models/gpt-5-mini
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -799,7 +799,7 @@ models:
     gitlab_identifier: "gpt_5_4_mini"
     description: "Model for high-volume coding, reasoning, and routine workflows."
     cost_indicator: "$"
-    max_context_tokens: 400000 # https://developers.openai.com/api/docs/models/gpt-5.4-mini
+    max_context_tokens: 400000  # https://developers.openai.com/api/docs/models/gpt-5.4-mini
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -813,7 +813,7 @@ models:
     gitlab_identifier: "gpt_5_4_nano"
     description: "Model for high-volume coding, reasoning, and routine workflows."
     cost_indicator: "$"
-    max_context_tokens: 400000 # https://developers.openai.com/api/docs/models/gpt-5.4-nano
+    max_context_tokens: 400000  # https://developers.openai.com/api/docs/models/gpt-5.4-nano
     proxy_provider: openai
     model_class_provider: "openai"
     family:
@@ -860,7 +860,7 @@ models:
 
   - name: Amazon Q
     gitlab_identifier: amazon_q
-    max_context_tokens: 200000 # https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-in-ides-chat-models.html
+    max_context_tokens: 200000  # https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-in-ides-chat-models.html
     model_class_provider: amazon_q
     family:
       - amazon_q
@@ -869,7 +869,7 @@ models:
 
   - name: Mistral
     gitlab_identifier: mistral
-    max_context_tokens: 128000 # https://docs.mistral.ai/models/mistral-medium-3-1-25-08
+    max_context_tokens: 128000  # https://docs.mistral.ai/models/mistral-medium-3-1-25-08
     model_class_provider: litellm
     family:
       - mistral
@@ -880,7 +880,7 @@ models:
 
   - name: Mixtral
     gitlab_identifier: mixtral
-    max_context_tokens: 32000 # Mixtral 8x7B: https://www.prompthub.us/models/mixtral-8x7b
+    max_context_tokens: 32000  # Mixtral 8x7B: https://www.prompthub.us/models/mixtral-8x7b
     # Note: Mixtral 8x22B supports 64K context window (https://www.prompthub.us/models/mixtral-8x22b)
     model_class_provider: litellm
     family:
@@ -893,7 +893,7 @@ models:
 
   - name: Codestral
     gitlab_identifier: codestral
-    max_context_tokens: 128000 # https://docs.mistral.ai/models/codestral-25-08
+    max_context_tokens: 128000  # https://docs.mistral.ai/models/codestral-25-08
     model_class_provider: litellm
     family:
       - codestral
@@ -905,7 +905,7 @@ models:
 
   - name: Llama3
     gitlab_identifier: llama3
-    max_context_tokens: 128000 # https://codesphere.com/articles/taking-advantage-of-the-long-context-of-llama-3-1-2
+    max_context_tokens: 128000  # https://codesphere.com/articles/taking-advantage-of-the-long-context-of-llama-3-1-2
     model_class_provider: litellm
     family:
       - llama3
@@ -916,7 +916,7 @@ models:
 
   - name: Codellama
     gitlab_identifier: codellama
-    max_context_tokens: 16000 # https://huggingface.co/blog/codellama
+    max_context_tokens: 16000  # https://huggingface.co/blog/codellama
     model_class_provider: litellm
     family:
       - codellama
@@ -936,7 +936,7 @@ models:
 
   - name: Codegemma
     gitlab_identifier: codegemma
-    max_context_tokens: 8000 # https://ollama.com/library/codegemma
+    max_context_tokens: 8000  # https://ollama.com/library/codegemma
     model_class_provider: litellm
     family:
       - codegemma
@@ -947,7 +947,7 @@ models:
 
   - name: DeepSeekCoder
     gitlab_identifier: deepseekcoder
-    max_context_tokens: 16000 # https://ollama.com/library/deepseek-coder
+    max_context_tokens: 16000  # https://ollama.com/library/deepseek-coder
     model_class_provider: litellm
     family:
       - deepseekcoder
@@ -957,7 +957,7 @@ models:
       max_tokens: 4_096
 
   - name: "Self-Hosted Claude"
-    gitlab_identifier: "claude_3" # For backwards compatibility with requests asking for [prompt_id]/claude_3
+    gitlab_identifier: "claude_3"  # For backwards compatibility with requests asking for [prompt_id]/claude_3
     max_context_tokens: 200000
     model_class_provider: litellm
     params:
@@ -988,7 +988,7 @@ models:
       max_tokens: 8_192
 
   - name: "Self-Hosted General Models"
-    gitlab_identifier: "general" # For backwards compatibility with requests asking for [prompt_id]/general
+    gitlab_identifier: "general"  # For backwards compatibility with requests asking for [prompt_id]/general
     max_context_tokens: 200000
     model_class_provider: litellm
     params:
@@ -1000,7 +1000,7 @@ models:
     gitlab_identifier: "text_embedding_005_vertex"
     description: "Natural language processing technique that converts textual data into numerical vectors."
     cost_indicator: "$"
-    max_context_tokens: 20000 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings#api_limits
+    max_context_tokens: 20000  # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings#api_limits
     model_class_provider: litellm_embedding
     family:
       - vertex

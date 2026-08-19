@@ -25,6 +25,7 @@ MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
 
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?=
+YAMLLINT_WORKING_DIR ?= .
 COMPOSE_FILES := -f docker-compose.dev.yaml
 ifneq (,$(wildcard docker-compose.override.yaml))
 COMPOSE_FILES += -f docker-compose.override.yaml
@@ -194,7 +195,7 @@ format: codespell ruff-format ruff-fix docformatter
 lint: lint-code lint-doc
 
 .PHONY: lint-code
-lint-code: check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-graphql lint-proto
+lint-code: check-ruff check-pylint check-mypy check-codespell check-docformatter check-editorconfig check-yamllint check-graphql lint-proto
 
 .PHONY: lint-commit
 lint-commit:
@@ -237,6 +238,11 @@ check-docformatter: install-lint-deps
 check-editorconfig: install-lint-deps
 	@echo "Running editorconfig check..."
 	@poetry run ec ${EDITORCONFIG_LINT_WORKING_DIR}
+
+.PHONY: check-yamllint
+check-yamllint: install-lint-deps
+	@echo "Running yamllint check..."
+	@poetry run yamllint --strict ${YAMLLINT_WORKING_DIR}
 
 .PHONY: check-graphql
 check-graphql:

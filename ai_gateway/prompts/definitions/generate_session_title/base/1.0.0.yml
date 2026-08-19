@@ -12,4 +12,3 @@ prompt_template:
     {% include 'generate_session_title/user/1.0.0.jinja' %}
 params:
   timeout: 30
-

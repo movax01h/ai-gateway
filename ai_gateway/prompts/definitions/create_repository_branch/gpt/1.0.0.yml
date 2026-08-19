@@ -8,4 +8,3 @@ prompt_template:
     {% include 'create_repository_branch/user/1.0.0.jinja' %}
 params:
   timeout: 60
-

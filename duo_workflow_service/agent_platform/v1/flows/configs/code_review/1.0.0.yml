@@ -62,7 +62,7 @@ components:
         as: "mr_context"
       - from: "context:explore_relevant_directories.tool_responses"
         as: "directory_trees"
-        optional: True
+        optional: true
     toolset:
       - "get_repository_file"
       - "read_file"
@@ -98,7 +98,7 @@ components:
         as: "mr_context"
       - from: "context:prescan_codebase.tool_responses"
         as: "prescan_tool_responses"
-        optional: True
+        optional: true
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"

@@ -196,4 +196,3 @@ routers:
 flow:
   entry_point: "fetch_new_issues"
   inputs: []
-

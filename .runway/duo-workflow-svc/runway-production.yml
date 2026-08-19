@@ -9,9 +9,9 @@ metadata:
   owner_email_handle: bastirehm
 spec:
   regions:
-  - us-east1
-  - asia-northeast1
-  - europe-west2
+    - us-east1
+    - asia-northeast1
+    - europe-west2
   request_timeout: 3600
   load_balancing:
     external_load_balancer:
@@ -19,8 +19,8 @@ spec:
   observability:
     scrape_targets:
       - "localhost:8082"
-# TODO: Renable once CF issue is being resolved
-# https://gitlab.com/gitlab-org/gitlab/-/issues/509586
+  # TODO: Re-enable once CF issue is being resolved
+  # https://gitlab.com/gitlab-org/gitlab/-/issues/509586
   # network_policies:
   #   cloudflare: true
   scalability:

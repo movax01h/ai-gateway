@@ -51,15 +51,15 @@ components:
         as: "repository_url"
       - from: "Duo Agent: Convert to GitLab CI"
         as: "naming_context"
-        literal: True
+        literal: true
       - from: "context:workflow_id"
         as: "workflow_id"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     ui_log_events:
       - "on_agent_reasoning"
       - "on_tool_execution_success"
@@ -74,10 +74,10 @@ components:
         as: "repository_url"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     toolset:
       - "run_git_command"
     ui_log_events:
@@ -104,10 +104,10 @@ components:
         as: "session_url"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     toolset:
       - "run_git_command"
       - "create_merge_request"

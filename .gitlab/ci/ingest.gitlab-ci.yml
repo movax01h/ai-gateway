@@ -1,7 +1,7 @@
 include:
   # see https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks/-/blob/main/oidc.md
   - project: 'gitlab-com/gl-infra/common-ci-tasks'
-    ref: v4.45.0 # renovate:managed
+    ref: v4.45.0  # renovate:managed
     file: 'oidc.yml'
 
 .ingest-base:
@@ -108,4 +108,4 @@ ingest:dry-run:
     # can only pack files inside $CI_PROJECT_DIR
     # https://docs.gitlab.com/ee/ci/yaml/index.html#artifactspaths
     paths:
-    - $GITLAB_DOCS_JSONL_EXPORT_PATH
+      - $GITLAB_DOCS_JSONL_EXPORT_PATH

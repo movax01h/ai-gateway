@@ -1,0 +1,13 @@
+extends: default
+
+ignore: |
+  .venv/
+  node_modules/
+  dist/
+  docs/.vale/
+
+rules:
+  # Prompt definitions and CI script blocks are long by nature.
+  line-length: disable
+  # The repo has never used `---` document markers.
+  document-start: disable

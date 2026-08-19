@@ -34,6 +34,11 @@ pre-commit:
     lint-graphql:
       glob: "*.graphql"
       run: make check-graphql
+    lint-yaml:
+      glob: "*.{yml,yaml}"
+      run: |
+        export STAGED_FILES="$(echo '{staged_files}')"
+        make check-yamllint YAMLLINT_WORKING_DIR="$STAGED_FILES"
     lint-other:
       exclude:
         - "*.py"

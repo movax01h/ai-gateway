@@ -5572,7 +5572,7 @@ version = "6.0.3"
 description = "YAML parser and emitter for Python"
 optional = false
 python-versions = ">=3.8"
-groups = ["main"]
+groups = ["main", "lint"]
 files = [
     {file = "PyYAML-6.0.3-cp38-cp38-macosx_10_13_x86_64.whl", hash = "sha256:c2514fceb77bc5e7a2f7adfaa1feb2fb311607c9cb518dbc378688ec73d8292f"},
     {file = "PyYAML-6.0.3-cp38-cp38-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9c57bb8c96f6d1808c030b1687b9b5fb476abaa47f0db9c0101f5e9f394e97f4"},
@@ -7655,6 +7655,25 @@ files = [
 ]
 
 [[package]]
+name = "yamllint"
+version = "1.38.0"
+description = "A linter for YAML files."
+optional = false
+python-versions = ">=3.10"
+groups = ["lint"]
+files = [
+    {file = "yamllint-1.38.0-py3-none-any.whl", hash = "sha256:fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220"},
+    {file = "yamllint-1.38.0.tar.gz", hash = "sha256:09e5f29531daab93366bb061e76019d5e91691ef0a40328f04c927387d1d364d"},
+]
+
+[package.dependencies]
+pathspec = ">=1.0.0"
+pyyaml = "*"
+
+[package.extras]
+dev = ["doc8", "flake8", "flake8-import-order", "rstcheck[sphinx]", "ruff", "sphinx"]
+
+[[package]]
 name = "yappi"
 version = "1.7.5"
 description = "Yet Another Python Profiler"
@@ -7985,4 +8004,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "fddbeff50a9025e1f782a42d06a5b41a43ff5fe15f91f8e412d44b60d5c3ccb3"
+content-hash = "8adbce5cc7bb4ae2dfd54fc9b8f1c535ce1e1bd9acca5b354d6d3bd4a91819a3"

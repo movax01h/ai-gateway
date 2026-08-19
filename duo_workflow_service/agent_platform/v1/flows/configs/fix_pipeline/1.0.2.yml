@@ -24,7 +24,7 @@ components:
     inputs:
       - from: "context:inputs.merge_request.url"
         as: "url"
-        optional: True
+        optional: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -44,19 +44,19 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
       - from: "context:fetch_failing_bridge_jobs.tool_responses"
         as: "failing_bridge_jobs"
-        optional: True
+        optional: true
       - from: "context:fetch_mr_diffs.tool_responses"
         as: "mr_diffs"
-        optional: True
+        optional: true
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     toolset:
       - get_failing_bridge_jobs
       - get_job_logs
@@ -86,7 +86,7 @@ components:
         as: "execution_diff"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
     toolset: []
     ui_log_events:
       - "on_agent_final_answer"
@@ -100,14 +100,14 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
       - from: "context:project_id"
         as: "project_id"
       - from: "context:fix_pipeline_context.final_answer.summary"
         as: "context_summary"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
     toolset:
       - "build_review_merge_request_context"
       - "create_merge_request_diff_note"
@@ -126,19 +126,19 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
       - from: "context:fix_pipeline_context.final_answer.summary"
         as: "fix_pipeline_context_results"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:workflow_id"
         as: "workflow_id"
       - from: "context:session_url"
         as: "session_url"
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     toolset: ["create_merge_request_note"]
     ui_log_events:
       - "on_agent_final_answer"
@@ -151,10 +151,10 @@ components:
     inputs:
       - from: "git"
         as: "program"
-        literal: True
+        literal: true
       - from: "fetch origin"
         as: "args"
-        literal: True
+        literal: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -180,10 +180,10 @@ components:
         as: "workflow_id"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -213,10 +213,10 @@ components:
     inputs:
       - from: "git"
         as: "program"
-        literal: True
+        literal: true
       - from: "diff --no-color"
         as: "args"
-        literal: True
+        literal: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -232,12 +232,12 @@ components:
         as: "source_branch"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.os_information"
         as: "os_information"
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     max_cycles: 25
     toolset:
       - create_file_with_contents
@@ -262,10 +262,10 @@ components:
         as: "repository_url"
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
     toolset:
       - "run_command"
     ui_log_events:
@@ -278,10 +278,10 @@ components:
     inputs:
       - from: "git"
         as: "program"
-        literal: True
+        literal: true
       - from: "fetch --unshallow"
         as: "args"
-        literal: True
+        literal: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -292,10 +292,10 @@ components:
     inputs:
       - from: "git"
         as: "program"
-        literal: True
+        literal: true
       - from: "push origin HEAD --no-verify"
         as: "args"
-        literal: True
+        literal: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -326,13 +326,13 @@ components:
         as: "assignee_id"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
       - from: "context:inputs.merge_request.author_id"
         as: "merge_request_author_id"
-        optional: True
+        optional: true
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
     toolset:
       - "create_merge_request"
       - "create_merge_request_note"
@@ -350,13 +350,13 @@ components:
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
       - from: "context:fix_pipeline_create_new_mr.tool_responses"
         as: "create_mr_result"
-        optional: True
+        optional: true
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
     max_cycles: 4
     toolset:
       - create_merge_request_note
@@ -370,11 +370,11 @@ routers:
     condition:
       input:
         from: "context:inputs.merge_request.url"
-        optional: True
+        optional: true
       routes:
         # No MR: the collector omits the merge_request context entirely, so the
         # key is absent from state rather than present-and-empty. With
-        # optional: True that resolves to None, which Router stringifies to
+        # optional: true that resolves to None, which Router stringifies to
         # "None". An empty string is kept as well for callers that do send
         # merge_request with a blank url. Both skip fetch_mr_diffs, which would
         # fail tool validation without a url; a real url falls through to
