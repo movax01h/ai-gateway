@@ -164,6 +164,13 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
         if _dict.get("tool_calls"):
             additional_kwargs["tool_calls"] = _dict["tool_calls"]
 
+        # Preserve reasoning_content so it survives the inbound (non-streaming)
+        # conversion and remains available for subsequent turns.  Providers such
+        # as Fireworks, Moonshot, and MiniMax require the field to be echoed back
+        # in multi-turn requests; dropping it here would prevent round-tripping.
+        if _dict.get("reasoning_content"):
+            additional_kwargs["reasoning_content"] = _dict["reasoning_content"]
+
         return AIMessage(content=content, additional_kwargs=additional_kwargs)
     elif role == "system":
         return SystemMessage(content=_dict["content"])
@@ -278,6 +285,15 @@ def _convert_message_to_dict(message: BaseMessage) -> dict:
             ]
         elif "tool_calls" in message.additional_kwargs:
             message_dict["tool_calls"] = message.additional_kwargs["tool_calls"]
+        # Echo reasoning_content back for providers that require it in multi-turn
+        # tool loops (Fireworks, Moonshot, MiniMax; DeepSeek-style APIs 400
+        # without it). Only endpoints that emitted the field ever receive it
+        # back, so no provider gating is needed. Truthiness check mirrors the
+        # inbound paths, which only store non-empty values.
+        if message.additional_kwargs.get("reasoning_content"):
+            message_dict["reasoning_content"] = message.additional_kwargs[
+                "reasoning_content"
+            ]
     elif isinstance(message, SystemMessage):
         message_dict["role"] = "system"
     elif isinstance(message, FunctionMessage):

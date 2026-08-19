@@ -8,6 +8,7 @@ from langchain_core.messages import (
     AIMessageChunk,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
@@ -23,7 +24,11 @@ from ai_gateway.models.v2.chat_litellm import (
     _rewrite_trailing_assistant_prefill,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
-from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
+from ai_gateway.vendor.langchain_litellm.litellm import (
+    _convert_dict_to_message,
+    _convert_message_to_dict,
+    _create_usage_metadata,
+)
 
 
 def test_importing_module_applies_empty_text_patch():
@@ -979,3 +984,209 @@ class TestTrailingAssistantPrefillRewrite:
 
         assert result == "ok"
         assert super_call.call_args.kwargs["messages"][-1]["role"] == "user"
+
+
+class TestReasoningContentRoundTrip:
+    """Verify that reasoning_content survives both the inbound and outbound conversion paths.
+
+    Fireworks, Moonshot, and MiniMax require reasoning_content to be echoed back in subsequent turns of a multi-turn
+    conversation.  The streaming path already stores it in AIMessage.additional_kwargs; these tests guard the two
+    conversion functions that were previously dropping it.
+    """
+
+    # ------------------------------------------------------------------ #
+    # _convert_message_to_dict  (outbound: LangChain message → wire dict) #
+    # ------------------------------------------------------------------ #
+
+    def test_convert_message_to_dict_preserves_reasoning_content(self):
+        """AIMessage with reasoning_content in additional_kwargs must produce a wire dict that includes the field so
+        providers receive it in subsequent turns."""
+        message = AIMessage(
+            content="I will call the tool.",
+            additional_kwargs={"reasoning_content": "Let me think step by step..."},
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert result["role"] == "assistant"
+        assert result["content"] == "I will call the tool."
+        assert result["reasoning_content"] == "Let me think step by step..."
+
+    def test_convert_message_to_dict_no_reasoning_content_when_absent(self):
+        """AIMessage without reasoning_content must not inject the field into the wire dict (avoids sending null/empty
+        values to providers that reject unknown fields)."""
+        message = AIMessage(content="Plain response.", additional_kwargs={})
+
+        result = _convert_message_to_dict(message)
+
+        assert result["role"] == "assistant"
+        assert "reasoning_content" not in result
+
+    def test_convert_message_to_dict_empty_reasoning_content_not_forwarded(self):
+        """An empty reasoning_content (falsy) must not be serialized into the wire dict — mirrors the inbound paths,
+        which only store non-empty values."""
+        message = AIMessage(
+            content="Answer.", additional_kwargs={"reasoning_content": ""}
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert "reasoning_content" not in result
+
+    @pytest.mark.parametrize(
+        ("content", "reasoning"),
+        [
+            ("answer", "short thought"),
+            ("", "long reasoning block " * 50),
+            ("multi-line\nresponse", "step 1\nstep 2\nstep 3"),
+        ],
+    )
+    def test_convert_message_to_dict_reasoning_content_values(self, content, reasoning):
+        """reasoning_content is forwarded verbatim regardless of its length or content."""
+        message = AIMessage(
+            content=content,
+            additional_kwargs={"reasoning_content": reasoning},
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert result["reasoning_content"] == reasoning
+
+    def test_convert_message_to_dict_reasoning_content_alongside_tool_calls(self):
+        """reasoning_content must be preserved even when tool_calls are also present."""
+        message = AIMessage(
+            content="",
+            additional_kwargs={
+                "reasoning_content": "I need to call a tool.",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "search", "arguments": '{"q": "test"}'},
+                    }
+                ],
+            },
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert result["reasoning_content"] == "I need to call a tool."
+        assert result["tool_calls"] == message.additional_kwargs["tool_calls"]
+
+    # ------------------------------------------------------------------ #
+    # _convert_dict_to_message  (inbound: wire dict → LangChain message)  #
+    # ------------------------------------------------------------------ #
+
+    def test_convert_dict_to_message_extracts_reasoning_content(self):
+        """Non-streaming assistant response containing reasoning_content must store it in AIMessage.additional_kwargs so
+        it is available for subsequent turns."""
+        wire_dict = {
+            "role": "assistant",
+            "content": "Here is my answer.",
+            "reasoning_content": "I reasoned through this carefully.",
+        }
+
+        message = _convert_dict_to_message(wire_dict)
+
+        assert isinstance(message, AIMessage)
+        assert message.content == "Here is my answer."
+        assert (
+            message.additional_kwargs["reasoning_content"]
+            == "I reasoned through this carefully."
+        )
+
+    def test_convert_dict_to_message_no_reasoning_content_when_absent(self):
+        """Non-streaming assistant response without reasoning_content must not add the key to additional_kwargs."""
+        wire_dict = {"role": "assistant", "content": "Plain answer."}
+
+        message = _convert_dict_to_message(wire_dict)
+
+        assert isinstance(message, AIMessage)
+        assert "reasoning_content" not in message.additional_kwargs
+
+    def test_convert_dict_to_message_empty_reasoning_content_not_stored(self):
+        """An empty string for reasoning_content (falsy) must not be stored, matching the behaviour of the streaming
+        path which only stores non-empty values."""
+        wire_dict = {
+            "role": "assistant",
+            "content": "Answer.",
+            "reasoning_content": "",
+        }
+
+        message = _convert_dict_to_message(wire_dict)
+
+        assert isinstance(message, AIMessage)
+        assert "reasoning_content" not in message.additional_kwargs
+
+    # ------------------------------------------------------------------ #
+    # Full round-trip                                                      #
+    # ------------------------------------------------------------------ #
+
+    def test_full_round_trip_preserves_reasoning_content(self):
+        """Simulate a multi-turn history: a prior assistant turn with reasoning_content
+        must survive inbound parsing and then be forwarded in the next outbound request.
+
+        Flow:
+            wire response dict → AIMessage (via _convert_dict_to_message)
+            → outbound message dict (via _convert_message_to_dict)
+        """
+        # Step 1: provider returns a response with reasoning_content (non-streaming)
+        inbound_dict = {
+            "role": "assistant",
+            "content": "The answer is 42.",
+            "reasoning_content": "I computed this by dividing 84 by 2.",
+        }
+        ai_message = _convert_dict_to_message(inbound_dict)
+
+        # Step 2: that AIMessage is placed in the conversation history and converted
+        # back to a wire dict for the next request
+        outbound_dict = _convert_message_to_dict(ai_message)
+
+        assert outbound_dict["role"] == "assistant"
+        assert outbound_dict["content"] == "The answer is 42."
+        assert (
+            outbound_dict["reasoning_content"] == "I computed this by dividing 84 by 2."
+        )
+
+    # ------------------------------------------------------------------ #
+    # Payload level (v2 ChatLiteLLM._create_message_dicts)                 #
+    # ------------------------------------------------------------------ #
+
+    def test_create_message_dicts_payload_carries_reasoning_content(self):
+        """Guard the full request-assembly path, not just the leaf converter.
+
+        Runs a realistic tool-loop history through the v2 subclass's _create_message_dicts (which also applies trailing-
+        prefill rewriting) and asserts reasoning_content survives into the outbound payload. A regression in any
+        intermediate layer fails here even if _convert_message_to_dict itself is correct.
+        """
+        chat = ChatLiteLLM(model="test-model", custom_llm_provider="fireworks_ai")
+        history = [
+            SystemMessage(content="You are an agent."),
+            HumanMessage(content="Fix the bug."),
+            AIMessage(
+                content="",
+                additional_kwargs={
+                    "reasoning_content": "I should read the file first.",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": '{"path": "a.py"}',
+                            },
+                        }
+                    ],
+                },
+            ),
+            ToolMessage(content="<file contents>", tool_call_id="call_1"),
+        ]
+
+        message_dicts, _ = chat._create_message_dicts(history, stop=None)
+
+        assistant_dicts = [m for m in message_dicts if m["role"] == "assistant"]
+        assert len(assistant_dicts) == 1
+        assert (
+            assistant_dicts[0]["reasoning_content"] == "I should read the file first."
+        )
+        assert assistant_dicts[0]["tool_calls"][0]["id"] == "call_1"
