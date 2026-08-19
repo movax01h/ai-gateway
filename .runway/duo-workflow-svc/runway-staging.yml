@@ -9,7 +9,7 @@ metadata:
   owner_email_handle: bastirehm
 spec:
   regions:
-  - us-east1
+    - us-east1
   deployment:
     strategy: "expedited"
   request_timeout: 3600
@@ -19,8 +19,8 @@ spec:
   observability:
     scrape_targets:
       - "localhost:8082"
-# TODO: Renable once CF issue is being resolved
-# https://gitlab.com/gitlab-org/gitlab/-/issues/509586
+  # TODO: Re-enable once CF issue is being resolved
+  # https://gitlab.com/gitlab-org/gitlab/-/issues/509586
   # network_policies:
   #   cloudflare: true
   scalability:

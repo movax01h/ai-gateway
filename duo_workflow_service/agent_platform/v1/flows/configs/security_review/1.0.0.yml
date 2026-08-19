@@ -57,7 +57,7 @@ components:
       # prompts identify the agent's own prior comments without hardcoding a naming convention.
       - from: "context:inputs.agent_platform_standard_context.service_account_name"
         as: "service_account_name"
-        optional: True
+        optional: true
     toolset:
       - "build_review_merge_request_context"
       - "list_repository_tree"
@@ -146,7 +146,7 @@ components:
         as: "merge_request_iid"
       - from: "context:inputs.agent_platform_standard_context.service_account_name"
         as: "service_account_name"
-        optional: True
+        optional: true
     toolset:
       - "list_mr_discussions"
       - "reply_to_discussion"
@@ -200,10 +200,10 @@ components:
         as: "merge_request_iid"
       - from: "context:inputs.agent_platform_standard_context.service_account_name"
         as: "service_account_name"
-        optional: True
+        optional: true
       - from: "context:inputs.agent_platform_trigger_context.triggering_conversation"
         as: "triggering_conversation"
-        optional: True
+        optional: true
     toolset:
       # Read-only: the respond component answers via its final response, which the mention
       # adapter posts as the single reply. It must NOT post itself (that double-posted: the

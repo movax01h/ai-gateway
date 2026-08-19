@@ -41,28 +41,28 @@ components:
         as: "goal"
       - from: "context:project_id"
         as: "project_id"
-        optional: True
+        optional: true
       - from: "context:project_http_url_to_repo"
         as: "project_url"
-        optional: True
+        optional: true
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
       - from: "context:inputs.workspace_agent_skills"
         as: "workspace_agent_skills"
-        optional: True
+        optional: true
       # TODO: This seems not to be send by the CI --> Probably we should have this from the CI as well!
       - from: "context:inputs.agent_user_environment"
         as: "agent_user_environment"
-        optional: True
+        optional: true
       - from: "context:current_date"
         as: "today"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "primary_branch"
-        optional: True
+        optional: true
       - from: "context:inputs.agent_platform_standard_context.session_owner_id"
         as: "session_owner_id"
-        optional: True
+        optional: true
     toolset:
       - "read_file"
       - "find_files"

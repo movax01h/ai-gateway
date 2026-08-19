@@ -12,16 +12,16 @@ components:
     type: AgentComponent
     prompt_id: "resolve_dep_bump_pipeline_fix"
     prompt_version: "^1.0.0"
-    enable_web_search: True
+    enable_web_search: true
     inputs:
       - from: "context:goal"
         as: "pipeline_url"
       - from: "context:inputs.merge_request.url"
         as: "merge_request_url"
-        optional: True
+        optional: true
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
-        optional: True
+        optional: true
     toolset:
       - get_pipeline_failing_jobs
       - get_job_logs

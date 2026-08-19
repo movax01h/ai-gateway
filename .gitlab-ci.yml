@@ -126,7 +126,7 @@ include:
   # Analyze commits to determine whether to cut a release
   # see https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks/-/blob/main/semantic-release.md
   - project: "gitlab-com/gl-infra/common-ci-tasks"
-    ref: v4.45.0 # renovate:managed
+    ref: v4.45.0  # renovate:managed
     file: "semantic-release.yml"
     rules: *skip-if-not-canonical
 
