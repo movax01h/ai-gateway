@@ -86,7 +86,7 @@ RUN poetry env use venv/ai-gateway-*/bin/python
 RUN poetry run python scripts/bootstrap.py
 
 # Pull foundational agents from the catalog
-RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356,ci_expert_agent:1004583" \
+RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356,ci_expert_agent:1004583,onboarding_guide:1003979" \
     --flow-registry-version v1
 
 USER 0
