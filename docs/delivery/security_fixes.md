@@ -6,7 +6,7 @@ The purpose of this page is to guide GitLab engineers in preparing security fixe
 
 - This process is based on [Patch release runbook for GitLab engineers: Preparing security fixes for a patch release:](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/engineer.md) and customized for the AI Gateway project. When in doubt, follow the original doc.
 - It's required to manually synchronize canonical and security repos such as resolving merge conflicts.
-- It's required to manually create [backports and releases](release.md#how-to-backport-a-fix).
+- Backports **must** be prepared and merged in the [security fork](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist) **before** any canonical sync. See [Process](#process) for details.
 - Automations such as `@gitlab-release-tools-bot` are not supported.
 
 ## Due Date
@@ -74,21 +74,123 @@ When creating your security branch, use the `--track` argument To create a secur
 While most of the process is same with [the original process](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/engineer.md?plain=0#process),
 there are a couple of additional steps required for AIGW project.
 
+> **Key principle — security fork first, canonical last.**
+> All work (main fix **and** all backports) must be completed and merged in the
+> [security fork](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist)
+> before anything is synced to the canonical repository. This prevents premature
+> vulnerability disclosure: the vulnerability is only publicly visible once the
+> canonical sync lands, at which point every supported version is already patched.
+
 Once an eligible confidential security issue is assigned to an engineer:
 
-1. Steps 1 to 4 are same. Open MRs and get approvals from a maintainer and an PSIRT team member.
-   - As stated in [the original process](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/engineer.md?plain=0#process) sections, PSIRT approval is not required for backport MRs. PSIRT approval is only required for the MR targeting the `main` branch.
-1. Once the merge request targeting the default branch and all backports are ready, merge these MRs at once.
-   At this moment, these branches (e.g. `main`, `stable-18-4-ee`, etc) are diverged between canonical and security repos, so we're going to fix in the following steps.
-1. Ensure that the security patch has been deployed to GitLab-managed AIGW and DWS fleet.
-   One way to confirm it is to check the post-merge pipeline in the MR that targets `main` branch. Check `[duo-workflow-svc]` job status in `runway_production` stage if it succeeded.
+1. **Verify stable branches exist in the security fork.**
+   Before opening any backport MRs, confirm that the target stable branches
+   (e.g. `stable-18-4-ee`) already exist in the security fork. If they do not,
+   create them by branching from the corresponding canonical stable branch and
+   pushing to the security remote:
+
+   ```shell
+   git fetch origin stable-18-4-ee
+   git checkout -b stable-18-4-ee --track origin/stable-18-4-ee
+   git push -u security stable-18-4-ee
+   ```
+
+1. **Open all MRs in the security fork and get approvals.**
+   Steps 1 to 4 of [the original process](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/engineer.md?plain=0#process) apply, with the following AIGW-specific clarifications:
+   - The MR targeting `main` **and** all backport MRs must be opened in the
+     **security fork** (`gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist`),
+     not in the canonical repository.
+   - Backport MRs target the stable branches of the security fork
+     (e.g. `stable-18-4-ee` in the security repo), using branches created as
+     described in [Creating security branches with proper tracking](#creating-security-branches-with-proper-tracking).
+   - PSIRT approval is not required for backport MRs. PSIRT approval is only
+     required for the MR targeting the `main` branch.
+
+1. **Merge all security-fork MRs.**
+   Once the MR targeting `main` and all backport MRs are approved, merge them
+   **all in the security fork**. At this point the branches
+   (e.g. `main`, `stable-18-4-ee`) are diverged between canonical and security
+   repos — the following steps bring them back in sync.
+
+1. **Cut the private patch tags in the fork.**
+   Once every backport MR for this release is merged, open the latest pipeline
+   of each stable branch in the security fork and run the manual
+   `tag-stable-patch` job ([`scripts/tag_stable_patch.py`](../../scripts/tag_stable_patch.py)).
+   It creates the next patch tag (e.g. `self-hosted-v18.4.2-ee`) **in the
+   security fork**, where it stays private. The tag pipeline builds the
+   self-hosted images into the fork's private container registry, so the
+   patched artifacts exist before disclosure. Nothing is published yet: the
+   Docker Hub jobs in that pipeline are also manual (see the publish step
+   below).
+
+   The job is manual in the fork (it is automatic in canonical) so that one
+   release can group several backport MRs — run it **once per branch**, after
+   the last MR merges. Cutting more than one fork tag per branch between syncs
+   desynchronizes the patch numbers from the canonical re-cut.
+
+   > This requires the `AIGW_TAGGING_ACCESS_TOKEN` CI/CD variable to be set in
+   > the security fork, holding a token that can create tags **on the fork**
+   > (the canonical token is group-inherited and does not reach the
+   > `gitlab-org/security` subtree). If it is not set, the job does not run and
+   > the patch tag is only cut in canonical after the sync.
+   >
+   > If the variable is marked **Protected**, note that the fork currently
+   > protects `*-stable` branches, not `stable-*-ee` — a protected variable is
+   > invisible on the stable-branch pipelines where this job runs. Either add a
+   > `stable-*` protected-branch rule in the fork or create the variable
+   > unprotected.
+
+1. **Ensure the security patch is deployed to the GitLab-managed fleet.**
+   Check the post-merge pipeline of the `main`-targeting MR in the security fork.
+   Verify the `[duo-workflow-svc]` job in the `runway_production` stage succeeded.
    **Do NOT proceed to the next steps until you've confirmed it.**
-1. Open new merge requests in [the canonical project](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/1703) to sync the security repository and the canonical repository. For example,
-   - Open new MR that targets `main` branch of the canonical repository from the `main` branch of the security repository.
-   - Open new MR that targets `stable-18-4-ee` branch of the canonical repository from the `stable-18-4-ee` branch of the security repository.
-   - And merge these MRs.
-1. Cut Git-Tags for backports by following [How to backport a fix](./release.md#how-to-backport-a-fix). This will release patched Docker images for self-hosted Duo customers.
-1. In [the repository settings](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/settings/repository#js-push-remote-settings) (**Maintainer** role required to view this page), under **Mirroring repositories**, verify that mirroring between the security and canonical repositories succeeded.
+
+1. **Publish the patched images (disclosure starts here).**
+   In the security-fork tag pipeline of each patch tag, run the manual
+   `release-docker-hub-image:self-managed-tag` and
+   `release-docker-hub-self-hosted-fips-image:tag` jobs. These push the
+   pre-built images to Docker Hub, so self-hosted users can pull the patched
+   version the moment the code becomes public. A published image can be diffed
+   against the previous patch, so only run these jobs when you are ready to
+   complete the canonical sync immediately afterwards.
+
+   > These jobs need the `DOCKERHUB_USERNAME` and `DOCKERHUB_PASSWORD` CI/CD
+   > variables in the security fork. They are project variables in canonical
+   > and are not inherited by the fork.
+   >
+   > Do not retry the stable-branch pipeline's build jobs after the tag
+   > pipeline ran: they overwrite the per-commit registry image that these
+   > publish jobs pull. If that happened, re-run the tag pipeline's build jobs
+   > before publishing.
+
+1. **Sync security fork → canonical.**
+   Open sync MRs in [the canonical project](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/1703)
+   for every branch that was updated in the security fork. For example:
+   - Open a new MR targeting `main` of the canonical repository from `main` of the security repository.
+   - Open a new MR targeting `stable-18-4-ee` of the canonical repository from `stable-18-4-ee` of the security repository.
+   - Merge all of these MRs.
+
+   Merging the sync MR for a stable branch triggers `tag-stable-patch` in
+   canonical, which cuts the same patch tag name there. The sync MR merges
+   with a merge commit, so the canonical tag can point at a different commit
+   than the fork's tag, with identical content. The canonical tag pipeline
+   publishes the canonical GitLab Container Registry images (including the
+   cosign-signed FIPS image used by Dedicated) and re-pushes the Docker Hub
+   tags with a functionally identical rebuild. If repository mirroring later
+   reports a divergence on the tag, delete the tag in the security fork; the
+   mirror recreates it from canonical.
+
+1. **Verify the release artifacts.**
+   After the sync MRs are merged and the canonical tag pipelines complete,
+   confirm the patched images are available. See
+   [How to backport a fix](./release.md#how-to-backport-a-fix) for details on
+   verifying images in the GitLab Container Registry and DockerHub.
+
+1. **Verify repository mirroring.**
+   In [the repository settings](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/settings/repository#js-push-remote-settings)
+   (**Maintainer** role required), under **Mirroring repositories**, verify that
+   mirroring between the security and canonical repositories succeeded.
+
 1. If the mirroring is failing with an error like `Some refs have diverged...`, use the below shell commands to bring the two repos into sync. Note that squash commits should not be enabled on the resulting MR.
 
 ```shell
@@ -103,11 +205,11 @@ git push origin <branch_name>
     Instead, cherry-pick only the real fix commits onto canonical, then force-push canonical over the security
     mirror as a last-resort reset. See [this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2153) for an example.
     Related information can be found at [How to sync Security repository with Canonical repository](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/how_to_sync_security_with_canonical.md).
-  - You could encounter a merge conflict at step 4 if the other developers have changed the same code.
+  - You could encounter a merge conflict at step 7 (the canonical sync) if other developers changed the same code.
     You need to manually fix the merge conflict and ask a maintainer to merge it.
-  - The other developers could notice that their change is not deployed to production because of mirroring failure due to merge conflict.
-    This could happen if they changed the same code while you're working on step 2~3.
-    To resolve this issue, finish the step 4 and ask them to rebase their feature branches.
+  - Other developers may notice their change is not deployed to production because of a mirroring failure due to a merge conflict.
+    This can happen if they changed the same code while you were working on steps 3–6.
+    To resolve this, finish step 7 and ask them to rebase their feature branches.
 
 ## References
 

@@ -7,8 +7,11 @@ line has no tag yet, so the baseline ``.0`` is cut; on each subsequent commit
 the highest existing patch is bumped. Tags are pinned to the current commit and
 trigger a separate tag pipeline that builds and releases the self-hosted images.
 
-Designed for GitLab CI: reads ``CI_COMMIT_BRANCH`` / ``CI_COMMIT_SHA`` and
-authenticates to the tags API with ``AIGW_TAGGING_ACCESS_TOKEN``.
+Designed for GitLab CI: reads ``CI_COMMIT_BRANCH`` / ``CI_COMMIT_SHA`` /
+``CI_PROJECT_ID`` and authenticates to the tags API with
+``AIGW_TAGGING_ACCESS_TOKEN``. Tags are cut in the project that runs the job,
+so the same script serves the canonical repository and the security fork
+(where tags stay private until the canonical sync).
 """
 
 import json
@@ -19,10 +22,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-PROJECT_ID = "39903947"
-API_BASE = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}/repository"
-
 BRANCH_RE = re.compile(r"^stable-(\d+)-(\d+)-ee$")
+
+CANONICAL_PROJECT_ID = "39903947"
+
+
+def api_base(project_id: str) -> str:
+    """Return the repository API base for a project."""
+    return f"https://gitlab.com/api/v4/projects/{project_id}/repository"
 
 
 def version_line(branch):
@@ -52,8 +59,10 @@ def next_tag(tag_names, prefix):
     return f"{prefix}{highest + 1}-ee"
 
 
-def _request(method, path, token, params=None):
-    url = f"{API_BASE}{path}"
+def _request(
+    method: str, path: str, token: str, project_id: str, params: dict | None = None
+):
+    url = f"{api_base(project_id)}{path}"
     if params:
         url = f"{url}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, method=method)
@@ -82,22 +91,35 @@ def head_already_tagged(tags, sha, prefix):
     )
 
 
-def line_tags(prefix, token):
-    """Fetch tag objects whose name starts with this version line prefix."""
-    tags = _request(
-        "GET",
-        "/tags",
-        token,
-        {"search": f"^{prefix}", "per_page": 100},
-    )
-    return tags or []
+def line_tags(prefix: str, token: str, project_ids: list[str]) -> list[dict]:
+    """Fetch this version line's tag objects across the given projects.
+
+    The security fork must count tags cut in canonical too: the push mirror
+    that copies them into the fork can lag or fail, and canonical can cut new
+    patches while a security release is being prepared. Reusing a patch number
+    would overwrite a published image.
+    """
+    tags: list[dict] = []
+    for project_id in dict.fromkeys(project_ids):
+        tags.extend(
+            _request(
+                "GET",
+                "/tags",
+                token,
+                project_id,
+                {"search": f"^{prefix}", "per_page": 100},
+            )
+            or []
+        )
+    return tags
 
 
-def create_tag(tag_name, ref, token):
+def create_tag(tag_name: str, ref: str, token: str, project_id: str) -> None:
     _request(
         "POST",
         "/tags",
         token,
+        project_id,
         {"tag_name": tag_name, "ref": ref},
     )
 
@@ -107,6 +129,7 @@ def main():
     branch = os.environ.get("CI_COMMIT_BRANCH", "")
     sha = os.environ.get("CI_COMMIT_SHA", "")
     token = os.environ.get("AIGW_TAGGING_ACCESS_TOKEN", "")
+    project_id = os.environ.get("CI_PROJECT_ID", "")
     # pylint: enable=direct-environment-variable-reference
 
     line = version_line(branch)
@@ -116,18 +139,21 @@ def main():
     if not token:
         print("Error: AIGW_TAGGING_ACCESS_TOKEN is not set", file=sys.stderr)
         return 1
+    if not project_id:
+        print("Error: CI_PROJECT_ID is not set", file=sys.stderr)
+        return 1
 
     prefix = f"self-hosted-v{line}."
     print(f"Stable branch: {branch} (version line {line})")
 
-    tags = line_tags(prefix, token)
+    tags = line_tags(prefix, token, [project_id, CANONICAL_PROJECT_ID])
     if head_already_tagged(tags, sha, prefix):
         print(f"HEAD ({sha}) is already tagged on this line; nothing to do")
         return 0
 
     tag = next_tag([tag["name"] for tag in tags], prefix)
     print(f"Creating tag {tag} at {sha}")
-    create_tag(tag, sha, token)
+    create_tag(tag, sha, token, project_id)
     print(f"Created {tag}")
     return 0
 
