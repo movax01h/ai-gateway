@@ -31,6 +31,7 @@ __all__ = [
     "TokensConsumptionMetadata",
     "grpc_connect_vertex",
     "init_anthropic_client",
+    "init_google_gen_vertex_ai_http_client",
     "validate_custom_endpoint",
 ]
 
@@ -256,3 +257,14 @@ def init_anthropic_client() -> AsyncAnthropic:
     )
 
     return AsyncAnthropic(http_client=http_client)
+
+
+def init_google_gen_vertex_ai_http_client() -> httpx.AsyncClient:
+    # Shared, pooled connection pool for all Vertex Gemini requests (see
+    # `ai_gateway.models.v2.chat_google_genai.connect_google_gen_vertex_ai`). Safe to share despite
+    # each resolution getting its own `Client`: google-genai never closes a caller-provided
+    # `httpx_async_client` itself.
+    return httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=1000),
+        event_hooks={"request": [log_request]},
+    )

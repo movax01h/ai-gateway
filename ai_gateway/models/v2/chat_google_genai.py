@@ -1,5 +1,6 @@
 from typing import Any, Self, override
 
+import httpx
 from google.genai import Client
 from google.genai.types import HttpOptions
 from langchain_core.language_models.chat_models import _ChatModelBinding
@@ -13,14 +14,25 @@ __all__ = ["ChatGoogleGenerativeAI", "connect_google_gen_vertex_ai"]
 
 
 def connect_google_gen_vertex_ai(
-    project: str, location: str, headers: dict[str, str] | None = None
+    project: str,
+    location: str,
+    headers: dict[str, str] | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> Client:
     _, user_agent = get_user_agent("ChatGoogleGenerativeAI")
     all_headers = {"User-Agent": user_agent}
     if headers:
         all_headers.update(headers)
 
-    http_options = HttpOptions(headers=all_headers)
+    # `http_client` is a pooled client shared across every resolution (see
+    # `ContainerModels.google_gen_vertex_ai_http_client`): google-genai never closes a
+    # caller-provided client itself (`_api_client.py`'s `close`/`aclose` explicitly skip it),
+    # so sharing it here is safe even though `ChatGoogleGenerativeAI.__del__` (langchain_google_genai)
+    # closes `client` on every resolution's garbage collection. Passing `http_client` also
+    # forces google-genai to use the httpx transport instead of aiohttp (its default when aiohttp
+    # happens to be installed); unlike aiohttp, httpx binds to the event loop lazily at request
+    # time, so this client can be built once at import/container-wiring time with no running loop.
+    http_options = HttpOptions(headers=all_headers, httpx_async_client=http_client)
 
     return Client(
         vertexai=True,
