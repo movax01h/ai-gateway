@@ -9,7 +9,11 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
-from ai_gateway.models.v2.completion_litellm import MODEL_STOP_TOKENS, CompletionLiteLLM
+from ai_gateway.models.v2.completion_litellm import (
+    MODEL_STOP_TOKENS,
+    CompletionLiteLLM,
+    resolve_vertex_completion_location,
+)
 
 
 @pytest.fixture(name="message_content")
@@ -313,6 +317,57 @@ class TestBuildCompletionArgs:
             stream=False,
         )
         assert args["vertex_ai_location"] == "us-central1"
+
+    def test_vertex_ai_injected_location(self):
+        model = CompletionLiteLLM(
+            model="codestral-2",
+            completion_type=CompletionType.TEXT,
+            custom_llm_provider="vertex_ai",
+            vertex_location="europe-west4",
+        )
+        args = model._build_completion_args(
+            prompt="test",
+            suffix=None,
+            stop=None,
+            stream=False,
+        )
+        assert args["vertex_ai_location"] == "europe-west4"
+
+    def test_vertex_ai_explicit_location_wins_over_injected(self):
+        model = CompletionLiteLLM(
+            model="codestral-2",
+            completion_type=CompletionType.TEXT,
+            custom_llm_provider="vertex_ai",
+            vertex_location="europe-west4",
+        )
+        args = model._build_completion_args(
+            prompt="test",
+            suffix=None,
+            stop=None,
+            stream=False,
+            vertex_ai_location="us-east1",
+        )
+        assert args["vertex_ai_location"] == "us-east1"
+
+
+class TestResolveVertexCompletionLocation:
+    @pytest.mark.parametrize(
+        ("override", "runway_region", "expected"),
+        [
+            (None, "europe-west2", "europe-west4"),
+            (None, "europe-west3", "europe-west4"),
+            (None, "europe-west9", "europe-west4"),
+            (None, "us-east4", "us-central1"),
+            (None, "asia-northeast1", "us-central1"),
+            (None, "asia-northeast3", "us-central1"),
+            (None, "", "us-central1"),
+            ("us-east5", "europe-west2", "us-east5"),
+            ("europe-west1", "us-east4", "europe-west1"),
+            ("", "europe-west2", "europe-west4"),
+        ],
+    )
+    def test_resolution(self, override, runway_region, expected):
+        assert resolve_vertex_completion_location(override, runway_region) == expected
 
 
 class TestGenerate:

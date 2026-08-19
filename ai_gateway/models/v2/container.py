@@ -14,7 +14,10 @@ from ai_gateway.models.v2.chat_google_genai import (
     connect_google_gen_vertex_ai,
 )
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
-from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
+from ai_gateway.models.v2.completion_litellm import (
+    CompletionLiteLLM,
+    resolve_vertex_completion_location,
+)
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.models.v2.openai import ChatOpenAI
 
@@ -145,6 +148,11 @@ class ContainerModels(containers.DeclarativeContainer):
             custom_models_enabled=config.custom_models.enabled,
             allowed_api_bases=_fireworks_allowed_api_bases,
             bedrock_guardrail_config=config.bedrock_guardrail_config,
+            vertex_location=providers.Callable(
+                resolve_vertex_completion_location,
+                config.vertexai_location,
+                config.vertex_text_model.location,
+            ),
         ),
         mocked=providers.Factory(mock.FakeCompletionModel),
         agentic=providers.Factory(mock.AgenticFakeModel),
