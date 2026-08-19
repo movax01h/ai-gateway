@@ -27,18 +27,19 @@ models:
       temperature: 0.0
       max_tokens: 32_768
 
-  - name: "Minimax M2.7"
+  - name: "Minimax M3"
     provider: "Fireworks"
-    gitlab_identifier: "minimax_m2_7_fireworks"
-    description: "Open-source MoE model for coding, agentic tasks, and reasoning."
+    gitlab_identifier: "minimax_m3_fireworks"
+    description: "Native multimodal MoE model for coding, agentic tasks, and reasoning."
     cost_indicator: "$"
-    max_context_tokens: 196000
+    max_context_tokens: 512_000 # https://app.fireworks.ai/models/fireworks/minimax-m3
     model_class_provider: litellm
     params:
-      model: "accounts/fireworks/models/minimax-m2p7"
+      model: "accounts/fireworks/models/minimax-m3"
       custom_llm_provider: "fireworks_ai"
-      temperature: 0.0
-      max_tokens: 65_536
+      temperature: 1.0 # MiniMax vendor-recommended sampling: https://huggingface.co/MiniMaxAI/MiniMax-M3
+      top_p: 0.95
+      max_tokens: 64_000
 
   - name: "GLM 5.2"
     provider: "Fireworks"
