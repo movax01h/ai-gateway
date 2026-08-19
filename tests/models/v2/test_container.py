@@ -1,4 +1,7 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
+from google.genai.client import Client
 
 from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.base import log_request
@@ -136,3 +139,66 @@ def test_lite_llm_completion_resolves_vertex_location(
     )
 
     assert model.vertex_location == expected
+
+
+@pytest.mark.asyncio
+async def test_google_chat_gen_vertex_ai_client_not_shared_across_resolutions():
+    """Each resolution of the Vertex Gemini factory must build its own `google.genai.Client` instead of sharing one
+    process-wide singleton.
+
+    `ChatGoogleGenerativeAI.__del__` (langchain_google_genai) closes whatever `client` it was given as soon as that
+    resolution's wrapper is garbage collected. A shared `Client` previously let any one request's wrapper being
+    collected close the client out from under another in-flight request still using it, crashing it with
+    `assert self._connector is not None` deep in aiohttp.
+    """
+    container = ContainerModels()
+    container.config.from_dict(
+        {
+            "custom_models": {"enabled": False},
+            "google_cloud_platform": {"project": "test-project"},
+            "mock_model_responses": False,
+            "use_agentic_mock": False,
+        }
+    )
+
+    with patch(
+        "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+        side_effect=lambda *_args, **_kwargs: MagicMock(spec=Client),
+    ) as mock_connect:
+        model_a = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
+        model_b = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
+
+    assert mock_connect.call_count == 2
+    assert model_a.client is not model_b.client
+
+    await container.google_gen_vertex_ai_http_client().aclose()
+
+
+@pytest.mark.asyncio
+async def test_google_chat_gen_vertex_ai_http_client_shared_across_resolutions():
+    """The underlying http client (and its connection pool) is shared across every resolution, unlike the `Client`
+    wrapper itself, so that Vertex Gemini requests reuse pooled connections instead of paying a fresh TCP+TLS handshake
+    per call."""
+    container = ContainerModels()
+    container.config.from_dict(
+        {
+            "custom_models": {"enabled": False},
+            "google_cloud_platform": {"project": "test-project"},
+            "mock_model_responses": False,
+            "use_agentic_mock": False,
+        }
+    )
+
+    with patch(
+        "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+        side_effect=lambda *_args, **kwargs: MagicMock(
+            spec=Client, http_client=kwargs.get("http_client")
+        ),
+    ):
+        model_a = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
+        model_b = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
+
+    assert model_a.client.http_client is model_b.client.http_client
+    assert model_a.client.http_client is container.google_gen_vertex_ai_http_client()
+
+    await container.google_gen_vertex_ai_http_client().aclose()

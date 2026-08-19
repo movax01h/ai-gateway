@@ -1,5 +1,6 @@
 from typing import Any
 
+import httpx
 import litellm
 from dependency_injector import containers, providers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
@@ -7,7 +8,11 @@ from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from ai_gateway.config import ConfigDuoWorkflow
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.models import mock
-from ai_gateway.models.base import init_anthropic_client, log_request
+from ai_gateway.models.base import (
+    init_anthropic_client,
+    init_google_gen_vertex_ai_http_client,
+    log_request,
+)
 from ai_gateway.models.v2.anthropic_claude import ChatAnthropic
 from ai_gateway.models.v2.chat_google_genai import (
     ChatGoogleGenerativeAI,
@@ -43,10 +48,19 @@ def _compute_fireworks_allowed_api_bases(
     return frozenset()
 
 
-def _init_google_chat_gen_vertex_ai_global_client(config: dict[str, Any]):
-    client = connect_google_gen_vertex_ai(config["project"], "global")
-    yield client
-    client.close()
+def _create_google_chat_gen_vertex_ai_client(
+    config: dict[str, Any], http_client: httpx.AsyncClient
+):
+    # A fresh `Client` is created per resolution rather than shared as a process-wide
+    # singleton: `ChatGoogleGenerativeAI.__del__` (langchain_google_genai) closes whatever
+    # `client` it was given as soon as that resolution's wrapper is garbage collected. A
+    # shared `Client` would get closed out from under any other request still using it. The
+    # underlying httpx client is still shared for connection pooling (see
+    # `ContainerModels.google_gen_vertex_ai_http_client`); only the lightweight per-resolution
+    # `Client` wrapper is private.
+    return connect_google_gen_vertex_ai(
+        config["project"], "global", http_client=http_client
+    )
 
 
 def _mock_selector(mock_model_responses: bool, use_agentic_mock: bool) -> str:
@@ -73,6 +87,10 @@ class ContainerModels(containers.DeclarativeContainer):
     )
 
     http_async_client_anthropic = providers.Singleton(init_anthropic_client)
+
+    google_gen_vertex_ai_http_client = providers.Singleton(
+        init_google_gen_vertex_ai_http_client
+    )
 
     _fireworks_allowed_api_bases = providers.Singleton(
         _compute_fireworks_allowed_api_bases,
@@ -110,9 +128,10 @@ class ContainerModels(containers.DeclarativeContainer):
 
     google_chat_gen_vertex_ai_global_fn = providers.Factory(
         ChatGoogleGenerativeAI,
-        client=providers.Resource(
-            _init_google_chat_gen_vertex_ai_global_client,
+        client=providers.Factory(
+            _create_google_chat_gen_vertex_ai_client,
             config.google_cloud_platform,
+            google_gen_vertex_ai_http_client,
         ),
         custom_models_enabled=config.custom_models.enabled,
     )
