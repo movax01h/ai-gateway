@@ -27,7 +27,6 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     _get_orbit_tool_calls,
     _serialize_all_channels_full,
     _serialize_channel_blobs,
-    _thread_started_at_from_id,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.entities.state import WorkflowStatusEnum
@@ -3543,51 +3542,6 @@ def test_serialize_channel_blobs_conversation_sends_delta():
     assert val == ["c"]
 
 
-def _v6_uuid_for(unix_seconds: int, sub_second_100ns: int = 0) -> str:
-    """Build a valid UUIDv6 whose embedded timestamp is unix_seconds (+ optional 100ns)."""
-    gregorian_100ns = unix_seconds * 10_000_000 + sub_second_100ns + 0x01B21DD213814000
-    time_high = (gregorian_100ns >> 28) & 0xFFFFFFFF
-    time_mid = (gregorian_100ns >> 12) & 0xFFFF
-    time_low = gregorian_100ns & 0x0FFF
-    return f"{time_high:08x}-{time_mid:04x}-6{time_low:03x}-8000-000000000000"
-
-
-def test_thread_started_at_from_id_decodes_v6():
-    # 1_700_000_000 == 2023-11-14T22:13:20Z
-    assert (
-        _thread_started_at_from_id(_v6_uuid_for(1_700_000_000))
-        == "2023-11-14T22:13:20+00:00"
-    )
-
-
-def test_thread_started_at_from_id_decodes_v7():
-    # 48-bit millisecond timestamp: 1_700_000_000_000 ms
-    value = (1_700_000_000_000 << 80) | (0x7 << 76) | (0x8 << 62)
-    uuid = f"{value:032x}"
-    dashed = f"{uuid[:8]}-{uuid[8:12]}-{uuid[12:16]}-{uuid[16:20]}-{uuid[20:]}"
-    assert _thread_started_at_from_id(dashed) == "2023-11-14T22:13:20+00:00"
-
-
-def test_thread_started_at_from_id_floors_to_second():
-    # Sub-second 100ns component must be dropped so the marker never exceeds the
-    # created_at Rails derives from the same id.
-    assert (
-        _thread_started_at_from_id(
-            _v6_uuid_for(1_700_000_000, sub_second_100ns=9_999_999)
-        )
-        == "2023-11-14T22:13:20+00:00"
-    )
-
-
-def test_thread_started_at_from_id_returns_none_for_non_time_uuid():
-    # Version 4 (random) UUID embeds no timestamp.
-    assert _thread_started_at_from_id("f47ac10b-58cc-4372-a567-0e02b2c3d479") is None
-
-
-def test_thread_started_at_from_id_returns_none_for_malformed():
-    assert _thread_started_at_from_id("not-a-uuid") is None
-
-
 def test_serialize_all_channels_full_reseeds_every_channel():
     """Group-start snapshot: every channel is re-seeded as a full 'compaction' blob, scalars included, with versions
     taken from the checkpoint."""
@@ -3989,105 +3943,6 @@ async def test_aput_compaction_reseeds_all_channels_as_full_snapshot(
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
-async def test_aput_pins_current_thread_started_at_to_group_start(
-    _mock_duo_workflow_metrics,
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    checkpoint_data,
-    checkpoint_metadata,
-):
-    """current_thread_started_at pins to the group's first checkpoint and re-pins on compaction."""
-    checkpoint = checkpoint_data[0]["checkpoint"]
-    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
-
-    id_start = _v6_uuid_for(1_700_000_000)
-    id_mid = _v6_uuid_for(1_700_000_005)
-    id_compaction = _v6_uuid_for(1_700_000_010)
-
-    # First checkpoint of the group — marker takes its start time.
-    checkpoint["id"] = id_start
-    checkpoint["channel_values"]["messages"] = ["a", "b"]
-    await gitlab_workflow.aput(
-        {"configurable": {"checkpoint_id": None}},
-        checkpoint,
-        checkpoint_metadata,
-        ChannelVersions({"messages": "1.0"}),
-    )
-    body = json.loads(http_client.apost.call_args[1]["body"])
-    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_start)
-
-    # Conversation step — marker stays pinned to the first checkpoint, not id_mid.
-    checkpoint["id"] = id_mid
-    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
-    await gitlab_workflow.aput(
-        {"configurable": {"checkpoint_id": id_start}},
-        checkpoint,
-        checkpoint_metadata,
-        ChannelVersions({"messages": "2.0"}),
-    )
-    body = json.loads(http_client.apost.call_args[1]["body"])
-    assert body["current_thread"] == 0
-    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_start)
-
-    # Compaction (list shrank) starts a new group — marker re-pins to id_compaction.
-    checkpoint["id"] = id_compaction
-    checkpoint["channel_values"]["messages"] = ["summary"]
-    await gitlab_workflow.aput(
-        {"configurable": {"checkpoint_id": id_mid}},
-        checkpoint,
-        checkpoint_metadata,
-        ChannelVersions({"messages": "3.0"}),
-    )
-    body = json.loads(http_client.apost.call_args[1]["body"])
-    assert body["current_thread"] == 1
-    assert body["current_thread_started_at"] == _thread_started_at_from_id(
-        id_compaction
-    )
-
-
-@pytest.mark.asyncio
-@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
-async def test_aput_repins_current_thread_started_at_on_stale_cache(
-    _mock_duo_workflow_metrics,
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    checkpoint_data,
-    checkpoint_metadata,
-):
-    """A stale cache (skipped parent) re-pins the marker to the stale checkpoint, not the original group start."""
-    checkpoint = checkpoint_data[0]["checkpoint"]
-    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
-
-    id_start = _v6_uuid_for(1_700_000_000)
-    id_stale = _v6_uuid_for(1_700_000_020)
-
-    checkpoint["id"] = id_start
-    checkpoint["channel_values"]["messages"] = ["a", "b"]
-    await gitlab_workflow.aput(
-        {"configurable": {"checkpoint_id": None}},
-        checkpoint,
-        checkpoint_metadata,
-        ChannelVersions({"messages": "1.0"}),
-    )
-
-    # Wrong parent → stale cache → thread bumps and the marker re-pins to id_stale.
-    checkpoint["id"] = id_stale
-    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
-    await gitlab_workflow.aput(
-        {"configurable": {"checkpoint_id": "ckpt-unknown"}},
-        checkpoint,
-        checkpoint_metadata,
-        ChannelVersions({"messages": "2.0"}),
-    )
-    body = json.loads(http_client.apost.call_args[1]["body"])
-    assert body["current_thread"] == 1
-    assert body["current_thread_started_at"] == _thread_started_at_from_id(id_stale)
-
-
-@pytest.mark.asyncio
-@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_resets_cache_on_stale_checkpoint_id(
     _mock_duo_workflow_metrics,
     incremental_enabled,
@@ -4182,33 +4037,6 @@ async def test_aget_tuple_hydrates_current_thread_from_response(
     assert (
         "conversation_history"
         in _incremental_state(gitlab_workflow).prev_channel_values
-    )
-
-
-@pytest.mark.asyncio
-@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
-async def test_aget_tuple_hydrates_current_thread_started_at(
-    _mock_duo_workflow_metrics,
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    compressed_checkpoint_data,
-):
-    """On resume the marker is restored so a post-restart aput doesn't re-pin it mid-group."""
-    compressed_checkpoint_data[0]["current_thread_started_at"] = (
-        "2026-07-08T10:00:00+00:00"
-    )
-    http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
-    )
-
-    config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
-    result = await gitlab_workflow.aget_tuple(config)
-
-    assert result is not None
-    assert (
-        _incremental_state(gitlab_workflow).current_thread_started_at
-        == "2026-07-08T10:00:00+00:00"
     )
 
 
@@ -4376,7 +4204,6 @@ _GQL_LATEST_CHECKPOINT = {
     "checkpoint": json.dumps({"id": "gql-ckpt", "channel_values": {"x": [1]}}),
     "metadata": "{}",
     "currentThread": 4,
-    "currentThreadStartedAt": "2026-07-08T10:00:00+00:00",
 }
 
 
@@ -4393,9 +4220,6 @@ def test_decode_graphql_checkpoint_is_side_effect_free(gitlab_workflow):
     _incremental_state(gitlab_workflow).prev_checkpoint_id = "sentinel-ckpt"
     _incremental_state(gitlab_workflow).prev_channel_values = {"sentinel": True}
     _incremental_state(gitlab_workflow).current_thread = 9
-    _incremental_state(
-        gitlab_workflow
-    ).current_thread_started_at = "2026-01-01T00:00:00+00:00"
 
     result = gitlab_workflow.decode_graphql_checkpoint(dict(_GQL_LATEST_CHECKPOINT))
 
@@ -4404,10 +4228,6 @@ def test_decode_graphql_checkpoint_is_side_effect_free(gitlab_workflow):
     assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "sentinel-ckpt"
     assert _incremental_state(gitlab_workflow).prev_channel_values == {"sentinel": True}
     assert _incremental_state(gitlab_workflow).current_thread == 9
-    assert (
-        _incremental_state(gitlab_workflow).current_thread_started_at
-        == "2026-01-01T00:00:00+00:00"
-    )
 
 
 @pytest.mark.asyncio
@@ -4440,10 +4260,6 @@ async def test_aget_tuple_hydrates_from_cached_latest_checkpoint(
     assert _incremental_state(gitlab_workflow).current_thread == 4
     assert _incremental_state(gitlab_workflow).prev_checkpoint_id == "gql-ckpt"
     assert _incremental_state(gitlab_workflow).prev_channel_values == {"x": [1]}
-    assert (
-        _incremental_state(gitlab_workflow).current_thread_started_at
-        == "2026-07-08T10:00:00+00:00"
-    )
 
 
 def _make_gl_checkpoint(thread_ts, status):

@@ -472,6 +472,7 @@ async def test_workflow_run(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures(
+    "mock_duo_workflow_service_container",
     "mock_tools_registry_cls",
     "mock_git_lab_workflow_instance",
     "mock_fetch_workflow_and_container_data",
