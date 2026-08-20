@@ -52,7 +52,7 @@ models:
       model: "accounts/fireworks/models/glm-5p2"
       custom_llm_provider: "fireworks_ai"
       temperature: 0.0
-      max_tokens: 8_192
+      max_tokens: 32_768  # aligned with OSS peers (Kimi K3, Qwen 3.6) on same Fireworks infra
 
   - name: "Qwen3.6-27B"
     provider: "Fireworks"
