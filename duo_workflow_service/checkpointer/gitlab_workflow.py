@@ -9,7 +9,6 @@ import time
 import zlib
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import (
     Any,
     AsyncIterator,
@@ -28,7 +27,6 @@ from typing import (
 )
 
 import structlog
-import uuid_utils
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.runnables import RunnableConfig
@@ -174,7 +172,6 @@ class _IncrementalCheckpointState:
     prev_channel_values: Dict[str, Any] = field(default_factory=dict)
     prev_checkpoint_id: Optional[str] = None
     current_thread: int = 0
-    current_thread_started_at: Optional[str] = None
 
 
 def _get_orbit_tool_calls(checkpoint: Checkpoint) -> bool:
@@ -234,25 +231,6 @@ def _dict_of_list_delta(
     if not delta:
         return None
     return Delta(delta, True)
-
-
-def _thread_started_at_from_id(checkpoint_id: str) -> Optional[str]:
-    """ISO8601 UTC start time of a current_thread group, decoded from the group's first checkpoint id and floored to the
-    second.
-
-    ``uuid_utils.UUID.timestamp`` returns Unix milliseconds for v1/v6/v7, matching the value Rails derives via
-    ``Gitlab::Utils.time_from_uuid`` (langgraph emits v6). Rails bounds the partition-scanned blob query with
-    ``created_at >= current_thread_started_at``, so the marker must never be later than the earliest blob's
-    ``created_at`` or that blob is dropped from reconstruction. Flooring to the second keeps the marker at-or-before the
-    sub-second value Rails stores for the same id, and daily partitioning makes the slack irrelevant to pruning. Returns
-    None for non-time-based or malformed ids (uuid_utils raises ValueError for both).
-    """
-    try:
-        timestamp_ms = uuid_utils.UUID(checkpoint_id).timestamp
-    except (ValueError, TypeError):
-        return None
-
-    return datetime.fromtimestamp(timestamp_ms // 1_000, tz=timezone.utc).isoformat()
 
 
 def _serialize_channel_blobs(
@@ -1248,14 +1226,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     current_thread=current_thread,
                 )
 
-        started_at = gl_checkpoint.get(
-            "current_thread_started_at"
-        ) or gl_checkpoint.get("currentThreadStartedAt")
-        if started_at is not None:
-            # Restore the group's original start time so a post-restart checkpoint doesn't
-            # re-pin the marker to a mid-group time and drop the group's earlier blobs.
-            state.current_thread_started_at = started_at
-
         state.prev_checkpoint_id = decoded_checkpoint.get("id")
         state.prev_channel_values = dict(decoded_checkpoint.get("channel_values", {}))
 
@@ -1594,17 +1564,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 state.prev_channel_values,
                 force_rewrite=stale_cache,
             )
-            # A new current_thread group starts on the first checkpoint and whenever
-            # current_thread is bumped; its start time bounds the created_at range of a
-            # later blob query. Carried forward (and restored on restart) otherwise so the
-            # marker stays pinned to the group's first checkpoint.
-            starts_new_thread = (
-                state.current_thread_started_at is None or stale_cache or is_compaction
-            )
             # A genuine group boundary: the workflow's first checkpoint, a stale-cache
-            # reset, or a compaction. Keyed on prev_checkpoint_id (not the started_at
-            # marker, which stays None when a checkpoint id isn't time-based) so later
-            # checkpoints in a group are never re-seeded.
+            # reset, or a compaction.
             is_group_start = (
                 state.prev_checkpoint_id is None or stale_cache or is_compaction
             )
@@ -1615,21 +1576,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 channel_blobs = _serialize_all_channels_full(checkpoint)
             if stale_cache or is_compaction:
                 state.current_thread += 1
-            if starts_new_thread:
-                state.current_thread_started_at = _thread_started_at_from_id(
-                    checkpoint["id"]
-                )
             state.prev_channel_values = dict(checkpoint.get("channel_values", {}))
             state.prev_checkpoint_id = checkpoint["id"]
             payload["channel_blobs"] = channel_blobs
             payload["current_thread"] = state.current_thread
-            if state.current_thread_started_at is not None:
-                payload["current_thread_started_at"] = state.current_thread_started_at
             self._logger.info(
                 "Incremental checkpoint sizes",
                 thread_ts=checkpoint["id"],
                 current_thread=state.current_thread,
-                current_thread_started_at=state.current_thread_started_at,
                 compressed_checkpoint_bytes=(
                     len(payload["compressed_checkpoint"])
                     if "compressed_checkpoint" in payload
