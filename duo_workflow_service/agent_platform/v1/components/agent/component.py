@@ -14,7 +14,8 @@ from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.graph import StateGraph
+from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import (
     BaseModel,
     Field,
@@ -83,6 +84,7 @@ from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
+    "SUBSESSION_ID_CONTEXT_KEY",
     "AgentComponent",
     "AgentComponentBase",
     "MaxCyclesConfig",
@@ -94,6 +96,20 @@ __all__ = [
 # (see `AgentComponentBase.resolve_max_cycles`) and `MaxCyclesConfig`'s own field
 # default, so both forms warn 10 cycles out unless explicitly overridden.
 _DEFAULT_ITERATION_WARNING_OFFSET: int = 10
+
+# Context key under which a subagent's per-invocation subsession ID is exposed when the
+# component is compiled as a standalone subgraph via ``AgentComponent.compile_as_subagent``
+# (the ``SupervisorAgentComponentV2`` / native-``Send``-dispatch code path — see that
+# method's docstring). Written by the supervisor's ``DelegationPrepareNode`` into the
+# isolated invocation's initial state, and read back by the subagent's own nodes (via
+# ``_session_id_key``) purely for UI attribution (so UiChatLog entries can be tagged with
+# the subsession they belong to).
+#
+# Not used by ``bind_to_supervisor``-based subagents (the current, production
+# ``SupervisorAgentComponent``): those get their session ID from the supervisor's own
+# ``session_id_key`` argument instead, since they run as flat-attached nodes sharing the
+# supervisor's state rather than as isolated invocations.
+SUBSESSION_ID_CONTEXT_KEY = "__subsession_id__"
 
 
 class RoutingError(Exception):
@@ -146,6 +162,23 @@ class MaxCyclesConfig(BaseModel):
                 "instead."
             )
         return self
+
+
+class _TerminalRouter:
+    """``RouterProtocol`` implementation that always routes straight to ``END``.
+
+    Used by ``AgentComponent.compile_as_subagent`` to terminate the standalone
+    subgraph after ``final_response``: unlike a component attached to a parent
+    flow graph, a standalone subagent subgraph has no external router to hand
+    off to — its result is consumed by whoever called ``ainvoke`` on the
+    compiled graph, not by further graph routing.
+    """
+
+    def attach(self, graph: StateGraph) -> None:
+        """No-op — no additional wiring is needed for the terminal router."""
+
+    def route(self, _state: FlowState) -> Annotated[str, "Next node"]:
+        return END
 
 
 class AgentComponentBase(BaseComponent):
@@ -718,6 +751,86 @@ class AgentComponent(AgentComponentBase):
             if inp.template_variable_name != goal_key.template_variable_name
         ]
         self.inputs.append(goal_key)
+
+    def compile_as_subagent(self) -> CompiledStateGraph:
+        """Compile this component's ReAct loop as an independent, standalone subgraph.
+
+        Alternative to ``bind_to_supervisor``, used by
+        ``SupervisorAgentComponentV2`` (see
+        ``duo_workflow_service.agent_platform.v1.components.supervisor_v2``) to
+        run subagents as isolated units of async execution (``await
+        compiled.ainvoke(state, config=config)``, see
+        ``supervisor_v2.nodes.subagent_dispatch_node.SubagentDispatchNode``),
+        one such invocation per concurrently dispatched native ``Send`` task,
+        so that multiple delegations in a single turn run truly concurrently
+        under LangGraph's own Pregel scheduler instead of being flattened into
+        the supervisor's own graph (which, via ``bind_to_supervisor``, only
+        supports one "active" subsession at a time).
+
+        This is purely additive: ``bind_to_supervisor`` and the production,
+        non-parallel ``SupervisorAgentComponent`` are untouched and continue to
+        work exactly as before. A given ``AgentComponent`` instance is expected
+        to be used via only one of the two mechanisms.
+
+        The compiled graph uses this component's default (component-scoped)
+        state keys — ``conversation_history["<name>"]``,
+        ``context["<name>"]["final_answer"]`` — since every invocation gets its
+        own fully isolated ``FlowState``. The caller (``DelegationPrepareNode``)
+        is responsible for seeding that state with the delegation prompt (as
+        ``context["goal"]``) and, for resumed subsessions, prior conversation
+        history; ``SubagentDispatchNode`` is responsible for translating this
+        component-scoped result into a subsession-scoped update before it's
+        merged into the supervisor's own shared state, since two concurrent
+        invocations of the *same* subagent type would otherwise collide.
+
+        A per-invocation subsession ID — used only for tagging ``UiChatLog``
+        entries so the UI can attribute them to the right subsession — is read
+        from ``context[SUBSESSION_ID_CONTEXT_KEY]`` when the caller sets it.
+
+        No checkpointer is passed to ``compile()`` here — as long as the caller
+        invokes the returned graph with the *same* ``RunnableConfig`` it was
+        itself given, LangGraph treats the invocation as a genuinely nested
+        Pregel run: it inherits the parent's checkpointer, and an
+        ``interrupt()`` raised inside this subgraph (e.g. by
+        ``require_tool_approval=True``'s ``ToolApprovalFetchNode``) bubbles all
+        the way to the true root graph instead of being swallowed, so
+        ``require_tool_approval`` works the same way here as at the top level.
+        Concurrent sibling invocations sharing that same forwarded config are
+        automatically kept in separate checkpoint namespaces by LangGraph.
+
+        Note: this requires checkpointer-layer support for serializing
+        pending ``Send`` tasks, needed whenever a checkpoint is persisted
+        while a concurrent dispatch is still pending (see the
+        ``CustomEncoder``/``checkpoint_decoder`` support for
+        ``langgraph.types.Send``). Separately, resuming when two or more
+        concurrently dispatched subagents are simultaneously paused on
+        tool-call approval within the same turn is a known limitation,
+        tracked as follow-up work; single-subagent and
+        sequential-multi-subagent delegation are unaffected.
+
+        Raises:
+            ValueError: If ``description`` is not set (required so the
+                supervisor's ``delegate_task`` tool can describe this subagent
+                to the LLM).
+        """
+        if not self.description:
+            raise ValueError(
+                f"AgentComponent '{self.name}' must have a description to be used as a subagent."
+            )
+
+        self._session_id_key = RuntimeIOKey(
+            alias="session_id",
+            factory=lambda _: IOKey(
+                target="context",
+                subkeys=[SUBSESSION_ID_CONTEXT_KEY],
+                optional=True,
+            ),
+        )
+
+        graph = StateGraph(FlowState)
+        self.attach(graph, _TerminalRouter())
+        graph.set_entry_point(self.__entry_hook__())
+        return graph.compile()
 
     def _agent_node_router(self, state: FlowState) -> str:
         history_iokey = self._conversation_history_key.to_iokey(state)
