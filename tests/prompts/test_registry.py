@@ -1776,6 +1776,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "fix_pipeline_execution",
         "fix_pipeline_new_mr_comment",
         "gitlab_duo_mention_agent_prompt",
+        "local_code_review",
         "project_activity_create_summary_issue",
         "project_activity_fetch_issues_closed",
         "project_activity_fetch_issues_new",

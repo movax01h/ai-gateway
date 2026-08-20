@@ -225,7 +225,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         _max_subsession_id_key,
     )
 
-    supported_environments: ClassVar[tuple[str, ...]] = ("ambient",)
+    supported_environments: ClassVar[tuple[str, ...]] = ("ambient", "chat")
 
     max_delegations: Optional[int] = None
 
