@@ -1,5 +1,5 @@
 version: "v1"
-environment: ambient
+environment: chat
 
 components:
   - name: "developer_agent"
@@ -102,9 +102,19 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
+  - name: "user_input"
+    type: HumanInputComponent
+    sends_response_to: "developer_agent"
+    interaction_type: "input"
+    message_template: ""
+    ui_log_events:
+      - on_user_response
+
 routers:
   - from: "developer_agent"
-    to: "end"
+    to: "user_input"
+  - from: "user_input"
+    to: "developer_agent"
 
 flow:
   entry_point: "developer_agent"
