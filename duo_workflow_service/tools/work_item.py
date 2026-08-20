@@ -16,6 +16,7 @@ from duo_workflow_service.tools.work_items.base_tool import (
 )
 from duo_workflow_service.tools.work_items.queries.graphql_queries import GET_NOTE_QUERY
 from duo_workflow_service.tools.work_items.queries.work_items import (
+    CREATE_DISCUSSION_MUTATION,
     CREATE_NOTE_MUTATION,
     GET_WORK_ITEM_STATUSES_QUERY,
 )
@@ -716,6 +717,10 @@ class UpdateWorkItem(WorkItemBaseTool):
         return f"Update work item #{args.work_item_iid} in project {args.project_id}"
 
 
+CREATE_NOTE_MUTATION_KEY = "createNote"
+CREATE_DISCUSSION_MUTATION_KEY = "createDiscussion"
+
+
 class CreateWorkItemNoteInput(WorkItemResourceInput):
     body: str = Field(
         description=f"The content of the note. Limited to {DESCRIPTION_CHARACTER_LIMIT} characters.",
@@ -730,6 +735,9 @@ class CreateWorkItemNoteInput(WorkItemResourceInput):
         "The tool will automatically find the discussion containing this note. "
         "If not provided, creates a standalone comment.",
     )
+    # start_discussion (see commit ccb7b5b3) isn't exposed here yet: createDiscussion
+    # has no ai_workflows scope until !249603 ships, so every agent would hit a
+    # guaranteed auth error. Mutation path below stays wired for when it's re-added.
 
 
 class CreateWorkItemNote(WorkItemBaseTool):
@@ -765,6 +773,13 @@ class CreateWorkItemNote(WorkItemBaseTool):
         work_item_iid = kwargs.pop("work_item_iid", None)
         internal = kwargs.pop("internal", None)
         note_id = kwargs.pop("note_id", None)
+        start_discussion = kwargs.pop("start_discussion", False)
+
+        if start_discussion and note_id is not None:
+            raise ToolException(
+                "start_discussion cannot be combined with note_id; "
+                "a reply cannot start a new discussion."
+            )
 
         resolved = await self._validate_work_item_url(
             url, group_id, project_id, work_item_iid
@@ -774,10 +789,34 @@ class CreateWorkItemNote(WorkItemBaseTool):
 
         discussion_id = None
         if note_id is not None:
-            discussion_result = await self._get_discussion_id_from_note(note_id)
-            discussion_id = discussion_result.get("replyId")
+            discussion_id = (await self._get_discussion_id_from_note(note_id)).get(
+                "replyId"
+            )
 
-        note_input = {"noteableId": result["id"], "body": body}
+        note_input = self._build_note_input(result["id"], body, internal, discussion_id)
+
+        note_response = await self.gitlab_client.graphql(
+            CREATE_DISCUSSION_MUTATION if start_discussion else CREATE_NOTE_MUTATION,
+            {"input": note_input},
+        )
+
+        return self._process_note_response(
+            note_response,
+            mutation_key=(
+                CREATE_DISCUSSION_MUTATION_KEY
+                if start_discussion
+                else CREATE_NOTE_MUTATION_KEY
+            ),
+        )
+
+    @staticmethod
+    def _build_note_input(
+        noteable_id: str,
+        body: str,
+        internal: Optional[bool],
+        discussion_id: Optional[str],
+    ) -> dict:
+        note_input: Dict[str, Any] = {"noteableId": noteable_id, "body": body}
 
         if internal is not None:
             note_input["internal"] = internal
@@ -785,11 +824,7 @@ class CreateWorkItemNote(WorkItemBaseTool):
         if discussion_id is not None:
             note_input["discussionId"] = discussion_id
 
-        note_response = await self.gitlab_client.graphql(
-            CREATE_NOTE_MUTATION, {"input": note_input}
-        )
-
-        return self._process_note_response(note_response)
+        return note_input
 
     async def _get_work_item_id(self, resolved: ResolvedWorkItem) -> dict:
         """Get work item ID from resolved work item."""
@@ -802,26 +837,32 @@ class CreateWorkItemNote(WorkItemBaseTool):
 
         return {"id": work_item["id"]}
 
-    def _process_note_response(self, note_response: dict) -> str:
+    def _process_note_response(
+        self, note_response: dict, mutation_key: str = CREATE_NOTE_MUTATION_KEY
+    ) -> str:
         """Process the GraphQL response from creating a note."""
+        noun = (
+            "discussion" if mutation_key == CREATE_DISCUSSION_MUTATION_KEY else "note"
+        )
+
         # Top-level GraphQL errors (e.g., auth, syntax, variables)
         if top_errors := note_response.get("errors"):
             raise ToolException(f"GraphQL errors: {json.dumps(top_errors)}")
 
-        create_note = note_response.get("createNote", {})
+        create_note = note_response.get(mutation_key, {})
         created_note = create_note.get("note", {})
         note_errors = create_note.get("errors", [])
 
         # Application-level errors (mutation ran but failed validation)
         if note_errors or not created_note.get("id"):
             raise ToolException(
-                f"Failed to create note. GraphQL errors: {top_errors}, Note errors: {note_errors}"
+                f"Failed to create {noun}. GraphQL errors: {top_errors}, {noun.capitalize()} errors: {note_errors}"
             )
 
         return json.dumps(
             {
                 "status": "success",
-                "message": "Note created successfully.",
+                "message": f"{noun.capitalize()} created successfully.",
                 "note": created_note,
             }
         )
