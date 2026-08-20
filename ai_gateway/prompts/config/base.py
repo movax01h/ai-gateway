@@ -5,7 +5,12 @@ from ai_gateway.model_selection import PromptParams
 from ai_gateway.model_selection.models import BaseModelParams, OpenAIProviderParams
 from lib.billing_events.service import LLMOperationType
 
-__all__ = ["ModelConfig", "PromptConfig", "PromptProviderParams"]
+__all__ = [
+    "InMemoryPromptConfig",
+    "ModelConfig",
+    "PromptConfig",
+    "PromptProviderParams",
+]
 
 
 # Field names must exactly match ModelClassProvider values (enforced by test)

@@ -120,7 +120,9 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         # whether the model comes from the flow config or from model_metadata.
         provider_params = (model_from_prompt or {}).get("provider_params")
 
-        unit_primitives = raw_data.get("unit_primitives")
+        # `raw_data` is produced by `InMemoryPromptConfig.to_prompt_data()`, which
+        # collapses the plural `unit_primitives` list into a single `unit_primitive` value.
+        unit_primitive = raw_data.get("unit_primitive")
         prompt_template = raw_data["prompt_template"]
         if (
             model_metadata
@@ -134,8 +136,8 @@ class InMemoryPromptRegistry(BasePromptRegistry):
                 provider_params=provider_params,
             ),
             unit_primitive=(
-                GitLabUnitPrimitive(unit_primitives[0])
-                if unit_primitives
+                GitLabUnitPrimitive(unit_primitive)
+                if unit_primitive
                 else GitLabUnitPrimitive.DUO_AGENT_PLATFORM
             ),
             prompt_template=prompt_template,

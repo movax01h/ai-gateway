@@ -19,6 +19,7 @@ from ai_gateway.model_selection.models import (
 from ai_gateway.prompts.base import Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import (
+    InMemoryPromptConfig,
     ModelConfig,
     PromptConfig,
     PromptProviderParams,
@@ -200,11 +201,12 @@ class TestInMemoryPromptRegistry:
         assert result == prompt
 
     @pytest.mark.parametrize(
-        "unit_primitives,expected_unit_primitive",
+        # Param is named `raw_unit_primitive` to avoid shadowing the shared
+        # `unit_primitive` fixture from conftest, which feeds the prompt fixtures.
+        "raw_unit_primitive,expected_unit_primitive",
         [
             (None, GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
-            ([], GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
-            (["duo_chat"], GitLabUnitPrimitive.DUO_CHAT),
+            ("duo_chat", GitLabUnitPrimitive.DUO_CHAT),
         ],
     )
     def test_prompt_config_conversion(
@@ -212,16 +214,21 @@ class TestInMemoryPromptRegistry:
         in_memory_registry,
         mock_shared_registry,
         sample_prompt_data,
-        unit_primitives,
+        raw_unit_primitive,
         expected_unit_primitive,
     ):
-        """Test that flow YAML data is correctly converted to PromptConfig."""
+        """Test that flow YAML data is correctly converted to PromptConfig.
+
+        ``register_prompt`` receives the output of
+        ``InMemoryPromptConfig.to_prompt_data()``, which emits the singular
+        ``unit_primitive`` key, so the raw data is keyed the same way here.
+        """
         prompt_id = "test_prompt"
 
         # Add optional fields to test defaults
         extended_data = {
             **sample_prompt_data,
-            "unit_primitives": unit_primitives,
+            "unit_primitive": raw_unit_primitive,
             "params": {"timeout": 30},
         }
 
@@ -242,6 +249,54 @@ class TestInMemoryPromptRegistry:
             tool_choice=None,
             tools=None,
         )
+
+    @pytest.mark.parametrize(
+        "unit_primitives,expected_unit_primitive",
+        [
+            ([], GitLabUnitPrimitive.DUO_AGENT_PLATFORM),
+            ([GitLabUnitPrimitive.COMPLETE_CODE], GitLabUnitPrimitive.COMPLETE_CODE),
+            ([GitLabUnitPrimitive.DUO_CHAT], GitLabUnitPrimitive.DUO_CHAT),
+        ],
+    )
+    def test_declared_unit_primitive_survives_to_prompt_data_seam(
+        self,
+        in_memory_registry,
+        mock_shared_registry,
+        sample_prompt_data,
+        unit_primitives,
+        expected_unit_primitive,
+    ):
+        """Regression: the declared unit primitive must survive the production seam.
+
+        In production, prompt data reaches ``register_prompt`` via
+        ``InMemoryPromptConfig.to_prompt_data()``, which collapses the plural
+        ``unit_primitives`` list into the singular ``unit_primitive`` key. This
+        test feeds that serializer output (rather than a hand-built plural dict)
+        so a reader/writer key mismatch cannot silently default every prompt to
+        ``duo_agent_platform``.
+        """
+        prompt_id = "test_prompt"
+
+        prompt_config = InMemoryPromptConfig(
+            prompt_id=prompt_id,
+            name=prompt_id,
+            model=None,
+            unit_primitives=unit_primitives,
+            prompt_template=sample_prompt_data["prompt_template"],
+        )
+
+        in_memory_registry.register_prompt(prompt_id, prompt_config.to_prompt_data())
+
+        model_metadata = Mock()
+        model_metadata.llm_definition.model_class_provider = ModelClassProvider.LITE_LLM
+        model_metadata.llm_definition.requires_single_system_message = False
+
+        in_memory_registry.get(
+            prompt_id, prompt_version=None, model_metadata=model_metadata
+        )
+
+        resolved = mock_shared_registry._build_prompt.call_args.kwargs["config"]
+        assert resolved.unit_primitive == expected_unit_primitive
 
     def test_provider_params_forwarded_from_flow_model(
         self, in_memory_registry, mock_shared_registry, sample_prompt_data
