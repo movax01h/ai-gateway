@@ -18,11 +18,17 @@ from duo_workflow_service.agent_platform.v1.components.registry import (
 from duo_workflow_service.agent_platform.v1.components.supervisor.component import (
     SupervisorAgentComponent,
 )
+from duo_workflow_service.agent_platform.v1.components.supervisor_v2.component import (
+    SupervisorAgentComponentV2,
+)
+from lib.feature_flags import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag
 
 # The @inject decorator wraps the class into a function when the class has
 # Provide[...] fields; __wrapped__ gives the original class for isinstance() checks.
 _AgentComponentClass = AgentComponent.__wrapped__  # type: ignore[attr-defined]
 _SupervisorAgentComponentClass = SupervisorAgentComponent.__wrapped__  # type: ignore[attr-defined]
+_SupervisorAgentComponentV2Class = SupervisorAgentComponentV2.__wrapped__  # type: ignore[attr-defined]
 
 
 @pytest.fixture(name="mock_schema_registry")
@@ -232,3 +238,130 @@ class TestAgentComponentFactoryDispatch:
         )
 
         assert set(built_components.keys()) == original_keys
+
+
+@pytest.fixture(name="parallel_subagents_flag")
+def parallel_subagents_flag_fixture():
+    """Enable ``dap_parallel_subagents`` for one test, then restore the previous context."""
+    token = current_feature_flag_context.set({FeatureFlag.DAP_PARALLEL_SUBAGENTS.value})
+    yield
+    current_feature_flag_context.reset(token)
+
+
+class TestAgentComponentFactoryV2Dispatch:
+    """Test suite verifying factory dispatch to SupervisorAgentComponentV2.
+
+    The ``dap_parallel_subagents`` feature flag is the only thing selecting
+    parallel over sequential delegation: any component declaring ``subagents``
+    switches once the flag is on, and the flag doubles as the kill switch, so a
+    rollback never needs a new flow config revision.
+    """
+
+    def _make_developer_mock(self):
+        developer_mock = Mock(spec=BaseComponent)
+        developer_mock.description = "Developer agent"
+        developer_mock.compile_as_subagent = Mock()
+        return developer_mock
+
+    def test_dispatches_to_v2_when_the_feature_flag_is_enabled(
+        self,
+        parallel_subagents_flag,
+        flow_id,
+        flow_type,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_schema_registry,
+        user,
+    ):
+        built_components: dict[str, BaseComponent] = {
+            "developer": self._make_developer_mock()
+        }
+
+        result = agent_component_factory(
+            name="supervisor",
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id="supervisor_prompt",
+            toolset=mock_toolset,
+            subagents=[{"name": "developer"}],
+            max_delegations=5,
+            _built_components=built_components,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=mock_schema_registry,
+        )
+
+        assert isinstance(result, _SupervisorAgentComponentV2Class)
+
+    def test_dispatches_to_v1_when_the_feature_flag_is_disabled(
+        self,
+        flow_id,
+        flow_type,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_schema_registry,
+        user,
+    ):
+        """The feature flag is the kill switch: without it, subagents are delegated to sequentially.
+
+        No ``parallel_subagents_flag`` fixture here, so the flag context is empty. The mock exposes
+        ``bind_to_supervisor`` rather than ``compile_as_subagent``, since falling back really does construct the
+        sequential component, which validates its managed agents for exactly that method.
+        """
+        developer_mock = Mock(spec=BaseComponent)
+        developer_mock.description = "Developer agent"
+        developer_mock.bind_to_supervisor = Mock()
+        built_components: dict[str, BaseComponent] = {"developer": developer_mock}
+
+        result = agent_component_factory(
+            name="supervisor",
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id="supervisor_prompt",
+            toolset=mock_toolset,
+            subagents=[{"name": "developer"}],
+            max_delegations=5,
+            _built_components=built_components,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=mock_schema_registry,
+        )
+
+        assert isinstance(result, _SupervisorAgentComponentClass)
+        assert not isinstance(result, _SupervisorAgentComponentV2Class)
+
+    def test_v2_dispatch_injects_built_components(
+        self,
+        parallel_subagents_flag,
+        flow_id,
+        flow_type,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_schema_registry,
+        user,
+    ):
+        built_components: dict[str, BaseComponent] = {
+            "developer": self._make_developer_mock()
+        }
+
+        result = agent_component_factory(
+            name="supervisor",
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id="supervisor_prompt",
+            toolset=mock_toolset,
+            subagents=[{"name": "developer"}],
+            max_delegations=5,
+            _built_components=built_components,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=mock_schema_registry,
+        )
+
+        assert "developer" in result.subagent_components

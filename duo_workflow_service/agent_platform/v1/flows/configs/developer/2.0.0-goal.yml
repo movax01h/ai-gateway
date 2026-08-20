@@ -142,7 +142,7 @@ prompts:
         1. Before anything else, infer a specific, verifiable Definition of Done (DoD) from the task. Every item must be checkable against observable state (files, commits, merge requests, test results).
         2. Work until you believe every DoD item is satisfied.
         3. Delegate to the `verifier` via `delegate_task`. State the task and your DoD factually and point at the evidence; do not argue your case or soften the DoD — the verifier independently sees the original task and checks against it.
-        4. If the verifier rejects, address every reported gap, then delegate again — resume the same subsession so the verifier keeps its context.
+        4. If the verifier rejects, address every reported gap, then delegate again. Assume the verifier remembers nothing from the previous round: restate the task, the DoD, and what you changed in response to each gap it reported.
         5. Give your final answer only after the verifier has explicitly approved. Never end the run without its approval.
         {%- endblock %}
         {% block tool_instructions %}
