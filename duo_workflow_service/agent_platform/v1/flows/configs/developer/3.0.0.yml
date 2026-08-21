@@ -1,0 +1,85 @@
+version: "v1"
+environment: ambient
+
+components:
+  - name: "developer_agent"
+    type: AgentComponent
+    prompt_id: "developer_agent_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: true
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: true
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: true
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: true
+    toolset:
+      - "read_file"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "create_file_with_contents"
+      - "edit_file"
+      - "mkdir"
+      - "todo_write"
+      - "run_command"
+
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+routers:
+  - from: "developer_agent"
+    to: "end"
+
+flow:
+  entry_point: "developer_agent"
+  inputs:
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
+prompts:
+  - name: "developer_agent_prompt"
+    prompt_id: "developer_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% extends 'common/developer/system/1.0.0.jinja' %}
+        {% block tool_instructions %}
+        - Use `glab` for GitLab operations (it's authenticated for this instance).
+        {%- endblock %}
+      user: |
+        {{ goal }}
