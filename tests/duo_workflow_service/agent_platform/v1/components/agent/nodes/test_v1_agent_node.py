@@ -4,6 +4,7 @@ import importlib
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, call, patch
 
+import litellm
 import pytest
 from anthropic import APIStatusError
 from langchain_core.exceptions import ContextOverflowError
@@ -324,8 +325,51 @@ class TestAgentNode:
             config={},
         )
 
+    @pytest.mark.parametrize(
+        ("error_factory", "expected_status_code", "expected_message"),
+        [
+            pytest.param(
+                lambda: APIStatusError(
+                    "Rate limit exceeded", response=Mock(status_code=429), body=None
+                ),
+                429,
+                "Rate limit exceeded",
+                id="anthropic_rate_limit",
+            ),
+            pytest.param(
+                lambda: litellm.RateLimitError(
+                    message="Rate limit exceeded",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                429,
+                "litellm.RateLimitError: Rate limit exceeded",
+                id="litellm_rate_limit",
+            ),
+            pytest.param(
+                lambda: litellm.InternalServerError(
+                    message="Internal server error",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                500,
+                "litellm.InternalServerError: Internal server error",
+                id="litellm_internal_server_error",
+            ),
+            pytest.param(
+                lambda: litellm.ServiceUnavailableError(
+                    message="Service temporarily unavailable",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                503,
+                "litellm.ServiceUnavailableError: Service temporarily unavailable",
+                id="litellm_service_unavailable",
+            ),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_run_api_error(
+    async def test_run_retries_api_status_error(
         self,
         flow_id,
         inputs,
@@ -336,16 +380,12 @@ class TestAgentNode:
         base_flow_state,
         mock_ai_message,
         mock_prompt,
+        error_factory,
+        expected_status_code,
+        expected_message,
     ):
         """Test run method handles retryable API status errors."""
-        # Create mock API error (429 - rate limit)
-        mock_response = Mock()
-        mock_response.status_code = 429
-        api_error = APIStatusError(
-            "Rate limit exceeded", response=mock_response, body=None
-        )
-
-        mock_prompt.ainvoke = AsyncMock(side_effect=[api_error, mock_ai_message])
+        mock_prompt.ainvoke = AsyncMock(side_effect=[error_factory(), mock_ai_message])
 
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.ModelErrorHandler",
@@ -373,13 +413,17 @@ class TestAgentNode:
             )
             result = await agent_node.run(base_flow_state)
 
+            mock_error_handler.get_error_type.assert_called_once_with(
+                expected_status_code
+            )
+
             # Verify error handler was called
             mock_error_handler.handle_error.assert_called_once()
             error = mock_error_handler.handle_error.call_args[0][0]
             assert isinstance(error, ModelError)
             assert error.error_type == ModelErrorType.RATE_LIMIT_ERROR
-            assert error.status_code == 429
-            assert error.message == "Rate limit exceeded"
+            assert error.status_code == expected_status_code
+            assert error.message == expected_message
 
             # Verify successful result after retry
             assert FlowStateKeys.CONVERSATION_HISTORY in result

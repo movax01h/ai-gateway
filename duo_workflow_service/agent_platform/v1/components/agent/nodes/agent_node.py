@@ -3,10 +3,11 @@ from http import HTTPStatus
 from typing import Any, ClassVar, Optional, Sequence, Type, cast
 
 import structlog
-from anthropic import APIStatusError
+from anthropic import APIStatusError as AnthropicAPIStatusError
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ConfigDict, Field
 from pydantic_core import ValidationError
 
@@ -535,7 +536,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 )
 
                 await self._error_handler.handle_error(model_error)
-            except APIStatusError as e:
+            # Catch both hierarchies. LiteLLM builds its exceptions on OpenAI's,
+            # so an Anthropic-only clause leaves this retry loop unreachable for
+            # every model served through LiteLLM.
+            except (AnthropicAPIStatusError, OpenAIAPIStatusError) as e:
                 error_message = str(e)
                 status_code = e.response.status_code
                 model_error = ModelError(
