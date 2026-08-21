@@ -27,9 +27,6 @@ GET_WORK_ITEM_TYPE_BY_NAME_QUERY = load_graphql_query(
 CREATE_NOTE_MUTATION = load_graphql_query(
     str(TOOLS_QUERIES_DIR / "create_note.graphql")
 )
-CREATE_DISCUSSION_MUTATION = load_graphql_query(
-    str(TOOLS_QUERIES_DIR / "create_discussion.graphql")
-)
 UPDATE_WORK_ITEM_MUTATION = load_graphql_query(
     str(TOOLS_QUERIES_DIR / "update_work_item.graphql")
 )
@@ -39,7 +36,6 @@ GET_WORK_ITEM_STATUSES_QUERY = load_graphql_query(
 )
 
 __all__ = [
-    "CREATE_DISCUSSION_MUTATION",
     "CREATE_NOTE_MUTATION",
     "CREATE_WORK_ITEM_MUTATION",
     "GET_GROUP_WORK_ITEM_NOTES_QUERY",
