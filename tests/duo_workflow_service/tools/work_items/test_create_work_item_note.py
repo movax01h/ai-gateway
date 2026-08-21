@@ -251,39 +251,6 @@ async def test_create_work_item_note_reply_to_note(
             {"graphql_errors": None, "note_errors": ["Body cannot be blank"]},
             2,
         ),
-        # Create discussion error
-        (
-            {
-                "project_id": "namespace/project",
-                "work_item_iid": 42,
-                "body": "",
-                "start_discussion": True,
-            },
-            [
-                {
-                    "project": {
-                        "workItems": {
-                            "nodes": [
-                                {
-                                    "id": "gid://gitlab/WorkItem/123",
-                                    "iid": "42",
-                                    "title": "Test Work Item",
-                                }
-                            ]
-                        }
-                    }
-                },
-                {
-                    "createDiscussion": {
-                        "note": None,
-                        "errors": ["Body cannot be blank"],
-                    }
-                },
-            ],
-            "Failed to create discussion",
-            {"graphql_errors": None, "note_errors": ["Body cannot be blank"]},
-            2,
-        ),
         # GraphQL error on create
         (
             {
@@ -455,64 +422,6 @@ async def test_create_work_item_note_errors(
                     assert error in exception_message
 
     assert gitlab_client_mock.graphql.call_count == expected_call_count
-
-
-@pytest.mark.asyncio
-async def test_create_work_item_note_start_discussion(
-    gitlab_client_mock, metadata, work_item_data, created_note_data_fixture
-):
-    """start_discussion=True should call createDiscussion instead of createNote."""
-    gitlab_client_mock.graphql = AsyncMock()
-    gitlab_client_mock.graphql.side_effect = [
-        {"project": {"workItems": {"nodes": [work_item_data]}}},
-        {"createDiscussion": {"note": created_note_data_fixture, "errors": []}},
-    ]
-
-    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
-
-    response = await tool._arun(
-        project_id="namespace/project",
-        work_item_iid=42,
-        body="This is a question",
-        start_discussion=True,
-    )
-
-    response_json = json.loads(response)
-    assert response_json["status"] == "success"
-    assert response_json["message"] == "Discussion created successfully."
-    assert response_json["note"] == created_note_data_fixture
-
-    assert gitlab_client_mock.graphql.call_count == 2
-
-    second_call_args = gitlab_client_mock.graphql.call_args_list[1][0]
-    assert "createDiscussion" in second_call_args[0]
-    assert "createNote" not in second_call_args[0]
-    assert second_call_args[1]["input"]["body"] == "This is a question"
-
-
-@pytest.mark.asyncio
-async def test_create_work_item_note_start_discussion_with_note_id_raises(
-    gitlab_client_mock, metadata
-):
-    """start_discussion cannot be combined with note_id (a reply).
-
-    This guard fires before any GraphQL round-trip - no work-item lookup or
-    mutation call should happen on a request that's rejected up front.
-    """
-    gitlab_client_mock.graphql = AsyncMock()
-
-    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
-
-    with pytest.raises(ToolException, match="start_discussion cannot be combined"):
-        await tool._arun(
-            project_id="namespace/project",
-            work_item_iid=42,
-            body="This is a reply",
-            note_id=456,
-            start_discussion=True,
-        )
-
-    assert gitlab_client_mock.graphql.call_count == 0
 
 
 @pytest.mark.parametrize(
