@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://gitlab.com/gitlab-org/caproni/-/raw/main/schema/config.v2.schema.json
+#
+# AI Gateway - lifecycle hooks and reloaders.
+#
+# Loaded automatically by Caproni when the ai-gateway repository is cloned.
+
+lifecycle_hooks:
+  # Installs poetry deps, configures .env, creates the Anthropic secret,
+  # and seeds GitLab Duo (license, feature flags, gitlab-duo/test project).
+  - type: edit_mode_start
+    script: .gitlab/caproni/setup-ai-gateway.sh
+
+reloaders:
+  ai-gateway:
+    type: mirror
+    repository: ai-gateway
+    edit_mode: false
+    mirror:
+      target:
+        namespace: ai-gateway
+        kubernetes_type: deployment
+        name: ai-gateway
+      edit_mode_processes:
+        ai-gateway:
+          command: poetry run ai_gateway
+        duo-workflow-service:
+          # duo-workflow-service crashes if GitLab's OIDC endpoint is not up
+          # yet, so gate it behind a readiness poll.
+          command: bash -c '.gitlab/caproni/wait-for-gitlab.sh && exec poetry run duo-workflow-service'
