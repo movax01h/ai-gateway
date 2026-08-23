@@ -113,6 +113,59 @@ class TestValidateFlowConfigs:
             pytest.fail(f"validate_flow raised:\n{error}", pytrace=False)
 
 
+def _component(config: FlowConfig, name: str) -> dict:
+    return next(
+        component for component in config.components if component["name"] == name
+    )
+
+
+class TestFixPipelineConfigVersions:
+    @pytest.mark.parametrize("version", ["1.0.0", "1.0.1", "1.0.2"])
+    def test_existing_versions_keep_original_bootstrap(self, version: str):
+        config = FlowConfig.from_yaml_config("fix_pipeline", version)
+        context_component = _component(config, "fix_pipeline_context")
+
+        assert config.flow.entry_point == "fetch_failing_bridge_jobs"
+        assert all(
+            component["name"] != "fetch_failing_jobs" for component in config.components
+        )
+        assert context_component["prompt_version"] == "^1.0.0"
+        assert all(
+            input_["as"] != "failing_jobs" for input_ in context_component["inputs"]
+        )
+
+    def test_patch_version_uses_deterministic_failing_jobs_bootstrap(self):
+        config = FlowConfig.from_yaml_config("fix_pipeline", "1.0.3")
+        context_component = _component(config, "fix_pipeline_context")
+
+        assert config.flow.entry_point == "fetch_failing_jobs"
+        assert _component(config, "fetch_failing_jobs")["tool_name"] == (
+            "get_pipeline_failing_jobs"
+        )
+        assert context_component["prompt_version"] == "^2.0.0"
+        assert {
+            "from": "context:fetch_failing_jobs.tool_responses",
+            "as": "failing_jobs",
+        } in context_component["inputs"]
+        assert {
+            "from": "fetch_failing_jobs",
+            "to": "fetch_failing_bridge_jobs",
+        } in config.routers
+
+    @pytest.mark.parametrize(
+        ("prompt_version", "has_failing_jobs"),
+        [("^1.0.0", False), ("^2.0.0", True)],
+    )
+    def test_prompt_versions_have_expected_contract(
+        self, prompt_version: str, has_failing_jobs: bool
+    ):
+        variables = _make_local_prompt_registry().get_required_variables(
+            "fix_pipeline_context", prompt_version=prompt_version
+        )
+
+        assert ("failing_jobs" in variables) is has_failing_jobs
+
+
 def _write_config(tmp_path: Path, config) -> Path:
     config_path = tmp_path / "flow.yml"
     config_path.write_text(yaml.safe_dump(config))
