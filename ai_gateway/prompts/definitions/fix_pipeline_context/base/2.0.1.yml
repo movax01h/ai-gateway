@@ -1,0 +1,13 @@
+name: fix_pipeline_context_prompt
+model:
+  params:
+    max_tokens: 32_768
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_context/system/2.0.1.jinja' %}
+  user: |
+    {% include 'fix_pipeline_context/user/2.0.1.jinja' %}
+  placeholder: history
+params:
+  timeout: 60

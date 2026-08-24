@@ -134,15 +134,17 @@ class TestFixPipelineConfigVersions:
             input_["as"] != "failing_jobs" for input_ in context_component["inputs"]
         )
 
-    def test_patch_version_uses_deterministic_failing_jobs_bootstrap(self):
-        config = FlowConfig.from_yaml_config("fix_pipeline", "1.0.3")
+    @pytest.mark.parametrize("version", ["1.0.3", "1.0.4"])
+    def test_patch_version_uses_deterministic_failing_jobs_bootstrap(
+        self, version: str
+    ):
+        config = FlowConfig.from_yaml_config("fix_pipeline", version)
         context_component = _component(config, "fix_pipeline_context")
 
         assert config.flow.entry_point == "fetch_failing_jobs"
         assert _component(config, "fetch_failing_jobs")["tool_name"] == (
             "get_pipeline_failing_jobs"
         )
-        assert context_component["prompt_version"] == "^2.0.0"
         assert {
             "from": "context:fetch_failing_jobs.tool_responses",
             "as": "failing_jobs",
@@ -153,8 +155,44 @@ class TestFixPipelineConfigVersions:
         } in config.routers
 
     @pytest.mark.parametrize(
+        ("version", "expected_prompt_version"),
+        [("1.0.3", "2.0.0"), ("1.0.4", "2.0.1")],
+    )
+    def test_flow_versions_pin_context_prompt_exactly(
+        self, version: str, expected_prompt_version: str
+    ):
+        """Each flow version must resolve to one prompt version.
+
+        A caret range would let a newer prompt leak into an older flow, so per-version LLM call counts could no longer
+        be attributed to the flow version that produced them.
+        """
+        context_component = _component(
+            FlowConfig.from_yaml_config("fix_pipeline", version),
+            "fix_pipeline_context",
+        )
+
+        assert context_component["prompt_version"] == expected_prompt_version
+
+    @pytest.mark.parametrize(
+        ("prompt", "expected_categories_version"),
+        [
+            ("fix_pipeline_context/system/2.0.1.jinja", "1.0.1"),
+            ("fix_pipeline_context/system/2.0.0.jinja", "1.0.0"),
+            ("fix_pipeline_context/system/1.0.0.jinja", "1.0.0"),
+            ("fix_pipeline_experiment/system/1.0.0.jinja", "1.0.0"),
+        ],
+    )
+    def test_failure_categories_partial_is_versioned_per_prompt(
+        self, prompt: str, expected_categories_version: str
+    ):
+        """The partial is shared, so a new revision must be cut rather than edited in place."""
+        include = f"fix_pipeline_failure_categories/{expected_categories_version}.jinja"
+
+        assert include in (Path("ai_gateway/prompts/definitions") / prompt).read_text()
+
+    @pytest.mark.parametrize(
         ("prompt_version", "has_failing_jobs"),
-        [("^1.0.0", False), ("^2.0.0", True)],
+        [("^1.0.0", False), ("2.0.0", True), ("2.0.1", True)],
     )
     def test_prompt_versions_have_expected_contract(
         self, prompt_version: str, has_failing_jobs: bool

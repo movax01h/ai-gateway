@@ -45,7 +45,7 @@ components:
   - name: "fix_pipeline_context"
     type: AgentComponent
     prompt_id: "fix_pipeline_context"
-    prompt_version: "2.0.0"
+    prompt_version: "2.0.1"
     response_schema_id: "fix_pipeline_context"
     response_schema_version: "^1.0.0"
     response_schema_tracking: true

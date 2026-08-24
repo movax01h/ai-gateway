@@ -51,6 +51,12 @@ class GetPipelineFailingJobs(DuoBaseTool):
     downstream pipeline URL. Only report no failing jobs after checking the original pipeline
     and all downstream pipelines. Do not ask the user before checking downstream pipelines.
 
+    When no failing jobs are found, the response also includes `pipeline_status`,
+    `pipeline_started_at`, and `yaml_errors` when GitLab recorded one. A `failed` pipeline with a
+    null `pipeline_started_at` never ran a single job, which means its CI/CD configuration was
+    rejected: that is a CI configuration error, not an absence of failures. `yaml_errors` is often
+    empty even then, so do not rely on it alone.
+
     {MERGE_REQUEST_IDENTIFICATION_DESCRIPTION}
 
     To identify a pipeline you must provide:
@@ -130,18 +136,23 @@ class GetPipelineFailingJobs(DuoBaseTool):
             failing_jobs = failing_jobs[:MAX_JOBS_RETURNED]
 
         if len(failing_jobs) == 0:
-            no_failures_msg = "No failing jobs found in this pipeline."
+            result: dict[str, Any] = {}
             if merge_request:
-                return json.dumps(
-                    {
-                        "merge_request": merge_request,
-                        "pipeline_id": pipeline_id,
-                        "failed_jobs": no_failures_msg,
-                    }
-                )
-            return json.dumps(
-                {"pipeline_id": pipeline_id, "failed_jobs": no_failures_msg}
+                result["merge_request"] = merge_request
+
+            result["pipeline_id"] = pipeline_id
+            result["failed_jobs"] = "No failing jobs found in this pipeline."
+
+            pipeline = await self._get_pipeline(
+                validation_result.project_id, pipeline_id
             )
+            if pipeline:
+                result["pipeline_status"] = pipeline.get("status")
+                result["pipeline_started_at"] = pipeline.get("started_at")
+                if yaml_errors := pipeline.get("yaml_errors"):
+                    result["yaml_errors"] = yaml_errors
+
+            return json.dumps(result)
 
         xml_root = etree.Element("jobs")
         for job in failing_jobs:
@@ -186,6 +197,40 @@ class GetPipelineFailingJobs(DuoBaseTool):
         if exclude_allow_failure:
             jobs = [job for job in jobs if not job.get("allow_failure", False)]
         return jobs
+
+    async def _get_pipeline(
+        self,
+        project_id: str | None,
+        pipeline_id: int | None,
+    ) -> Optional[dict]:
+        """Fetch a pipeline's own record, for diagnosing pipelines that produced no jobs.
+
+        Returns None when the pipeline cannot be read. This is supplementary diagnostic detail, so a failure here must
+        not fail the caller, which has already successfully determined that the pipeline has no failing jobs.
+        """
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{project_id}/pipelines/{pipeline_id}",
+            )
+        except Exception:
+            log.warning(
+                "Could not fetch pipeline details for a pipeline with no failing jobs",
+                project_id=project_id,
+                pipeline_id=pipeline_id,
+                exc_info=True,
+            )
+            return None
+
+        if not response.is_success() or not isinstance(response.body, dict):
+            log.warning(
+                "Could not fetch pipeline details for a pipeline with no failing jobs",
+                project_id=project_id,
+                pipeline_id=pipeline_id,
+                status_code=response.status_code,
+            )
+            return None
+
+        return response.body
 
     def format_display_message(
         self, args: GetPipelineFailingJobsInput, _tool_response: Any = None
