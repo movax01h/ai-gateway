@@ -708,6 +708,33 @@ def test_start_flow_tool_gated_by_enablement(
     assert ("start_flow" in tools) is expect_start_flow
 
 
+@pytest.mark.parametrize(
+    "generic_gitlab_tools_enabled", [True, False], ids=["generic_tools", "simple_tools"]
+)
+@pytest.mark.parametrize("web_search_enabled", [True, False])
+def test_web_search_requested_when_opted_in(
+    generic_gitlab_tools_enabled, web_search_enabled, workflow_with_project
+):
+    """web_search follows the per-conversation opt-in, under either read-only tool set.
+
+    Requesting it is necessary but not sufficient: ToolsRegistry enables it only for models without
+    native web search, and `toolset` silently drops names that are not enabled. So omitting it when
+    opted in would disable the fallback with no error surfacing, while requesting it when opted out
+    would let non-native models search after the user declined.
+    """
+    if generic_gitlab_tools_enabled:
+        current_feature_flag_context.set({"use_generic_gitlab_api_tools"})
+
+    workflow_with_project._workflow_config = {
+        **workflow_with_project._workflow_config,
+        "web_search_enabled": web_search_enabled,
+    }
+
+    tools = workflow_with_project._get_tools()
+
+    assert ("web_search" in tools) is web_search_enabled
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.chat.workflow.uuid4")
 async def test_get_graph_input_start(mock_uuid, workflow_with_project):

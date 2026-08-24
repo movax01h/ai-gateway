@@ -2,6 +2,7 @@ import copy
 import json
 from typing import Any, NotRequired, Optional, Sequence, Type, TypedDict, Union
 
+import boto3
 import structlog
 from langchain.tools import BaseTool
 from pydantic import BaseModel
@@ -29,6 +30,7 @@ from duo_workflow_service.tools.mr_review import SubmitMrReview
 from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
+from duo_workflow_service.tools.web_search import web_search_boto_session
 from lib.language_server import LanguageServerVersion
 
 log = structlog.stdlib.get_logger("tools_registry")
@@ -41,6 +43,9 @@ class ToolMetadata(TypedDict):
     gitlab_host: str
     project: Optional[Project]
     features: NotRequired[WorkflowFeatures]
+    # Signs AgentCore gateway requests for web search. None whenever web search is disabled,
+    # which AgentCoreWebSearch reports as a configuration error rather than searching unsigned.
+    boto_session: NotRequired[Optional[boto3.Session]]
 
 
 # This tools agent uses to interact with its internal state, they are required for
@@ -75,6 +80,21 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.AdvanceBlobSearch,
     tools.ReadFileChunked,
     tools.NotifyMeWhen,
+    tools.AgentCoreWebSearch,
+]
+
+# Capability-dependent tools that run without asking the user each time.
+#
+# Opt-in, and deliberately not derived from any other property of the tool: pre-approval is a
+# security decision, so a tool added to `_CAPABILITY_DEPENDENT_TOOLS` must require approval until
+# someone puts it here on purpose. Superseding tools are absent because they inherit the approval
+# state of the tool they replace.
+#
+# Only read-only tools with no side effects belong here.
+_PREAPPROVED_CAPABILITY_TOOLS: list[Type[BaseTool]] = [
+    # Reads public web pages and returns text. Nothing is written, and the agent is told to treat
+    # results as untrusted, so prompting on each search would only add friction.
+    tools.AgentCoreWebSearch,
 ]
 
 _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
@@ -258,6 +278,7 @@ class ToolsRegistry:
             gitlab_host=workflow_config.get("gitlab_host", ""),
             project=project,
             features=workflow_config.get("features", {}),
+            boto_session=web_search_boto_session(),
         )
 
         return cls(
@@ -349,6 +370,12 @@ class ToolsRegistry:
             if not is_client_capable(required_capability):
                 continue
 
+            # Skip tool if it declares additional runtime conditions that are not met,
+            # such as a feature flag or a fallback that only applies for some models.
+            is_available = getattr(tool_cls, "is_available", None)
+            if is_available is not None and not is_available():
+                continue
+
             # Don't add capability dependent tool if it supersedes another tool
             # and the superseded tool is not currently enabled
             supersedes = getattr(tool_cls, "supersedes", None)
@@ -362,9 +389,15 @@ class ToolsRegistry:
             # pre-approval status will not be changed
             # deny status is inherited implicitly: if the superseded tool name is in
             # _denied_tools, toolset() will strip it regardless of which instance is active
-            self._enabled_tools[tool_cls.model_fields["name"].default] = tool_cls(
-                metadata=tool_metadata
-            )
+            tool_name = tool_cls.model_fields["name"].default
+            self._enabled_tools[tool_name] = tool_cls(metadata=tool_metadata)
+
+            # A tool that supersedes nothing introduces a new name, so there is no pre-approval to
+            # inherit and the default is to prompt. Pre-approval is granted only by explicit
+            # listing, so adding a capability-dependent tool never changes its approval behaviour
+            # by itself.
+            if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
+                self._preapproved_tool_names.add(tool_name)
 
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)

@@ -39,5 +39,6 @@ from .todo_write import *
 from .toolset import *
 from .user import *
 from .vulnerabilities import *
+from .web_search import *
 from .wiki import *
 from .work_item import *

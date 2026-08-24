@@ -203,6 +203,10 @@ CHAT_SESSION_CONTEXT_TOOLS = ["get_session_context"]
 # composition here (`["render_ui"]`), gated behind DUO_CHAT_GENERATIVE_UI.
 CHAT_GENUI_TOOLS: list[str] = []
 
+# Fallback web search, for models that cannot search natively. The registry only enables it in
+# that case, and `toolset` drops names that are not enabled.
+CHAT_WEB_SEARCH_TOOLS = ["web_search"]
+
 
 @support_self_hosted_billing(class_schema="legacy")
 class Workflow(AbstractWorkflow):
@@ -506,8 +510,17 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
+        # The per-conversation opt-in gates the fallback tool just as it gates native
+        # `web_search_options`, so turning search off holds for every model.
+        web_search_tools = (
+            CHAT_WEB_SEARCH_TOOLS
+            if self._workflow_config.get("web_search_enabled", False)
+            else []
+        )
+
         available_tools = (
             read_only_tools
+            + web_search_tools
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
