@@ -25,7 +25,6 @@ from ai_gateway.api.middleware import (
     AccessLogMiddleware,
     DistributedTraceMiddleware,
     FeatureFlagMiddleware,
-    HostHeaderValidationMiddleware,
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
@@ -140,7 +139,6 @@ def create_fast_api_server(config: Config):
         swagger_ui_parameters={"defaultModelsExpandDepth": -1},
         lifespan=lifespan,
         middleware=[
-            Middleware(HostHeaderValidationMiddleware),
             Middleware(
                 RawContextMiddleware,
                 plugins=(EnabledInstanceVerboseAiLogsHeaderPlugin(),),

@@ -19,7 +19,6 @@ from .headers import (
     X_GITLAB_TEAM_MEMBER_HEADER,
     X_GITLAB_VERSION_HEADER,
 )
-from .host_header_validation import HostHeaderValidationMiddleware
 from .internal_event import InternalEventMiddleware
 from .model_config import ModelConfigMiddleware
 from .request_metadata import RequestMetadataMiddleware
@@ -43,7 +42,6 @@ __all__ = [
     "AccessLogMiddleware",
     "DistributedTraceMiddleware",
     "FeatureFlagMiddleware",
-    "HostHeaderValidationMiddleware",
     "InternalEventMiddleware",
     "MiddlewareAuthentication",
     "ModelConfigMiddleware",
