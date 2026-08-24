@@ -24,7 +24,8 @@ models:
     params:
       model: "accounts/fireworks/models/kimi-k3"
       custom_llm_provider: "fireworks_ai"
-      temperature: 0.0
+      temperature: 1.0  # Moonshot vendor-fixed sampling: https://platform.kimi.ai/docs/guide/kimi-k3-quickstart
+      top_p: 0.95
       max_tokens: 32_768
 
   - name: "Minimax M3"
@@ -51,7 +52,8 @@ models:
     params:
       model: "accounts/fireworks/models/glm-5p2"
       custom_llm_provider: "fireworks_ai"
-      temperature: 0.0
+      temperature: 1.0  # Z.ai SWE-Bench Pro config: temperature=1 (https://huggingface.co/zai-org/GLM-5.2)
+      top_p: 1.0
       max_tokens: 32_768  # aligned with OSS peers (Kimi K3, Qwen 3.6) on same Fireworks infra
 
   - name: "Qwen3.6-27B"
