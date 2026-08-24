@@ -193,7 +193,9 @@ class TestChatAnthropic:
             pytest.param("claude-opus-4-6", True, id="4.6-opus"),
             pytest.param("claude-opus-4-7", True, id="4.7-opus"),
             # Claude <= 4.5: prefill supported, payload untouched
-            pytest.param("claude-opus-4-1-20250805", False, id="4.1-opus"),
+            # Note: claude-opus-4-1-20250805 was removed; it is no longer in
+            # models.yml and the registry lookup would return False (no prefill),
+            # making a test case for it misleading.
             pytest.param("claude-sonnet-4-5-20250929", False, id="4.5-sonnet"),
             pytest.param("claude-opus-4-5-20251101", False, id="4.5-opus"),
             pytest.param("claude-haiku-4-5-20251001", False, id="4.5-haiku"),

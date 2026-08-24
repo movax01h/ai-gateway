@@ -73,22 +73,6 @@ models:
       temperature: 0.0
       max_tokens: 32_768
 
-  - name: "Devstral 2"
-    provider: "Mistral"
-    gitlab_identifier: "devstral_2_mistral"
-    description: "Mistral AI's frontier coding agent for complex software engineering tasks across codebases."
-    cost_indicator: "$$"
-    max_context_tokens: 256_000  # https://docs.mistral.ai/models/model-cards/devstral-2-25-12
-    model_class_provider: litellm
-    family:
-      - mistral
-    params:
-      model: mistral/devstral-2512
-      custom_llm_provider: mistral
-      temperature: 0.0
-      max_tokens: 32_000
-      max_retries: 1
-
   - name: "Codestral 25.01"
     provider: "Fireworks"
     gitlab_identifier: "codestral_2501_fireworks"
@@ -144,20 +128,6 @@ models:
       max_tokens: 48
       max_retries: 10
 
-  - name: "Gemini 1.5 Flash"
-    provider: "Gemini Enterprise Agent Platform"
-    gitlab_identifier: "gemini_1_5_flash_vertex"
-    description: "Multimodal for high-volume tasks."
-    max_context_tokens: 1_000_000  # https://gemini-api.apidog.io/doc-965857
-    # Note: "Gemini 1.5 Flash come with a 1-million-token context window, and Gemini 1.5 Pro comes with a 2-million-token context window.". Read the source for more information.
-    model_class_provider: litellm
-    params:
-      model: "vertex_ai/gemini-1.5-flash-002"
-      temperature: 0.0
-      top_p: 1.0
-      top_k: 1
-      max_tokens: 8_192
-
   - name: "Gemini 2.5 Flash"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_2_5_flash_vertex"
@@ -172,18 +142,6 @@ models:
     deprecation:
       deprecation_date: "2026-03-01"
       removal_version: "19.5"
-
-  - name: "Claude Opus 4.1"
-    provider: "Anthropic"
-    gitlab_identifier: "claude_opus_4_1_20250805"
-    description: "Superseded by Sonnet 4.5 for coding, reasoning, and agentic workflows."
-    max_context_tokens: 200000  # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
-    model_class_provider: anthropic
-    supports_assistant_prefill: true
-    params:
-      model: "claude-opus-4-1-20250805"
-      temperature: 0.0
-      max_tokens: 32_000
 
   - name: "Claude Opus 4.5"
     provider: "Anthropic"

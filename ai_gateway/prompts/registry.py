@@ -147,7 +147,7 @@ LEGACY_MODEL_MAPPING = {
         "1.0.1": "claude_haiku_4_5_20251001",
     },
     "measure_comment_temperature": {
-        "1.0.0": "gemini_1_5_flash_vertex",
+        "1.0.0": "gemini_2_5_flash_vertex",
         "1.0.1": "gemini_2_5_flash_vertex",
         "1.0.2": "gemini_2_5_flash_vertex",
     },
