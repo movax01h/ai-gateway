@@ -252,6 +252,52 @@ class TestCreateAgent:
         else:
             mock_is_client_capable.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "native_available,expected_params",
+        [
+            (True, {"web_search_options": {}}),
+            (False, {}),
+        ],
+    )
+    @patch("duo_workflow_service.agents.chat_agent_factory.native_web_search_available")
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
+    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    def test_web_search_options_requires_native_support(
+        self,
+        mock_is_client_capable,
+        mock_is_feature_enabled,
+        mock_native_web_search_available,
+        user,
+        mock_tools_registry,
+        mock_toolset,
+        mock_local_prompt_registry,
+        native_available,
+        expected_params,
+    ):
+        """Models that cannot search natively get the fallback tool instead of `web_search_options`.
+
+        Binding both would offer the model two ways to answer one query, and bill the fallback provider for work the
+        model provider would have done.
+        """
+        mock_is_feature_enabled.return_value = True
+        mock_is_client_capable.return_value = True
+        mock_native_web_search_available.return_value = native_available
+
+        create_agent(
+            user=user,
+            tools_registry=mock_tools_registry,
+            internal_event_category="test_category",
+            tools=mock_toolset,
+            prompt_registry=mock_local_prompt_registry,
+            workflow_id="workflow_123",
+            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            system_template_override=None,
+            web_search_enabled=True,
+        )
+
+        call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
+        assert call_kwargs["bind_tools_params"] == expected_params
+
     @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
     @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
     def test_create_agent_with_compaction_default_config(

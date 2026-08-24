@@ -4,10 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.tools import BaseTool
 
+from ai_gateway.model_selection.models import ModelClassProvider
 from contract import contract_pb2
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
+    _CAPABILITY_DEPENDENT_TOOLS,
     _DEFAULT_TOOLS,
+    _PREAPPROVED_CAPABILITY_TOOLS,
     NO_OP_TOOLS,
     Toolset,
     ToolsRegistry,
@@ -58,6 +61,8 @@ from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitla
     PostSecretFpAnalysisToGitlab,
 )
 from duo_workflow_service.tools.wiki import GetWikiPage
+from lib.context import current_model_metadata_context
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 @pytest.fixture(name="gl_http_client")
@@ -553,6 +558,39 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
     }
 
     assert registry._enabled_tools == expected_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session", [None, "sentinel-session"])
+async def test_configure_passes_boto_session_to_tool_metadata(
+    gl_http_client, mcp_tools, project_mock, session
+):
+    """AgentCoreWebSearch signs gateway requests with this session, so configure must forward it.
+
+    It is None whenever web search is disabled, which the tool surfaces as a configuration error rather than attempting
+    an unsigned request.
+    """
+    with patch(
+        "duo_workflow_service.components.tools_registry.web_search_boto_session",
+        return_value=session,
+    ):
+        registry = await ToolsRegistry.configure(
+            workflow_config={
+                "workflow_id": "test_workflow",
+                "agent_privileges_names": ["use_git"],
+                "gitlab_host": "gitlab.example.com",
+            },
+            gl_http_client=gl_http_client,
+            outbox=_outbox,
+            project=project_mock,
+            mcp_tools=mcp_tools,
+        )
+
+    # Assert on a privilege-granted tool rather than the registry: metadata reaching the tools is
+    # the behaviour that matters, and the default tools are built without any.
+    assert (
+        registry._enabled_tools["run_git_command"].metadata["boto_session"] == session
+    )
 
 
 @pytest.mark.asyncio
@@ -1748,3 +1786,174 @@ class TestMcpToolApprovals:
         toolset = registry.toolset(["mcp__context7__get_docs"])
 
         assert "mcp__context7__get_docs" not in toolset._all_tools
+
+
+class TestWebSearchFallbackRegistration:
+    """`AgentCoreWebSearch` is a fallback: it registers only when native search cannot run."""
+
+    @pytest.fixture(name="capable_client")
+    def capable_client_fixture(self):
+        with patch(
+            "duo_workflow_service.components.tools_registry.is_client_capable",
+            return_value=True,
+        ):
+            yield
+
+    @pytest.fixture(name="model_class_provider")
+    def model_class_provider_fixture(self, request):
+        metadata = MagicMock()
+        metadata.llm_definition.model_class_provider = request.param
+        token = current_model_metadata_context.set(metadata)
+        yield
+        current_model_metadata_context.reset(token)
+
+    @pytest.fixture(name="web_search_flag")
+    def web_search_flag_fixture(self, request):
+        flags = {FeatureFlag.DAP_WEB_SEARCH.value} if request.param else set()
+        token = current_feature_flag_context.set(flags)
+        yield
+        current_feature_flag_context.reset(token)
+
+    @pytest.fixture(name="configured_gateway", autouse=True)
+    def configured_gateway_fixture(self, monkeypatch):
+        """Point the tool at a gateway, since it does not register without one.
+
+        Set explicitly rather than inherited from the environment: the test process loads the
+        repository `.env`, so these tests would otherwise pass only for developers who have
+        configured a real gateway locally.
+        """
+        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "true")
+        monkeypatch.setenv(
+            "DUO_WORKFLOW_WEB_SEARCH__GATEWAY_URL",
+            "https://gw-abcdefghij.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
+        )
+        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__TARGET_NAME", "websearch")
+
+    @pytest.mark.parametrize(
+        "web_search_flag,model_class_provider",
+        [(True, ModelClassProvider.LITE_LLM)],
+        indirect=True,
+    )
+    def test_not_registered_without_a_configured_gateway(
+        self,
+        capable_client,
+        web_search_flag,
+        model_class_provider,
+        tool_metadata,
+        monkeypatch,
+    ):
+        """Every other gate can be open; with no gateway the tool still must not be offered."""
+        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "false")
+
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert "web_search" not in registry._enabled_tools
+        assert "web_search" not in registry._preapproved_tool_names
+
+    @pytest.mark.parametrize(
+        "web_search_flag,model_class_provider,registered",
+        [
+            # Flag on, native unusable over LiteLLM: register the fallback.
+            (True, ModelClassProvider.LITE_LLM, True),
+            # Anthropic and OpenAI search natively, so the fallback must not be offered too.
+            (True, ModelClassProvider.ANTHROPIC, False),
+            (True, ModelClassProvider.OPENAI, False),
+            # Flag off: never registered.
+            (False, ModelClassProvider.LITE_LLM, False),
+        ],
+        indirect=["web_search_flag", "model_class_provider"],
+    )
+    def test_registration(
+        self,
+        capable_client,
+        web_search_flag,
+        model_class_provider,
+        registered,
+        tool_metadata,
+    ):
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert ("web_search" in registry._enabled_tools) is registered
+
+    @pytest.mark.parametrize(
+        "web_search_flag,model_class_provider",
+        [(True, ModelClassProvider.LITE_LLM)],
+        indirect=True,
+    )
+    def test_registers_as_preapproved(
+        self,
+        capable_client,
+        web_search_flag,
+        model_class_provider,
+        tool_metadata,
+    ):
+        """Searching is read-only, so it must not prompt for approval on every call."""
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert "web_search" in registry._preapproved_tool_names
+        assert registry.toolset(["web_search"]).approved("web_search")
+
+
+class TestCapabilityDependentPreapproval:
+    """Pre-approval is granted by explicit listing; everything else keeps prompting."""
+
+    def test_only_listed_tools_are_preapproved(self, tool_metadata):
+        """Adding a capability-dependent tool must not change its approval behaviour.
+
+        Guards against deriving pre-approval from some other property of the tool. A rule keyed on
+        `supersedes` previously pre-approved `notify_me_when` the moment it was added to
+        `_CAPABILITY_DEPENDENT_TOOLS`, silently dropping the prompt for a tool that schedules a
+        notification which cannot be cancelled.
+        """
+        with patch(
+            "duo_workflow_service.components.tools_registry.is_client_capable",
+            return_value=True,
+        ):
+            registry = ToolsRegistry(
+                enabled_tools=[],
+                preapproved_tools=[],
+                tool_metadata=tool_metadata,
+            )
+
+        expected = {
+            tool_cls.model_fields["name"].default
+            for tool_cls in _PREAPPROVED_CAPABILITY_TOOLS
+        }
+        capability_dependent = {
+            tool_cls.model_fields["name"].default
+            for tool_cls in _CAPABILITY_DEPENDENT_TOOLS
+        }
+
+        assert capability_dependent & registry._preapproved_tool_names <= expected
+
+    def test_superseding_tool_does_not_gain_preapproval(self, tool_metadata):
+        """A superseding tool must keep the pre-approval of the tool it replaces.
+
+        `run_command` is enabled here without its privilege being pre-approved, so if the rule
+        stopped distinguishing superseding tools, `shell_command` would silently become approved
+        and shell execution would skip its approval prompt.
+        """
+        with patch(
+            "duo_workflow_service.components.tools_registry.is_client_capable",
+            return_value=True,
+        ):
+            registry = ToolsRegistry(
+                enabled_tools=["run_commands"],
+                preapproved_tools=[],
+                tool_metadata=tool_metadata,
+            )
+
+        assert "run_command" in registry._enabled_tools
+        assert "run_command" not in registry._preapproved_tool_names

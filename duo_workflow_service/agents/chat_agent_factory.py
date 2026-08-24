@@ -19,6 +19,7 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
 from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
+from duo_workflow_service.tools.web_search import native_web_search_available
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
@@ -63,11 +64,17 @@ def create_agent(
 
     # Include web_search_options when the feature flag is on, the client can
     # render search results, AND the user enabled web search for this session.
+    #
+    # The last condition keeps this to models that run search themselves. Models that do not get
+    # the AgentCoreWebSearch tool in their toolset instead, and the two routes must stay mutually
+    # exclusive: binding both offers the model two ways to answer one query and bills the fallback
+    # for work the provider would have done.
     bind_tools_params: dict[str, dict] = {}
     if (
         is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH)
         and is_client_capable("web_search")
         and web_search_enabled
+        and native_web_search_available()
     ):
         bind_tools_params["web_search_options"] = {}
 
