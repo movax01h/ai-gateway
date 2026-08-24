@@ -1,6 +1,15 @@
 import copy
 import json
-from typing import Any, NotRequired, Optional, Sequence, Type, TypedDict, Union
+from typing import (
+    Any,
+    Iterable,
+    NotRequired,
+    Optional,
+    Sequence,
+    Type,
+    TypedDict,
+    Union,
+)
 
 import boto3
 import structlog
@@ -245,6 +254,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!, $toolName: String!, $toolCallArgs:
 class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
+    _ask_tool_names: set[str]
     _mcp_tool_names: list[str]
 
     @classmethod
@@ -258,6 +268,7 @@ class ToolsRegistry:
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
+        ask_tools: Optional[list[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -288,6 +299,7 @@ class ToolsRegistry:
             mcp_tools=mcp_tools,
             language_server_version=language_server_version,
             denied_tools=denied_tools or [],
+            ask_tools=ask_tools or [],
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
         )
@@ -302,6 +314,7 @@ class ToolsRegistry:
         mcp_tools: Optional[list[McpToolConfig]] = None,
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
+        ask_tools: Optional[list[str]] = None,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
@@ -318,6 +331,7 @@ class ToolsRegistry:
 
         self._preapproved_tool_names = set(self._enabled_tools.keys())
         self._denied_tools: set[str] = set(denied_tools or [])
+        self._ask_tool_names: set[str] = set(ask_tools or [])
         self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
 
         self._gl_http_client = gl_http_client
@@ -398,6 +412,14 @@ class ToolsRegistry:
             # by itself.
             if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
                 self._preapproved_tool_names.add(tool_name)
+
+        # Applied last so it outranks every pre-approval source above: an admin `ask`
+        # rule must always reach the user, never be silently auto-approved.
+        self._preapproved_tool_names -= self._ask_tool_names
+
+    def ask_listed_tool_names(self, tool_names: Iterable[str]) -> set[str]:
+        """Return the subset of ``tool_names`` an admin `ask` rule forces to prompt."""
+        return {name for name in tool_names if name in self._ask_tool_names}
 
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)

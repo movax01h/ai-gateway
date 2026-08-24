@@ -20,6 +20,9 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.utils.flow import (
+    strip_ask_listed_pre_approvals,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     AbortComponent,
     BaseComponent,
@@ -672,6 +675,11 @@ class Flow(AbstractWorkflow):
                 "environment": self._config.environment,
             }
         )
+
+        if "pre_approved_tools" in comp_params:
+            comp_params["pre_approved_tools"] = strip_ask_listed_pre_approvals(
+                comp_params["pre_approved_tools"], tools_registry
+            )
 
         if "toolset" in comp_params:
             comp_params["toolset"] = self._parse_toolset(

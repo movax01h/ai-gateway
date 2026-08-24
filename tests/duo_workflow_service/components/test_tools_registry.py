@@ -1202,6 +1202,91 @@ async def test_registry_configuration_jwt_deny_overrides_workflow_config_preappr
     assert "edit_file" in toolset._all_tools
 
 
+@pytest.mark.asyncio
+async def test_registry_configuration_jwt_ask_overrides_workflow_config_preapproval(
+    gl_http_client, project_mock
+):
+    """JWT ask list should override pre-approvals set via workflow_config."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": ["read_write_files"],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        ask_tools=["read_file"],
+    )
+
+    # Unlike deny, ask keeps the tool available -- it just always prompts.
+    assert not registry.is_preapproved("read_file")
+    assert registry.is_preapproved("edit_file")
+    toolset = registry.toolset(["read_file", "edit_file"])
+    assert "read_file" in toolset._all_tools
+    assert "read_file" not in toolset._pre_approved
+    assert "edit_file" in toolset._pre_approved
+    assert await registry.approval_required("read_file", {"path": "x"})
+
+
+@pytest.mark.asyncio
+async def test_registry_ask_overrides_default_tool_blanket_preapproval(
+    gl_http_client, project_mock
+):
+    """Default tools are pre-approved unconditionally; an ask rule must still win."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    baseline = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+    default_tool = next(iter(baseline._preapproved_tool_names))
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        ask_tools=[default_tool],
+    )
+
+    assert baseline.is_preapproved(default_tool)
+    assert not registry.is_preapproved(default_tool)
+
+
+@pytest.mark.asyncio
+async def test_ask_listed_tool_names_reports_ask_listed_names(
+    gl_http_client, project_mock
+):
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        ask_tools=["read_file"],
+    )
+
+    assert registry.ask_listed_tool_names(["read_file", "edit_file"]) == {"read_file"}
+    assert registry.ask_listed_tool_names([]) == set()
+
+
 # Tests for Generic GitLab API Tools
 
 
