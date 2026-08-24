@@ -235,6 +235,38 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             )
             yield flow
 
+    def test_prepare_component_params_strips_ask_listed_pre_approvals(
+        self, flow_instance, mock_tools_registry
+    ):
+        mock_tools_registry.ask_listed_tool_names.return_value = {"run_command"}
+
+        params = flow_instance._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "pre_approved_tools": ["run_command", "notify_me_when"],
+            },
+            mock_tools_registry,
+        )
+
+        assert params["pre_approved_tools"] == ["notify_me_when"]
+
+    def test_prepare_component_params_keeps_pre_approvals_without_ask_rules(
+        self, flow_instance, mock_tools_registry
+    ):
+        mock_tools_registry.ask_listed_tool_names.return_value = set()
+
+        params = flow_instance._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "pre_approved_tools": ["notify_me_when"],
+            },
+            mock_tools_registry,
+        )
+
+        assert params["pre_approved_tools"] == ["notify_me_when"]
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "status_event,goal,expected_type,first_checkpoint",

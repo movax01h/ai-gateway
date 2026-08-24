@@ -210,6 +210,7 @@ class AbstractWorkflow(ABC):
         self._language_server_version = language_server_version
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
+        self._ask_tools: list[str] = []
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -338,15 +339,27 @@ class AbstractWorkflow(ABC):
                     )
                     self._preapproved_tools = []
                     return
+                # Ask needs a human to answer; without one (headless/CI, no
+                # timeout on a pending approval) treat it as absent so behaviour
+                # there is unchanged by this claim. Default False (cannot ask)
+                # matches WorkflowConfig's own construction defaults.
+                can_ask_user = self._workflow_config.get(
+                    "allow_agent_to_request_user", False
+                )
+                self._ask_tools = list(set(policies.ask)) if can_ask_user else []
                 # The JWT allow-list is the ceiling: client-supplied preapproved_tools
                 # cannot widen it, else a custom container bypasses Ask/Deny governance.
                 # `ask` counts as active so an "ask everything" policy (empty allow and
                 # deny) still enforces the ceiling.
                 governance_active = (
-                    bool(policies.allow) or bool(policies.deny) or bool(policies.ask)
+                    bool(policies.allow) or bool(policies.deny) or bool(self._ask_tools)
                 )
                 if governance_active:
-                    self._preapproved_tools = list(set(policies.allow))
+                    # deny > ask > allow, matching Rails' resolution order, so a tool
+                    # named in both allow and ask still reaches the user.
+                    self._preapproved_tools = list(
+                        set(policies.allow) - set(self._ask_tools)
+                    )
                 if policies.deny:
                     self._denied_tools = list(
                         set(self._denied_tools) | set(policies.deny)
@@ -490,6 +503,7 @@ class AbstractWorkflow(ABC):
                 ),
                 language_server_version=self._language_server_version,
                 denied_tools=self._denied_tools,
+                ask_tools=self._ask_tools,
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):

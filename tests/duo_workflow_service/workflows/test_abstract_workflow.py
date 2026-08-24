@@ -471,6 +471,7 @@ async def test_compile_and_run_graph(
         mcp_tools=[mcp_tool] if mcp_enabled else [],
         language_server_version=None,
         denied_tools=[],
+        ask_tools=[],
     )
 
 
@@ -660,11 +661,14 @@ async def test_compile_and_run_graph_ask_only_policy_enforces_ceiling(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
+    workflow_config,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    # Someone is present to answer the prompt -- enforcement should apply.
+    workflow_config["allow_agent_to_request_user"] = True
 
     user = CloudConnectorUser(
         authenticated=True,
@@ -687,6 +691,174 @@ async def test_compile_and_run_graph_ask_only_policy_enforces_ceiling(
     await workflow._compile_and_run_graph("Test goal")
 
     assert "run_command" not in workflow._preapproved_tools
+    # The ask list must also reach the registry, or nothing enforces it downstream.
+    assert workflow._ask_tools == ["run_command"]
+    assert mock_tools_registry.call_args.kwargs["ask_tools"] == ["run_command"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_ask_outranks_allow(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    # Someone is present to answer the prompt -- enforcement should apply.
+    workflow_config["allow_agent_to_request_user"] = True
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["run_command", "read_file"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_ask_is_neutralized_without_a_user_to_ask(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    """Headless/CI sessions have no channel to answer a prompt, and there is no timeout on a pending approval -- so ask
+    must not veto anything for them, leaving behaviour identical to a claim that never carried `ask` at all."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    # The shared fixture already defaults this to False; set it explicitly so
+    # the test doesn't silently pass if that default ever changes.
+    workflow_config["allow_agent_to_request_user"] = False
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["read_file"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._ask_tools == []
+    # allow is untouched by the (neutralized) ask list, exactly as if the
+    # claim had never carried an ask key.
+    assert workflow._preapproved_tools == ["read_file"]
+    assert mock_tools_registry.call_args.kwargs["ask_tools"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_ask_is_neutralized_when_signal_is_missing(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    """If `allow_agent_to_request_user` is ever absent from workflow_config rather than explicitly set, default to
+    "cannot ask" (neutralize ask) rather than "can ask" (enforce the veto) -- missing must fail toward the unchanged-
+    behaviour side, never toward a prompt nobody can answer."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    del workflow_config["allow_agent_to_request_user"]
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["read_file"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._ask_tools == []
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_all_ask_policy_does_not_clear_preapproved_without_a_user(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    """An all-ask policy (empty allow and deny) must not clear preapproved_tools when nobody can answer -- governance
+    itself has to treat ask as inactive here, not just the subtraction, or the client's own list gets wiped anyway."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["allow_agent_to_request_user"] = False
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": [], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._ask_tools == []
+    assert workflow._preapproved_tools == ["read_file"]
 
 
 @pytest.mark.asyncio
