@@ -130,6 +130,67 @@ _FLOW_CONFIGS_BY_VERSION = {
     "v1": v1_list_configs,
 }
 
+# Canonical role order for prompt templates arriving via protobuf Struct.
+# Lower sorts first; unknown roles sort last. system_static must precede
+# system_dynamic: every split-system template in the repo orders static
+# first, and the first system message receives the security block and the
+# index-0 prompt-cache breakpoint.
+_PROMPT_ROLE_PRIORITIES = {
+    "system": 0,
+    "system_static": 1,
+    "system_dynamic": 2,
+    "user": 10,
+    "human": 10,
+    "assistant": 20,
+    "ai": 20,
+    "function": 20,
+    "placeholder": 30,
+}
+_UNKNOWN_SYSTEM_ROLE_PRIORITY = 3
+_UNKNOWN_ROLE_PRIORITY = 40
+
+
+def _prompt_role_sort_key(role: str) -> Tuple[int, str]:
+    priority = _PROMPT_ROLE_PRIORITIES.get(role)
+    if priority is None:
+        priority = (
+            _UNKNOWN_SYSTEM_ROLE_PRIORITY
+            if role.startswith("system")
+            else _UNKNOWN_ROLE_PRIORITY
+        )
+    return (priority, role)
+
+
+def _normalize_prompt_template_order(config_dict: Dict[str, Any]) -> None:
+    """Impose a canonical role order on struct-sourced prompt templates, in place.
+
+    ``flowConfig`` is a ``google.protobuf.Struct``, i.e. a ``map<string, Value>``:
+    its key iteration order is unspecified and varies across processes (the upb
+    backend hashes with a per-process seed). ``prompt_template_to_messages``
+    emits messages in dict iteration order, so without normalization the same
+    inline flow renders ``[system, user]`` in one process and ``[user, system]``
+    in another, which breaks prompt-cache stability and any A/B comparison.
+
+    Registry prompts are loaded from YAML, which preserves author order, and are
+    deliberately not routed through this function: authors may order roles
+    intentionally (e.g. a mid-template history placeholder). For struct-sourced
+    templates the author's order is already lost on the wire, so a canonical
+    order is the best available behavior.
+    """
+    prompts = config_dict.get("prompts")
+    if not isinstance(prompts, list):
+        return
+    for prompt in prompts:
+        if not isinstance(prompt, dict):
+            continue
+        template = prompt.get("prompt_template")
+        if isinstance(template, dict):
+            prompt["prompt_template"] = dict(
+                sorted(
+                    template.items(), key=lambda item: _prompt_role_sort_key(item[0])
+                )
+            )
+
 
 @overload
 def _convert_struct_to_flow_config(
@@ -172,6 +233,7 @@ def _convert_struct_to_flow_config(
             f"Supported versions: {list(_FLOW_BY_VERSIONS.keys())}"
         ) from None
     config_dict: Dict[str, Any] = MessageToDict(struct)
+    _normalize_prompt_template_order(config_dict)
 
     if flow_config_schema_version != config_dict["version"]:
         raise ValueError(

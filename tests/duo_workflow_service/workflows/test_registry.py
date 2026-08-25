@@ -1,8 +1,10 @@
+import copy
 from functools import partial
 from unittest.mock import Mock, patch
 
 import pytest
 from google.protobuf import struct_pb2
+from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform import experimental, v1
@@ -24,8 +26,10 @@ from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
     CHAT_AGENT_COMPONENT_ENVIRONMENT,
     ResolvedFlow,
+    _convert_struct_to_flow_config,
     _load_flow_from_inline_config,
     _load_flow_from_registry,
+    _normalize_prompt_template_order,
     list_configs,
     resolve_flow,
 )
@@ -805,3 +809,119 @@ def test_load_flow_from_inline_config_accepts_valid_experimental_config():
     factory = _load_flow_from_inline_config(struct, "experimental")
 
     assert factory is not None
+
+
+class TestNormalizePromptTemplateOrder:
+    """Canonical role ordering for struct-sourced prompt templates.
+
+    flowConfig is a protobuf Struct (map<string, Value>), so prompt_template key order is unspecified and varies per
+    process under the upb backend. The registry must impose a canonical role order on struct-sourced templates or
+    message order (and the security block position) is nondeterministic.
+    """
+
+    @pytest.mark.parametrize(
+        "template,expected_keys",
+        [
+            (
+                {
+                    "placeholder": "history",
+                    "assistant": "A",
+                    "user": "U",
+                    "system": "S",
+                },
+                ["system", "user", "assistant", "placeholder"],
+            ),
+            (
+                {"user": "U", "system_dynamic": "S2", "system_static": "S1"},
+                ["system_static", "system_dynamic", "user"],
+            ),
+            (
+                {"custom": "C", "user": "U"},
+                ["user", "custom"],
+            ),
+            (
+                {"human": "H", "ai": "A", "function": "F"},
+                ["human", "ai", "function"],
+            ),
+        ],
+        ids=[
+            "canonical_roles",
+            "split_system_static_before_dynamic",
+            "unknown_roles_last",
+            "role_aliases",
+        ],
+    )
+    def test_orders_roles_canonically(self, template, expected_keys):
+        config_dict = {"prompts": [{"prompt_id": "p", "prompt_template": template}]}
+
+        _normalize_prompt_template_order(config_dict)
+
+        normalized = config_dict["prompts"][0]["prompt_template"]
+        assert list(normalized.keys()) == expected_keys
+        assert normalized == template
+
+    def test_preserves_values_including_lists_and_placeholder_names(self):
+        template = {
+            "placeholder": "history",
+            "user": "U",
+            "system": ["static part", "dynamic part"],
+        }
+        config_dict = {"prompts": [{"prompt_id": "p", "prompt_template": template}]}
+
+        _normalize_prompt_template_order(config_dict)
+
+        normalized = config_dict["prompts"][0]["prompt_template"]
+        assert list(normalized.keys()) == ["system", "user", "placeholder"]
+        assert normalized["system"] == ["static part", "dynamic part"]
+        assert normalized["placeholder"] == "history"
+
+    @pytest.mark.parametrize(
+        "config_dict",
+        [
+            {},
+            {"prompts": None},
+            {"prompts": "oops"},
+            {"prompts": ["oops"]},
+            {"prompts": [{"prompt_id": "p"}]},
+            {"prompts": [{"prompt_id": "p", "prompt_template": "oops"}]},
+        ],
+        ids=[
+            "no_prompts",
+            "null_prompts",
+            "non_list_prompts",
+            "non_dict_prompt_entry",
+            "no_template",
+            "non_dict_template",
+        ],
+    )
+    def test_tolerates_malformed_configs(self, config_dict):
+        original = copy.deepcopy(config_dict)
+        _normalize_prompt_template_order(config_dict)
+        assert config_dict == original
+
+    def test_inline_config_message_order_is_deterministic(self):
+        """End to end through the Struct: canonical order regardless of map order.
+
+        A live Struct round-trip cannot pin the bug in a single process (the
+        upb hash seed is fixed per process), so the adversarial order is
+        injected by patching MessageToDict.
+        """
+        config = _experimental_inline_config({"max_tokens": 1})
+        config["prompts"][0]["prompt_template"] = {"user": "U", "system": "S"}
+        struct = struct_pb2.Struct()
+        struct.update(config)
+
+        adversarial = MessageToDict(struct)
+        adversarial["prompts"][0]["prompt_template"] = {"user": "U", "system": "S"}
+
+        with patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=adversarial,
+        ):
+            loaded = _convert_struct_to_flow_config(
+                struct=struct,
+                flow_config_schema_version="experimental",
+                flow_config_cls=ExperimentalFlowConfig,
+            )
+
+        assert list(loaded.prompts[0].prompt_template.keys()) == ["system", "user"]
