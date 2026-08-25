@@ -891,6 +891,16 @@ def test_config_model_selection(values: dict, expected: ConfigModelSelection):
         assert config.model_selection == expected
 
 
+def test_config_model_releases_not_revealed_in_repr():
+    secret_payload = '{"models": [{"gitlab_identifier": "SENTINEL_SHOULD_NOT_APPEAR"}]}'
+    values = {"AIGW_MODEL_SELECTION__MODEL_RELEASES": secret_payload}
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert "SENTINEL_SHOULD_NOT_APPEAR" not in repr(config)
+        assert "SENTINEL_SHOULD_NOT_APPEAR" not in repr(config.model_selection)
+
+
 @pytest.mark.parametrize(
     ("env", "expected_location"),
     [

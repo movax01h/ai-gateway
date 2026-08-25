@@ -34,7 +34,7 @@ ai-gateway-eks:
       AIGW_BILLING_EVENT__NAMESPACE: "gl"
       AIGW_BILLING_EVENT__BATCH_SIZE: "1"
       AIGW_BILLING_EVENT__THREAD_COUNT: "5"
-      AIGW_FEATURE_FLAGS__DISALLOWED_FLAGS: '{"self-managed": ["expanded_ai_logging"]}'
+      AIGW_FEATURE_FLAGS__DISALLOWED_FLAGS: '{"self-managed": ["expanded_ai_logging", "ai_model_release"]}'
       AIGW_FEATURE_FLAGS__FIREWORKS_SCORE_THRESHOLD: '{"qwen2p5-coder-7b": -1.5}'
       GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-service-account/credentials.json"
 

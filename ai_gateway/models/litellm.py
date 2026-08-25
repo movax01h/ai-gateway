@@ -604,7 +604,7 @@ def _get_fireworks_config(
     """
     configs = ModelSelectionConfig.instance()
 
-    for llm_def in configs.get_llm_definitions().values():
+    for llm_def in configs.get_resolved_llm_definitions().values():
         if llm_def.params.model == model_name and llm_def.params.identifier:
             return fireworks_api_base_url, llm_def.params.identifier
 

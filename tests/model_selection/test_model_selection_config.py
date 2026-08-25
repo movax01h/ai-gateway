@@ -1,10 +1,13 @@
 # pylint: disable=too-many-lines  # large but cohesive test module for model selection config
+import json
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
+import structlog.testing
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from pydantic import SecretStr
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.model_selection.model_selection_config import (
@@ -1174,3 +1177,394 @@ def test_validate_with_valid_deprecated_model(selection_config, fs: FakeFilesyst
     # editorconfig-checker-enable
 
     selection_config.validate()  # must not raise
+
+
+def _env_model_payload(
+    gitlab_identifier: str = "env-fake-model-vertex",
+    feature_setting: str = "test_config",
+    selectable: bool = True,
+    beta: bool = False,
+    as_default: bool = False,
+) -> str:
+    attachment: dict = {}
+    if selectable:
+        attachment["selectable_models"] = [gitlab_identifier]
+    if beta:
+        attachment["beta_models"] = [gitlab_identifier]
+    if as_default:
+        attachment["default_models"] = [gitlab_identifier]
+    payload = {
+        "models": [
+            {
+                "name": "Fake Env Model",
+                "gitlab_identifier": gitlab_identifier,
+                "model_class_provider": "litellm",
+                "max_context_tokens": 100000,
+                "cost_indicator": "$$",
+                "description": "Fake env-injected model.",
+                "params": {
+                    "model": "fake-provider/fake-model-001",
+                    "custom_llm_provider": "fake_provider",
+                },
+            }
+        ],
+        "feature_attachments": {feature_setting: attachment},
+    }
+    return json.dumps(payload)
+
+
+@pytest.mark.usefixtures("mock_fs")
+class TestEnvModelReleases:
+    def setup_method(self):
+        ModelSelectionConfig._instance = None
+
+    def teardown_method(self):
+        ModelSelectionConfig._instance = None
+        current_feature_flag_context.set(set())
+
+    def _make_config(self, payload: str) -> ModelSelectionConfig:
+        return ModelSelectionConfig(
+            default_models_override={},
+            model_releases=payload,
+        )
+
+    def test_env_model_resolvable_when_flag_enabled(self):
+        config = self._make_config(_env_model_payload())
+        current_feature_flag_context.set({"ai_model_release"})
+        result = config.get_model("env-fake-model-vertex")
+        assert result.gitlab_identifier == "env-fake-model-vertex"
+
+    def test_env_model_invisible_when_flag_disabled(self):
+        config = self._make_config(_env_model_payload())
+        with pytest.raises(ValueError):
+            config.get_model("env-fake-model-vertex")
+
+    def test_env_model_overrides_yaml_model_when_flag_on(self):
+        override_name = "OVERRIDDEN NAME"
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": override_name,
+                        "gitlab_identifier": "gitlab-model-1",
+                        "model_class_provider": "litellm",
+                        "max_context_tokens": 100000,
+                        "params": {
+                            "model": "fake-provider/fake-model-001",
+                            "custom_llm_provider": "fake_provider",
+                        },
+                    }
+                ],
+                "feature_attachments": {},
+            }
+        )
+        config = self._make_config(payload)
+        current_feature_flag_context.set({"ai_model_release"})
+        result = config.get_model("gitlab-model-1")
+        assert result.name == override_name
+
+    def test_get_resolved_llm_definitions_includes_env_when_flag_on(self):
+        config = self._make_config(_env_model_payload())
+        current_feature_flag_context.set({"ai_model_release"})
+        resolved = config.get_resolved_llm_definitions()
+        assert "env-fake-model-vertex" in resolved
+        assert "gitlab-model-1" in resolved
+
+    def test_get_resolved_llm_definitions_excludes_env_when_flag_off(self):
+        config = self._make_config(_env_model_payload())
+        resolved = config.get_resolved_llm_definitions()
+        assert "env-fake-model-vertex" not in resolved
+        assert set(resolved.keys()) == set(config.get_llm_definitions().keys())
+
+    def test_feature_attachment_adds_selectable_model_when_flag_on(self):
+        config = self._make_config(
+            _env_model_payload(selectable=True, beta=False, as_default=False)
+        )
+        current_feature_flag_context.set({"ai_model_release"})
+        result_map = config.get_resolved_unit_primitive_config_map()
+        assert "env-fake-model-vertex" in result_map["test_config"].selectable_models
+
+    def test_feature_attachment_adds_beta_model_when_flag_on(self):
+        config = self._make_config(
+            _env_model_payload(selectable=False, beta=True, as_default=False)
+        )
+        current_feature_flag_context.set({"ai_model_release"})
+        result_map = config.get_resolved_unit_primitive_config_map()
+        assert "env-fake-model-vertex" in result_map["test_config"].beta_models
+
+    def test_feature_attachment_sets_default_models_when_flag_on(self):
+        config = self._make_config(
+            _env_model_payload(selectable=False, beta=False, as_default=True)
+        )
+        original_map = config.get_unit_primitive_config_map()
+        original_defaults = list(original_map["test_config"].default_models)
+
+        current_feature_flag_context.set({"ai_model_release"})
+        resolved_map = config.get_resolved_unit_primitive_config_map()
+        assert resolved_map["test_config"].default_models == ["env-fake-model-vertex"]
+
+        # Cached map must be unchanged
+        assert (
+            config.get_unit_primitive_config_map()["test_config"].default_models
+            == original_defaults
+        )
+
+    def test_feature_attachment_not_applied_when_flag_off(self):
+        config = self._make_config(
+            _env_model_payload(selectable=True, beta=True, as_default=False)
+        )
+        base_selectable = list(
+            config.get_unit_primitive_config_map()["test_config"].selectable_models
+        )
+        resolved_map = config.get_resolved_unit_primitive_config_map()
+        assert resolved_map["test_config"].selectable_models == base_selectable
+
+    def test_malformed_env_model_skipped_valid_model_loads(self):
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Bad Model",
+                        "gitlab_identifier": "bad-model",
+                        # missing model_class_provider — will fail validation
+                    },
+                    {
+                        "name": "Good Model",
+                        "gitlab_identifier": "good-fake-model",
+                        "model_class_provider": "litellm",
+                        "max_context_tokens": 100000,
+                        "params": {
+                            "model": "fake-provider/good-model-001",
+                            "custom_llm_provider": "fake_provider",
+                        },
+                    },
+                ],
+                "feature_attachments": {},
+            }
+        )
+        config = self._make_config(payload)
+        assert "good-fake-model" in config._env_llm_definitions
+        assert "bad-model" not in config._env_llm_definitions
+
+    def test_yaml_cache_not_mutated_by_resolved_selectable_and_beta(self):
+        config = self._make_config(
+            _env_model_payload(selectable=True, beta=True, as_default=False)
+        )
+        original_map = config.get_unit_primitive_config_map()
+        original_obj = original_map["test_config"]
+        original_selectable = list(original_obj.selectable_models)
+        original_beta = list(original_obj.beta_models)
+
+        current_feature_flag_context.set({"ai_model_release"})
+        config.get_resolved_unit_primitive_config_map()
+
+        refreshed_map = config.get_unit_primitive_config_map()
+        assert refreshed_map["test_config"] is original_obj
+        assert refreshed_map["test_config"].selectable_models == original_selectable
+        assert refreshed_map["test_config"].beta_models == original_beta
+
+    def test_instance_reads_model_releases_from_get_config(self):
+        payload_str = _env_model_payload()
+        mock_cfg = MagicMock()
+        mock_cfg.model_selection.default_models = {}
+        mock_cfg.model_selection.model_params = {}
+        mock_cfg.model_selection.prompt_params = {}
+        mock_cfg.model_selection.model_releases = SecretStr(payload_str)
+
+        with patch(
+            "ai_gateway.model_selection.model_selection_config.get_config",
+            return_value=mock_cfg,
+        ):
+            instance = ModelSelectionConfig.instance()
+
+        assert "env-fake-model-vertex" in instance._env_llm_definitions
+
+    def test_invalid_json_string_produces_empty_env_definitions(self):
+        with structlog.testing.capture_logs() as cap_logs:
+            config = self._make_config("{not valid json}")
+
+        assert config._env_llm_definitions == {}
+        assert config._env_feature_attachments == {}
+        assert any(
+            "AIGW_MODEL_SELECTION__MODEL_RELEASES failed to parse"
+            in str(log.get("event", ""))
+            for log in cap_logs
+        )
+
+    def test_get_model_for_feature_returns_env_model_when_flag_on(self):
+        config = self._make_config(
+            _env_model_payload(selectable=True, beta=False, as_default=True)
+        )
+        current_feature_flag_context.set({"ai_model_release"})
+        result = config.get_model_for_feature("test_config")
+        assert result.gitlab_identifier == "env-fake-model-vertex"
+
+    def test_credential_value_not_logged_on_model_validation_error(self):
+        """Pydantic must not echo the offending input value into the log record."""
+        sentinel = "SENTINEL_SHOULD_NOT_APPEAR"
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Bad Model",
+                        "gitlab_identifier": "bad-model",
+                        "model_class_provider": "litellm",
+                        "max_context_tokens": 100000,
+                        "params": {
+                            "model": "fake/model",
+                            "custom_llm_provider": "fake",
+                            "api_key": sentinel,  # extra field triggers extra_forbidden
+                        },
+                    }
+                ],
+                "feature_attachments": {},
+            }
+        )
+        with structlog.testing.capture_logs() as cap_logs:
+            self._make_config(payload)
+
+        full_output = str(cap_logs)
+        assert sentinel not in full_output
+        assert any(
+            "params" in str(record.get("validation_errors", "")) for record in cap_logs
+        )
+
+    def test_empty_model_releases_produces_no_env_models_and_no_error(self):
+        """Empty string is the documented disable form; must be silent."""
+        with structlog.testing.capture_logs() as cap_logs:
+            config = self._make_config("")
+
+        assert config._env_llm_definitions == {}
+        assert config._env_feature_attachments == {}
+        error_logs = [r for r in cap_logs if r.get("log_level") == "error"]
+        assert error_logs == []
+
+    def test_dangling_attachment_dropped_and_warning_logged(self):
+        """A model that fails validation must not reach selectable_models via its attachment."""
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Invalid Model",
+                        "gitlab_identifier": "embargo-model",
+                        # missing model_class_provider — fails validation, skipped
+                    }
+                ],
+                "feature_attachments": {
+                    "test_config": {
+                        "selectable_models": ["embargo-model"],
+                    }
+                },
+            }
+        )
+        config = self._make_config(payload)
+        current_feature_flag_context.set({"ai_model_release"})
+
+        with structlog.testing.capture_logs() as cap_logs:
+            resolved = config.get_resolved_unit_primitive_config_map()
+
+        assert "embargo-model" not in resolved["test_config"].selectable_models
+        assert any(
+            r.get("log_level") == "warning"
+            and r.get("gitlab_identifier") == "embargo-model"
+            for r in cap_logs
+        )
+
+    def test_dangling_attachment_dropped_from_beta_models_and_warning_logged(self):
+        """A model that fails validation must not reach beta_models via its attachment."""
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Invalid Model",
+                        "gitlab_identifier": "embargo-model",
+                        # missing model_class_provider — fails validation, skipped
+                    }
+                ],
+                "feature_attachments": {
+                    "test_config": {
+                        "beta_models": ["embargo-model"],
+                    }
+                },
+            }
+        )
+        config = self._make_config(payload)
+        current_feature_flag_context.set({"ai_model_release"})
+
+        with structlog.testing.capture_logs() as cap_logs:
+            resolved = config.get_resolved_unit_primitive_config_map()
+
+        assert "embargo-model" not in resolved["test_config"].beta_models
+        assert any(
+            r.get("log_level") == "warning"
+            and r.get("gitlab_identifier") == "embargo-model"
+            and r.get("list") == "beta_models"
+            for r in cap_logs
+        )
+
+    def test_dangling_attachment_dropped_from_default_models_and_warning_logged(self):
+        """A model that fails validation must not reach default_models via its attachment."""
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Invalid Model",
+                        "gitlab_identifier": "embargo-model",
+                        # missing model_class_provider — fails validation, skipped
+                    }
+                ],
+                "feature_attachments": {
+                    "test_config": {
+                        "default_models": ["embargo-model"],
+                    }
+                },
+            }
+        )
+        config = self._make_config(payload)
+        current_feature_flag_context.set({"ai_model_release"})
+
+        with structlog.testing.capture_logs() as cap_logs:
+            resolved = config.get_resolved_unit_primitive_config_map()
+
+        assert "embargo-model" not in resolved["test_config"].default_models
+        assert any(
+            r.get("log_level") == "warning"
+            and r.get("gitlab_identifier") == "embargo-model"
+            and r.get("list") == "default_models"
+            for r in cap_logs
+        )
+
+    def test_attachment_for_unknown_feature_setting_is_skipped(self):
+        """An attachment naming a feature_setting absent from the base unit-primitive map is ignored."""
+        payload = _env_model_payload(feature_setting="nonexistent_feature")
+        config = self._make_config(payload)
+        current_feature_flag_context.set({"ai_model_release"})
+
+        resolved = config.get_resolved_unit_primitive_config_map()
+
+        assert "nonexistent_feature" not in resolved
+        assert resolved["test_config"].selectable_models == ["gitlab-model-1"]
+
+    def test_non_validation_error_during_env_release_load_uses_generic_fallback(self):
+        """Non-ValidationError failures fall back to type/msg only — no loc, no raw input."""
+        sentinel = "SENTINEL_SHOULD_NOT_APPEAR"
+        payload_with_sentinel = json.dumps(
+            {
+                "models": [{"gitlab_identifier": sentinel}],
+                "feature_attachments": {},
+            }
+        )
+        with patch(
+            "ai_gateway.model_selection.model_selection_config.ModelReleasesPayload.model_validate_json",
+            side_effect=RuntimeError("boom"),
+        ):
+            with structlog.testing.capture_logs() as cap_logs:
+                config = self._make_config(payload_with_sentinel)
+
+        assert config._env_llm_definitions == {}
+        assert config._env_feature_attachments == {}
+
+        error_logs = [r for r in cap_logs if r.get("log_level") == "error"]
+        assert len(error_logs) == 1
+        assert error_logs[0]["errors"] == [{"type": "RuntimeError", "msg": "boom"}]
+        assert sentinel not in str(cap_logs)

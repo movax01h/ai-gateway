@@ -58,7 +58,7 @@ class _GetModelResponse(BaseModel):
 )
 async def get_models():
     selection_config = ModelSelectionConfig.instance()
-    llm_definitions = selection_config.get_llm_definitions()
+    llm_definitions = selection_config.get_resolved_llm_definitions()
     unit_primitives = []
     # Collect pseudo-models to add for unit primitives with multiple default models.
     # Maps pseudo-model identifier to _GetModelResponseModel.
@@ -68,7 +68,7 @@ async def get_models():
         FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS
     )
 
-    for primitive in selection_config.get_unit_primitive_config():
+    for primitive in selection_config.get_resolved_unit_primitive_config_map().values():
         values = primitive.model_dump()
         default_models = values["default_models"]
 
