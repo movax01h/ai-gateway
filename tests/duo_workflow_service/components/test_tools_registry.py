@@ -3,17 +3,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.tools import BaseTool
+from pydantic import Field
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from contract import contract_pb2
 from duo_workflow_service import tools
 from duo_workflow_service.components.tools_registry import (
+    _AGENT_PRIVILEGES,
     _CAPABILITY_DEPENDENT_TOOLS,
     _DEFAULT_TOOLS,
     _PREAPPROVED_CAPABILITY_TOOLS,
+    _READ_ONLY_FILE_TOOLS,
+    BUILTIN_TOOL_NAMES,
     NO_OP_TOOLS,
+    ToolMetadata,
     Toolset,
     ToolsRegistry,
+    _builtin_tool_names,
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -39,7 +45,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
-from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
+from duo_workflow_service.tools.mcp_tools import McpTool, convert_mcp_tools_to_configs
 from duo_workflow_service.tools.mr_discussions import (
     ListMrDiscussions,
     ReplyToDiscussion,
@@ -1200,6 +1206,265 @@ async def test_registry_configuration_jwt_deny_overrides_workflow_config_preappr
     toolset = registry.toolset(["read_file", "edit_file"])
     assert "read_file" not in toolset._all_tools
     assert "edit_file" in toolset._all_tools
+
+
+def _ceiling_registry(tool_metadata, admin_allowed_preapprovals):
+    """Registry whose workflow row claims the whole read_write_files group."""
+    return ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=["read_write_files"],
+        tool_metadata=tool_metadata,
+        admin_allowed_preapprovals=admin_allowed_preapprovals,
+    )
+
+
+def test_governance_ceiling_clamps_workflow_row_preapproval(tool_metadata):
+    """The workflow row must not pre-approve tools outside the JWT allow-list.
+
+    The row is writable by the session owner via updateDuoWorkflowAgentPrivileges, so it is the escalation vector this
+    ceiling exists to close.
+    """
+    registry = _ceiling_registry(
+        tool_metadata, admin_allowed_preapprovals={"read_file"}
+    )
+
+    # Inside the ceiling, so the row's claim stands.
+    assert registry.is_preapproved("read_file")
+
+    # Claimed by the row but withheld by policy.
+    assert not registry.is_preapproved("edit_file")
+    assert not registry.is_preapproved("create_file_with_contents")
+    assert not registry.is_preapproved("run_tests")
+
+
+def test_governance_ceiling_none_leaves_row_preapproval_untouched(tool_metadata):
+    """No ceiling means governance is inactive, so behaviour is unchanged.
+
+    This is the compatibility path for a GitLab that does not send the claim.
+    """
+    registry = _ceiling_registry(tool_metadata, admin_allowed_preapprovals=None)
+
+    assert registry.is_preapproved("read_file")
+    assert registry.is_preapproved("edit_file")
+    assert registry.is_preapproved("run_tests")
+
+
+def test_governance_ceiling_empty_clamps_every_privilege_derived_tool(tool_metadata):
+    """An empty allow-list pre-approves nothing that came from the row."""
+    registry = _ceiling_registry(tool_metadata, admin_allowed_preapprovals=set())
+
+    assert not registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+
+
+@pytest.mark.parametrize("ceiling", [set(), {"read_file"}])
+def test_governance_ceiling_never_strips_baseline_tools(tool_metadata, ceiling):
+    """Default and no-op tools are not privilege-derived and must always survive.
+
+    Intersecting without re-adding these would break planning and handover for every governed session.
+    """
+    registry = _ceiling_registry(tool_metadata, admin_allowed_preapprovals=ceiling)
+
+    baseline_names = {tool_cls.tool_title for tool_cls in NO_OP_TOOLS} | {
+        tool_cls().name for tool_cls in _DEFAULT_TOOLS
+    }
+    assert all(registry.is_preapproved(name) for name in baseline_names)
+    assert registry.is_preapproved("create_plan")
+    assert registry.is_preapproved("handover_tool")
+
+
+def test_governance_ceiling_reaches_the_toolset(tool_metadata):
+    """The clamped pre-approval set is what Toolset receives.
+
+    Toolset itself holds no governance state; it only ever sees the already-clamped set, so there is nothing a caller
+    could consult incorrectly.
+    """
+    registry = _ceiling_registry(
+        tool_metadata, admin_allowed_preapprovals={"read_file"}
+    )
+    toolset = registry.toolset(["read_file", "edit_file"])
+
+    assert "read_file" in toolset._pre_approved
+    assert "edit_file" not in toolset._pre_approved
+
+
+@pytest.mark.asyncio
+async def test_registry_configuration_plumbs_governance_ceiling(
+    gl_http_client, project_mock
+):
+    """Configure() must pass the ceiling through, mirroring denied_tools."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": ["read_write_files"],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        admin_allowed_preapprovals={"read_file"},
+    )
+
+    assert registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+
+
+def _mcp_config_named(name):
+    """Build an MCP tool config whose llm_name collides with a built-in."""
+    mock = MagicMock()
+    mock.name = name
+    mock.description = "client supplied"
+    mock.inputSchema = "{}"
+    return convert_mcp_tools_to_configs(mcp_tools=[mock])
+
+
+@pytest.mark.parametrize(
+    "colliding_name",
+    ["create_plan", "read_file", "handover_tool"],
+    ids=["baseline default tool", "privilege-group tool", "no-op tool"],
+)
+def test_mcp_tool_cannot_take_a_builtin_name(tool_metadata, colliding_name):
+    """A client MCP tool must not be able to register under a built-in's name.
+
+    Registration is keyed on the name, so a collision would both replace the real
+    built-in and inherit whatever that name is trusted for: baseline exemption,
+    governance ceiling membership, or row-derived pre-approval.
+    """
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=["read_write_files", "read_only_gitlab"],
+        tool_metadata=tool_metadata,
+        mcp_tools=_mcp_config_named(colliding_name),
+        # Deliberately admit the colliding name to the ceiling: even then the client
+        # tool must not get in.
+        admin_allowed_preapprovals={colliding_name},
+    )
+
+    assert colliding_name not in registry._mcp_tool_names
+    tool = registry.get(colliding_name)
+    if tool is not None:
+        # The genuine built-in is still the one bound to that name.
+        assert not isinstance(tool, McpTool)
+
+
+def test_mcp_tool_with_a_free_name_is_still_registered(tool_metadata):
+    """Only colliding names are rejected; ordinary MCP tools are unaffected."""
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files"],
+        preapproved_tools=["read_write_files"],
+        tool_metadata=tool_metadata,
+        mcp_tools=_mcp_config_named("some_client_tool"),
+        admin_allowed_preapprovals={"read_file"},
+    )
+
+    assert "some_client_tool" in registry._mcp_tool_names
+    # Not in the ceiling, so it still requires approval.
+    assert not registry.is_preapproved("some_client_tool")
+    # Genuine built-ins survive the ceiling.
+    assert registry.is_preapproved("create_plan")
+
+
+def test_builtin_tool_names_matches_the_names_actually_registered():
+    """Every name the registry binds at runtime must be reserved.
+
+    Deliberately instantiates the tools the way ToolsRegistry does, rather than
+    reading `model_fields` as `_builtin_tool_names` does. Comparing the static
+    extraction against itself would pass even if a tool's runtime name diverged
+    from its field default, leaving that name free for an MCP tool to claim.
+    """
+    metadata = ToolMetadata(
+        workflow_id="1",
+        outbox=_outbox,
+        gitlab_client=MagicMock(spec=GitlabHttpClient),
+        gitlab_host="gitlab.example.com",
+        project=None,
+        features={},
+    )
+
+    registered = {tool_cls.tool_title for tool_cls in NO_OP_TOOLS}
+    registered |= {tool_cls().name for tool_cls in _DEFAULT_TOOLS}
+    registered |= {
+        tool_cls(metadata=metadata).name for tool_cls in _CAPABILITY_DEPENDENT_TOOLS
+    }
+    for tool_classes in _AGENT_PRIVILEGES.values():
+        registered |= {tool_cls(metadata=metadata).name for tool_cls in tool_classes}
+
+    assert registered - BUILTIN_TOOL_NAMES == set()
+
+
+@pytest.mark.asyncio
+async def test_governance_ceiling_applies_to_approval_required(tool_metadata):
+    """The ceiling must bite at `approval_required`, not only `is_preapproved`.
+
+    `chat_agent._get_approvals` calls this method, and it is where the original
+    escalation surfaced, so the fix has to be pinned here specifically.
+    """
+    registry = _ceiling_registry(
+        tool_metadata, admin_allowed_preapprovals={"read_file"}
+    )
+
+    # Claimed by the workflow row but withheld by policy.
+    assert await registry.approval_required("edit_file") is True
+    # Inside the ceiling, so no approval needed.
+    assert await registry.approval_required("read_file") is False
+
+
+@pytest.mark.parametrize(
+    ("ceiling", "requested", "expected"),
+    [
+        # Governance inactive: the caller's list is returned untouched.
+        (None, ["read_file", "edit_file"], {"read_file", "edit_file"}),
+        # Active: only names policy permits survive.
+        ({"read_file"}, ["read_file", "edit_file"], {"read_file"}),
+        # Empty allow-list still permits baseline tools, which are not privilege-derived.
+        (set(), ["create_plan", "edit_file"], {"create_plan"}),
+        # Nothing requested, nothing returned.
+        ({"read_file"}, [], set()),
+    ],
+    ids=["inactive", "active", "empty ceiling keeps baseline", "empty request"],
+)
+def test_pre_approvals_allowed_by_policy(tool_metadata, ceiling, requested, expected):
+    """A caller-held pre-approval list is reduced to what admin policy permits.
+
+    This is what the flow builder calls for a component's `pre_approved_tools`, so a
+    flow author cannot pre-approve a tool the namespace marked Ask or Deny.
+    """
+    registry = _ceiling_registry(tool_metadata, admin_allowed_preapprovals=ceiling)
+
+    assert registry.pre_approvals_allowed_by_policy(requested) == expected
+
+
+def test_pre_approvals_allowed_by_policy_does_not_mutate_input(tool_metadata):
+    """The caller's collection must be left alone."""
+    registry = _ceiling_registry(
+        tool_metadata, admin_allowed_preapprovals={"read_file"}
+    )
+    requested = ["read_file", "edit_file"]
+
+    registry.pre_approvals_allowed_by_policy(requested)
+
+    assert requested == ["read_file", "edit_file"]
+
+
+def test_builtin_tool_names_raises_when_a_name_cannot_be_read(monkeypatch):
+    """A name we cannot reserve must fail loudly, not be skipped.
+
+    Skipping would leave that name free for a client MCP tool to claim, silently reopening the collision this guard
+    exists to prevent.
+    """
+
+    class NameFromFactory(tools.CreatePlan):
+        name: str = Field(default_factory=lambda: "computed_name")
+
+    monkeypatch.setitem(
+        _AGENT_PRIVILEGES, "read_only_files", [*_READ_ONLY_FILE_TOOLS, NameFromFactory]
+    )
+
+    with pytest.raises(RuntimeError, match="no static string `name` default"):
+        _builtin_tool_names()
 
 
 @pytest.mark.asyncio
