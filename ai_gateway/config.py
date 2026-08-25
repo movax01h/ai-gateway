@@ -33,6 +33,8 @@ __all__ = [
     "ConfigSnowplow",
     "ConfigTLS",
     "ConfigVertexTextModel",
+    "ModelReleaseFeatureAttachment",
+    "ModelReleasesPayload",
     "get_config",
 ]
 
@@ -353,6 +355,32 @@ class ConfigBedrockGuardrail(BaseModel):
     )
 
 
+class ModelReleaseFeatureAttachment(BaseModel):
+    selectable_models: list[str] = Field(
+        default_factory=list,
+        description="Gitlab_identifier values to add to selectable_models for this feature_setting.",
+    )
+    beta_models: list[str] = Field(
+        default_factory=list,
+        description="Gitlab_identifier values to add to beta_models for this feature_setting.",
+    )
+    default_models: list[str] = Field(
+        default_factory=list,
+        description="Gitlab_identifier values to replace default_models for this feature_setting.",
+    )
+
+
+class ModelReleasesPayload(BaseModel):
+    models: list[dict] = Field(
+        default_factory=list,
+        description="Env-injected LLMDefinition dicts, keyed by their own gitlab_identifier field.",
+    )
+    feature_attachments: dict[str, ModelReleaseFeatureAttachment] = Field(
+        default_factory=dict,
+        description="Feature_setting name to the env-injected model lists attached to it.",
+    )
+
+
 class ConfigModelSelection(BaseModel):
     default_models: dict[str, list[str]] = Field(
         default_factory=dict,
@@ -379,6 +407,17 @@ class ConfigModelSelection(BaseModel):
             "model's prompt_params. Use this for params that must be passed at model "
             "invocation rather than initialization. "
             'Example: \'{"claude_sonnet_4_5_20250929_vertex": {"vertex_location": "us-east5"}}\''
+        ),
+    )
+    model_releases: Optional[SecretStr] = Field(
+        default=None,
+        description=(
+            "JSON payload for pre-launch model injection via Vault-backed env var. "
+            'Format: {"models": [{...LLMDefinition fields...}], '
+            '"feature_attachments": {"<feature_setting>": {"selectable_models": [...], '
+            '"beta_models": [...], "default_models": [...]}}}. '
+            "Env-defined models take precedence over models.yml entries with the same "
+            "gitlab_identifier when the ai_model_release feature flag is enabled."
         ),
     )
 

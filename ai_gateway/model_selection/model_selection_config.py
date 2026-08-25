@@ -3,11 +3,16 @@ from itertools import chain
 from pathlib import Path
 from typing import Annotated, Iterable, Literal, Optional
 
+import structlog
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from ai_gateway.config import get_config
+from ai_gateway.config import (
+    ModelReleaseFeatureAttachment,
+    ModelReleasesPayload,
+    get_config,
+)
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ChatAmazonQParams,
@@ -25,6 +30,30 @@ from ai_gateway.model_selection.types import (
     FeatureDeprecatedModel,
 )
 from lib.feature_flags import FeatureFlag, is_feature_enabled
+
+log = structlog.stdlib.get_logger(__name__)
+
+
+def _safe_error_details(exc: Exception) -> list[dict]:
+    """Build error details safe to log — no input values, only field paths and error types."""
+    if isinstance(exc, ValidationError):
+        return [
+            {
+                "loc": ".".join(str(p) for p in e["loc"]),
+                "type": e["type"],
+                "msg": e["msg"],
+            }
+            for e in exc.errors()
+        ]
+    return [{"type": type(exc).__name__, "msg": str(exc)}]
+
+
+def _partition_known(ids: list[str], known: set[str]) -> tuple[list[str], list[str]]:
+    """Split ids into (known, unknown) without mutating the input."""
+    valid = [m for m in ids if m in known]
+    dropped = [m for m in ids if m not in known]
+    return valid, dropped
+
 
 BASE_PATH = Path(__file__).parent
 MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
@@ -156,12 +185,17 @@ class ModelSelectionConfig:
         default_models_override: dict[str, list[str]],
         model_params_override: dict[str, dict] | None = None,
         prompt_params_override: dict[str, dict] | None = None,
+        model_releases: Optional[str] = None,
     ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
         self._model_params_override: dict[str, dict] = model_params_override or {}
         self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
+        self._env_llm_definitions: dict[str, LLMDefinition] = {}
+        self._env_feature_attachments: dict[str, ModelReleaseFeatureAttachment] = {}
+        if model_releases:
+            self._load_env_releases(model_releases)
 
     @classmethod
     def instance(cls) -> "ModelSelectionConfig":
@@ -172,10 +206,14 @@ class ModelSelectionConfig:
         """
         if cls._instance is None:
             cfg = get_config()
+            model_releases = cfg.model_selection.model_releases
             cls._instance = cls(
                 default_models_override=cfg.model_selection.default_models,
                 model_params_override=cfg.model_selection.model_params,
                 prompt_params_override=cfg.model_selection.prompt_params,
+                model_releases=(
+                    model_releases.get_secret_value() if model_releases else None
+                ),
             )
         return cls._instance
 
@@ -208,6 +246,50 @@ class ModelSelectionConfig:
 
         return self._llm_definitions
 
+    def _load_env_releases(self, model_releases: str) -> None:
+        try:
+            payload = ModelReleasesPayload.model_validate_json(model_releases)
+        except Exception as exc:  # catches json.JSONDecodeError, ValidationError, and anything else  # pylint: disable=broad-except
+            log.error(
+                "AIGW_MODEL_SELECTION__MODEL_RELEASES failed to parse; env-injected models will not be available",
+                errors=_safe_error_details(exc),
+            )
+            return
+
+        for model_data in payload.models:
+            identifier = model_data.get("gitlab_identifier", "<unknown>")
+            try:
+                definition: LLMDefinition = TypeAdapter(LLMDefinition).validate_python(
+                    model_data
+                )
+                self._env_llm_definitions[definition.gitlab_identifier] = definition
+            except Exception as exc:  # catches all Pydantic validation errors to allow warm startup  # pylint: disable=broad-except
+                log.error(
+                    "Env-injected model definition failed validation; skipping",
+                    gitlab_identifier=identifier,
+                    validation_errors=_safe_error_details(exc),
+                )
+        self._env_feature_attachments = dict(payload.feature_attachments)
+
+    def get_resolved_llm_definitions(self) -> dict[str, LLMDefinition]:
+        """Get LLM definitions, merged with env-injected releases when enabled.
+
+        Env-injected model definitions apply only when
+        ``FeatureFlag.AI_MODEL_RELEASE`` is enabled for the current request,
+        and take precedence over ``models.yml`` entries with the same
+        ``gitlab_identifier``.
+
+        Returns:
+            Mapping of gitlab_identifier to LLMDefinition.
+        """
+        base = self.get_llm_definitions()
+        if (
+            not is_feature_enabled(FeatureFlag.AI_MODEL_RELEASE)
+            or not self._env_llm_definitions
+        ):
+            return base
+        return {**base, **self._env_llm_definitions}
+
     def get_unit_primitive_config_map(self) -> dict[str, UnitPrimitiveConfig]:
         if not self._unit_primitive_configs:
             with open(UNIT_PRIMITIVE_CONFIG_PATH, "r") as f:
@@ -228,6 +310,76 @@ class ModelSelectionConfig:
 
     def get_unit_primitive_config(self) -> Iterable[UnitPrimitiveConfig]:
         return self.get_unit_primitive_config_map().values()
+
+    def get_resolved_unit_primitive_config_map(self) -> dict[str, UnitPrimitiveConfig]:
+        """Get unit primitive configs, merged with env-injected attachments when enabled.
+
+        Env-injected feature attachments (``selectable_models``,
+        ``beta_models``, ``default_models``) apply only when
+        ``FeatureFlag.AI_MODEL_RELEASE`` is enabled for the current request,
+        and take precedence over ``unit_primitives.yml`` entries for the same
+        feature_setting.
+
+        Returns:
+            Mapping of feature_setting to UnitPrimitiveConfig.
+        """
+        base = self.get_unit_primitive_config_map()
+        if (
+            not is_feature_enabled(FeatureFlag.AI_MODEL_RELEASE)
+            or not self._env_feature_attachments
+        ):
+            return base
+        result = dict(base)
+        known_ids = set(self.get_resolved_llm_definitions().keys())
+        for feature_setting, attachment in self._env_feature_attachments.items():
+            if feature_setting not in result:
+                continue
+            upc = result[feature_setting]
+            updates: dict = {}
+            if attachment.selectable_models:
+                valid, dropped = _partition_known(
+                    attachment.selectable_models, known_ids
+                )
+                for m in dropped:
+                    log.warning(
+                        "Env attachment references unresolvable model; dropping",
+                        gitlab_identifier=m,
+                        feature_setting=feature_setting,
+                        list="selectable_models",
+                    )
+                existing = set(upc.selectable_models)
+                updates["selectable_models"] = [
+                    *upc.selectable_models,
+                    *[m for m in valid if m not in existing],
+                ]
+            if attachment.beta_models:
+                valid, dropped = _partition_known(attachment.beta_models, known_ids)
+                for m in dropped:
+                    log.warning(
+                        "Env attachment references unresolvable model; dropping",
+                        gitlab_identifier=m,
+                        feature_setting=feature_setting,
+                        list="beta_models",
+                    )
+                existing_beta = set(upc.beta_models)
+                updates["beta_models"] = [
+                    *upc.beta_models,
+                    *[m for m in valid if m not in existing_beta],
+                ]
+            if attachment.default_models:
+                valid, dropped = _partition_known(attachment.default_models, known_ids)
+                for m in dropped:
+                    log.warning(
+                        "Env attachment references unresolvable model; dropping",
+                        gitlab_identifier=m,
+                        feature_setting=feature_setting,
+                        list="default_models",
+                    )
+                if valid:
+                    updates["default_models"] = valid
+            if updates:
+                result[feature_setting] = upc.model_copy(update=updates)
+        return result
 
     def _validate_model_ids_exist(
         self,
@@ -356,12 +508,15 @@ class ModelSelectionConfig:
         ]
 
     def get_model(self, model_id: str) -> LLMDefinition:
+        if is_feature_enabled(FeatureFlag.AI_MODEL_RELEASE):
+            if model := self._env_llm_definitions.get(model_id):
+                return model
         if model := self.get_llm_definitions().get(model_id, None):
             return model
         raise ValueError(f"Invalid model identifier: {model_id}")
 
     def get_model_for_feature(self, feature_setting_name: str) -> LLMDefinition:
-        if feature_setting := self.get_unit_primitive_config_map().get(
+        if feature_setting := self.get_resolved_unit_primitive_config_map().get(
             feature_setting_name, None
         ):
             if is_feature_enabled(FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS):

@@ -56,7 +56,7 @@ def mock_model_config_fixture():
                 },
             ),
         }
-        mock_configs.get_unit_primitive_config.return_value = [
+        _unit_primitives = [
             UnitPrimitiveConfig(
                 feature_setting="config1",
                 unit_primitives=[
@@ -102,6 +102,13 @@ def mock_model_config_fixture():
                 ],
             ),
         ]
+        mock_configs.get_unit_primitive_config.return_value = _unit_primitives
+        mock_configs.get_resolved_llm_definitions.return_value = (
+            mock_configs.get_llm_definitions.return_value
+        )
+        mock_configs.get_resolved_unit_primitive_config_map.return_value = {
+            upc.feature_setting: upc for upc in _unit_primitives
+        }
 
         yield mock_configs
 
@@ -270,3 +277,86 @@ def test_get_models_returns_correct_data_with_flag_disabled(client):
             "removal_version": "19.6",
         }
     ]
+
+
+class TestGetModelsEnvRelease:
+    """Endpoint mapping given already-resolved definitions.
+
+    Flag gating on env-injected models happens inside
+    ``get_resolved_llm_definitions`` / ``get_resolved_unit_primitive_config_map``,
+    which are mocked here — real flag gating is covered by
+    ``TestEnvModelReleases`` in tests/model_selection/test_model_selection_config.py.
+    """
+
+    def test_env_model_in_resolved_definitions_appears_in_response(self, client):
+        env_model = ChatLiteLLMDefinition(
+            name="Env Model",
+            gitlab_identifier="env-model-vertex",
+            provider="FakeProvider",
+            max_context_tokens=100000,
+            description="An env-injected model.",
+            cost_indicator="$$",
+            params={},
+        )
+        yaml_model = ChatLiteLLMDefinition(
+            name="Yaml Model",
+            gitlab_identifier="yaml-model",
+            max_context_tokens=100000,
+            params={},
+        )
+        with patch(
+            "ai_gateway.api.v1.models.get_definitions.ModelSelectionConfig",
+        ) as mock_cls:
+            mock_cfg = MagicMock()
+            mock_cls.instance.return_value = mock_cfg
+            mock_cfg.get_resolved_llm_definitions.return_value = {
+                "yaml-model": yaml_model,
+                "env-model-vertex": env_model,
+            }
+            mock_cfg.get_resolved_unit_primitive_config_map.return_value = {
+                "test_feat": UnitPrimitiveConfig(
+                    feature_setting="test_feat",
+                    unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                    default_models=["env-model-vertex"],
+                    selectable_models=["env-model-vertex"],
+                    beta_models=[],
+                )
+            }
+            response = client.get("/definitions")
+
+        assert response.status_code == 200
+        identifiers = [m["identifier"] for m in response.json()["models"]]
+        assert "env-model-vertex" in identifiers
+
+    def test_env_model_absent_from_resolved_definitions_is_absent_from_response(
+        self, client
+    ):
+        yaml_model = ChatLiteLLMDefinition(
+            name="Yaml Model",
+            gitlab_identifier="yaml-model",
+            max_context_tokens=100000,
+            params={},
+        )
+        with patch(
+            "ai_gateway.api.v1.models.get_definitions.ModelSelectionConfig",
+        ) as mock_cls:
+            mock_cfg = MagicMock()
+            mock_cls.instance.return_value = mock_cfg
+            mock_cfg.get_resolved_llm_definitions.return_value = {
+                "yaml-model": yaml_model,
+            }
+            mock_cfg.get_resolved_unit_primitive_config_map.return_value = {
+                "test_feat": UnitPrimitiveConfig(
+                    feature_setting="test_feat",
+                    unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                    default_models=["yaml-model"],
+                    selectable_models=["yaml-model"],
+                    beta_models=[],
+                )
+            }
+            response = client.get("/definitions")
+
+        assert response.status_code == 200
+        identifiers = [m["identifier"] for m in response.json()["models"]]
+        assert "env-model-vertex" not in identifiers
+        assert "yaml-model" in identifiers

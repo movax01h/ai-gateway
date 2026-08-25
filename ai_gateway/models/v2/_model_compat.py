@@ -18,7 +18,7 @@ def supports_assistant_prefill(model: Optional[str]) -> bool:
     """
     if not model or "claude" not in model:
         return True
-    for defn in ModelSelectionConfig.instance().get_llm_definitions().values():
+    for defn in ModelSelectionConfig.instance().get_resolved_llm_definitions().values():
         if defn.params.model == model:
             return defn.supports_assistant_prefill
     return False

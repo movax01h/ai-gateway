@@ -33,6 +33,7 @@ class FeatureFlag(StrEnum):
     DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS = (
         "duo_workflow_read_incremental_checkpoints"
     )
+    AI_MODEL_RELEASE = "ai_model_release"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
