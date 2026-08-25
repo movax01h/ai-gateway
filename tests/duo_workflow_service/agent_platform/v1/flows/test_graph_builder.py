@@ -104,7 +104,6 @@ class TestFlowGraphBuilder:
         tools_registry = Mock(spec=ToolsRegistry)
         tools_registry.toolset.return_value = Mock(name="toolset")
         tools_registry.mcp_tool_names.return_value = ["mcp_tool"]
-        tools_registry.pre_approvals_allowed_by_policy.side_effect = set
         tools_registry.ask_listed_tool_names.return_value = set()
         return tools_registry
 
@@ -274,28 +273,24 @@ class TestFlowGraphBuilder:
 
     @pytest.mark.usefixtures("mock_graph")
     @pytest.mark.parametrize(
-        "permitted,ask_listed,expected",
+        "ask_listed,expected",
         [
-            ({"read_file"}, set(), ["read_file"]),
-            ({"read_file", "run_command"}, {"run_command"}, ["read_file"]),
-            ({"read_file", "run_command"}, set(), ["read_file", "run_command"]),
+            ({"run_command"}, ["read_file"]),
+            (set(), ["read_file", "run_command"]),
         ],
         ids=[
-            "policy_denies_a_listed_tool",
             "an_ask_rule_forces_a_listed_tool_to_prompt",
-            "nothing_to_clamp",
+            "nothing_to_strip",
         ],
     )
-    def test_pre_approved_tools_are_clamped_by_namespace_policy(
-        self, builder, mock_tools_registry, permitted, ask_listed, expected
+    def test_pre_approved_tools_strip_ask_listed_entries(
+        self, builder, mock_tools_registry, ask_listed, expected
     ):
         """The flow config's pre-approval list is reduced where it enters.
 
-        Clamping here, rather than at each approval decision, is what stops a flow author pre-approving a tool the
-        namespace marked Ask or Deny. Downstream consumers can then treat the list as already permitted.
+        Stripping here, rather than at each approval decision, is what stops a flow author pre-approving a tool an
+        admin `ask` rule forces to prompt.
         """
-        mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = None
-        mock_tools_registry.pre_approvals_allowed_by_policy.return_value = permitted
         mock_tools_registry.ask_listed_tool_names.return_value = ask_listed
 
         comp_class = _ComponentClassStub(_component_stub("agent"))
@@ -311,7 +306,7 @@ class TestFlowGraphBuilder:
         ):
             builder.build(_config(components=[comp_config]))
 
-        mock_tools_registry.pre_approvals_allowed_by_policy.assert_called_once_with(
+        mock_tools_registry.ask_listed_tool_names.assert_called_once_with(
             ["read_file", "run_command"]
         )
         assert comp_class.params["pre_approved_tools"] == expected
@@ -329,7 +324,7 @@ class TestFlowGraphBuilder:
         ):
             builder.build(_config())
 
-        mock_tools_registry.pre_approvals_allowed_by_policy.assert_not_called()
+        mock_tools_registry.ask_listed_tool_names.assert_not_called()
         assert "pre_approved_tools" not in comp_class.params
 
     @pytest.mark.usefixtures("mock_graph")

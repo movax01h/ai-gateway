@@ -18,7 +18,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
-from duo_workflow_service.components.tools_registry import ToolMetadata, ToolsRegistry
+from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     build_compaction_tool_card,
 )
@@ -2044,63 +2044,3 @@ class TestToolApprovalRequestTracking:
 
         assert result["status"] == WorkflowStatusEnum.EXECUTION
         internal_event_client.track_event.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_governance_ceiling_blocks_row_widened_tool_in_get_approvals(
-    input, mock_toolset
-):
-    """Approval is still required at the call site the escalation actually used.
-
-    `_get_approvals` combines the row-derived registry check with the JWT-derived
-    state list using `and`, which is how a widened workflow row used to suppress the
-    prompt. Uses a real ToolsRegistry rather than a mock so the ceiling is exercised
-    through `approval_required`, not asserted on in isolation.
-    """
-    registry = ToolsRegistry(
-        enabled_tools=["read_write_gitlab"],
-        # The workflow row claims the whole group, as it would after the
-        # updateDuoWorkflowAgentPrivileges escalation.
-        preapproved_tools=["read_write_gitlab"],
-        tool_metadata=ToolMetadata(
-            workflow_id="1",
-            outbox=None,
-            gitlab_client=None,
-            gitlab_host="gitlab.example.com",
-            project=None,
-            features={},
-        ),
-        # Policy allows a read-only tool but withholds create_commit.
-        admin_allowed_preapprovals={"get_commit"},
-    )
-
-    mock_model = Mock()
-    mock_model._is_auto_approved_by_agentic_mock_model = False
-    mock_prompt_adapter = Mock()
-    mock_prompt_adapter.get_model.return_value = mock_model
-
-    chat_agent = ChatAgent(
-        name="Chat Agent",
-        prompt_adapter=mock_prompt_adapter,
-        tools_registry=registry,
-        system_template_override=None,
-        toolset=mock_toolset,
-        optimizer_pipeline=_make_passthrough_pipeline(),
-    )
-    chat_agent.prompt_adapter.get_response = AsyncMock(
-        return_value=AIMessage(
-            content="committing",
-            tool_calls=[
-                {
-                    "name": "create_commit",
-                    "args": {},
-                    "id": "call_1",
-                    "type": "tool_call",
-                }
-            ],
-        )
-    )
-
-    result = await chat_agent.run(input)
-
-    assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED

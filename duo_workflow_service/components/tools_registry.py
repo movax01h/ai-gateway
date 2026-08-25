@@ -252,42 +252,9 @@ query($workflowId: AiDuoWorkflowsWorkflowID!, $toolName: String!, $toolCallArgs:
 """
 
 
-def _builtin_tool_names() -> frozenset[str]:
-    """Every tool name the service itself owns, across all privilege groups.
-
-    Computed from every group rather than the enabled ones, so a name stays reserved even in a session where its group
-    is not enabled.
-    """
-    names = {tool_cls.tool_title for tool_cls in NO_OP_TOOLS}  # type: ignore[attr-defined]
-
-    tool_classes: list[Type[BaseTool]] = [*_DEFAULT_TOOLS, *_CAPABILITY_DEPENDENT_TOOLS]
-    for group in _AGENT_PRIVILEGES.values():
-        tool_classes.extend(group)
-
-    for tool_cls in tool_classes:
-        field = tool_cls.model_fields.get("name")
-        if field is None or not isinstance(field.default, str):
-            # Fail loudly rather than skip. A name we cannot read here is a name we
-            # cannot reserve, which would leave it free for a client MCP tool to claim.
-            # Tools must declare `name: str = "literal"`, not default_factory or an
-            # __init__-assigned name.
-            raise RuntimeError(
-                f"{tool_cls.__name__} has no static string `name` default, so its name "
-                "cannot be reserved against MCP tool collisions. Declare it as "
-                '`name: str = "the_tool_name"`.'
-            )
-        names.add(field.default)
-
-    return frozenset(names)
-
-
-BUILTIN_TOOL_NAMES = _builtin_tool_names()
-
-
 class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
-    _policy_permitted_preapprovals: Optional[set[str]]
     _ask_tool_names: set[str]
     _mcp_tool_names: list[str]
 
@@ -303,7 +270,6 @@ class ToolsRegistry:
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
-        admin_allowed_preapprovals: Optional[set[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -337,7 +303,6 @@ class ToolsRegistry:
             ask_tools=ask_tools or [],
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
-            admin_allowed_preapprovals=admin_allowed_preapprovals,
         )
 
     def __init__(
@@ -351,16 +316,8 @@ class ToolsRegistry:
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
-        admin_allowed_preapprovals: Optional[set[str]] = None,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
-
-        # Reject before anything keys off a name. Every trust decision in this class is
-        # name-based (_preapproved_tool_names, _policy_permitted_preapprovals,
-        # _denied_tools, the Toolset), so a client tool allowed to take a built-in's name
-        # inherits whatever that name is trusted for. Guarding at registration fixes all
-        # of them at once, and keeps the real built-in reachable.
-        mcp_tools = self._reject_builtin_name_collisions(mcp_tools)
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
@@ -373,10 +330,7 @@ class ToolsRegistry:
             **{tool.name: tool for tool in [tool_cls() for tool_cls in _DEFAULT_TOOLS]},
         }
 
-        # No-op and default tools are pre-approved unconditionally and are not derived
-        # from the workflow row, so the governance ceiling must never strip them.
-        baseline_preapproved = set(self._enabled_tools.keys())
-        self._preapproved_tool_names = set(baseline_preapproved)
+        self._preapproved_tool_names = set(self._enabled_tools.keys())
         self._denied_tools: set[str] = set(denied_tools or [])
         self._ask_tool_names: set[str] = set(ask_tools or [])
         self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
@@ -460,21 +414,6 @@ class ToolsRegistry:
             if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
                 self._preapproved_tool_names.add(tool_name)
 
-        # The set built above comes from the user-writable workflow row, so intersecting
-        # stops the row widening past policy. Baseline tools are unioned back in; they are
-        # not privilege-derived. `None` means governance is inactive, so nothing is clamped.
-        # The union owns its storage, so a caller mutating what it passed cannot change
-        # policy afterwards.
-        if admin_allowed_preapprovals is None:
-            self._policy_permitted_preapprovals = None
-        else:
-            self._policy_permitted_preapprovals = (
-                set(admin_allowed_preapprovals) | baseline_preapproved
-            )
-        self._preapproved_tool_names = self._clamp_to_policy(
-            self._preapproved_tool_names
-        )
-
         # Applied last so it outranks every pre-approval source above: an admin `ask`
         # rule must always reach the user, never be silently auto-approved.
         self._preapproved_tool_names -= self._ask_tool_names
@@ -482,57 +421,6 @@ class ToolsRegistry:
     def ask_listed_tool_names(self, tool_names: Iterable[str]) -> set[str]:
         """Return the subset of ``tool_names`` an admin `ask` rule forces to prompt."""
         return {name for name in tool_names if name in self._ask_tool_names}
-
-    def pre_approvals_allowed_by_policy(self, tool_names: Iterable[str]) -> set[str]:
-        """Reduce a caller-held pre-approval list to what admin policy permits.
-
-        For pre-approval sources that do not flow through `_preapproved_tool_names`, such
-        as a flow config's `pre_approved_tools`. Clamping the list where it enters means
-        no unclamped list reaches an approval decision, so no caller has to remember a
-        per-tool check.
-
-        Returns the list unchanged when governance is not active for this session.
-        """
-        return self._clamp_to_policy(set(tool_names))
-
-    def _clamp_to_policy(self, tool_names: set[str]) -> set[str]:
-        """Intersect a pre-approval set with admin policy, logging what policy removed."""
-        permitted = self._policy_permitted_preapprovals
-        if permitted is None:
-            return tool_names
-
-        removed = tool_names - permitted
-        if removed:
-            log.warning(
-                "Removed tools from pre-approval: not permitted by admin policy",
-                tool_names=sorted(removed),
-            )
-
-        return tool_names & permitted
-
-    @staticmethod
-    def _reject_builtin_name_collisions(
-        mcp_tools: Optional[list[McpToolConfig]],
-    ) -> list[McpToolConfig]:
-        """Drop client MCP tools whose name is already owned by a built-in.
-
-        Registration is keyed on the tool name, so a colliding MCP tool would both replace the real built-in and inherit
-        any trust attached to that name, such as pre-approval from the governance ceiling or the baseline exemption.
-        """
-        if not mcp_tools:
-            return []
-
-        kept = []
-        for tool in mcp_tools:
-            if tool["llm_name"] in BUILTIN_TOOL_NAMES:
-                log.warning(
-                    "Rejected MCP tool: name collides with a built-in tool",
-                    tool_name=tool["llm_name"],
-                )
-                continue
-            kept.append(tool)
-
-        return kept
 
     def get(self, tool_name: str) -> Optional[ToolType]:
         return self._enabled_tools.get(tool_name)
