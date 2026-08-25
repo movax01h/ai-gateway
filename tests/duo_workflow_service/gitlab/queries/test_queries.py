@@ -61,6 +61,42 @@ class TestQueryVersionSelection:
         assert "compressedCheckpoint" in result
         assert "duoWorkflowStatusCheck" in result
 
+    def test_query_selection_gitlab_19_3_or_above(self):
+        """GitLab >= 19.3 has incrementalCheckpointsEnabled but not currentThread."""
+        result = fetch_query_for_version("19.3.0")
+
+        assert "incrementalCheckpointsEnabled" in result
+        assert "currentThread" not in result
+
+    def test_query_selection_gitlab_19_4_or_above(self):
+        """GitLab >= 19.4 selects currentThread, so a resume restores the group."""
+        result = fetch_query_for_version("19.4.0")
+
+        assert "currentThread" in result
+        assert "incrementalCheckpointsEnabled" in result
+        assert "compressedCheckpoint" in result
+
+    @pytest.mark.parametrize(
+        "version",
+        [
+            pytest.param("19.4.0", id="release"),
+            pytest.param("19.4.0-pre", id="gitlab_com_pre_release"),
+            pytest.param("19.4.0-rc1", id="release_candidate"),
+            pytest.param("19.4.1", id="patch"),
+        ],
+    )
+    def test_pre_release_gets_its_own_milestone_query(self, version: str):
+        """A pre-release carries merged master code, so it must not fall back a milestone.
+
+        PEP 440 sorts 19.4.0-pre below 19.4.0. GitLab.com reports exactly that, so comparing full versions would keep it
+        on the 19.3 query indefinitely.
+        """
+        assert "currentThread" in fetch_query_for_version(version)
+
+    def test_pre_release_does_not_reach_forward(self):
+        """19.3.0-pre is still a 19.3 instance; it must not get 19.4 fields."""
+        assert "currentThread" not in fetch_query_for_version("19.3.0-pre")
+
     def test_query_selection_unknown_version_returns_fallback(self):
         """Unknown/unparsable version returns the fallback (oldest) query."""
         result = fetch_query_for_version(None)
@@ -89,6 +125,7 @@ class TestQueryVersionSelection:
 
         assert "incrementalCheckpointsEnabled" in result
         assert "compressedCheckpoint" in result
+        assert "currentThread" in result
 
     @pytest.mark.parametrize(
         "version, expected_feature",
@@ -106,6 +143,7 @@ class TestQueryVersionSelection:
                 "incrementalCheckpointsEnabled",
                 id="19.2_has_incrementalCheckpointsEnabled",
             ),
+            pytest.param("19.4.0", "currentThread", id="19.4_has_currentThread"),
         ],
     )
     def test_version_gate_features(self, version: str, expected_feature: str):
