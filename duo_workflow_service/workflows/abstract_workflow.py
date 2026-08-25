@@ -211,9 +211,6 @@ class AbstractWorkflow(ABC):
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
         self._ask_tools: list[str] = []
-        # `None` means governance is not active for this session; an empty set means it
-        # is active and permits nothing.
-        self._admin_allowed_preapprovals: Optional[set[str]] = None
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -337,13 +334,10 @@ class AbstractWorkflow(ABC):
                     # governance claim is security-relevant and operators need visibility.
                     self.log.warning(
                         "tool_access_policies claim present but unparsable; "
-                        "failing closed: clearing client preapproved_tools and "
-                        "setting an empty governance ceiling, so no privilege-derived "
-                        "tool is pre-approved and every tool call will request approval",
+                        "failing closed and clearing client preapproved_tools",
                         exc_info=True,
                     )
                     self._preapproved_tools = []
-                    self._admin_allowed_preapprovals = set()
                     return
                 # Ask needs a human to answer; without one (headless/CI, no
                 # timeout on a pending approval) treat it as absent so behaviour
@@ -363,13 +357,9 @@ class AbstractWorkflow(ABC):
                 if governance_active:
                     # deny > ask > allow, matching Rails' resolution order, so a tool
                     # named in both allow and ask still reaches the user.
-                    permitted = set(policies.allow) - set(self._ask_tools)
-                    self._preapproved_tools = list(permitted)
-                    # The same allow-list must reach the privilege-derived pre-approval
-                    # set, which ToolsRegistry builds from the workflow row. That row is
-                    # writable by the session owner, so leaving it unclamped lets a user
-                    # pre-approve tools the namespace policy marked Ask or Deny.
-                    self._admin_allowed_preapprovals = permitted
+                    self._preapproved_tools = list(
+                        set(policies.allow) - set(self._ask_tools)
+                    )
                 if policies.deny:
                     self._denied_tools = list(
                         set(self._denied_tools) | set(policies.deny)
@@ -514,7 +504,6 @@ class AbstractWorkflow(ABC):
                 language_server_version=self._language_server_version,
                 denied_tools=self._denied_tools,
                 ask_tools=self._ask_tools,
-                admin_allowed_preapprovals=self._admin_allowed_preapprovals,
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):

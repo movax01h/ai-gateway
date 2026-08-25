@@ -267,9 +267,7 @@ class ToolApprovalRequestNode:
         """
         tool_name = tool_call["name"]
 
-        # Component-level pre-approval short-circuits before any network check. The list
-        # was already reduced to what admin policy permits when the flow was built (see
-        # Flow._prepare_component_params), so a plain membership check is sufficient here.
+        # Component-level pre-approval short-circuits before any network check
         if tool_name in self._pre_approved_tools:
             log.debug(
                 "Tool call approval skipped: component pre_approved_tools",

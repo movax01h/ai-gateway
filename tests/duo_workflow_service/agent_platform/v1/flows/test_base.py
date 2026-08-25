@@ -155,8 +155,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
             mock_tools_registry.mcp_tool_names.return_value = []
-            mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = set
-            mock_tools_registry.ask_listed_tool_names.return_value = set()
             mock_tools_registry_class.configure = AsyncMock(
                 return_value=mock_tools_registry
             )

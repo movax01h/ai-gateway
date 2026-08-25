@@ -150,11 +150,8 @@ class FlowGraphBuilder:
         )
 
         if "pre_approved_tools" in comp_params:
-            permitted = self._tools_registry.pre_approvals_allowed_by_policy(
-                comp_params["pre_approved_tools"]
-            )
             comp_params["pre_approved_tools"] = strip_ask_listed_pre_approvals(
-                sorted(permitted), self._tools_registry
+                comp_params["pre_approved_tools"], self._tools_registry
             )
 
         if "toolset" in comp_params:
