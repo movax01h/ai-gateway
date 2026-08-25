@@ -13,7 +13,7 @@
 #
 # Usage:
 #   export ANTHROPIC_API_KEY=<your-key>
-#   ./scripts/setup-ai-gateway.sh
+#   ./.gitlab/caproni/setup-ai-gateway.sh
 
 set -euo pipefail
 
@@ -44,8 +44,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo ""
 echo "==> Installing dependencies..."
 
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$REPO_DIR"
+AI_GATEWAY_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPOS_DIR="$(cd "$AI_GATEWAY_DIR/.." && pwd)"
+cd "$AI_GATEWAY_DIR"
 
 if [ ! -f .env ]; then
   cp example.env .env
@@ -127,7 +128,7 @@ fi
 # (needed after recreating the cluster/database).
 # ---------------------------------------------------------------------------
 
-DUO_SETUP_MARKER="$REPO_DIR/.caproni-duo-setup-complete"
+DUO_SETUP_MARKER="$AI_GATEWAY_DIR/.caproni-duo-setup-complete"
 
 if [[ -f "$DUO_SETUP_MARKER" && "${CAPRONI_DUO_SETUP_FORCE:-0}" != "1" ]]; then
   echo ""
@@ -151,7 +152,7 @@ TOOLBOX_POD=$(caproni kubectl get pod -n "$GITLAB_NS" -l app=toolbox \
 
 success "  ✓ Found pod: $TOOLBOX_POD"
 
-GITLAB_DIR="$(cd "$SCRIPT_DIR/../../repos/gitlab" && pwd)"
+GITLAB_DIR="$(cd "$REPOS_DIR/gitlab" && pwd)"
 
 # ---------------------------------------------------------------------------
 # Ensure the GitLab repo's cluster-config sync has run first.
@@ -205,12 +206,10 @@ rails_runner() {
 echo ""
 echo "==> Configuring GitLab Duo..."
 
-rails_runner <<RUBY
-::Ai::Setting.instance.update!(
-  self_hosted_duo_agent_platform_service_secure: false,
-  duo_agent_platform_service_url: 'ai-gateway.ai-gateway.svc.cluster.local:50052'
-)
+rails_runner <<'RUBY'
 ::ApplicationSetting.current_without_cache.update!(
+  self_hosted_duo_agent_platform_service_secure: false,
+  duo_agent_platform_service_url: 'ai-gateway.ai-gateway.svc.cluster.local:50052',
   instance_level_ai_beta_features_enabled: true,
   duo_features_enabled: true,
   outbound_local_requests_allowlist_raw: 'ai-gateway.ai-gateway.svc.cluster.local'
