@@ -292,8 +292,18 @@ class AgentComponentBase(BaseComponent):
         )
 
     def _tools_enabled(self) -> dict[str, bool]:
-        """Map of optional tool/capability -> active, exposed to the prompt template."""
-        return {"web_search": self._web_search_enabled()}
+        """Map of optional tool/capability -> active, exposed to the prompt template.
+
+        The keys are not computed the same way: `web_search` is a capability gate for the
+        provider-native search route, `run_command` is toolset membership.
+        """
+        return {
+            "web_search": self._web_search_enabled(),
+            # Presence is the whole answer: `run_command` reaches the toolset only if the
+            # `run_commands` privilege was granted and no tool policy denied it. Checked
+            # by name because RunCommand and ShellCommand both register under it.
+            "run_command": "run_command" in self.toolset,
+        }
 
     def _build_optimizer_pipeline(self) -> HistoryOptimizerPipeline:
         """Build the history-optimizer pipeline for this component's AgentNode."""
