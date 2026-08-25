@@ -472,6 +472,7 @@ async def test_compile_and_run_graph(
         language_server_version=None,
         denied_tools=[],
         ask_tools=[],
+        admin_allowed_preapprovals=None,
     )
 
 
@@ -610,6 +611,66 @@ async def test_compile_and_run_graph_caps_client_preapproved_to_jwt_allow_list(
     # ceiling: the client cannot widen pre-approval beyond the JWT allow-list
     assert "read_file" not in workflow._preapproved_tools
     assert "create_issue" in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize(
+    ("extra", "expected_ceiling"),
+    [
+        # Active governance: the allow-list becomes the ceiling handed to the registry,
+        # so the workflow row cannot pre-approve past it.
+        (
+            {"tool_access_policies": '{"allow": ["create_issue"], "deny": []}'},
+            {"create_issue"},
+        ),
+        # Deny-only policy is still active governance, so the ceiling is empty.
+        ({"tool_access_policies": '{"allow": [], "deny": ["run_command"]}'}, set()),
+        # Unparsable claim fails closed.
+        ({"tool_access_policies": "not_valid_json"}, set()),
+        # No claim at all: governance inactive, no ceiling, existing behaviour preserved
+        # for a GitLab that does not send it.
+        ({}, None),
+    ],
+    ids=["allow list", "deny only", "unparsable", "no claim"],
+)
+async def test_compile_and_run_graph_passes_governance_ceiling_to_registry(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    extra,
+    expected_ceiling,
+):
+    """The JWT ceiling must reach ToolsRegistry, not just the client-supplied list.
+
+    This is the wiring that issue 608968 was missing: the ceiling was computed and
+    applied to `_preapproved_tools` but never handed to the registry, which is what
+    builds pre-approval from the user-writable workflow row.
+    """
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(gitlab_realm="saas", extra=extra),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert (
+        mock_tools_registry.call_args.kwargs["admin_allowed_preapprovals"]
+        == expected_ceiling
+    )
 
 
 @pytest.mark.asyncio
@@ -930,11 +991,15 @@ async def test_compile_and_run_graph_fails_closed_on_invalid_claim(
         await workflow._compile_and_run_graph("Test goal")
 
     assert not workflow._preapproved_tools
-    # the fail-closed path must warn for operator visibility
+    # the ceiling is cleared too, which is the effect an operator would be chasing
+    assert workflow._admin_allowed_preapprovals == set()
+    # the fail-closed path must warn for operator visibility, naming both effects
     assert any(
         entry["event"]
         == "tool_access_policies claim present but unparsable; "
-        "failing closed and clearing client preapproved_tools"
+        "failing closed: clearing client preapproved_tools and "
+        "setting an empty governance ceiling, so no privilege-derived "
+        "tool is pre-approved and every tool call will request approval"
         and entry["log_level"] == "warning"
         for entry in cap_logs
     )

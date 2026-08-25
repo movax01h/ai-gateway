@@ -137,6 +137,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
             mock_tools_registry.mcp_tool_names.return_value = []
+            mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = set
+            mock_tools_registry.ask_listed_tool_names.return_value = set()
             mock_tools_registry_class.configure = AsyncMock(
                 return_value=mock_tools_registry
             )
@@ -234,6 +236,42 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 config=sample_flow_config,
             )
             yield flow
+
+    def test_prepare_component_params_clamps_pre_approved_tools(
+        self, flow_instance, mock_tools_registry
+    ):
+        """The flow config's pre-approval list is reduced where it enters.
+
+        Mirrors the v1 builder: this platform has its own _prepare_component_params, so
+        the clamp has to be applied here too or v2 flows stay unclamped.
+        """
+        mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = lambda _: {
+            "read_file"
+        }
+
+        params = flow_instance._prepare_component_params(
+            {
+                "type": "AgentComponent",
+                "pre_approved_tools": ["read_file", "edit_file"],
+            },
+            mock_tools_registry,
+        )
+
+        mock_tools_registry.pre_approvals_allowed_by_policy.assert_called_once_with(
+            ["read_file", "edit_file"]
+        )
+        assert params["pre_approved_tools"] == ["read_file"]
+
+    def test_prepare_component_params_leaves_configs_without_pre_approved_tools(
+        self, flow_instance, mock_tools_registry
+    ):
+        """Components that declare no pre-approval list are untouched."""
+        params = flow_instance._prepare_component_params(
+            {"type": "AgentComponent"}, mock_tools_registry
+        )
+
+        mock_tools_registry.pre_approvals_allowed_by_policy.assert_not_called()
+        assert "pre_approved_tools" not in params
 
     def test_prepare_component_params_strips_ask_listed_pre_approvals(
         self, flow_instance, mock_tools_registry

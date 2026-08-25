@@ -338,8 +338,11 @@ class Flow(AbstractWorkflow):
         )
 
         if "pre_approved_tools" in comp_params:
+            permitted = tools_registry.pre_approvals_allowed_by_policy(
+                comp_params["pre_approved_tools"]
+            )
             comp_params["pre_approved_tools"] = strip_ask_listed_pre_approvals(
-                comp_params["pre_approved_tools"], tools_registry
+                sorted(permitted), tools_registry
             )
 
         if "toolset" in comp_params:
