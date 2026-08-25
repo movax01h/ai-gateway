@@ -65,7 +65,7 @@ class TestAgentComponentFactoryRegistry:
         """Flow passes _built_components to the registered AgentComponent factory.
 
         The factory reads _built_components to resolve subagent references but does not mutate the dict — removal of
-        consumed subagents is handled by Flow._instantiate_component after the component is created.
+        consumed subagents is handled by FlowGraphBuilder._instantiate_component after the component is created.
         """
         registry = ComponentRegistry.instance()
         # pylint: disable-next=unsubscriptable-object
@@ -213,7 +213,7 @@ class TestAgentComponentFactoryDispatch:
         """Factory does not remove consumed subagents from _built_components.
 
         Removal of consumed subagents is the responsibility of the flow builder
-        (``Flow._instantiate_component``), not the factory.
+        (``FlowGraphBuilder._instantiate_component``), not the factory.
         """
         developer_mock = Mock(spec=BaseComponent)
         developer_mock.description = "Developer agent"

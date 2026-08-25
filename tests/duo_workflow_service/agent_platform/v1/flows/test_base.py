@@ -73,7 +73,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_components = [self.mock_component(name) for name in names]
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.load_component_class"
+            "duo_workflow_service.agent_platform.v1.flows.graph_builder.load_component_class"
         ) as mock_load_class:
             mock_load_class.side_effect = [
                 MagicMock(return_value=mock_comp) for mock_comp in mock_components
@@ -125,7 +125,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "duo_workflow_service.gitlab.gitlab_api.GitLabUrlParser"
             ) as mock_parser,
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.StateGraph",
+                "duo_workflow_service.agent_platform.v1.flows.graph_builder.StateGraph",
                 return_value=mock_state_graph,
             ),
         ):
@@ -243,7 +243,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         """Fixture providing a Flow instance with mocked dependencies."""
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-workflow-123",
@@ -253,42 +253,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 config=sample_flow_config,
             )
             yield flow
-
-    def test_prepare_component_params_clamps_pre_approved_tools(
-        self, flow_instance, mock_tools_registry
-    ):
-        """The flow config's pre-approval list is reduced where it enters.
-
-        Clamping here, rather than at each approval decision, is what stops a flow author pre-approving a tool the
-        namespace marked Ask or Deny. Downstream consumers can then treat the list as already permitted.
-        """
-        mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = lambda _: {
-            "read_file"
-        }
-
-        params = flow_instance._prepare_component_params(
-            {
-                "type": "AgentComponent",
-                "pre_approved_tools": ["read_file", "edit_file"],
-            },
-            mock_tools_registry,
-        )
-
-        mock_tools_registry.pre_approvals_allowed_by_policy.assert_called_once_with(
-            ["read_file", "edit_file"]
-        )
-        assert params["pre_approved_tools"] == ["read_file"]
-
-    def test_prepare_component_params_leaves_configs_without_pre_approved_tools(
-        self, flow_instance, mock_tools_registry
-    ):
-        """Components that declare no pre-approval list are untouched."""
-        params = flow_instance._prepare_component_params(
-            {"type": "AgentComponent"}, mock_tools_registry
-        )
-
-        mock_tools_registry.pre_approvals_allowed_by_policy.assert_not_called()
-        assert "pre_approved_tools" not in params
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -376,7 +340,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         goal = "test chat goal"
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-workflow-chat",
@@ -420,7 +384,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
                 "duo_workflow_service.workflows.abstract_workflow.fetch_workflow_and_container_data",
                 return_value=(None, namespace, mock_state_graph.compile.return_value),
@@ -447,38 +411,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert input_data["context"]["project_http_url_to_repo"] is None
             assert input_data["context"]["project_default_branch"] is None
             assert input_data["context"]["namespace"] == namespace
-
-    def test_prepare_component_params_strips_ask_listed_pre_approvals(
-        self, flow_instance, mock_tools_registry
-    ):
-        mock_tools_registry.ask_listed_tool_names.return_value = {"run_command"}
-
-        params = flow_instance._prepare_component_params(
-            {
-                "name": "agent",
-                "type": "AgentComponent",
-                "pre_approved_tools": ["run_command", "notify_me_when"],
-            },
-            mock_tools_registry,
-        )
-
-        assert params["pre_approved_tools"] == ["notify_me_when"]
-
-    def test_prepare_component_params_keeps_pre_approvals_without_ask_rules(
-        self, flow_instance, mock_tools_registry
-    ):
-        mock_tools_registry.ask_listed_tool_names.return_value = set()
-
-        params = flow_instance._prepare_component_params(
-            {
-                "name": "agent",
-                "type": "AgentComponent",
-                "pre_approved_tools": ["notify_me_when"],
-            },
-            mock_tools_registry,
-        )
-
-        assert params["pre_approved_tools"] == ["notify_me_when"]
 
     def test_support_namespace_level_workflow(self, flow_instance):
         """Test that Flow supports namespace-level workflows."""
@@ -577,7 +509,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id=f"test-workflow-{approval_decision or 'no-approval'}",
@@ -689,7 +621,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-workflow-resume-inputs",
@@ -726,7 +658,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         """With no additional context the resume Command carries no state update."""
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-workflow-resume-no-inputs",
@@ -775,7 +707,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-workflow-resume-inputs-and-rejection",
@@ -818,7 +750,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         """Test get_graph_input returns appropriate input based on status event."""
         with (
             self.mock_components(["AgentComponent", "EndComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             additional_context = AdditionalContext(
                 category="file",
@@ -871,7 +803,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             self.mock_components(["AgentComponent", "AnotherComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
                 "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
             ) as mock_log_exception,
@@ -958,17 +890,17 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.load_component_class"
+                "duo_workflow_service.agent_platform.v1.flows.graph_builder.load_component_class"
             ) as mock_load_class,
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.StateGraph",
+                "duo_workflow_service.agent_platform.v1.flows.graph_builder.StateGraph",
                 return_value=mock_state_graph,
             ),
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.Router"
+                "duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"
             ) as mock_router_class,
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.EndComponent",
+                "duo_workflow_service.agent_platform.v1.flows.graph_builder.EndComponent",
                 return_value=mock_end_component,
             ) as mock_end_component_class,
         ):
@@ -1098,7 +1030,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
                 "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
             ) as mock_log_exception,
@@ -1130,162 +1062,49 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "source": "duo_workflow_service.agent_platform.v1.flows.base",
             }
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "toolset,tool_name,want_toolset",
-        [
-            (None, "read_file", ["read_file"]),
-            (["create_file_with_contents"], "read_file", ["create_file_with_contents"]),
-            (["create_file_with_contents"], None, ["create_file_with_contents"]),
-            (None, None, None),
-        ],
-        ids=[
-            "tool_name_without_toolset",
-            "tool_name_with_toolset",
-            "toolset_without_tool_name",
-            "no_toolset_or_tool_name",
-        ],
-    )
-    @pytest.mark.usefixtures("mock_checkpointer", "mock_state_graph")
-    async def test_flow_config_tool_name(
+    def test_flow_hands_the_builder_every_dependency_it_holds(
         self,
-        toolset,
-        tool_name,
-        want_toolset,
         mock_flow_metadata,
         user,
-        mock_tools_registry,
+        sample_flow_config,
         flow_type: GLReportingEventContext,
     ):
-        """Test that tool_names can be used without explicit toolsets."""
+        """Pin the ``Flow`` to ``FlowGraphBuilder`` seam, which no builder test can reach.
 
-        # Build component config based on parameters
-        component_config = {
-            "name": "tool_call",
-            "type": "DeterministicStepComponent",
-            "inputs": ["context:goal"],
-        }
-
-        if toolset is not None:
-            component_config["toolset"] = toolset
-        if tool_name is not None:
-            component_config["tool_name"] = tool_name
-
-        config = FlowConfig(
-            flow={"entry_point": "tool_call"},  # type: ignore[arg-type]
-            components=[component_config],
-            routers=[{"from": "tool_call", "to": "end"}],
-            environment="chat-partial",
-            version="v1",
-        )
-
-        # Mock the toolset return value
-        mock_tools_registry.toolset.return_value = want_toolset or []
-
-        with (
-            self.mock_components(["DeterministicStepComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
-        ):
-            flow = Flow(
-                workflow_id="test-workflow-123",
-                workflow_metadata=mock_flow_metadata,
-                workflow_type=flow_type,
-                user=user,
-                config=config,
-            )
-
-            await flow.run("test goal")
-
-            # Verify tools_registry.toolset was called with the expected arguments
-            if want_toolset is not None:
-                if toolset is not None:
-                    # When toolset is specified in config, _parse_toolset is used which passes tool_options
-                    mock_tools_registry.toolset.assert_called_once_with(
-                        want_toolset, tool_options={}
-                    )
-                else:
-                    # When only tool_name is specified, toolset is called directly without tool_options
-                    mock_tools_registry.toolset.assert_called_once_with(want_toolset)
-            else:
-                # When neither toolset nor tool_name is specified, toolset shouldn't be called
-                mock_tools_registry.toolset.assert_not_called()
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "environment,mcp_names,expected_tool_names",
-        [
-            # chat environment: MCP tools are auto-injected
-            (
-                "chat",
-                ["mcp_tool_a", "mcp_tool_b"],
-                ["read_file", "mcp_tool_a", "mcp_tool_b"],
-            ),
-            # chat environment with no MCP tools: no change
-            ("chat", [], ["read_file"]),
-            # ambient environment: MCP tools are NOT injected
-            ("ambient", ["mcp_tool_a", "mcp_tool_b"], ["read_file"]),
-            # ambient environment with no MCP tools: no change
-            ("ambient", [], ["read_file"]),
-        ],
-        ids=[
-            "chat_with_mcp_tools",
-            "chat_without_mcp_tools",
-            "ambient_with_mcp_tools",
-            "ambient_without_mcp_tools",
-        ],
-    )
-    @pytest.mark.usefixtures("mock_checkpointer", "mock_state_graph")
-    async def test_parse_toolset_mcp_injection_by_environment(
-        self,
-        environment,
-        mcp_names,
-        expected_tool_names,
-        mock_flow_metadata,
-        user,
-        mock_tools_registry,
-        flow_type: GLReportingEventContext,
-    ):
-        """MCP tools are auto-injected only for 'chat' environment flows.
-
-        Flows with ``environment: ambient`` must NOT receive MCP tools unless
-        they are explicitly listed in the YAML toolset declaration.  This is
-        the core invariant introduced by the Phase 1 fix (work item #2412).
+        Asserted as an exact kwarg set rather than key by key, so dropping any single
+        dependency from the wiring fails here rather than silently disabling it. Losing
+        ``internal_event_client`` would switch off router telemetry in production while
+        every other test still passed.
         """
-        config = FlowConfig(
-            flow={"entry_point": "agent"},  # type: ignore[arg-type]
-            components=[
-                {
-                    "name": "agent",
-                    "type": "AgentComponent",
-                    "prompt_id": "test/prompt",
-                    "inputs": ["context:goal"],
-                    "toolset": ["read_file"],
-                }
-            ],
-            routers=[{"from": "agent", "to": "end"}],
-            environment=environment,
-            version="v1",
-        )
-
-        mock_tools_registry.mcp_tool_names.return_value = mcp_names
-        mock_tools_registry.toolset.return_value = []
-
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
-                workflow_id="test-mcp-injection",
+                workflow_id="test-workflow-seam",
                 workflow_metadata=mock_flow_metadata,
                 workflow_type=flow_type,
                 user=user,
-                config=config,
+                config=sample_flow_config,
             )
-            await flow.run("test goal")
 
-        mock_tools_registry.toolset.assert_called_once_with(
-            expected_tool_names, tool_options={}
-        )
+        tools_registry = Mock()
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.FlowGraphBuilder"
+        ) as mock_builder_class:
+            builder = flow._graph_builder(tools_registry)
+
+        assert builder is mock_builder_class.return_value
+        assert mock_builder_class.call_args.kwargs == {
+            "tools_registry": tools_registry,
+            "prompt_registry": flow._flow_prompt_registry,
+            "schema_registry": flow._flow_schema_registry,
+            "workflow_id": "test-workflow-seam",
+            "workflow_type": flow_type,
+            "user": user,
+            "internal_event_client": flow._internal_event_client,
+        }
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""
@@ -1547,147 +1366,6 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert "user_rule" not in result
 
-    @pytest.mark.usefixtures("mock_state_graph")
-    def test_build_routers_always_passes_tracking_params_for_conditional_routers(
-        self,
-        mock_flow_metadata,
-        user,
-        flow_type: GLReportingEventContext,
-    ):
-        """Test _build_routers always passes instrumentation params for conditional routers."""
-        config = FlowConfig(
-            version="v1",
-            environment="ambient",
-            components=[{"name": "agent", "type": "AgentComponent"}],
-            routers=[
-                {
-                    "from": "agent",
-                    "condition": {
-                        "input": "status",
-                        "routes": {"Execution": "end"},
-                    },
-                },
-            ],
-            flow=FlowConfigMetadata(entry_point="agent"),
-        )
-
-        components = {
-            "agent": self.mock_component("agent"),
-            "end": self.mock_component("end"),
-        }
-
-        with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.Router"
-        ) as mock_router_class:
-            mock_router_class.return_value = Mock(spec=Router)
-
-            flow = Flow(
-                workflow_id="test-workflow-123",
-                workflow_metadata=mock_flow_metadata,
-                workflow_type=flow_type,
-                user=user,
-                config=config,
-            )
-
-            flow._build_routers(components, Mock(spec=StateGraph))
-
-            call_kwargs = mock_router_class.call_args[1]
-            assert call_kwargs["flow_id"] == "test-workflow-123"
-            assert call_kwargs["flow_type"] == flow_type
-            assert "internal_event_client" in call_kwargs
-
-    @pytest.mark.usefixtures("mock_state_graph")
-    def test_build_routers_accepts_mapping_condition_input(
-        self,
-        mock_flow_metadata,
-        user,
-        flow_type: GLReportingEventContext,
-    ):
-        """A condition input may be a mapping ({from: ..., optional: true})."""
-        mapping_input = {
-            "from": "context:inputs.agent_platform_trigger_context.event_type",
-            "optional": True,
-        }
-        config = FlowConfig(
-            version="v1",
-            environment="ambient",
-            components=[{"name": "agent", "type": "AgentComponent"}],
-            routers=[
-                {
-                    "from": "agent",
-                    "condition": {
-                        "input": mapping_input,
-                        "routes": {"mention": "end"},
-                    },
-                },
-            ],
-            flow=FlowConfigMetadata(entry_point="agent"),
-        )
-
-        components = {
-            "agent": self.mock_component("agent"),
-            "end": self.mock_component("end"),
-        }
-
-        with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.Router"
-        ) as mock_router_class:
-            mock_router_class.return_value = Mock(spec=Router)
-
-            flow = Flow(
-                workflow_id="test-workflow-123",
-                workflow_metadata=mock_flow_metadata,
-                workflow_type=flow_type,
-                user=user,
-                config=config,
-            )
-
-            flow._build_routers(components, Mock(spec=StateGraph))
-
-            assert mock_router_class.call_args[1]["input"] == mapping_input
-
-    @pytest.mark.usefixtures("mock_state_graph")
-    def test_build_routers_rejects_non_string_non_mapping_condition_input(
-        self,
-        mock_flow_metadata,
-        user,
-        flow_type: GLReportingEventContext,
-    ):
-        """Anything that is not a string or a mapping is still rejected."""
-        config = FlowConfig(
-            version="v1",
-            environment="ambient",
-            components=[{"name": "agent", "type": "AgentComponent"}],
-            routers=[
-                {
-                    "from": "agent",
-                    "condition": {
-                        "input": ["status"],
-                        "routes": {"Execution": "end"},
-                    },
-                },
-            ],
-            flow=FlowConfigMetadata(entry_point="agent"),
-        )
-
-        components = {
-            "agent": self.mock_component("agent"),
-            "end": self.mock_component("end"),
-        }
-
-        flow = Flow(
-            workflow_id="test-workflow-123",
-            workflow_metadata=mock_flow_metadata,
-            workflow_type=flow_type,
-            user=user,
-            config=config,
-        )
-
-        with pytest.raises(
-            ValueError, match="Router input must be a string or a mapping"
-        ):
-            flow._build_routers(components, Mock(spec=StateGraph))
-
     @pytest.mark.asyncio
     async def test_handle_workflow_failure_appends_error_log(self, flow_instance):
         """Existing ui_chat_log entries are preserved."""
@@ -1894,7 +1572,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         """Flow instance using the versioned config."""
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-versioned-workflow",
@@ -1949,7 +1627,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         """Flow instance with ^1.1.0 version constraint."""
         with (
             self.mock_components(["AgentComponent"]),
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             flow = Flow(
                 workflow_id="test-higher-constraint-workflow",
@@ -2660,9 +2338,9 @@ class TestSetTrackingContextFromAdditionalContext:
         flow_type = GLReportingEventContext.from_workflow_definition("chat")
         with (
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.load_component_class"
+                "duo_workflow_service.agent_platform.v1.flows.graph_builder.load_component_class"
             ) as mock_load_class,
-            patch("duo_workflow_service.agent_platform.v1.flows.base.Router"),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
         ):
             mock_component = MagicMock(spec=BaseComponent)
             mock_component.__entry_hook__.return_value = "agent_entry_node"
