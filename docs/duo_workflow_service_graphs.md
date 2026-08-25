@@ -1203,3 +1203,32 @@ graph TD;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
 ```
+
+## Graph: `workplan 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> research;
+    research(research<br>#91;AgentComponent#93;);
+    research_gate(research_gate<br>#91;HumanInputComponent#93;);
+    planner(planner<br>#91;AgentComponent#93;);
+    plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    research -.->|ready| planner;
+    research -.->|needs_input| research_gate;
+    research -.->|default_route| research_gate;
+    research_gate --> research;
+    planner -.->|ask_question| plan_gate;
+    planner -.->|plan_ready| __end__;
+    planner -.->|default_route| plan_gate;
+    plan_gate --> planner;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```

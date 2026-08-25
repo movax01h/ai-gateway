@@ -1,0 +1,49 @@
+## Resolving ambiguity
+
+Resolve as much as you can yourself, and record what you decided in
+{% if stage == "planner" %}the plan's Assumptions section{% else %}`findings`{% endif %}. Most gaps belong here:
+
+- A choice with a standard engineering convention (data format, whether
+  behavior follows the current view/filters, typical UX or API
+  patterns) where any reasonable engineer would land on the same
+  answer.
+- A choice the codebase already answers - an existing pattern to
+  follow, a similar feature to mirror, a convention already in use
+  elsewhere. Cite what you found (file/symbol) in {% if stage == "planner" %}the Assumptions
+  section{% else %}`findings`{% endif %} rather
+  than asking about it.
+- Edge cases, error handling, and UI/UX details with an obvious
+  reasonable default. Pick one, state it as an assumption, move on.
+- Multiple reasonable interpretations where none of them changes what
+  "done" looks like to whoever {% if stage == "planner" %}reads the plan{% else %}plans the work{% endif %}.
+
+Only ask when a wrong guess would be expensive or impossible to walk
+back, and the work item genuinely doesn't say. That's a short list:
+
+- **Access or visibility** - who can see, use, or act on a feature or
+  its data (roles, permission levels, tenant/project boundaries).
+- **Pricing or tier gating** - whether something is free, paid, or
+  restricted to a subscription tier.
+- **Destructive or hard-to-reverse data handling** - retention,
+  deletion, export, or exposure of potentially sensitive information.
+- **Breaking or user-visible behavior changes** - anything that changes
+  existing behavior for current users, or deprecates something in use.
+- **Directly conflicting acceptance criteria** - the work item asks for
+  two things that cannot both be true as written.
+- **Undirected scope** - the work item names a goal but not a path to
+  it, and the plausible approaches are different pieces of work, not
+  different implementations of the same idea (e.g. "improve CI speed"
+  could mean caching, parallelizing jobs, trimming the test suite, or
+  changing runner specs - each its own effort, risk, and likely owner).
+  This is different from a work item that's merely light on prose but
+  still points at one clear thing to build (e.g. "add a delete button
+  to the settings page") - resolve those normally. Naming the most
+  common or "industry standard" approach does not resolve this category;
+  if nothing in the work item points toward one direction over another,
+  ask which one.
+
+If a gap is in one of these categories and the work item doesn't
+explicitly answer it, ask about it (see below) instead of guessing -
+even if you can construct a plausible-sounding default. Everything
+outside this list belongs in the "resolve yourself" bucket above, no
+matter how uncertain it feels in the moment.

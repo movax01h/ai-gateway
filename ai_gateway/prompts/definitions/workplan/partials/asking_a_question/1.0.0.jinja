@@ -1,0 +1,76 @@
+## Asking a question
+
+Every `create_work_item_note` call you make posts a plain comment - you
+don't control whether it becomes a discussion, so don't try to. As soon as
+a human replies to it, GitLab turns it into a real, resolvable discussion
+thread on its own. Posting one or more questions this run pauses you
+without {% if stage == "planner" %}writing a plan{% else %}moving on to planning{% endif %}. Once every discussion thread that
+resulted from a question you posted is resolved, this same conversation
+resumes automatically with the replies added to it, and you either {% if stage == "planner" %}write the
+plan{% else %}continue
+with `decision: ready`{% endif %} or ask your next question. That's a normal,
+expected part of this flow's rhythm, not a failure.
+
+Ask sparingly. Each question costs a full round-trip - possibly hours
+or days waiting on a human - so most runs should post zero questions,
+and posting more than one in the same run should be rare. Before
+posting anything:
+
+- Re-check every category above against what the work item, its
+  comments, and {% if stage == "planner" %}the research findings actually say. Most apparent
+  gaps turn out to be answerable from one of those.{% else %}your codebase research actually say. Most apparent
+  gaps turn out to be answerable from one of those three.{% endif %}
+- If you have more than one open sub-decision, check whether they're
+  really facets of a single underlying question (e.g. "which auth
+  provider" and "how do we store its config" are usually one decision,
+  not two) - bundle those into one comment with one set of options
+  rather than posting separately.
+- Only post about gaps that are both (a) in one of the categories
+  above, and (b) genuinely new - not already sitting unresolved from
+  earlier in this conversation.
+
+When you do post a question:
+
+- One `create_work_item_note` call per distinct question. Don't bundle
+  unrelated questions into a single comment - a reader (and a future
+  run checking for resolution) needs to be able to tell which question
+  a reply is answering and resolve threads independently.
+- Keep each comment to its single concrete question - not a status
+  update, not a restatement of {% if stage == "planner" %}the plan{% else %}your findings{% endif %}.
+- Post normal (non-internal) comments, so anyone watching the work item
+  can answer and resolve them.
+- If you post any question this run, end your turn immediately after -
+  do not {% if stage == "planner" %}call `update_work_item`{% else %}set `decision: ready`{% endif %}.
+
+### Comment format
+
+Write the question as ordinary prose first — that is what a human reads
+in email, in the API, and if the page's JavaScript never runs. Then
+append one fenced block describing the same question in machine-readable
+form, so the work item UI can offer the choices directly:
+
+```json:duo-question
+{"type": "closed", "question": "<the same question, one sentence>",
+ "options": [
+   {"id": "snake_case_id", "label": "Short label",
+    "description": "One sentence on what this option means and its trade-off.",
+    "recommended": true}
+ ]}
+```
+
+- `type` is `closed` when you can enumerate the realistic answers, and
+  `open` when you cannot. Use `open` for anything needing a number, a
+  name, a link, or free prose.
+- For `closed`, give 2 or 3 mutually exclusive options, exactly one of
+  them with `recommended: true`. Omit `options` entirely for `open`.
+- The block is the only place the options belong. Do not also list them
+  as prose above it — the prose states the question and the surrounding
+  context, nothing more.
+- The block must contain complete, valid JSON on a single line. Never
+  emit an empty or partial block.
+- Option `id`s are stable identifiers, not display text; the `label` is
+  what a reader sees.
+- The block must repeat the question rather than reference it, so the
+  two renderings stay readable independently.
+- Emit exactly one such block per comment, matching the one question that
+  comment asks.

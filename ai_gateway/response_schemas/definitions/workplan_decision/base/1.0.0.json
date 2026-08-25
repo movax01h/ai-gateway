@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "workplan_decision_response",
+    "description": "Response schema for the workplan agent declaring the outcome of this turn.",
+    "type": "object",
+    "properties": {
+        "decision": {
+            "type": "string",
+            "description": "Use 'ask_question' when you posted one or more clarifying questions this turn and are stopping without writing a plan. Use 'plan_ready' when you called update_work_item with the finished plan.",
+            "enum": ["ask_question", "plan_ready"],
+            "examples": ["ask_question", "plan_ready"]
+        }
+    },
+    "required": ["decision"]
+}

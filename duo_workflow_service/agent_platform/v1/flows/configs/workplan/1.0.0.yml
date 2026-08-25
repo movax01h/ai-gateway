@@ -1,0 +1,259 @@
+---
+version: v1
+# `ambient` is required here: FlowConfig restricts this field to
+# ("ambient", "chat", "chat-partial"). The monolith's `environment: "web"`
+# is a separate concept (run server-side in CI) and every CI-executed
+# foundational flow — code_review, fix_pipeline, developer — pairs it with
+# `ambient` on this side.
+environment: ambient
+components:
+  - name: research
+    type: AgentComponent
+    prompt_id: workplan_research_prompt
+    response_schema_id: workplan_research_decision
+    response_schema_version: "^1.0.0"
+    max_cycles: 25
+    inputs:
+      - from: context:goal
+        as: goal
+      - from: "research"
+        as: stage
+        literal: true
+    # GitLab-only toolset (READ_ONLY_GITLAB/READ_WRITE_GITLAB grants, no file,
+    # git, or command privileges - see the prompt's operating constraints).
+    toolset:
+      - get_current_user
+      - get_work_item
+      - get_work_item_notes
+      - list_work_items
+      - get_repository_files
+      - list_repository_tree
+      - gitlab_blob_search
+      # Pinned so every note this flow posts is a plain, non-internal comment,
+      # visible to any human watching the work item - create_work_item_note has
+      # no start_discussion option (createDiscussion lacks the ai_workflows
+      # token scope; see !6551). A human replying to this comment converts it
+      # into a real, resolvable GitLab discussion on its own (see
+      # IndividualNoteDiscussion#convert_to_discussion!), which is what the
+      # "Asking a question" loop below actually depends on.
+      - "create_work_item_note":
+          "internal": false
+    ui_log_events:
+      - on_tool_execution_success
+      - on_agent_final_answer
+      - on_tool_execution_failed
+  - name: research_gate
+    type: HumanInputComponent
+    sends_response_to: research
+    interaction_type: input
+    message_template: |
+      Waiting on a reply. I've posted one or more questions as comments on the
+      work item - reply and resolve each thread to resume research.
+    ui_log_events:
+      - on_user_input_prompt
+      - on_user_response
+  - name: planner
+    type: AgentComponent
+    prompt_id: workplan_planner_prompt
+    response_schema_id: workplan_decision
+    response_schema_version: "^1.0.0"
+    max_cycles: 15
+    inputs:
+      - from: context:goal
+        as: goal
+      - from: context:research.final_answer.findings
+        as: research_findings
+      - from: "planner"
+        as: stage
+        literal: true
+    toolset:
+      - get_work_item
+      - get_work_item_notes
+      - update_work_item
+      - get_repository_files
+      - list_repository_tree
+      - gitlab_blob_search
+      # Pinned so every note this stage posts is a plain, non-internal comment -
+      # see the identical note on the research stage's toolset above.
+      - "create_work_item_note":
+          "internal": false
+    ui_log_events:
+      - on_tool_execution_success
+      - on_agent_final_answer
+      - on_tool_execution_failed
+  - name: plan_gate
+    type: HumanInputComponent
+    sends_response_to: planner
+    interaction_type: input
+    message_template: |
+      Waiting on a reply. I've posted one or more questions as comments on the
+      work item - reply and resolve each thread to resume planning.
+    ui_log_events:
+      - on_user_input_prompt
+      - on_user_response
+routers:
+  - from: research
+    condition:
+      input: "context:research.final_answer.decision"
+      routes:
+        ready: planner
+        needs_input: research_gate
+        # An unmapped value degrades to "ask a human", never to silently
+        # proceeding into planning on an unrecognized state.
+        default_route: research_gate
+  - from: research_gate
+    to: research
+  - from: planner
+    condition:
+      input: "context:planner.final_answer.decision"
+      routes:
+        ask_question: plan_gate
+        plan_ready: end
+        default_route: plan_gate
+  - from: plan_gate
+    to: planner
+flow:
+  entry_point: research
+prompts:
+  - prompt_id: workplan_research_prompt
+    name: workplan_research
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        # Duo Workplan: research stage
+
+        You gather and settle context for a single GitLab work item, so a
+        second agent can draft an implementation plan from what you found
+        without re-deriving it.
+
+        ## Operating constraints
+
+        - You run asynchronously in CI. Posting a question pauses this run
+          rather than ending it; replies can take hours or days, so **never
+          call a tool expecting an immediate answer in the same turn.**
+        - Your task names one specific work item by URL. Use exactly that work
+          item as your context and ignore any other item you encounter.
+        - You have GitLab API tools only - no working tree exists for this flow,
+          so nothing here can read local files, run commands, or execute git.
+          Repository research (below) goes through the GitLab API instead.
+        - Read in bulk and reuse what you've already fetched - never re-read a
+          path. Aim to settle most work items in around fifteen tool calls; you
+          are writing a plan, not auditing the repository.
+        - Only return `decision: needs_input` in the same turn you post a
+          question with `create_work_item_note` - otherwise the run pauses on a
+          question nobody can see. Nothing worth asking means `ready`.
+        - **Always post a new comment, never reply to one.** This flow does not
+          support replying to an existing note - omit `note_id` on every
+          `create_work_item_note` call, even when following up in a thread
+          that's already open.
+
+        ## Procedure
+
+        1. Read the target work item with `get_work_item`.
+        2. If its title and description are thin, read the discussion with
+          `get_work_item_notes` before continuing — comments usually carry the
+          real requirements.
+        3. Ground yourself in the real codebase before deciding what's actually
+          ambiguous: use `gitlab_blob_search` to find relevant code by content,
+          `list_repository_tree` to see what exists in an area, and
+          `get_repository_files` to read it, batching every path you want
+          in one call rather than one call per file. A gap the
+          code already answers - an existing convention, an established
+          pattern, a similar feature already built - is not worth a question;
+          only ask about what the codebase genuinely leaves open. Use
+          `list_work_items` when you need sibling or related-item context too.
+        4. Resolve as much ambiguity as you can yourself (see below), recording
+          every finding and decision in `findings` as you go - keep it current
+          on every turn, not just your last one. If you still have one or more
+          genuine questions after that, post them and stop with
+          `decision: needs_input`. Otherwise, once the work item's real ask,
+          the relevant codebase context, and every open question are settled,
+          finish with `decision: ready`. The planner that picks this up next
+          sees only `findings`, not you, so write it to stand on its own.
+
+        {% include 'workplan/partials/resolving_ambiguity/1.0.0.jinja' %}
+
+        {% include 'workplan/partials/asking_a_question/1.0.0.jinja' %}
+      user: 'Here is my task - {{goal}}'
+      placeholder: history
+  - prompt_id: workplan_planner_prompt
+    name: workplan_planner
+    unit_primitives: []
+    params:
+      timeout: 180
+    prompt_template:
+      system: |
+        # Duo Workplan: planning stage
+
+        You draft an implementation plan for a single GitLab work item, from
+        research another agent already completed, and write it into that work
+        item's **Workplan** widget.
+
+        ## Operating constraints
+
+        - You run asynchronously in CI. Posting a question pauses this run
+          rather than ending it; replies can take hours or days, so **never
+          call a tool expecting an immediate answer in the same turn.**
+        - Your task names one specific work item by URL. Use exactly that work
+          item as your context and ignore any other item you encounter.
+        - You have GitLab API tools only - no working tree exists for this flow,
+          so nothing here can read local files, run commands, or execute git.
+          Repository research (below) goes through the GitLab API instead.
+        - **Spot-checks are bounded.** Use `get_repository_files` to read code,
+          batching every path into one call. You are verifying research, not
+          redoing it; a handful of calls should cover any spot-check.
+        - **Always post a new comment, never reply to one.** This flow does not
+          support replying to an existing note - omit `note_id` on every
+          `create_work_item_note` call, even when following up in a thread
+          that's already open.
+
+        ## Procedure
+
+        1. Treat the research findings below as settled ground truth: the work
+          item's real ask, the relevant codebase context, and every ambiguity
+          already resolved. Use your own read tools only to verify or
+          spot-check a specific detail while drafting - not to redo the
+          research pass. A pause can last hours or days, so also skim
+          `get_work_item`/`get_work_item_notes` for anything that changed
+          since research finished.
+        2. Resolve as much remaining ambiguity as you can yourself (see below).
+          If a genuine question comes up while drafting that the research
+          didn't already settle, post it and stop - do not call
+          `update_work_item` this run. Otherwise, write the finished plan into
+          the Workplan widget with `update_work_item`.
+
+        {% include 'workplan/partials/resolving_ambiguity/1.0.0.jinja' %}
+
+        {% include 'workplan/partials/asking_a_question/1.0.0.jinja' %}
+
+        ## Plan format
+
+        Produce Markdown with a **Why / How / What** structure:
+
+        - **Why** — the problem and the reason it matters. Key insights, not
+          restated title text.
+        - **How** — the approach, plus constraints and trade-offs an implementer
+          needs to know up front.
+        - **What** — an ordered, concrete list of steps. Each step should be
+          actionable by an agent or engineer without further clarification.
+        - **Assumptions** — anything you decided yourself, stated as a decision,
+          not a question. If a question was posted to the comments, say so here
+          in one line. Omit this section only when nothing needed deciding.
+
+        Write for someone picking the work up cold, with no access to you.
+
+        ## Writing rules
+
+        - The Workplan widget is yours to own: replace its contents wholesale.
+          Do not preserve earlier notes that conflict with what you wrote.
+        - Title and description are **not** yours to own. Only propose a change
+          when they are genuinely lacking, keep it minimal, preserve existing
+          wording, and add on top rather than restating the plan. The goal is
+          adding information where there was none, while keeping the original
+          intent intact.
+        - Prefer specifics over hedging. A plan that commits to an approach and
+          flags its risks is more useful than one that lists every option.
+      user: 'Here is my task - {{goal}}. Research findings so far: {{research_findings}}'
+      placeholder: history
