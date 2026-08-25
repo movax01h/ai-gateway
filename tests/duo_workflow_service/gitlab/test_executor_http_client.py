@@ -11,41 +11,45 @@ from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.executor_http_client import (
     ExecutorGitLabHttpClient,
     _is_retryable_error,
-    _ServerErrorRetry,
+    _RetryableStatusError,
 )
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
-@pytest.fixture(autouse=True)
-def mock_tenacity_sleep():
+@pytest.fixture(autouse=True, name="mock_tenacity_sleep")
+def mock_tenacity_sleep_fixture():
     """Patch asyncio.sleep to return immediately for retry wait tests.
 
-    Retry tests use wait_exponential(min=1s). Tenacity's async sleep path calls asyncio.sleep() via a lazy import inside
+    Retry tests back off by 3s/9s/27s. Tenacity's async sleep path calls asyncio.sleep() via a lazy import inside
     _portable_async_sleep, so patching asyncio.sleep directly is the correct interception point. This drops each retry-
-    triggering test from ~1s to <5ms without affecting retry logic correctness.
+    triggering test from ~39s to <5ms without affecting retry logic correctness.
+
+    Yields the mock so tests can assert on the backoff schedule.
     """
-    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
-        yield
+    sleep_mock = AsyncMock(return_value=None)
+    with patch("asyncio.sleep", new=sleep_mock):
+        yield sleep_mock
 
 
-@pytest.fixture(name="mock_execute_action")
-def mock_execute_action_fixture():
-    return AsyncMock()
+def http_action_response(body: str, status_code: int = 200):
+    """Build the ActionResponse an executor returns for a runHTTPRequest action."""
+    action_response = contract_pb2.ActionResponse()
+    action_response.httpResponse.statusCode = status_code
+    action_response.httpResponse.body = body
+    return action_response
+
+
+def plain_text_action_response(response: str):
+    """Build the ActionResponse returned by executors that answer with plain text."""
+    action_response = contract_pb2.ActionResponse()
+    action_response.plainTextResponse.response = response
+    return action_response
 
 
 @pytest.fixture(name="client")
 def client_fixture():
     outbox = Outbox()
     return ExecutorGitLabHttpClient(outbox)
-
-
-@pytest.fixture(name="monkeypatch_execute_action")
-def monkeypatch_execute_action_fixture(monkeypatch, mock_execute_action):
-    monkeypatch.setattr(
-        "duo_workflow_service.gitlab.executor_http_client._execute_action",
-        mock_execute_action,
-    )
-    return mock_execute_action
 
 
 @pytest.fixture(name="mock_execute_http_response")
@@ -241,7 +245,7 @@ async def test_executor_gitlab_http_client_with_object_hook(
 
 
 @pytest.mark.asyncio
-async def test_graphql_basic_query(client, monkeypatch_execute_action):
+async def test_graphql_basic_query(client, monkeypatch_execute_http_response):
     mock_response = json.dumps(
         {
             "data": {
@@ -257,7 +261,7 @@ async def test_graphql_basic_query(client, monkeypatch_execute_action):
             }
         }
     )
-    monkeypatch_execute_action.return_value = mock_response
+    monkeypatch_execute_http_response.return_value = http_action_response(mock_response)
 
     query = """
     query GetGroupProjects($fullPath: ID!) {
@@ -280,8 +284,8 @@ async def test_graphql_basic_query(client, monkeypatch_execute_action):
     assert len(result["group"]["projects"]["nodes"]) == 2
     assert result["group"]["projects"]["nodes"][0]["name"] == "Project 1"
 
-    monkeypatch_execute_action.assert_called_once()
-    call_args = monkeypatch_execute_action.call_args[0]
+    monkeypatch_execute_http_response.assert_called_once()
+    call_args = monkeypatch_execute_http_response.call_args[0]
 
     assert call_args[0]["outbox"] == client.outbox
 
@@ -295,7 +299,7 @@ async def test_graphql_basic_query(client, monkeypatch_execute_action):
 
 
 @pytest.mark.asyncio
-async def test_graphql_without_variables(client, monkeypatch_execute_action):
+async def test_graphql_without_variables(client, monkeypatch_execute_http_response):
     mock_response = json.dumps(
         {
             "data": {
@@ -303,7 +307,7 @@ async def test_graphql_without_variables(client, monkeypatch_execute_action):
             }
         }
     )
-    monkeypatch_execute_action.return_value = mock_response
+    monkeypatch_execute_http_response.return_value = http_action_response(mock_response)
 
     query = """
     query {
@@ -319,8 +323,8 @@ async def test_graphql_without_variables(client, monkeypatch_execute_action):
     assert result["currentUser"]["username"] == "test-user"
     assert result["currentUser"]["email"] == "test@example.com"
 
-    monkeypatch_execute_action.assert_called_once()
-    call_args = monkeypatch_execute_action.call_args[0]
+    monkeypatch_execute_http_response.assert_called_once()
+    call_args = monkeypatch_execute_http_response.call_args[0]
 
     http_request = call_args[1].runHTTPRequest
     assert http_request.path == "/api/graphql"
@@ -332,8 +336,10 @@ async def test_graphql_without_variables(client, monkeypatch_execute_action):
 
 
 @pytest.mark.asyncio
-async def test_graphql_invalid_json_response(client, monkeypatch_execute_action):
-    monkeypatch_execute_action.return_value = "This is not valid JSON"
+async def test_graphql_invalid_json_response(client, monkeypatch_execute_http_response):
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        "This is not valid JSON"
+    )
 
     # Define query
     query = """
@@ -351,7 +357,7 @@ async def test_graphql_invalid_json_response(client, monkeypatch_execute_action)
 
 
 @pytest.mark.asyncio
-async def test_graphql_with_errors(client, monkeypatch_execute_action):
+async def test_graphql_with_errors(client, monkeypatch_execute_http_response):
     mock_response = json.dumps(
         {
             "errors": [
@@ -364,7 +370,7 @@ async def test_graphql_with_errors(client, monkeypatch_execute_action):
             "data": None,
         }
     )
-    monkeypatch_execute_action.return_value = mock_response
+    monkeypatch_execute_http_response.return_value = http_action_response(mock_response)
 
     query = """
     query {
@@ -453,7 +459,7 @@ async def test_http_call_exhausts_retries_on_repeated_timeouts(
         with pytest.raises(ToolException, match="request timed out"):
             await client.aget("/api/v4/test")
 
-    assert monkeypatch_execute_http_response.call_count == 3
+    assert monkeypatch_execute_http_response.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -493,7 +499,7 @@ async def test_http_call_retries_on_asyncio_timeout_and_succeeds(
 
 @pytest.mark.asyncio
 async def test_graphql_retries_on_timeout_and_succeeds(
-    client, monkeypatch_execute_action
+    client, monkeypatch_execute_http_response
 ):
     """Test that graphql retries when asyncio.TimeoutError is raised."""
     success_response = json.dumps({"data": {"currentUser": {"username": "alice"}}})
@@ -505,9 +511,9 @@ async def test_graphql_retries_on_timeout_and_succeeds(
         call_count += 1
         if call_count == 1:
             raise asyncio.TimeoutError()
-        return success_response
+        return http_action_response(success_response)
 
-    monkeypatch_execute_action.side_effect = side_effect
+    monkeypatch_execute_http_response.side_effect = side_effect
 
     with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
         result = await client.graphql("{ currentUser { username } }")
@@ -518,16 +524,16 @@ async def test_graphql_retries_on_timeout_and_succeeds(
 
 @pytest.mark.asyncio
 async def test_graphql_exhausts_retries_on_repeated_timeouts(
-    client, monkeypatch_execute_action
+    client, monkeypatch_execute_http_response
 ):
     """Test that graphql raises after all retry attempts are exhausted."""
-    monkeypatch_execute_action.side_effect = asyncio.TimeoutError()
+    monkeypatch_execute_http_response.side_effect = asyncio.TimeoutError()
 
     with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
         with pytest.raises(Exception, match="GraphQL request timed out"):
             await client.graphql("{ currentUser { username } }")
 
-    assert monkeypatch_execute_action.call_count == 3
+    assert monkeypatch_execute_http_response.call_count == 4
 
 
 # ---------------------------------------------------------------------------
@@ -539,8 +545,8 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
     "exc, expected",
     [
         (asyncio.TimeoutError(), True),
-        (_ServerErrorRetry(500, "Internal Server Error", {}), True),
-        (_ServerErrorRetry(503, "Service Unavailable", {}), True),
+        (_RetryableStatusError(500, "Internal Server Error", {}), True),
+        (_RetryableStatusError(503, "Service Unavailable", {}), True),
         (Exception("HTTP action error: request timed out"), True),
         (Exception("GraphQL request timed out after 10.0 seconds"), True),
         (ToolException("HTTP action error: connection refused"), True),
@@ -629,7 +635,7 @@ async def test_http_call_exhausts_retries_on_repeated_500s(
     assert isinstance(result, GitLabHttpResponse)
     assert result.status_code == 500
     assert result.body == "Internal Server Error"
-    assert monkeypatch_execute_http_response.call_count == 3
+    assert monkeypatch_execute_http_response.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -649,24 +655,77 @@ async def test_http_call_exhausts_retries_on_repeated_500s_with_json_body(
     assert isinstance(result, GitLabHttpResponse)
     assert result.status_code == 500
     assert result.body == {"error": "Internal Server Error"}
-    assert monkeypatch_execute_http_response.call_count == 3
+    assert monkeypatch_execute_http_response.call_count == 4
 
 
 @pytest.mark.asyncio
-async def test_http_call_does_not_retry_4xx_errors(
-    client, monkeypatch_execute_http_response
+@pytest.mark.parametrize("status_code", [400, 403, 404, 422, 429])
+async def test_http_call_does_not_retry_non_retryable_4xx_errors(
+    client, monkeypatch_execute_http_response, status_code
 ):
-    """Test that _call does NOT retry for 4xx client errors."""
+    """Test that _call does NOT retry 4xx client errors other than 401."""
     error_response = contract_pb2.ActionResponse()
-    error_response.httpResponse.statusCode = 404
-    error_response.httpResponse.body = '{"message": "Not found"}'
+    error_response.httpResponse.statusCode = status_code
+    error_response.httpResponse.body = '{"message": "Client error"}'
 
     monkeypatch_execute_http_response.return_value = error_response
 
     result = await client.aget("/api/v4/test")
 
-    assert result.status_code == 404
+    assert result.status_code == status_code
     monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_on_401_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """_call retries a 401, which is transient while a read replica lags behind the primary.
+
+    The same OAuth token succeeds once the replica catches up, so retrying turns a failed checkpoint or audit-event POST
+    into a successful one.
+    """
+    unauthorized_response = contract_pb2.ActionResponse()
+    unauthorized_response.httpResponse.statusCode = 401
+    unauthorized_response.httpResponse.body = '{"message": "401 Unauthorized"}'
+
+    success_response = contract_pb2.ActionResponse()
+    success_response.httpResponse.statusCode = 201
+    success_response.httpResponse.body = '{"id": 1}'
+
+    monkeypatch_execute_http_response.side_effect = [
+        unauthorized_response,
+        success_response,
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.apost(
+            "/api/v4/ai/duo_workflows/workflows/1/checkpoints", body="{}"
+        )
+
+    assert result.status_code == 201
+    assert result.body == {"id": 1}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_http_call_exhausts_retries_on_repeated_401s(
+    client, monkeypatch_execute_http_response
+):
+    """A genuinely expired or revoked token keeps returning 401 and is surfaced to the caller."""
+    unauthorized_response = contract_pb2.ActionResponse()
+    unauthorized_response.httpResponse.statusCode = 401
+    unauthorized_response.httpResponse.body = '{"message": "401 Unauthorized"}'
+
+    monkeypatch_execute_http_response.return_value = unauthorized_response
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 401
+    assert result.body == {"message": "401 Unauthorized"}
+    assert monkeypatch_execute_http_response.call_count == 4
 
 
 # ---------------------------------------------------------------------------
@@ -709,7 +768,7 @@ async def test_http_call_exhausts_retries_on_repeated_network_errors(
         with pytest.raises(ToolException, match="connection reset by peer"):
             await client.aget("/api/v4/test")
 
-    assert monkeypatch_execute_http_response.call_count == 3
+    assert monkeypatch_execute_http_response.call_count == 4
 
 
 # ---------------------------------------------------------------------------
@@ -719,7 +778,7 @@ async def test_http_call_exhausts_retries_on_repeated_network_errors(
 
 @pytest.mark.asyncio
 async def test_graphql_retries_on_network_error_and_succeeds(
-    client, monkeypatch_execute_action
+    client, monkeypatch_execute_http_response
 ):
     """Test that graphql retries when a network ToolException is raised."""
     success_response = json.dumps({"data": {"currentUser": {"username": "bob"}}})
@@ -731,9 +790,9 @@ async def test_graphql_retries_on_network_error_and_succeeds(
         call_count += 1
         if call_count == 1:
             raise ToolException("HTTP action error: connection refused")
-        return success_response
+        return http_action_response(success_response)
 
-    monkeypatch_execute_action.side_effect = side_effect
+    monkeypatch_execute_http_response.side_effect = side_effect
 
     with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
         result = await client.graphql("{ currentUser { username } }")
@@ -744,10 +803,10 @@ async def test_graphql_retries_on_network_error_and_succeeds(
 
 @pytest.mark.asyncio
 async def test_graphql_exhausts_retries_on_repeated_network_errors(
-    client, monkeypatch_execute_action
+    client, monkeypatch_execute_http_response
 ):
     """Test that graphql raises after all retries are exhausted on network errors."""
-    monkeypatch_execute_action.side_effect = ToolException(
+    monkeypatch_execute_http_response.side_effect = ToolException(
         "HTTP action error: connection reset by peer"
     )
 
@@ -755,4 +814,156 @@ async def test_graphql_exhausts_retries_on_repeated_network_errors(
         with pytest.raises(ToolException, match="connection reset by peer"):
             await client.graphql("{ currentUser { username } }")
 
-    assert monkeypatch_execute_action.call_count == 3
+    assert monkeypatch_execute_http_response.call_count == 4
+
+
+# ---------------------------------------------------------------------------
+# Tests for HTTP-status retry behaviour in graphql
+#
+# GitLab answers `/api/graphql` with HTTP 401 and a body of
+# `{"errors":[{"message":"Invalid token"}]}` when a Duo Agent Platform OAuth
+# token is temporarily invisible to a lagging Postgres read replica.  Without a
+# retry this surfaced as an unrecoverable `GraphQL errors: [...]` and killed the
+# whole flow.
+# ---------------------------------------------------------------------------
+
+
+INVALID_TOKEN_BODY = json.dumps({"errors": [{"message": "Invalid token"}]})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 500, 503])
+async def test_graphql_retries_on_retryable_status_and_succeeds(
+    client, monkeypatch_execute_http_response, status_code
+):
+    """Graphql retries retryable HTTP statuses and returns the eventual success."""
+    monkeypatch_execute_http_response.side_effect = [
+        http_action_response(INVALID_TOKEN_BODY, status_code=status_code),
+        http_action_response(
+            json.dumps({"data": {"currentUser": {"username": "carol"}}})
+        ),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.graphql("{ currentUser { username } }")
+
+    assert result["currentUser"]["username"] == "carol"
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graphql_exhausts_retries_on_repeated_401s(
+    client, monkeypatch_execute_http_response
+):
+    """Graphql surfaces the HTTP status once the retry budget is spent."""
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        INVALID_TOKEN_BODY, status_code=401
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(Exception, match="GraphQL request failed with HTTP 401"):
+            await client.graphql("{ currentUser { username } }")
+
+    assert monkeypatch_execute_http_response.call_count == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body, expected_message",
+    [
+        (
+            json.dumps(
+                {
+                    "errors": [
+                        {
+                            "message": "Workflow not found",
+                            "extensions": {"code": "WORKFLOW_NOT_FOUND"},
+                        }
+                    ]
+                }
+            ),
+            "Workflow not found",
+        ),
+        (
+            json.dumps(
+                {"errors": [{"message": "You don't have permission to access this"}]}
+            ),
+            "You don't have permission",
+        ),
+    ],
+)
+async def test_graphql_does_not_retry_errors_returned_with_http_200(
+    client, monkeypatch_execute_http_response, body, expected_message
+):
+    """GraphQL-level errors come back with HTTP 200 and must fail fast, not retry."""
+    monkeypatch_execute_http_response.return_value = http_action_response(body)
+
+    with pytest.raises(Exception) as excinfo:
+        await client.graphql("{ currentUser { username } }")
+
+    assert expected_message in str(excinfo.value)
+    monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_graphql_does_not_retry_non_retryable_status(
+    client, monkeypatch_execute_http_response
+):
+    """A 403 is a genuine authorization failure and must not be retried."""
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        json.dumps({"errors": [{"message": "Forbidden"}]}), status_code=403
+    )
+
+    with pytest.raises(Exception, match="GraphQL errors"):
+        await client.graphql("{ currentUser { username } }")
+
+    monkeypatch_execute_http_response.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_graphql_accepts_plain_text_response(
+    client, monkeypatch_execute_http_response
+):
+    """Executors that answer runHTTPRequest with plainTextResponse carry no status code."""
+    monkeypatch_execute_http_response.return_value = plain_text_action_response(
+        json.dumps({"data": {"currentUser": {"username": "dave"}}})
+    )
+
+    result = await client.graphql("{ currentUser { username } }")
+
+    assert result["currentUser"]["username"] == "dave"
+
+
+@pytest.mark.asyncio
+async def test_graphql_raises_when_response_type_missing(
+    client, monkeypatch_execute_http_response
+):
+    """An ActionResponse with neither response type is a protocol violation."""
+    monkeypatch_execute_http_response.return_value = contract_pb2.ActionResponse()
+
+    with pytest.raises(ToolException, match="expected response fields"):
+        await client.graphql("{ currentUser { username } }")
+
+
+@pytest.mark.asyncio
+async def test_retry_backoff_schedule_covers_replica_lag_window(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep
+):
+    """The retry budget must be 3s/9s/27s across 4 attempts.
+
+    GitLab pins a freshly minted OAuth token to the database primary for only 30s
+    (Gitlab::Database::LoadBalancing::Sticking::EXPIRATION). These waits add 39s on top of that, so a
+    replica lagging by up to ~69s no longer fails the flow.
+    """
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        INVALID_TOKEN_BODY, status_code=401
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(Exception, match="GraphQL request failed with HTTP 401"):
+            await client.graphql("{ currentUser { username } }")
+
+    waits = [call.args[0] for call in mock_tenacity_sleep.call_args_list]
+
+    assert waits == [3, 9, 27]
+    assert monkeypatch_execute_http_response.call_count == 4
