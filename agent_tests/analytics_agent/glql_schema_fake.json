@@ -1,0 +1,1816 @@
+{
+  "sources": [
+    {
+      "name": "WorkItems",
+      "label": "work items",
+      "modes": [
+        {
+          "mode": "Standard",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "aliases": [
+                "workitemtype"
+              ],
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "Issue",
+                    "Task",
+                    "Epic"
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "Enum",
+                      "values": [
+                        "Issue",
+                        "Task",
+                        "Epic"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "state",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "opened",
+                    "closed",
+                    "all"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "label",
+              "aliases": [
+                "labels"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "=",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "LabelRef"
+                    }
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "LabelRef"
+                }
+              ]
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "updated",
+              "aliases": [
+                "updatedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "assignee",
+              "aliases": [
+                "assignees"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "UserRef"
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "=",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "UserRef"
+                    }
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "milestone",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "MilestoneRef"
+                    }
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "values": [
+                    "upcoming",
+                    "started"
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "MilestoneRef"
+                }
+              ]
+            },
+            {
+              "name": "includeSubgroups",
+              "value_types": [
+                {
+                  "kind": "Boolean",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            }
+          ],
+          "wildcard_filter_fields": [
+            {
+              "name": "customField",
+              "syntax": "customField(\"Name\")",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "display_fields": [
+            {
+              "name": "id"
+            },
+            {
+              "name": "title"
+            },
+            {
+              "name": "state"
+            },
+            {
+              "name": "description",
+              "aliases": [
+                "descriptionhtml"
+              ]
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ]
+            },
+            {
+              "name": "updated",
+              "aliases": [
+                "updatedat"
+              ]
+            },
+            {
+              "name": "label",
+              "aliases": [
+                "labels"
+              ]
+            },
+            {
+              "name": "assignee",
+              "aliases": [
+                "assignees"
+              ]
+            },
+            {
+              "name": "milestone"
+            },
+            {
+              "name": "author"
+            },
+            {
+              "name": "project"
+            },
+            {
+              "name": "type",
+              "aliases": [
+                "workitemtype"
+              ]
+            }
+          ],
+          "sort_fields": [
+            "title",
+            "milestone",
+            "updated",
+            "created",
+            "due",
+            "weight"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "MergeRequests",
+      "label": "merge requests",
+      "modes": [
+        {
+          "mode": "Standard",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "MergeRequest"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "label",
+              "aliases": [
+                "labels"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    },
+                    {
+                      "kind": "Reference",
+                      "references": "LabelRef"
+                    }
+                  ]
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "LabelRef"
+                }
+              ]
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "updated",
+              "aliases": [
+                "updatedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "assignee",
+              "aliases": [
+                "assignees"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "Reference",
+                  "operators": [
+                    "=",
+                    "!="
+                  ],
+                  "references": "UserRef"
+                },
+                {
+                  "kind": "Null",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "state",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "opened",
+                    "closed",
+                    "merged",
+                    "all"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "merged",
+              "aliases": [
+                "mergedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "draft",
+              "value_types": [
+                {
+                  "kind": "Boolean",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "targetBranch",
+              "aliases": [
+                "targetbranches"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "!="
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "includeSubgroups",
+              "value_types": [
+                {
+                  "kind": "Boolean",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            }
+          ],
+          "display_fields": [
+            {
+              "name": "id"
+            },
+            {
+              "name": "title"
+            },
+            {
+              "name": "state"
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ]
+            },
+            {
+              "name": "updated",
+              "aliases": [
+                "updatedat"
+              ]
+            },
+            {
+              "name": "merged",
+              "aliases": [
+                "mergedat"
+              ]
+            },
+            {
+              "name": "draft"
+            },
+            {
+              "name": "sourceBranch",
+              "aliases": [
+                "sourcebranches"
+              ]
+            },
+            {
+              "name": "targetBranch",
+              "aliases": [
+                "targetbranches"
+              ]
+            },
+            {
+              "name": "label",
+              "aliases": [
+                "labels"
+              ]
+            },
+            {
+              "name": "assignee",
+              "aliases": [
+                "assignees"
+              ]
+            },
+            {
+              "name": "author"
+            },
+            {
+              "name": "project"
+            }
+          ],
+          "sort_fields": [
+            "merged",
+            "title",
+            "updated",
+            "created"
+          ]
+        },
+        {
+          "mode": "Analytics",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "MergeRequest"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "merged",
+              "aliases": [
+                "mergedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "state",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "opened",
+                    "closed",
+                    "merged",
+                    "locked"
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "Enum",
+                      "values": [
+                        "opened",
+                        "closed",
+                        "merged",
+                        "locked"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "targetBranch",
+              "aliases": [
+                "targetbranches"
+              ],
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "sort_fields": [
+            "created",
+            "merged",
+            "state",
+            "totalCount",
+            "throughputCount",
+            "timeToMergeQuantile"
+          ],
+          "dimensions": [
+            "created",
+            "merged",
+            "state",
+            "targetBranch"
+          ],
+          "metrics": [
+            "totalCount",
+            "throughputCount",
+            "timeToMergeQuantile"
+          ],
+          "parameterized_fields": [
+            {
+              "name": "created",
+              "parameters": [
+                {
+                  "name": "granularity",
+                  "kind": "Enum",
+                  "values": [
+                    "daily",
+                    "weekly",
+                    "monthly"
+                  ],
+                  "default": "weekly"
+                }
+              ]
+            },
+            {
+              "name": "merged",
+              "parameters": [
+                {
+                  "name": "granularity",
+                  "kind": "Enum",
+                  "values": [
+                    "daily",
+                    "weekly",
+                    "monthly"
+                  ],
+                  "default": "weekly"
+                }
+              ]
+            },
+            {
+              "name": "timeToMergeQuantile",
+              "parameters": [
+                {
+                  "name": "quantile",
+                  "kind": "Number",
+                  "min": 0.01,
+                  "max": 0.99,
+                  "default": 0.5
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pipelines",
+      "label": "pipelines",
+      "modes": [
+        {
+          "mode": "Standard",
+          "allowed_scopes": [
+            "project"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "Pipeline"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "canceled",
+                    "canceling",
+                    "created",
+                    "failed",
+                    "manual",
+                    "pending",
+                    "preparing",
+                    "running",
+                    "scheduled",
+                    "skipped",
+                    "success",
+                    "waiting_for_callback",
+                    "waiting_for_resource"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "ref",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "source",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "updated",
+              "aliases": [
+                "updatedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            }
+          ],
+          "display_fields": [
+            {
+              "name": "id"
+            },
+            {
+              "name": "iid"
+            },
+            {
+              "name": "status"
+            },
+            {
+              "name": "name"
+            },
+            {
+              "name": "ref"
+            },
+            {
+              "name": "sha"
+            },
+            {
+              "name": "source"
+            },
+            {
+              "name": "duration"
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ]
+            },
+            {
+              "name": "finished",
+              "aliases": [
+                "finishedat"
+              ]
+            }
+          ],
+          "sort_fields": []
+        },
+        {
+          "mode": "Analytics",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "Pipeline"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "canceled",
+                    "canceling",
+                    "created",
+                    "failed",
+                    "manual",
+                    "pending",
+                    "preparing",
+                    "running",
+                    "scheduled",
+                    "skipped",
+                    "success",
+                    "waiting_for_callback",
+                    "waiting_for_resource"
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "Enum",
+                      "values": [
+                        "canceled",
+                        "canceling",
+                        "created",
+                        "failed",
+                        "manual",
+                        "pending",
+                        "preparing",
+                        "running",
+                        "scheduled",
+                        "skipped",
+                        "success",
+                        "waiting_for_callback",
+                        "waiting_for_resource"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "ref",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "source",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "started",
+              "aliases": [
+                "startedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "finished",
+              "aliases": [
+                "finishedat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            }
+          ],
+          "sort_fields": [
+            "ref",
+            "status",
+            "finished",
+            "totalCount",
+            "successRate",
+            "durationQuantile"
+          ],
+          "dimensions": [
+            "ref",
+            "source",
+            "status",
+            "finished"
+          ],
+          "metrics": [
+            "totalCount",
+            "successRate",
+            "failureRate",
+            "durationQuantile"
+          ],
+          "parameterized_fields": [
+            {
+              "name": "started",
+              "parameters": [
+                {
+                  "name": "granularity",
+                  "kind": "Enum",
+                  "values": [
+                    "daily",
+                    "weekly",
+                    "monthly"
+                  ],
+                  "default": "weekly"
+                }
+              ]
+            },
+            {
+              "name": "finished",
+              "parameters": [
+                {
+                  "name": "granularity",
+                  "kind": "Enum",
+                  "values": [
+                    "daily",
+                    "weekly",
+                    "monthly"
+                  ],
+                  "default": "weekly"
+                }
+              ]
+            },
+            {
+              "name": "durationQuantile",
+              "parameters": [
+                {
+                  "name": "quantile",
+                  "kind": "Number",
+                  "min": 0.01,
+                  "max": 0.99,
+                  "default": 0.95
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "label": "projects",
+      "modes": [
+        {
+          "mode": "Standard",
+          "allowed_scopes": [
+            "namespace"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "Project"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "includeSubgroups",
+              "value_types": [
+                {
+                  "kind": "Boolean",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "includeArchived",
+              "value_types": [
+                {
+                  "kind": "Boolean",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                }
+              ]
+            }
+          ],
+          "display_fields": [
+            {
+              "name": "id"
+            },
+            {
+              "name": "fullPath"
+            },
+            {
+              "name": "name"
+            },
+            {
+              "name": "description",
+              "aliases": [
+                "descriptionhtml"
+              ]
+            },
+            {
+              "name": "visibility"
+            },
+            {
+              "name": "starCount"
+            },
+            {
+              "name": "openIssuesCount"
+            },
+            {
+              "name": "openMergeRequestsCount"
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ]
+            },
+            {
+              "name": "lastActivity",
+              "aliases": [
+                "lastactivityat"
+              ]
+            }
+          ],
+          "sort_fields": [
+            "path",
+            "fullPath",
+            "lastActivity"
+          ],
+          "sort_restrictions": [
+            {
+              "name": "lastActivity",
+              "directions": [
+                "desc"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "label": "jobs",
+      "modes": [
+        {
+          "mode": "Standard",
+          "allowed_scopes": [
+            "project"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "Job"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "canceled",
+                    "canceling",
+                    "created",
+                    "failed",
+                    "manual",
+                    "pending",
+                    "preparing",
+                    "running",
+                    "scheduled",
+                    "skipped",
+                    "success",
+                    "waiting_for_callback",
+                    "waiting_for_resource"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "kind",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "bridge",
+                    "build"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "pipeline",
+              "value_types": [
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "="
+                  ]
+                }
+              ]
+            }
+          ],
+          "display_fields": [
+            {
+              "name": "id"
+            },
+            {
+              "name": "name"
+            },
+            {
+              "name": "status"
+            },
+            {
+              "name": "stage"
+            },
+            {
+              "name": "pipeline"
+            },
+            {
+              "name": "kind"
+            },
+            {
+              "name": "duration"
+            },
+            {
+              "name": "failureMessage"
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ]
+            },
+            {
+              "name": "finished",
+              "aliases": [
+                "finishedat"
+              ]
+            }
+          ],
+          "sort_fields": []
+        }
+      ]
+    },
+    {
+      "name": "CodeSuggestions",
+      "label": "code suggestions",
+      "modes": [
+        {
+          "mode": "Analytics",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "CodeSuggestion"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "language",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "ideName",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "timestamp",
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "user",
+              "value_types": [
+                {
+                  "kind": "Number",
+                  "operators": [
+                    "="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "Number"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "sort_fields": [
+            "language",
+            "ideName",
+            "totalCount",
+            "usersCount",
+            "acceptanceRate"
+          ],
+          "dimensions": [
+            "language",
+            "ideName",
+            "timestamp"
+          ],
+          "metrics": [
+            "totalCount",
+            "usersCount",
+            "acceptanceRate",
+            "acceptedCount",
+            "shownCount"
+          ],
+          "parameterized_fields": [
+            {
+              "name": "timestamp",
+              "parameters": [
+                {
+                  "name": "granularity",
+                  "kind": "Enum",
+                  "values": [
+                    "monthly"
+                  ],
+                  "default": "monthly"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "operators": [
+    {
+      "symbol": "in",
+      "name": "In",
+      "label": "is one of"
+    },
+    {
+      "symbol": "=",
+      "name": "Equal",
+      "label": "equals"
+    },
+    {
+      "symbol": "!=",
+      "name": "NotEqual",
+      "label": "not equals"
+    },
+    {
+      "symbol": ">",
+      "name": "GreaterThan",
+      "label": "greater than"
+    },
+    {
+      "symbol": ">=",
+      "name": "GreaterThanEquals",
+      "label": "greater than or equal to"
+    },
+    {
+      "symbol": "<",
+      "name": "LessThan",
+      "label": "less than"
+    },
+    {
+      "symbol": "<=",
+      "name": "LessThanEquals",
+      "label": "less than or equal to"
+    }
+  ],
+  "value_kinds": [
+    {
+      "name": "String",
+      "description": "A quoted string, for example \"my title\"."
+    },
+    {
+      "name": "Number",
+      "description": "An integer, for example 3."
+    },
+    {
+      "name": "Date",
+      "description": "An ISO-8601 date (YYYY-MM-DD), or a date function such as today()."
+    },
+    {
+      "name": "Boolean",
+      "description": "true or false. Also accepts 0, 1, null, and the quoted forms \"true\", \"false\", \"0\" and \"1\"."
+    },
+    {
+      "name": "Null",
+      "description": "The tokens none or null, or an empty list (), for an unset value; any for a set one."
+    },
+    {
+      "name": "Enum",
+      "description": "One of a fixed set of tokens, listed in values."
+    },
+    {
+      "name": "StringEnum",
+      "description": "One of a fixed set of tokens that may contain spaces, listed in values."
+    },
+    {
+      "name": "Reference",
+      "description": "A prefixed reference to another object, for example @username. See reference_types."
+    },
+    {
+      "name": "List",
+      "description": "A parenthesised list of values, for example (a, b). `operators` says which comparisons the list accepts, and `items` the value types allowed inside it."
+    }
+  ],
+  "reference_types": [
+    {
+      "name": "UserRef",
+      "symbol": "@",
+      "example": "@username"
+    },
+    {
+      "name": "MilestoneRef",
+      "symbol": "%",
+      "example": "%Backlog"
+    },
+    {
+      "name": "LabelRef",
+      "symbol": "~",
+      "example": "~frontend"
+    },
+    {
+      "name": "IterationRef",
+      "symbol": "*iteration:",
+      "example": "*iteration:25263"
+    },
+    {
+      "name": "EpicRef",
+      "symbol": "&",
+      "example": "&123"
+    },
+    {
+      "name": "WorkItemRef",
+      "symbol": "#",
+      "example": "#123"
+    }
+  ],
+  "functions": [
+    {
+      "name": "today",
+      "kind": "value",
+      "description": "Today's date at 00:00 UTC.",
+      "args": [],
+      "returns": "Date"
+    },
+    {
+      "name": "startOfDay",
+      "kind": "value",
+      "description": "Start of day for an offset in days from today (negative = past, positive = future).",
+      "args": [
+        {
+          "name": "offset",
+          "kind": "String",
+          "example": "\"-7\"",
+          "optional": false
+        }
+      ],
+      "returns": "Date"
+    },
+    {
+      "name": "currentUser",
+      "kind": "value",
+      "description": "Reference to the user running the query. Requires a username in the compile context.",
+      "args": [],
+      "returns": "UserRef"
+    },
+    {
+      "name": "labels",
+      "kind": "field",
+      "description": "Displays only the labels matching the given patterns. Usable in fields, not in a filter.",
+      "args": [
+        {
+          "name": "pattern",
+          "kind": "String",
+          "example": "\"~group::*\"",
+          "optional": false
+        }
+      ],
+      "returns": "labels"
+    }
+  ],
+  "version": "0.34.0",
+  "display_types": [
+    {
+      "name": "list",
+      "description": "A bulleted list of items."
+    },
+    {
+      "name": "orderedList",
+      "description": "A numbered list of items."
+    },
+    {
+      "name": "table",
+      "description": "One row per item, one column per display field."
+    },
+    {
+      "name": "stat",
+      "description": "A single aggregate value.",
+      "selections": [
+        {
+          "dimensions": 0,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "columnChart",
+      "description": "Vertical bars, one per dimension value.",
+      "selections": [
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 1
+          }
+        },
+        {
+          "dimensions": 2,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "barChart",
+      "description": "Horizontal bars, one per dimension value.",
+      "selections": [
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 1
+          }
+        },
+        {
+          "dimensions": 2,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "lineChart",
+      "description": "A line over an ordered dimension, typically a date.",
+      "selections": [
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "areaChart",
+      "description": "A filled line over an ordered dimension, typically a date.",
+      "selections": [
+        {
+          "dimensions": 1,
+          "metrics": {
+            "min": 1
+          }
+        },
+        {
+          "dimensions": 2,
+          "metrics": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
+    }
+  ]
+}

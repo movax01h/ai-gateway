@@ -10,7 +10,7 @@ from agent_tests.helpers import ask_agent
 from .helpers import SAMPLE_ISSUES, SAMPLE_MRS, glql_response, mock_glql_response
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_post_summary_to_issue(
     analytics_agent,
@@ -34,7 +34,7 @@ async def test_post_summary_to_issue(
     result.assert_has_tool_calls().assert_called_tool("create_work_item_note")
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_post_summary_to_merge_request(
     analytics_agent,

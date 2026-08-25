@@ -18,7 +18,7 @@ from .helpers import (
 )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_embedded_view_has_required_fields(
     analytics_agent,
@@ -46,7 +46,7 @@ async def test_embedded_view_has_required_fields(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ordered_list_display_type(
     analytics_agent,
@@ -72,7 +72,7 @@ async def test_ordered_list_display_type(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_list_display_type(
     analytics_agent,
@@ -98,7 +98,7 @@ async def test_list_display_type(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_column_chart_display_type(
     analytics_agent,
@@ -128,7 +128,7 @@ async def test_column_chart_display_type(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_bar_chart_display_type(
     analytics_agent,
@@ -158,7 +158,7 @@ async def test_bar_chart_display_type(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_line_chart_display_type(
     analytics_agent,
@@ -189,7 +189,7 @@ async def test_line_chart_display_type(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_stat_display_type(
     analytics_agent,
@@ -220,7 +220,7 @@ async def test_stat_display_type(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_title_field_included_when_requested(
     analytics_agent,

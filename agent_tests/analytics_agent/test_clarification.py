@@ -15,7 +15,7 @@ from .helpers import (
 )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ambiguous_team_triggers_clarification(
     analytics_agent,
@@ -39,7 +39,7 @@ async def test_ambiguous_team_triggers_clarification(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ambiguous_bugs_and_quarter_triggers_clarification(
     analytics_agent,
@@ -66,7 +66,7 @@ async def test_ambiguous_bugs_and_quarter_triggers_clarification(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ambiguous_velocity_triggers_clarification(
     analytics_agent,
@@ -92,7 +92,7 @@ async def test_ambiguous_velocity_triggers_clarification(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_clear_question_proceeds_without_clarification(
     analytics_agent,

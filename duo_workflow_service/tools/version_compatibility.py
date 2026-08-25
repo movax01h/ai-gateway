@@ -1,4 +1,6 @@
-"""Version compatibility utilities for GraphQL queries."""
+"""Version compatibility utilities for features an instance may not have yet."""
+
+import re
 
 import structlog
 from packaging.version import InvalidVersion, Version
@@ -18,6 +20,11 @@ LICENSED_FEATURE_AVAILABILITY_VERSION = Version("18.11.0")
 AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
 SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
+GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
+
+# Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
+# parse, such as a GDK's `19.3.0-pre-g1234abcd`.
+_NUMERIC_VERSION_PREFIX = re.compile(r"^(\d+\.\d+(?:\.\d+)?)")
 
 
 def get_gitlab_version() -> Version:
@@ -27,11 +34,17 @@ def get_gitlab_version() -> Version:
         Version object representing the GitLab version.
         Falls back to DEFAULT_FALLBACK_VERSION if version cannot be determined.
     """
+    version_str = None
     try:
         version_str = gitlab_version.get()
         if version_str:
             return Version(str(version_str))
     except (InvalidVersion, TypeError) as ex:
+        prefix = (
+            _NUMERIC_VERSION_PREFIX.match(str(version_str)) if version_str else None
+        )
+        if prefix:
+            return Version(prefix.group(1))
         log_exception(ex, extra={"context": "Failed to parse GitLab version"})
 
     log.warning(
@@ -118,3 +131,23 @@ def supports_set_reviewers_mutation() -> bool:
         return True
 
     return get_gitlab_version() >= SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION
+
+
+def _padded_release(version: Version) -> tuple[int, ...]:
+    """The release tuple padded to three components, so "19.3" == "19.3.0"."""
+    release = version.release[:3]
+    return release + (0,) * (3 - len(release))
+
+
+def supports_glql_schema_endpoint() -> bool:
+    """Check if the GitLab instance serves `GET /api/v4/glql/schema`.
+
+    Returns:
+        True if the GLQL schema endpoint is available, False otherwise.
+    """
+    # Compare .release so pre-release builds like GitLab.com's 19.3.0-pre
+    # pass the 19.3.0 floor; comparing full Versions would rank them below it.
+    # Padded, because a two-component header like "19.3" releases as (19, 3).
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        GLQL_SCHEMA_ENDPOINT_VERSION
+    )

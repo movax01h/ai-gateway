@@ -14,7 +14,7 @@ from .helpers import (
 )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_how_many_open_issues(
     analytics_agent,
@@ -40,7 +40,7 @@ async def test_how_many_open_issues(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_show_open_mrs(
     analytics_agent,
@@ -66,7 +66,7 @@ async def test_show_open_mrs(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_multi_source_schema_single_call(
     analytics_agent,
