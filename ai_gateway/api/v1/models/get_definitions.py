@@ -14,12 +14,15 @@ from lib.feature_flags import FeatureFlag, is_feature_enabled
 router = APIRouter()
 
 # Identifier used for the pseudo-model created when a unit primitive has multiple default models.
-# The pseudo-model represents the load-balanced default and has no provider suffix in its name,
-# since requests are distributed across providers transparently.
+# The pseudo-model represents the load-balanced default. Its provider is reported as
+# "Load-balanced" since requests are distributed across providers transparently.
 # NOTE: Multiple default models should only be used for the same model across different providers,
 # because a single model name (from the first default model) will be used when displaying the
 # default model to the user.
 _PSEUDO_DEFAULT_MODEL_IDENTIFIER = "__default__"
+
+# Provider label for the load-balanced pseudo-model.
+_LOAD_BALANCED_PROVIDER = "Load-balanced"
 
 
 class _GetModelResponseModel(BaseModel):
@@ -86,7 +89,7 @@ async def get_models():
             pseudo_models[pseudo_identifier] = _GetModelResponseModel(
                 name=pseudo_name,
                 identifier=pseudo_identifier,
-                provider=None,
+                provider=_LOAD_BALANCED_PROVIDER,
                 description=(
                     first_definition.description if first_definition else None
                 ),

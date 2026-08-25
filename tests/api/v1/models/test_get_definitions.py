@@ -167,13 +167,14 @@ def test_get_models_returns_correct_data_with_flag_enabled(client):
     assert expected0.items() <= resp0.items()
     assert set(resp0["unit_primitives"]) == set(expected0["unit_primitives"])
 
-    # The pseudo-model should appear in the models list with the first default model's name and no provider.
+    # The pseudo-model should appear in the models list with the first default model's name
+    # and a "Load-balanced" provider.
     pseudo_model = next(
         (m for m in data["models"] if m["identifier"] == pseudo_identifier), None
     )
     assert pseudo_model is not None
     assert pseudo_model["name"] == "Model 1"
-    assert pseudo_model["provider"] is None
+    assert pseudo_model["provider"] == "Load-balanced"
     assert pseudo_model["description"] == "Fast, cost-effective responses."
     assert pseudo_model["cost_indicator"] == "$"
 
