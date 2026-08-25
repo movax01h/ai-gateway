@@ -16,7 +16,7 @@ from .helpers import (
 )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_analytical_question_answers_first(
     analytics_agent,
@@ -43,7 +43,7 @@ async def test_analytical_question_answers_first(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_query_request_shows_embedded_view(
     analytics_agent,
@@ -70,7 +70,7 @@ async def test_query_request_shows_embedded_view(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_visualization_request_shows_embedded_view(
     analytics_agent,
@@ -97,7 +97,7 @@ async def test_visualization_request_shows_embedded_view(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ide_analytical_question_answers_first(
     analytics_agent,
@@ -127,7 +127,7 @@ async def test_ide_analytical_question_answers_first(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ide_query_request_uses_markdown(
     analytics_agent,
@@ -156,7 +156,7 @@ async def test_ide_query_request_uses_markdown(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_ide_visualization_request_uses_markdown(
     analytics_agent,

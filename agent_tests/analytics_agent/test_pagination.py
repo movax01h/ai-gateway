@@ -16,7 +16,7 @@ from .helpers import (
 )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_count_query_single_call(
     analytics_agent,
@@ -42,7 +42,7 @@ async def test_count_query_single_call(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_limited_results_single_call(
     analytics_agent,
@@ -68,7 +68,7 @@ async def test_limited_results_single_call(
     )
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_full_analysis_paginates(
     analytics_agent,

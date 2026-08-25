@@ -10,7 +10,7 @@ from agent_tests.helpers import ask_agent
 from .helpers import EMPTY_RESPONSE, glql_response, mock_glql_response
 
 
-@pytest.mark.flow_versions("1.0.0")
+@pytest.mark.flow_versions("1.0.0", "2.0.0")
 @pytest.mark.asyncio
 async def test_empty_results_handled_gracefully(
     analytics_agent,

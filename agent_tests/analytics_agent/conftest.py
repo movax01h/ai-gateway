@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import yaml
@@ -17,6 +17,7 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 from duo_workflow_service.conversation.history_optimizer.schema import (
     OptimizationResult,
 )
+from lib.context import gitlab_version
 
 
 def _make_passthrough_pipeline() -> HistoryOptimizerPipeline:
@@ -42,6 +43,7 @@ def pytest_collection_modifyitems(items):
 # differ in the tools they offer and in what the schema they read looks like.
 SCHEMA_TOOL_NAMES = {
     "1.0.0": "get_glql_schema",
+    "2.0.0": "fetch_glql_schema",
 }
 
 
@@ -84,11 +86,15 @@ def mock_gitlab_client():
 
 
 @pytest.fixture(autouse=True)
-def mock_gitlab_version_18_6():
-    """Mock GitLab version as 18.6.0 (required for GLQL)."""
-    with patch("duo_workflow_service.tools.run_glql_query.gitlab_version") as mock:
-        mock.get.return_value = "18.6.0"
-        yield mock
+def mock_gitlab_version():
+    """Set the GitLab version to 19.3.0, which clears both GLQL version floors.
+
+    GLQL itself needs 18.6 and the schema endpoint 19.3. Every reader imports
+    the same context var, so one set covers them all.
+    """
+    token = gitlab_version.set("19.3.0")
+    yield
+    gitlab_version.reset(token)
 
 
 @pytest.fixture
@@ -109,14 +115,41 @@ def schema_tool_name(flow_version):
 
 
 @pytest.fixture
-def glql_schema_tool(flow_version):
-    """The schema tool the version under test offers."""
+def glql_schema_tool(flow_version, mock_gitlab_client):
+    """The schema tool the version under test offers.
+
+    1.0.0 answers from a copy bundled in this repo and needs no client. 2.0.0
+    reads the instance, so it gets a stubbed endpoint serving
+    `glql_schema_fake.json` - a trimmed down, representative version of the
+    full schema. The stub answers on path, so a tool added to the toolset later
+    cannot silently receive the schema for its own GET.
+    """
     if flow_version == "1.0.0":
         from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
 
-        return GetGlqlSchema(metadata={})
+        tool = GetGlqlSchema(metadata={})
+    else:
+        from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+        from duo_workflow_service.tools.fetch_glql_schema import (
+            SCHEMA_PATH,
+            FetchGlqlSchema,
+        )
 
-    raise AssertionError(f"no schema tool for flow version {flow_version}")
+        document = (Path(__file__).parent / "glql_schema_fake.json").read_text()
+
+        async def aget(path, **_kwargs):
+            if path != SCHEMA_PATH:
+                return GitLabHttpResponse(status_code=404, body="404 Not Found")
+
+            return GitLabHttpResponse(status_code=200, body=document)
+
+        mock_gitlab_client.aget = AsyncMock(side_effect=aget)
+
+        tool = FetchGlqlSchema(metadata={"gitlab_client": mock_gitlab_client})
+
+    # Fail fast if a new flow version quietly inherits this branch's tool.
+    assert tool.name == SCHEMA_TOOL_NAMES[flow_version]
+    return tool
 
 
 @pytest.fixture

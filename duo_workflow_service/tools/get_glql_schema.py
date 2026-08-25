@@ -1,3 +1,11 @@
+"""Serve a copy of the GLQL schema bundled here.
+
+Deprecated and frozen: superseded by `fetch_glql_schema`, which reads the schema
+from the instance. This one stays only for instances older than the GitLab 19.3
+endpoint, via `analytics_agent/1.0.0.yml`, and goes away with that config. New
+data sources and fields belong in the compiler, which the endpoint serves.
+"""
+
 import json
 from typing import Any, Type
 
@@ -575,6 +583,10 @@ class GetGlqlSchema(DuoBaseTool):
 
     Returns available filters (with valid operators and values), display_fields, and sort_fields.
     MUST be called before building any GLQL query to ensure only valid fields are used.
+
+    Serves a bundled copy of the schema that may be out of date; if a `fetch_glql_schema`
+    tool is available (GitLab 19.3 and later), prefer it, as it reads the live schema
+    from the instance.
 
     Supports fetching a single source, multiple comma-separated sources, or "all" sources at once.
     Supported data sources: WorkItem, MergeRequest, Pipeline, Job, Project, CodeSuggestion, Contribution.

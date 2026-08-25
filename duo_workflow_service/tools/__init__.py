@@ -11,6 +11,7 @@ from .commit import *
 from .documentation_search import *
 from .duo_base_tool import format_tool_display_message
 from .epic import *
+from .fetch_glql_schema import *
 from .filesystem import *
 from .findings import *
 from .get_glql_schema import *
