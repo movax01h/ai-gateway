@@ -9,7 +9,6 @@ from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
-from langgraph.graph import StateGraph
 from langgraph.types import Command, Overwrite
 
 from ai_gateway.container import ContainerApplication
@@ -20,26 +19,12 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
-from duo_workflow_service.agent_platform.utils.flow import (
-    strip_ask_listed_pre_approvals,
-)
-from duo_workflow_service.agent_platform.v1.components.base import (
-    AbortComponent,
-    BaseComponent,
-    EndComponent,
-)
-from duo_workflow_service.agent_platform.v1.components.supervisor.component import (
-    extract_subagent_names,
-)
-from duo_workflow_service.agent_platform.v1.flows.flow_config import (
-    FlowConfig,
-    load_component_class,
-)
+from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
 from duo_workflow_service.agent_platform.v1.flows.inputs import (
     CANCELLED_TURN_CATEGORY,
     cancelled_turn_context,
 )
-from duo_workflow_service.agent_platform.v1.routers import Router
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
@@ -615,206 +600,6 @@ class Flow(AbstractWorkflow):
             case _:
                 return None
 
-    def _build_components(
-        self, tools_registry: ToolsRegistry, graph: StateGraph
-    ) -> dict[str, BaseComponent]:
-        end_component = EndComponent(
-            name="end",
-            flow_id=self._workflow_id,
-            flow_type=self._workflow_type,
-            user=self._user,
-        )
-        end_component.attach(graph)
-
-        abort_component = AbortComponent(
-            name="abort",
-            flow_id=self._workflow_id,
-            flow_type=self._workflow_type,
-            user=self._user,
-        )
-        abort_component.attach(graph)
-
-        components: dict[str, BaseComponent] = {
-            "end": end_component,
-            "abort": abort_component,
-        }
-
-        # Single-pass construction with deferred queue for components
-        # that depend on other components (e.g. supervisors need subagents).
-        deferred: list[dict] = []
-
-        for comp_config in self._config.components:
-            comp_params = self._prepare_component_params(comp_config, tools_registry)
-
-            if self._has_unresolved_dependencies(comp_config, components):
-                deferred.append(comp_config)
-                continue
-
-            self._instantiate_component(comp_config, comp_params, components)
-
-        # Build deferred components — their dependencies are now available
-        for comp_config in deferred:
-            comp_params = self._prepare_component_params(comp_config, tools_registry)
-            self._instantiate_component(comp_config, comp_params, components)
-
-        return components
-
-    def _prepare_component_params(
-        self, comp_config: dict, tools_registry: ToolsRegistry
-    ) -> dict:
-        """Prepare constructor parameters from a component config dict."""
-        comp_params = {k: v for k, v in comp_config.items() if k != "type"}
-
-        comp_params.update(
-            {
-                "prompt_registry": self._flow_prompt_registry,
-                "schema_registry": self._flow_schema_registry,
-                "flow_id": self._workflow_id,
-                "flow_type": self._workflow_type,
-                "user": self._user,
-                "environment": self._config.environment,
-            }
-        )
-
-        if "pre_approved_tools" in comp_params:
-            permitted = tools_registry.pre_approvals_allowed_by_policy(
-                comp_params["pre_approved_tools"]
-            )
-            comp_params["pre_approved_tools"] = strip_ask_listed_pre_approvals(
-                sorted(permitted), tools_registry
-            )
-
-        if "toolset" in comp_params:
-            comp_params["toolset"] = self._parse_toolset(
-                tools_registry, comp_params["toolset"]
-            )
-        elif "tool_name" in comp_params:
-            comp_params["toolset"] = tools_registry.toolset([comp_params["tool_name"]])
-
-        return comp_params
-
-    def _has_unresolved_dependencies(
-        self,
-        comp_config: dict,
-        components: dict[str, BaseComponent],
-    ) -> bool:
-        """Check if a component has dependencies that haven't been built yet.
-
-        A component has unresolved dependencies when it declares ``subagents``
-        and at least one of those agents has not yet been built.  This applies to
-        ``SupervisorAgentComponent`` configs that include ``subagents``.
-        """
-        subagents = comp_config.get("subagents", [])
-        if not subagents:
-            return False
-
-        try:
-            subagent_names = extract_subagent_names(subagents)
-        except ValueError as exc:
-            comp_name = comp_config.get("name", "<unknown>")
-            raise ValueError(
-                f"Component '{comp_name}' has a malformed subagents entry: {exc}"
-            ) from exc
-        return any(name not in components for name in subagent_names)
-
-    def _instantiate_component(
-        self,
-        comp_config: dict,
-        comp_params: dict,
-        components: dict[str, BaseComponent],
-    ) -> None:
-        """Instantiate a single component and add it to the components dict.
-
-        The shared ``_built_components`` dict is always injected into the params
-        so that factory callables (e.g. the ``AgentComponent`` factory registered
-        in the v1 :class:`ComponentRegistry`) can resolve subagent references when
-        needed.  Factories that do not require it (plain :class:`AgentComponent`)
-        simply pop and discard the key.
-
-        After the component is created, ``Flow`` inspects its
-        ``subagent_components`` attribute (present on
-        :class:`SupervisorAgentComponent`) and removes the consumed subagents
-        from the shared dict.  This keeps the mutation explicit and owned by
-        ``Flow`` rather than hidden inside the factory.
-        """
-        comp_name = comp_config["name"]
-        comp_type = comp_config["type"]
-        comp_class = load_component_class(comp_type)
-
-        if comp_name in components:
-            raise ValueError(
-                f"Duplicate component name: '{comp_name}'. Component names must be unique."
-            )
-
-        # AgentComponent configs are handled by a factory that needs the shared
-        # components dict to resolve subagent references (for supervisor dispatch).
-        if comp_type == "AgentComponent":
-            comp_params["_built_components"] = components
-
-        component = comp_class(**comp_params)
-        components[comp_name] = component
-
-        # If the newly created component consumed subagents (i.e. it is a
-        # SupervisorAgentComponent), remove those subagents from the shared dict
-        # so they are not exposed as top-level components (entry points, routers,
-        # etc.).
-        if hasattr(component, "subagent_components"):
-            for consumed_name in component.subagent_components:
-                components.pop(consumed_name, None)
-
-    def _build_routers(
-        self, components: dict[str, BaseComponent], graph: StateGraph
-    ) -> None:
-        """Build and attach routers to the graph based on configuration.
-
-        Creates routers that orders components in the flow graph.
-        Supports conditional routing based on component outputs.
-
-        Args:
-            components: Dictionary of component instances keyed by name
-            graph: The StateGraph instance to attach routers to
-
-        Example conditional router configuration:
-
-        - from: "human_input"
-            condition:
-                input: "status"
-                routes:
-                    "Execution": "agent"
-                    "default_route": "end"
-        """
-        for router_config in self._config.routers:
-            from_comp = components[router_config["from"]]
-
-            if "condition" in router_config:
-                to_components = {}
-                for route_key, comp_name in router_config["condition"][
-                    "routes"
-                ].items():
-                    to_components[route_key] = components[comp_name]
-
-                # A condition input is either a plain state-path string or, like
-                # component inputs, a mapping ({from: ..., optional: true}) so a
-                # router can branch on a key that may be absent from the state.
-                # BaseRouter parses both forms via IOKey.parse_key.
-                input_field = router_config["condition"]["input"]
-                if not isinstance(input_field, (str, dict)):
-                    raise ValueError("Router input must be a string or a mapping.")
-
-                router = Router(
-                    from_component=from_comp,
-                    input=router_config["condition"]["input"],
-                    to_component=to_components,
-                    flow_id=self._workflow_id,
-                    flow_type=self._workflow_type,
-                    internal_event_client=self._internal_event_client,
-                )
-            else:
-                to_comp = components[router_config["to"]]
-                router = Router(from_component=from_comp, to_component=to_comp)
-
-            router.attach(graph)
-
     @override
     def _compile(
         self,
@@ -822,54 +607,28 @@ class Flow(AbstractWorkflow):
         tools_registry: ToolsRegistry,
         checkpointer: BaseCheckpointSaver,
     ) -> Any:
-        if self._config.flow.entry_point is None:
-            raise ValueError(
-                "Can not compile flow: entry_point is not defined in the flow config."
-            )
-
-        graph = StateGraph(FlowState)
-        components = self._build_components(tools_registry, graph)
-        self._build_routers(components, graph)
-
-        entry_component = components[self._config.flow.entry_point]
-        graph.set_entry_point(entry_component.__entry_hook__())
+        graph = self._graph_builder(tools_registry).build(self._config)
 
         return graph.compile(checkpointer=checkpointer)
 
-    def _parse_toolset(
-        self, tools_registry: ToolsRegistry, toolset_config: list
-    ) -> Any:
-        """Parse toolset configuration and extract tool options.
+    def _graph_builder(self, tools_registry: ToolsRegistry) -> FlowGraphBuilder:
+        """Build the graph builder carrying this run's dependencies.
 
-        Supports two formats:
-        1. Simple string: "tool_name"
-        2. Dict with options: {"tool_name": {"option": "value"}}
-
-        For flows with ``environment: chat``, all MCP tools connected to the
-        session are automatically appended to the toolset, preserving the
-        pre-Phase-1 behaviour for interactive chat assistants (e.g. Duo CLI,
-        Interactive Developer, Software Development).  Flows with
-        ``environment: ambient`` receive only the tools explicitly declared in
-        their YAML config.
-
-        Returns a Toolset with the appropriate tool options applied.
+        The builder takes the config per call rather than holding it. Nothing
+        retains the builder yet, so that shape is groundwork: it is what would let a
+        nested flow be built from this same instance, resolving its toolset against
+        the parent run's ``ToolsRegistry`` and so never exceeding the privileges the
+        session was granted.
         """
-        tool_names: list[str] = []
-        tool_options: dict[str, dict[str, Any]] = {}
-
-        for item in toolset_config:
-            if isinstance(item, str):
-                tool_names.append(item)
-            elif isinstance(item, dict):
-                for tool_name, options in item.items():
-                    tool_names.append(tool_name)
-                    if options:
-                        tool_options[tool_name] = options
-
-        if self._config.should_auto_inject_mcp_tools():
-            tool_names += tools_registry.mcp_tool_names()
-
-        return tools_registry.toolset(tool_names, tool_options=tool_options)
+        return FlowGraphBuilder(
+            tools_registry=tools_registry,
+            prompt_registry=self._flow_prompt_registry,
+            schema_registry=self._flow_schema_registry,
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+            user=self._user,
+            internal_event_client=self._internal_event_client,
+        )
 
     @override
     async def _handle_compile_and_run_exception(

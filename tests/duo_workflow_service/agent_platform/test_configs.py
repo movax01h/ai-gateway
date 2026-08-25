@@ -32,7 +32,7 @@ def _declared_toolset_names(config_path: Path) -> list[str]:
     """Collect every tool name referenced by a config's component ``toolset`` lists.
 
     Entries may be plain strings or single-key ``{"tool_name": {options}}`` mappings, matching
-    ``Flow._parse_toolset``.
+    ``FlowGraphBuilder._parse_toolset``.
     """
     config = yaml.safe_load(config_path.read_text()) or {}
 
