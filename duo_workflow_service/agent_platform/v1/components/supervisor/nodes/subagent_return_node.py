@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import build_tool_info
+from duo_workflow_service.tracking.subagent_delegation import SubagentDelegationTracker
 
 log = structlog.stdlib.get_logger("subagent_return_node")
 
@@ -38,7 +39,8 @@ class SubagentReturnNode:
         (matching the delegate_task tool_call_id)
     4. Resets the active session context
     5. Emits a ``delegation_returns`` UI log entry
-    6. Routes back to the supervisor's agent node
+    6. Emits a ``duo_workflow_subagent_returned`` internal event carrying the delegation status
+    7. Routes back to the supervisor's agent node
 
     All state interactions are performed exclusively through ``IOKey`` instances,
     following the Flow Registry guideline of avoiding direct state dictionary access.
@@ -57,6 +59,11 @@ class SubagentReturnNode:
             subagent is returning to. ``None`` for top-level supervisors; set to
             a subsession ID for nested subagent architectures.
         ui_history: ``UIHistory`` for emitting ``delegation_returns`` log entries.
+        flow_id: Workflow id, used to correlate the internal event with others
+            emitted during the same workflow.
+        flow_type: Flow type, used as the internal event category.
+        internal_event_client: Client the ``duo_workflow_subagent_returned``
+            event is emitted through.
     """
 
     MESSAGE_SUB_TYPE = "delegation_returns"
@@ -72,6 +79,7 @@ class SubagentReturnNode:
         supervisor_history_key: RuntimeIOKey,
         session_id: Optional[str] = None,
         ui_history: UIHistory,
+        tracker: SubagentDelegationTracker,
     ):
         self.name = name
         self._delegate_task_cls = delegate_task_cls
@@ -81,6 +89,7 @@ class SubagentReturnNode:
         self._supervisor_history_key = supervisor_history_key
         self._session_id = session_id
         self._ui_history = ui_history
+        self._tracker = tracker
 
     async def run(self, state: FlowState) -> dict:
         """Inject subagent result into supervisor conversation history."""
@@ -165,6 +174,12 @@ class SubagentReturnNode:
             subagent_name=active_subagent_name,
             subsession_id=active_session,
             status=status,
+        )
+
+        self._tracker.returned(
+            subagent_name=active_subagent_name,
+            subsession_id=active_session,
+            status=status.value,
         )
 
         # Inject ToolMessage into supervisor's conversation history

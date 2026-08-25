@@ -17,6 +17,10 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import build_tool_info
+from duo_workflow_service.tracking.subagent_delegation import (
+    DelegationRejectionReason,
+    SubagentDelegationTracker,
+)
 
 # Factory that builds a subsession-scoped conversation-history IOKey given the
 # subagent type name and subsession ID.  Defined as a named type so callers
@@ -77,11 +81,20 @@ class DelegationError(Exception):
     LLM issues multiple delegate_task calls in one turn ``run()`` must respond
     with one ToolMessage per call to satisfy the AIMessage/ToolMessage pairing
     requirement.
+
+    Also carries ``reason``, the coarse cause reported to analytics, so the
+    emit site does not have to re-derive it from the message text.
     """
 
-    def __init__(self, message: str, call_ids: list[str]) -> None:
+    def __init__(
+        self,
+        message: str,
+        call_ids: list[str],
+        reason: DelegationRejectionReason,
+    ) -> None:
         super().__init__(message)
         self.call_ids = call_ids
+        self.reason = reason
 
 
 class DelegationNode:  # pylint: disable=too-many-instance-attributes
@@ -96,6 +109,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
     - Tracks delegation count for safety limits
     - Emits a ``delegation`` UI log entry for each successful delegation
     - Emits a ``delegation_error`` UI log entry for each recoverable delegation failure
+    - Emits a ``duo_workflow_subagent_delegated`` internal event for each successful delegation
 
     Routing after this node is handled by
     ``SupervisorAgentComponent._delegation_router``, which owns all routing
@@ -129,6 +143,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
         subsession_history_key_factory: SubsessionHistoryKeyFactory,
         subsession_goal_key_factory: Callable[[str, int], IOKey],
         ui_history: UIHistory,
+        tracker: SubagentDelegationTracker,
     ):
         self.name = name
         self._max_delegations = max_delegations
@@ -141,6 +156,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
         self._subsession_history_key_factory = subsession_history_key_factory
         self._subsession_goal_key_factory = subsession_goal_key_factory
         self._ui_history = ui_history
+        self._tracker = tracker
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Process a delegate_task tool call from the supervisor."""
@@ -164,6 +180,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                     f"Maximum delegation limit ({self._max_delegations}) reached. "
                     f"You must call final_response_tool to complete the workflow.",
                     call_ids=[call_id],
+                    reason=DelegationRejectionReason.LIMIT_REACHED,
                 )
 
             subagent_name = str(delegation.subagent_name)
@@ -189,6 +206,11 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}"
             )
             log.warning(str(e), supervisor=supervisor_key_id)
+
+            # One event per rejection, not per call id: this supervisor makes at
+            # most one delegation decision per turn, and a turn-level rejection
+            # (mixed/parallel calls) spans call ids that are not all delegations.
+            self._tracker.rejected(reason=e.reason)
 
             # Emit a tool-type UI log entry for the delegation error so that
             # the client's ui_chat_log contains a non-agent entry after the
@@ -218,13 +240,23 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 ui_updates,
             )
 
+        is_resume = delegation.subsession_id is not None
+        new_delegation_count = delegation_count + 1
+
         log.info(
             "Delegating task",
             supervisor=f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}",
             subagent_name=subagent_name,
             subsession_id=subsession_result.subsession_id,
-            delegation_count=delegation_count + 1,
-            is_resume=delegation.subsession_id is not None,
+            delegation_count=new_delegation_count,
+            is_resume=is_resume,
+        )
+
+        self._tracker.delegated(
+            subagent_name=subagent_name,
+            subsession_id=subsession_result.subsession_id,
+            is_resume=is_resume,
+            delegation_count=new_delegation_count,
         )
 
         delegate_args = {
@@ -246,7 +278,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             (self._max_subsession_id_key, subsession_result.new_max_id),
             (self._active_subsession_key, subsession_result.subsession_id),
             (self._active_subagent_name_key, subagent_name),
-            (self._delegation_count_key, delegation_count + 1),
+            (self._delegation_count_key, new_delegation_count),
         ):
             context_updates = merge_nested_dict(
                 context_updates,
@@ -317,6 +349,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"in a single turn. When delegating, {tool_title} must be the only tool "
                 f"call. Please retry using only {tool_title}.",
                 call_ids=all_tool_call_ids,
+                reason=DelegationRejectionReason.MIXED_TOOL_CALLS,
             )
 
         if len(delegate_calls) > 1:
@@ -329,6 +362,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"you must delegate to one subagent at a time. "
                 f"Please call {tool_title} again with a single delegation.",
                 call_ids=all_tool_call_ids,
+                reason=DelegationRejectionReason.PARALLEL_CALL,
             )
 
         raw_call = delegate_calls[0]
@@ -340,6 +374,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             raise DelegationError(
                 f"Invalid delegate_task arguments: {e}",
                 call_ids=[call_id],
+                reason=DelegationRejectionReason.INVALID_ARGS,
             ) from e
 
         return ExtractedDelegateCall(call_id=call_id, delegation=delegation)
@@ -398,6 +433,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"Invalid subsession ID {subsession_id}. "
                 f"Valid range: 1 to {max_subsession_id}",
                 call_ids=[call_id],
+                reason=DelegationRejectionReason.INVALID_SUBSESSION,
             )
 
         subsession_history_iokey = self._subsession_history_key_factory(
@@ -413,6 +449,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"(subagent_name: {subagent_name}). The subsession may belong to "
                 f"a different subagent.",
                 call_ids=[call_id],
+                reason=DelegationRejectionReason.INVALID_SUBSESSION,
             )
 
         return SubsessionResult(

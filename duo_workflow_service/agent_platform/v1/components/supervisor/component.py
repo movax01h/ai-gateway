@@ -52,6 +52,9 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     default_ui_log_writer_class,
 )
 from duo_workflow_service.entities.state import MessageTypeEnum
+from duo_workflow_service.tracking.subagent_delegation import (
+    SubagentDelegationTracker,
+)
 
 __all__ = ["SubagentConfig", "SupervisorAgentComponent", "extract_subagent_names"]
 
@@ -710,6 +713,14 @@ class SupervisorAgentComponent(AgentComponentBase):
             session_id_key=DEFAULT_SESSION_ID_KEY,
         )
 
+        delegation_tracker = SubagentDelegationTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+            supervisor_name=self.name,
+            parallel=False,
+        )
+
         # --- Delegation node ---
         node_delegation = DelegationNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}delegation",
@@ -733,6 +744,7 @@ class SupervisorAgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            tracker=delegation_tracker,
         )
 
         # --- Subagent return node ---
@@ -751,6 +763,7 @@ class SupervisorAgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            tracker=delegation_tracker,
         )
 
         # --- Add supervisor nodes to graph ---

@@ -59,6 +59,9 @@ from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     get_model_max_context_token_limit,
 )
+from duo_workflow_service.tracking.subagent_delegation import (
+    SubagentDelegationTracker,
+)
 
 __all__ = ["SubagentConfig", "SupervisorAgentComponentV2", "extract_subagent_names"]
 
@@ -536,6 +539,14 @@ class SupervisorAgentComponentV2(AgentComponentBase):
             for agent_name, compiled_graph in subagent_graphs.items()
         }
 
+        delegation_tracker = SubagentDelegationTracker(
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            internal_event_client=self.internal_event_client,
+            supervisor_name=self.name,
+            parallel=True,
+        )
+
         # --- Delegation prepare/collect nodes ---
         node_delegation_prepare = DelegationPrepareNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}delegation_prepare",
@@ -556,6 +567,7 @@ class SupervisorAgentComponentV2(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            tracker=delegation_tracker,
         )
         node_delegation_collect = DelegationCollectNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}delegation_collect",
@@ -572,6 +584,7 @@ class SupervisorAgentComponentV2(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
+            tracker=delegation_tracker,
         )
 
         # --- Add supervisor nodes to graph ---

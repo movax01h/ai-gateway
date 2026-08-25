@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor.nodes.delegati
 from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
     UILogEventsSupervisor,
 )
+from lib.internal_events.event_enum import EventEnum
 
 
 class TestDelegationNodeNewSession:
@@ -35,6 +36,7 @@ class TestDelegationNodeNewSession:
         subsession_history_key_factory,
         subsession_goal_key_factory,
         ui_history,
+        delegation_tracker,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -48,6 +50,7 @@ class TestDelegationNodeNewSession:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
     @pytest.mark.asyncio
@@ -163,6 +166,7 @@ class TestDelegationNodeResumeSession:
         subsession_history_key_factory,
         subsession_goal_key_factory,
         ui_history,
+        delegation_tracker,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -176,6 +180,7 @@ class TestDelegationNodeResumeSession:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
     @pytest.mark.asyncio
@@ -411,6 +416,7 @@ class TestDelegationNodeErrorHandling:
         subsession_history_key_factory,
         subsession_goal_key_factory,
         ui_history,
+        delegation_tracker,
     ):
         return DelegationNode(
             name=f"{supervisor_name}#delegation",
@@ -424,6 +430,7 @@ class TestDelegationNodeErrorHandling:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
     @pytest.mark.asyncio
@@ -441,6 +448,7 @@ class TestDelegationNodeErrorHandling:
         subsession_history_key_factory,
         subsession_goal_key_factory,
         ui_history,
+        delegation_tracker,
     ):
         """Test that exceeding max_delegations returns error ToolMessage."""
         node = DelegationNode(
@@ -455,6 +463,7 @@ class TestDelegationNodeErrorHandling:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
         state = {**base_flow_state}
@@ -493,6 +502,7 @@ class TestDelegationNodeErrorHandling:
         subsession_history_key_factory,
         subsession_goal_key_factory,
         ui_history,
+        delegation_tracker,
     ):
         """Test that None max_delegations imposes no delegation limit."""
         node = DelegationNode(
@@ -507,6 +517,7 @@ class TestDelegationNodeErrorHandling:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
         # Set delegation_count to a very high value — should not trigger any limit
@@ -704,6 +715,7 @@ class TestDelegationNodeUILog:
         subsession_history_key_factory,
         subsession_goal_key_factory,
         ui_history,
+        tracker,
         max_delegations=None,
     ):
         return DelegationNode(
@@ -718,6 +730,7 @@ class TestDelegationNodeUILog:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=tracker,
         )
 
     @pytest.mark.asyncio
@@ -736,6 +749,7 @@ class TestDelegationNodeUILog:
         ai_message_with_delegate,
         delegate_tool_call_id,
         ui_history,
+        delegation_tracker,
     ):
         """DelegationNode calls ui_history.log.success and includes pop_state_updates in result."""
         sentinel = {"ui_chat_log": ["sentinel_log_entry"]}
@@ -752,6 +766,7 @@ class TestDelegationNodeUILog:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
         state = supervisor_flow_state
@@ -787,6 +802,7 @@ class TestDelegationNodeUILog:
         ai_message_with_delegate,
         delegate_tool_call_id,
         ui_history,
+        delegation_tracker,
     ):
         """DelegationNode emits ON_DELEGATION_ERROR via ui_history.log.error when delegation fails."""
         sentinel = {"ui_chat_log": ["sentinel_error_log_entry"]}
@@ -804,6 +820,7 @@ class TestDelegationNodeUILog:
             subsession_history_key_factory=subsession_history_key_factory,
             subsession_goal_key_factory=subsession_goal_key_factory,
             ui_history=ui_history,
+            tracker=delegation_tracker,
             max_delegations=1,
         )
 
@@ -824,3 +841,244 @@ class TestDelegationNodeUILog:
         assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_error_log_entry"]
+
+
+class TestDelegationNodeInternalEvents:
+    """Tests for DelegationNode internal event emission."""
+
+    @pytest.fixture(name="delegation_node")
+    def delegation_node_fixture(
+        self,
+        supervisor_name,
+        max_delegations,
+        delegate_task_cls,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_name_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        subsession_history_key_factory,
+        subsession_goal_key_factory,
+        ui_history,
+        delegation_tracker,
+    ):
+        return DelegationNode(
+            name=f"{supervisor_name}#delegation",
+            max_delegations=max_delegations,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_key=supervisor_history_runtime_key,
+            subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
+            tracker=delegation_tracker,
+        )
+
+    @pytest.mark.asyncio
+    async def test_emits_delegated_event_for_new_subsession(
+        self,
+        delegation_node,
+        supervisor_flow_state,
+        supervisor_name,
+        developer_name,
+        ai_message_with_delegate,
+        mock_internal_event_client,
+    ):
+        """A new subsession emits the delegated event with is_resume False."""
+        state = supervisor_flow_state
+        state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
+
+        await delegation_node.run(state)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        additional_properties = call_kwargs["additional_properties"]
+        assert call_kwargs["event_name"] == EventEnum.WORKFLOW_SUBAGENT_DELEGATED.value
+        assert call_kwargs["category"] == "software_development"
+        assert additional_properties.label == supervisor_name
+        assert additional_properties.property == developer_name
+        assert additional_properties.value == "test_flow_id"
+        assert additional_properties.extra == {
+            "subsession_id": 1,
+            "is_resume": False,
+            "delegation_count": 1,
+            "parallel": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_emits_delegated_event_with_is_resume_for_resumed_subsession(
+        self,
+        delegation_node,
+        supervisor_name,
+        developer_name,
+        ai_message_with_delegate_resume,
+        base_flow_state,
+        mock_internal_event_client,
+    ):
+        """Resuming an existing subsession emits the delegated event with is_resume True."""
+        session_key = f"{supervisor_name}__{developer_name}__1"
+        state = {**base_flow_state}
+        state["context"] = {
+            supervisor_name: {
+                "max_subsession_id": 1,
+                "active_subsession": None,
+                "active_subagent_name": None,
+                "delegation_count": 1,
+            }
+        }
+        state["conversation_history"] = {
+            supervisor_name: [ai_message_with_delegate_resume],
+            session_key: [HumanMessage(content="Original task")],
+        }
+
+        await delegation_node.run(state)
+
+        additional_properties = mock_internal_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ]
+        assert additional_properties.extra == {
+            "subsession_id": 1,
+            "is_resume": True,
+            "delegation_count": 2,
+            "parallel": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_emits_rejected_event_instead_of_delegated(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_name_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        subsession_history_key_factory,
+        subsession_goal_key_factory,
+        ui_history,
+        delegation_tracker,
+        mock_internal_event_client,
+        supervisor_flow_state,
+        ai_message_with_delegate,
+    ):
+        """A refused call is a rejection, never a delegation: the adoption count must not move."""
+        node = DelegationNode(
+            name=f"{supervisor_name}#delegation",
+            max_delegations=0,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_key=supervisor_history_runtime_key,
+            subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
+            tracker=delegation_tracker,
+        )
+        state = supervisor_flow_state
+        state["conversation_history"][supervisor_name] = [ai_message_with_delegate]
+
+        await node.run(state)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        additional_properties = call_kwargs["additional_properties"]
+        assert (
+            call_kwargs["event_name"]
+            == EventEnum.WORKFLOW_SUBAGENT_DELEGATION_REJECTED.value
+        )
+        assert additional_properties.label == supervisor_name
+        assert additional_properties.property == "limit_reached"
+        assert additional_properties.value == "test_flow_id"
+        assert additional_properties.extra == {
+            "subagent_name": None,
+            "parallel": False,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "tool_calls,expected_reason",
+        [
+            pytest.param(
+                [
+                    {
+                        "id": "c1",
+                        "name": DelegateTask.tool_title,
+                        "args": {"subagent_name": "developer", "prompt": "A"},
+                    },
+                    {
+                        "id": "c2",
+                        "name": DelegateTask.tool_title,
+                        "args": {"subagent_name": "developer", "prompt": "B"},
+                    },
+                ],
+                "parallel_call",
+                id="parallel_call",
+            ),
+            pytest.param(
+                [
+                    {
+                        "id": "c1",
+                        "name": DelegateTask.tool_title,
+                        "args": {"subagent_name": "developer", "prompt": "A"},
+                    },
+                    {"id": "c2", "name": "read_file", "args": {}},
+                ],
+                "mixed_tool_calls",
+                id="mixed_tool_calls",
+            ),
+            pytest.param(
+                [
+                    {
+                        "id": "c1",
+                        "name": DelegateTask.tool_title,
+                        "args": {"subagent_name": "nonexistent_agent", "prompt": "A"},
+                    }
+                ],
+                "invalid_args",
+                id="invalid_args",
+            ),
+            pytest.param(
+                [
+                    {
+                        "id": "c1",
+                        "name": DelegateTask.tool_title,
+                        "args": {
+                            "subagent_name": "developer",
+                            "subsession_id": 99,
+                            "prompt": "A",
+                        },
+                    }
+                ],
+                "invalid_subsession",
+                id="invalid_subsession",
+            ),
+        ],
+    )
+    async def test_each_rejection_path_reports_its_own_reason(
+        self,
+        delegation_node,
+        supervisor_flow_state,
+        supervisor_name,
+        mock_internal_event_client,
+        tool_calls,
+        expected_reason,
+    ):
+        """The reason is the dimension the dashboard slices on, so each path must be distinguishable."""
+        ai_msg = Mock(spec=AIMessage)
+        ai_msg.tool_calls = tool_calls
+        state = supervisor_flow_state
+        state["conversation_history"][supervisor_name] = [ai_msg]
+
+        await delegation_node.run(state)
+
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        assert (
+            call_kwargs["event_name"]
+            == EventEnum.WORKFLOW_SUBAGENT_DELEGATION_REJECTED.value
+        )
+        assert call_kwargs["additional_properties"].property == expected_reason

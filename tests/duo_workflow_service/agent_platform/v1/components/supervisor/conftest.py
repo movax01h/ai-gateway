@@ -27,6 +27,9 @@ from duo_workflow_service.agent_platform.v1.state.base import FlowState, Runtime
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from duo_workflow_service.tracking.subagent_delegation import (
+    SubagentDelegationTracker,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 
@@ -661,3 +664,17 @@ def mock_schema_registry_fixture():
 
     mock_registry.get.return_value = CustomResponseTool
     return mock_registry
+
+
+@pytest.fixture(name="delegation_tracker")
+def delegation_tracker_fixture(
+    flow_id, flow_type, mock_internal_event_client, supervisor_name
+):
+    """Real tracker over the mock client, so tests assert the payload actually emitted."""
+    return SubagentDelegationTracker(
+        flow_id=flow_id,
+        flow_type=flow_type,
+        internal_event_client=mock_internal_event_client,
+        supervisor_name=supervisor_name,
+        parallel=False,
+    )

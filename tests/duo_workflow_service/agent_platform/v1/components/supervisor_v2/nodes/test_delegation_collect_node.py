@@ -14,6 +14,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor_v2.nodes.deleg
     DelegationStatus,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
+from lib.internal_events.event_enum import EventEnum
 
 
 @pytest.fixture(name="collect_node")
@@ -23,6 +24,7 @@ def collect_node_fixture(
     subsession_run_key_factory,
     supervisor_history_runtime_key,
     ui_history,
+    delegation_tracker,
 ):
     return DelegationCollectNode(
         name=f"{supervisor_name}#delegation_collect",
@@ -30,6 +32,7 @@ def collect_node_fixture(
         subsession_run_key_factory=subsession_run_key_factory,
         supervisor_history_key=supervisor_history_runtime_key,
         ui_history=ui_history,
+        tracker=delegation_tracker,
     )
 
 
@@ -151,6 +154,7 @@ class TestDelegationCollectNodeRunOutcome:
         ui_history,
         supervisor_flow_state,
         make_run_record,
+        delegation_tracker,
     ):
         """The node reads a record through the factory's key, not a convention of its own.
 
@@ -167,6 +171,7 @@ class TestDelegationCollectNodeRunOutcome:
             ),
             supervisor_history_key=supervisor_history_runtime_key,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
         state = supervisor_flow_state
         state["conversation_history"][supervisor_name] = [_turn(_delegate_call())]
@@ -352,3 +357,96 @@ class TestDelegationCollectNodeUILog:
             call.kwargs["message_id"] for call in ui_history.log.success.call_args_list
         ]
         assert message_ids == ["c1", "c2"]
+
+
+class TestDelegationCollectNodeInternalEvents:
+    """Tests for DelegationCollectNode internal event emission."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "record_kwargs,expected_status",
+        [
+            pytest.param({}, "completed", id="completed"),
+            pytest.param(
+                {"status": DelegationStatus.ERROR, "error": "boom"},
+                "error",
+                id="dispatch_failed",
+            ),
+            pytest.param(
+                {"final_answer": None}, "error", id="completed_without_answer"
+            ),
+        ],
+    )
+    async def test_emits_returned_event_per_call(
+        self,
+        collect_node,
+        supervisor_flow_state,
+        supervisor_name,
+        make_run_record,
+        mock_internal_event_client,
+        record_kwargs,
+        expected_status,
+    ):
+        """The event reports the status the supervisor was actually told."""
+        state = _state_with(
+            supervisor_flow_state,
+            supervisor_name,
+            [_turn(_delegate_call())],
+            {"c1": make_run_record(**record_kwargs)},
+        )
+
+        await collect_node.run(state, config={})
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        additional_properties = call_kwargs["additional_properties"]
+        assert call_kwargs["event_name"] == EventEnum.WORKFLOW_SUBAGENT_RETURNED.value
+        assert call_kwargs["category"] == "software_development"
+        assert additional_properties.label == supervisor_name
+        assert additional_properties.property == "developer"
+        assert additional_properties.value == "test_flow_id"
+        assert additional_properties.extra == {
+            "subsession_id": 1,
+            "status": expected_status,
+            "parallel": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_emits_one_event_per_concurrently_dispatched_call(
+        self,
+        collect_node,
+        supervisor_flow_state,
+        supervisor_name,
+        make_run_record,
+        mock_internal_event_client,
+    ):
+        """A parallel turn returns several subagents at once; each gets its own event."""
+        state = _state_with(
+            supervisor_flow_state,
+            supervisor_name,
+            [
+                _turn(
+                    _delegate_call(call_id="c1", subagent_name="developer"),
+                    _delegate_call(call_id="c2", subagent_name="tester"),
+                )
+            ],
+            {
+                "c1": make_run_record(subsession_id=1),
+                "c2": make_run_record(subsession_id=2),
+            },
+        )
+
+        await collect_node.run(state, config={})
+
+        emitted = [
+            (
+                c.kwargs["additional_properties"].property,
+                c.kwargs["additional_properties"].extra["subsession_id"],
+            )
+            for c in mock_internal_event_client.track_event.call_args_list
+        ]
+        assert emitted == [("developer", 1), ("tester", 2)]
+        assert all(
+            c.kwargs["additional_properties"].extra["parallel"] is True
+            for c in mock_internal_event_client.track_event.call_args_list
+        )
