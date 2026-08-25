@@ -35,6 +35,10 @@ from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import build_tool_info
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.tracking.subagent_delegation import (
+    DelegationRejectionReason,
+    SubagentDelegationTracker,
+)
 
 log = structlog.stdlib.get_logger("delegation_prepare_node")
 
@@ -62,6 +66,19 @@ def format_subagent_title(subagent_name: str, description: str) -> str:
     return f"{title_cased_name} Task — {description}"
 
 
+class _Rejection(NamedTuple):
+    """One refused ``delegate_task`` call: what the LLM is told, and why.
+
+    Attributes:
+        message: The correction sent back as this call's ToolMessage.
+        reason: Coarse cause reported to analytics, kept separate so the
+            message stays free to change without moving the metric.
+    """
+
+    message: str
+    reason: DelegationRejectionReason
+
+
 class _Dispatch(NamedTuple):
     """One validated ``delegate_task`` call, resolved to the subsession it will run.
 
@@ -78,6 +95,9 @@ class _Dispatch(NamedTuple):
         description: The LLM-authored short (3-5 word) task label, used to
             build the UI title (see ``format_subagent_title``).
         prompt: The delegation prompt for this call.
+        delegation_count: Delegations made by this supervisor so far, including
+            this one. Unlike the sequential supervisor, several dispatches in
+            one turn each take their own consecutive count.
     """
 
     call_id: str
@@ -85,6 +105,7 @@ class _Dispatch(NamedTuple):
     subsession_id: int
     description: str
     prompt: str
+    delegation_count: int
 
 
 class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
@@ -145,6 +166,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         max_subsession_id_key: IOKey,
         supervisor_history_key: RuntimeIOKey,
         ui_history: UIHistory,
+        tracker: SubagentDelegationTracker,
         logger: Optional[Any] = None,
     ):
         self.name = name
@@ -155,6 +177,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         self._max_subsession_id_key = max_subsession_id_key
         self._supervisor_history_key = supervisor_history_key
         self._ui_history = ui_history
+        self._tracker = tracker
         self._logger = logger or log
 
     async def run(
@@ -241,7 +264,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         self,
         supervisor_history_key: IOKey,
         supervisor_history: list[BaseMessage],
-        errors: dict[str, str],
+        errors: dict[str, _Rejection],
         context_updates: dict[str, Any],
     ) -> dict[str, Any]:
         """Assemble this node's state update from bookkeeping, error answers and UI entries.
@@ -254,8 +277,8 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         """
         if errors:
             error_messages = [
-                ToolMessage(content=message, tool_call_id=call_id)
-                for call_id, message in errors.items()
+                ToolMessage(content=rejection.message, tool_call_id=call_id)
+                for call_id, rejection in errors.items()
             ]
             context_updates = merge_nested_dict(
                 context_updates,
@@ -267,7 +290,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
 
     def _mixed_tool_calls_errors(
         self, all_tool_calls: list[ToolCall], delegate_tool_title: str
-    ) -> dict[str, str]:
+    ) -> dict[str, _Rejection]:
         """Build a per-call error map when delegate_task is mixed with other tools in one turn."""
         other_names = sorted(
             {tc["name"] for tc in all_tool_calls if tc["name"] != delegate_tool_title}
@@ -278,9 +301,11 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
             f"{delegate_tool_title} must be the only tool call. Please retry "
             f"using only {delegate_tool_title}."
         )
-        errors: dict[str, str] = {}
+        errors: dict[str, _Rejection] = {}
         for tc in all_tool_calls:
-            errors[require_tool_call_id(tc)] = message
+            errors[require_tool_call_id(tc)] = _Rejection(
+                message, DelegationRejectionReason.MIXED_TOOL_CALLS
+            )
         return errors
 
     def _prepare_delegations(
@@ -289,7 +314,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         delegate_calls: list[ToolCall],
         delegation_count: int,
         max_subsession_id: int,
-    ) -> tuple[list[_Dispatch], dict[str, str], int, int]:
+    ) -> tuple[list[_Dispatch], dict[str, _Rejection], int, int]:
         """Validate every delegate_task call and mint the subsession it runs as.
 
         Every call starts a fresh subsession: there is no way to address an
@@ -304,7 +329,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         subsession created here.
         """
         dispatches: list[_Dispatch] = []
-        errors: dict[str, str] = {}
+        errors: dict[str, _Rejection] = {}
         running_count = delegation_count
         running_max_id = max_subsession_id
 
@@ -315,10 +340,11 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
                 self._max_delegations is not None
                 and running_count >= self._max_delegations
             ):
-                errors[call_id] = (
+                errors[call_id] = _Rejection(
                     f"Maximum delegation limit ({self._max_delegations}) "
                     f"reached. You must call final_response_tool to "
-                    f"complete the workflow."
+                    f"complete the workflow.",
+                    DelegationRejectionReason.LIMIT_REACHED,
                 )
                 continue
 
@@ -328,7 +354,10 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
                 # ValidationError: args fail DelegateTask's pydantic validation (e.g. bad
                 # subagent_name, missing/wrong-typed field). TypeError: call["args"] itself
                 # isn't a mapping of str keys to unpack as keyword arguments.
-                errors[call_id] = f"Invalid delegate_task arguments: {e}"
+                errors[call_id] = _Rejection(
+                    f"Invalid delegate_task arguments: {e}",
+                    DelegationRejectionReason.INVALID_ARGS,
+                )
                 continue
 
             subagent_name = str(delegation.subagent_name)
@@ -342,6 +371,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
                     subsession_id=running_max_id,
                     description=delegation.description,
                     prompt=delegation.prompt,
+                    delegation_count=running_count,
                 )
             )
 
@@ -397,22 +427,25 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         self,
         supervisor_history_key: IOKey,
         dispatches: list[_Dispatch],
-        errors: dict[str, str],
+        errors: dict[str, _Rejection],
     ) -> None:
         """Log (and add UI entries for) every call this node rejected, then every one it dispatches."""
         delegate_tool_title: str = self._delegate_task_cls.tool_title
         supervisor = f"{supervisor_history_key.target}:{supervisor_history_key.subkeys}"
 
-        for call_id, message in errors.items():
-            self._logger.warning(message, supervisor=supervisor)
+        for call_id, rejection in errors.items():
+            self._logger.warning(rejection.message, supervisor=supervisor)
             self._ui_history.log.error(
-                message,
+                rejection.message,
                 event=UILogEventsSupervisor.ON_DELEGATION_ERROR,
                 message_sub_type=self.MESSAGE_SUB_TYPE_ERROR,
-                tool_info=build_tool_info(delegate_tool_title, {}, message),
+                tool_info=build_tool_info(delegate_tool_title, {}, rejection.message),
                 message_id=call_id,
                 subsession_id=None,
             )
+            # Per call, unlike the sequential supervisor's one-per-turn: this
+            # node validates every call in the turn independently.
+            self._tracker.rejected(reason=rejection.reason)
 
         for dispatch in dispatches:
             log.info(
@@ -421,6 +454,13 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
                 subagent_name=dispatch.subagent_name,
                 subsession_id=dispatch.subsession_id,
                 description=dispatch.description,
+            )
+            self._tracker.delegated(
+                subagent_name=dispatch.subagent_name,
+                subsession_id=dispatch.subsession_id,
+                # This supervisor cannot address an existing subsession.
+                is_resume=False,
+                delegation_count=dispatch.delegation_count,
             )
             delegate_args = {
                 "subagent_name": dispatch.subagent_name,

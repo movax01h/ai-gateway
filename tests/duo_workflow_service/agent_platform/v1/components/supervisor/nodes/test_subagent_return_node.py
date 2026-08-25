@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor.nodes.subagent
 from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
     UILogEventsSupervisor,
 )
+from lib.internal_events.event_enum import EventEnum
 
 
 @pytest.fixture(name="final_answer_runtime_key")
@@ -55,6 +56,7 @@ def return_node_fixture(
     supervisor_history_runtime_key,
     final_answer_runtime_key,
     ui_history,
+    delegation_tracker,
 ):
     """SubagentReturnNode wired with supervisor-scoped key fixtures."""
     return SubagentReturnNode(
@@ -65,6 +67,7 @@ def return_node_fixture(
         final_answer_key=final_answer_runtime_key,
         supervisor_history_key=supervisor_history_runtime_key,
         ui_history=ui_history,
+        tracker=delegation_tracker,
     )
 
 
@@ -323,6 +326,7 @@ class TestSubagentReturnNodeUILog:
         supervisor_history_runtime_key,
         final_answer_runtime_key,
         ui_history,
+        tracker,
     ):
         return SubagentReturnNode(
             name=f"{supervisor_name}#subagent_return",
@@ -332,6 +336,7 @@ class TestSubagentReturnNodeUILog:
             final_answer_key=final_answer_runtime_key,
             supervisor_history_key=supervisor_history_runtime_key,
             ui_history=ui_history,
+            tracker=tracker,
         )
 
     @pytest.mark.asyncio
@@ -346,6 +351,7 @@ class TestSubagentReturnNodeUILog:
         supervisor_state_with_completed_subsession,
         delegate_tool_call_id,
         ui_history,
+        delegation_tracker,
     ):
         """SubagentReturnNode calls ui_history.log.success and includes pop_state_updates in result."""
         sentinel = {"ui_chat_log": ["sentinel_log_entry"]}
@@ -359,6 +365,7 @@ class TestSubagentReturnNodeUILog:
             supervisor_history_runtime_key=supervisor_history_runtime_key,
             final_answer_runtime_key=final_answer_runtime_key,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
         result = await node.run(supervisor_state_with_completed_subsession)
@@ -386,6 +393,7 @@ class TestSubagentReturnNodeUILog:
         delegate_tool_call,
         delegate_tool_call_id,
         ui_history,
+        delegation_tracker,
     ):
         """SubagentReturnNode calls ui_history.log.error and includes pop_state_updates in result on failure."""
         sentinel = {"ui_chat_log": ["sentinel_error_entry"]}
@@ -399,6 +407,7 @@ class TestSubagentReturnNodeUILog:
             supervisor_history_runtime_key=supervisor_history_runtime_key,
             final_answer_runtime_key=final_answer_runtime_key,
             ui_history=ui_history,
+            tracker=delegation_tracker,
         )
 
         # State with active subsession but no final_answer
@@ -423,3 +432,58 @@ class TestSubagentReturnNodeUILog:
         assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_error_entry"]
+
+
+class TestSubagentReturnNodeInternalEvents:
+    """Tests for SubagentReturnNode internal event emission."""
+
+    @pytest.mark.asyncio
+    async def test_emits_returned_event_on_success(
+        self,
+        return_node,
+        supervisor_state_with_completed_subsession,
+        supervisor_name,
+        developer_name,
+        mock_internal_event_client,
+    ):
+        """A subagent that produced a final answer reports status completed."""
+        await return_node.run(supervisor_state_with_completed_subsession)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        additional_properties = call_kwargs["additional_properties"]
+        assert call_kwargs["event_name"] == EventEnum.WORKFLOW_SUBAGENT_RETURNED.value
+        assert call_kwargs["category"] == "software_development"
+        assert additional_properties.label == supervisor_name
+        assert additional_properties.property == developer_name
+        assert additional_properties.value == "test_flow_id"
+        assert additional_properties.extra == {
+            "subsession_id": 1,
+            "status": "completed",
+            "parallel": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_emits_returned_event_with_error_status(
+        self,
+        return_node,
+        base_flow_state,
+        supervisor_name,
+        delegate_tool_call,
+        mock_internal_event_client,
+    ):
+        """A subagent that produced no final answer reports status error."""
+        state = _state_with_delegate_history(
+            base_flow_state, supervisor_name, delegate_tool_call
+        )
+
+        await return_node.run(state)
+
+        additional_properties = mock_internal_event_client.track_event.call_args.kwargs[
+            "additional_properties"
+        ]
+        assert additional_properties.extra == {
+            "subsession_id": 1,
+            "status": "error",
+            "parallel": False,
+        }

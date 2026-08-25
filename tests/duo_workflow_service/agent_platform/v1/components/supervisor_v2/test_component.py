@@ -24,6 +24,10 @@ from duo_workflow_service.agent_platform.v1.components.supervisor_v2.ui_log impo
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
 from duo_workflow_service.entities.state import MessageTypeEnum
+from duo_workflow_service.tracking.subagent_delegation import (
+    DelegationRejectionReason,
+    SubagentDelegationTracker,
+)
 
 from .conftest import (
     _AGENT_COMPONENT_MODULE,
@@ -787,3 +791,40 @@ class TestSupervisorV2ToolApprovalAttribution:
         assert ui_history.log._component_name == supervisor_name
         assert ui_history.log._ui_roles_as == MessageTypeEnum.REQUEST
         # pylint: enable=protected-access
+
+
+class TestSupervisorV2DelegationEventWiring:
+    """Tests that attach() gives the delegation nodes what they need to emit internal events."""
+
+    @pytest.mark.usefixtures("all_node_mocks")
+    @pytest.mark.parametrize(
+        "node_cls_fixture",
+        ["mock_delegation_prepare_node_cls", "mock_delegation_collect_node_cls"],
+    )
+    def test_event_tracking_args_passed_to_delegation_nodes(
+        self,
+        request,
+        node_cls_fixture,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        supervisor_name,
+    ):
+        """Without these, parallel delegations produce no analytics events."""
+        node_cls = request.getfixturevalue(node_cls_fixture)
+        supervisor = make_supervisor()
+
+        supervisor.attach(mock_state_graph, mock_router)
+
+        tracker = node_cls.call_args[1]["tracker"]
+        assert isinstance(tracker, SubagentDelegationTracker)
+
+        tracker.rejected(reason=DelegationRejectionReason.LIMIT_REACHED)
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        assert call_kwargs["category"] == flow_type.value
+        assert call_kwargs["additional_properties"].label == supervisor_name
+        assert call_kwargs["additional_properties"].value == flow_id
+        assert call_kwargs["additional_properties"].extra["parallel"] is True

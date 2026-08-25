@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor_v2.nodes.deleg
     DelegationFatalError,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
+from lib.internal_events.event_enum import EventEnum
 
 
 async def _dispatch(prepare_node, state):
@@ -87,6 +88,7 @@ def prepare_node_fixture(
     max_subsession_id_key,
     supervisor_history_runtime_key,
     ui_history,
+    delegation_tracker,
 ):
     return DelegationPrepareNode(
         name=f"{supervisor_name}#delegation_prepare",
@@ -97,6 +99,7 @@ def prepare_node_fixture(
         max_subsession_id_key=max_subsession_id_key,
         supervisor_history_key=supervisor_history_runtime_key,
         ui_history=ui_history,
+        tracker=delegation_tracker,
     )
 
 
@@ -588,3 +591,160 @@ class TestDelegationPrepareNodeDispatch:
         assert [
             message.tool_call_id for message in _answers(update, supervisor_name)
         ] == ["c1"]
+
+
+class TestDelegationPrepareNodeInternalEvents:
+    """Tests for DelegationPrepareNode internal event emission."""
+
+    @pytest.mark.asyncio
+    async def test_emits_delegated_event_per_dispatch(
+        self,
+        prepare_node,
+        supervisor_flow_state,
+        supervisor_name,
+        mock_internal_event_client,
+    ):
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", "developer", "Do it"),
+        )
+
+        await _dispatch(prepare_node, state)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        additional_properties = call_kwargs["additional_properties"]
+        assert call_kwargs["event_name"] == EventEnum.WORKFLOW_SUBAGENT_DELEGATED.value
+        assert call_kwargs["category"] == "software_development"
+        assert additional_properties.label == supervisor_name
+        assert additional_properties.property == "developer"
+        assert additional_properties.value == "test_flow_id"
+        assert additional_properties.extra == {
+            "subsession_id": 1,
+            "is_resume": False,
+            "delegation_count": 1,
+            "parallel": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_concurrent_dispatches_take_consecutive_counts(
+        self,
+        prepare_node,
+        supervisor_flow_state,
+        supervisor_name,
+        mock_internal_event_client,
+    ):
+        """Unlike the sequential supervisor, one turn can produce several delegations."""
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", "developer", "Do it"),
+            _delegate_call("c2", "tester", "Test it"),
+        )
+
+        await _dispatch(prepare_node, state)
+
+        emitted = [
+            (
+                c.kwargs["additional_properties"].property,
+                c.kwargs["additional_properties"].extra["subsession_id"],
+                c.kwargs["additional_properties"].extra["delegation_count"],
+            )
+            for c in mock_internal_event_client.track_event.call_args_list
+        ]
+        assert emitted == [("developer", 1, 1), ("tester", 2, 2)]
+
+    @pytest.mark.asyncio
+    async def test_emits_rejected_event_instead_of_delegated(
+        self,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        ui_history,
+        delegation_tracker,
+        mock_internal_event_client,
+        supervisor_flow_state,
+    ):
+        """A refused call dispatched nothing, so it is a rejection, never a delegation."""
+        node = DelegationPrepareNode(
+            name=f"{supervisor_name}#delegation_prepare",
+            supervisor_name=supervisor_name,
+            max_delegations=0,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_key=supervisor_history_runtime_key,
+            ui_history=ui_history,
+            tracker=delegation_tracker,
+        )
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", "developer", "Do it"),
+        )
+
+        await _dispatch(node, state)
+
+        mock_internal_event_client.track_event.assert_called_once()
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        additional_properties = call_kwargs["additional_properties"]
+        assert (
+            call_kwargs["event_name"]
+            == EventEnum.WORKFLOW_SUBAGENT_DELEGATION_REJECTED.value
+        )
+        assert additional_properties.label == supervisor_name
+        assert additional_properties.property == "limit_reached"
+        assert additional_properties.extra == {
+            "subagent_name": None,
+            "parallel": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_invalid_args_reports_its_own_reason(
+        self,
+        prepare_node,
+        supervisor_flow_state,
+        supervisor_name,
+        mock_internal_event_client,
+    ):
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", "nonexistent_agent", "Do it"),
+        )
+
+        await _dispatch(prepare_node, state)
+
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        assert (
+            call_kwargs["event_name"]
+            == EventEnum.WORKFLOW_SUBAGENT_DELEGATION_REJECTED.value
+        )
+        assert call_kwargs["additional_properties"].property == "invalid_args"
+
+    @pytest.mark.asyncio
+    async def test_mixed_tool_calls_reject_every_call_in_the_turn(
+        self,
+        prepare_node,
+        supervisor_flow_state,
+        supervisor_name,
+        mock_internal_event_client,
+    ):
+        """This supervisor rejects per call, so a turn-level refusal emits one event per call."""
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", "developer", "Do it"),
+            {"id": "c2", "name": "read_file", "args": {}},
+        )
+
+        await _dispatch(prepare_node, state)
+
+        reasons = [
+            c.kwargs["additional_properties"].property
+            for c in mock_internal_event_client.track_event.call_args_list
+        ]
+        assert reasons == ["mixed_tool_calls", "mixed_tool_calls"]

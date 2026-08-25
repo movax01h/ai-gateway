@@ -14,6 +14,10 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
+from duo_workflow_service.tracking.subagent_delegation import (
+    DelegationRejectionReason,
+    SubagentDelegationTracker,
+)
 
 from .conftest import MockSubagentComponent, RoutingMockSubagentComponent, _compile
 
@@ -829,3 +833,48 @@ class TestSupervisorMaxWrapUpRetries:
 
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["max_wrap_up_retries"] == expected
+
+
+class TestSupervisorDelegationEventWiring:
+    """Tests that attach() gives the delegation nodes what they need to emit internal events."""
+
+    @pytest.mark.usefixtures(
+        "mock_agent_node_cls",
+        "mock_tool_node_cls",
+        "mock_final_response_node_cls",
+    )
+    @pytest.mark.parametrize(
+        "node_cls_fixture",
+        ["mock_delegation_node_cls", "mock_subagent_return_node_cls"],
+    )
+    def test_event_tracking_args_passed_to_delegation_nodes(
+        self,
+        request,
+        node_cls_fixture,
+        mock_delegation_node_cls,
+        mock_subagent_return_node_cls,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+        flow_id,
+        flow_type,
+        mock_internal_event_client,
+        supervisor_name,
+    ):
+        """Without these, delegations to sub-agents produce no analytics events."""
+        node_cls = request.getfixturevalue(node_cls_fixture)
+        supervisor = make_supervisor()
+
+        supervisor.attach(mock_state_graph, mock_router)
+
+        tracker = node_cls.call_args[1]["tracker"]
+        assert isinstance(tracker, SubagentDelegationTracker)
+
+        # Assert on what the tracker emits rather than its private fields: the
+        # binding is only correct if the payload is.
+        tracker.rejected(reason=DelegationRejectionReason.LIMIT_REACHED)
+        call_kwargs = mock_internal_event_client.track_event.call_args.kwargs
+        assert call_kwargs["category"] == flow_type.value
+        assert call_kwargs["additional_properties"].label == supervisor_name
+        assert call_kwargs["additional_properties"].value == flow_id
+        assert call_kwargs["additional_properties"].extra["parallel"] is False

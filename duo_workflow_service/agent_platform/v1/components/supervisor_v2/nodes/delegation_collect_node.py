@@ -26,6 +26,7 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.entities import build_tool_info
+from duo_workflow_service.tracking.subagent_delegation import SubagentDelegationTracker
 
 log = structlog.stdlib.get_logger("delegation_collect_node")
 
@@ -70,6 +71,7 @@ class DelegationCollectNode:
         subsession_run_key_factory: SubsessionRunKeyFactory,
         supervisor_history_key: RuntimeIOKey,
         ui_history: UIHistory,
+        tracker: SubagentDelegationTracker,
         logger: Optional[Any] = None,
     ):
         self.name = name
@@ -77,6 +79,7 @@ class DelegationCollectNode:
         self._subsession_run_key_factory = subsession_run_key_factory
         self._supervisor_history_key = supervisor_history_key
         self._ui_history = ui_history
+        self._tracker = tracker
         self._logger = logger or log
 
     async def run(
@@ -124,6 +127,11 @@ class DelegationCollectNode:
                 subagent_name=subagent_name,
                 subsession_id=subsession_id,
                 status=status,
+            )
+            self._tracker.returned(
+                subagent_name=subagent_name,
+                subsession_id=subsession_id,
+                status=status.value,
             )
 
             xml_result = format_delegation_result(

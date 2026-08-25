@@ -1,0 +1,27 @@
+---
+description: Tracks when a Duo Agent Platform supervisor refuses a delegate_task call before any sub-agent runs. No delegation happened, so these are counted separately from duo_workflow_subagent_delegated rather than folded into it
+internal_events: true
+action: duo_workflow_subagent_delegation_rejected
+product_group: agent_execution
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Name of the supervisor component that refused the call
+  property:
+    description: "Coarse cause: limit_reached, mixed_tool_calls, parallel_call, invalid_args, or invalid_subsession"
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen during the same workflow.
+  subagent_name:
+    description: Target sub-agent when the call named a valid one; absent when the arguments never parsed or the rejection covers a whole turn rather than one call
+  parallel:
+    description: Whether the parallel supervisor produced this rejection. The sequential supervisor rejects at most once per turn; the parallel one rejects per call, so counts are not comparable across the two
+  flow_version:
+    description: Concrete revision of the flow config that ran (e.g. 2.1.0-interactive). Absent for legacy flows. Needed because category carries only the flow name, so every revision of a flow shares one bucket
+  schema_version:
+    description: Flow config schema version the flow was loaded under (v1 or experimental). Absent for legacy flows
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6604
+tiers:
+  - premium
+  - ultimate

@@ -27,6 +27,9 @@ class EventEnum(StrEnum):
     LEGACY_TRIM_EXECUTED = "duo_workflow_legacy_trim_executed"
     WORKFLOW_MAX_CYCLES_REACHED = "duo_workflow_max_cycles_reached"
     WORKFLOW_MERGE_REQUEST_CREATED = "duo_workflow_merge_request_created"
+    WORKFLOW_SUBAGENT_DELEGATED = "duo_workflow_subagent_delegated"
+    WORKFLOW_SUBAGENT_RETURNED = "duo_workflow_subagent_returned"
+    WORKFLOW_SUBAGENT_DELEGATION_REJECTED = "duo_workflow_subagent_delegation_rejected"
 
 
 class EventLabelEnum(StrEnum):

@@ -22,6 +22,10 @@ from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
+from duo_workflow_service.tracking.monitoring_context import (
+    MonitoringContext,
+    current_monitoring_context,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import gitlab_version
 from lib.events import GLReportingEventContext
@@ -367,3 +371,15 @@ def workflow_state_fixture(
         goal=goal,
         additional_context=additional_context,
     )
+
+
+@pytest.fixture(autouse=True)
+def isolate_monitoring_context():
+    """Give each test a clean monitoring context.
+
+    It is a module-level ContextVar that several suites populate without restoring, which otherwise leaks flow identity
+    into whichever test the randomised order happens to run next.
+    """
+    token = current_monitoring_context.set(MonitoringContext())
+    yield
+    current_monitoring_context.reset(token)
