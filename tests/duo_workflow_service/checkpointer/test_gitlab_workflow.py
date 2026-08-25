@@ -2855,6 +2855,62 @@ async def test_aget_tuple_with_compressed_latest_checkpoint(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "current_thread, expected",
+    [
+        pytest.param(4, 4, id="19.4_selects_currentThread"),
+        pytest.param(None, 0, id="older_gitlab_omits_it"),
+    ],
+)
+async def test_aget_tuple_hydrates_current_thread_from_graphql_latest_checkpoint(
+    http_client,
+    workflow_id,
+    workflow_type,
+    checkpoint_data,
+    current_thread,
+    expected,
+):
+    """A GraphQL resume must restore current_thread, or later writes land in the wrong group.
+
+    See https://gitlab.com/gitlab-org/gitlab/-/issues/619496. The payload here is
+    shaped like a real latestCheckpoint response (camelCase), unlike the REST tests.
+    """
+    latest_checkpoint = {
+        "threadTs": "latest-id",
+        "parentTs": None,
+        "compressedCheckpoint": compress_checkpoint(checkpoint_data[0]["checkpoint"]),
+        "metadata": json.dumps(checkpoint_data[0]["metadata"], cls=CustomEncoder),
+    }
+    if current_thread is not None:
+        latest_checkpoint["currentThread"] = current_thread
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        {
+            "first_checkpoint": None,
+            "latest_checkpoint": latest_checkpoint,
+            "workflow_status": "created",
+            "agent_privileges_names": ["read_repository"],
+            "pre_approved_agent_privileges_names": [],
+            "mcp_enabled": True,
+            "incremental_checkpoints_enabled": True,
+            "allow_agent_to_request_user": True,
+            "archived": False,
+            "stalled": False,
+        },
+    )
+
+    config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
+    result = await gitlab_workflow.aget_tuple(config)
+
+    assert result is not None
+    assert _incremental_state(gitlab_workflow).current_thread == expected
+    http_client.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_aget_tuple_returns_none_when_no_first_checkpoint_and_no_latest_checkpoint(
     http_client,
     workflow_id,
