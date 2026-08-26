@@ -284,6 +284,12 @@ A
 past [commit](https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/commit/775462e46b838e9ad39d0394b9a51bc647d91121)
 that modified gRPC tracing configuration.
 
+### Metrics
+
+The service exposes Prometheus metrics on a separate HTTP port. See
+[Duo Workflow Service monitoring](../docs/duo_workflow_service_monitoring.md) for the full metric inventory, their
+labels, and how to enable the endpoint locally.
+
 ### Events Tracking
 
 We use GitLab Internal event tracking to track workflow events. See [internal_events](../docs/internal_events.md) for

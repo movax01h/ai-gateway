@@ -522,5 +522,6 @@ poetry install --sync
 - **Architecture**: `docs/duo_workflow_service.md`, [Blueprint](https://docs.gitlab.com/ee/architecture/blueprints/duo_workflow/)
 - **Testing**: `docs/tests.md`
 - **Authentication**: `docs/auth.md`
+- **Monitoring**: `docs/duo_workflow_service_monitoring.md` (Prometheus metrics), `docs/operations.md`
 - **Workflows**: `docs/workflows/*.md`
 - **Markdown linting**: Uses `markdownlint-cli2` with config in `.markdownlint-cli2.yaml`
