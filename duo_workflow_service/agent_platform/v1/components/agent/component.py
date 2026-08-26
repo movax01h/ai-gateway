@@ -596,6 +596,22 @@ class AgentComponentBase(BaseComponent):
                 factory=lambda _: IOKey(target="status"),
             ),
             approval_decision_key=self._tool_approval_decision_key,
+            # Event is fixed, not from `ui_log_events`, for the same reason as
+            # the request node above: the pair is enabled by
+            # `require_tool_approval`, so a config omitting it would drop the
+            # user's own feedback from the session view.
+            ui_history=UIHistory(
+                events=[UILogEventsAgent.ON_TOOL_APPROVAL_FEEDBACK],
+                writer_class=default_ui_log_writer_class(
+                    events_class=UILogEventsAgent,
+                    ui_role_as="user",
+                    component_name=self.name,
+                    # The user's own message reports no outcome, matching the
+                    # entry `HumanInputComponent` writes for the same reply.
+                    success_status=None,
+                ),
+            ),
+            session_id_key=session_id_key,
             tracker=tracker,
             approval_requests_key=approval_requests_key,
         )

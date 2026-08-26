@@ -34,6 +34,7 @@ class UILogEventsAgent(BaseUILogEvents):
     ON_TOOL_EXECUTION_SUCCESS = auto()
     ON_TOOL_EXECUTION_FAILED = auto()
     ON_TOOL_APPROVAL_REQUEST = auto()
+    ON_TOOL_APPROVAL_FEEDBACK = auto()
 
 
 class UILogWriterAgentTools(BaseUILogWriter):

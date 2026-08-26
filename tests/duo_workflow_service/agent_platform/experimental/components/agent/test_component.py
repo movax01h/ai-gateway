@@ -1628,6 +1628,35 @@ class TestAgentComponentToolApprovalRouter:
         assert call_kwargs["ui_history"].log._ui_roles_as == MessageTypeEnum.REQUEST
         # pylint: enable=protected-access
 
+    def test_attach_wires_approval_fetch_node_for_attribution(
+        self,
+        agent_component_with_tool_approval,
+        mock_state_graph,
+        mock_router,
+        component_name,
+        bind_as_subagent,
+    ):
+        """The user's feedback entry stays attributed on this package's inlined wiring too."""
+        component = agent_component_with_tool_approval
+        session_id_key = bind_as_subagent(component)
+
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.components."
+            "agent.component.ToolApprovalFetchNode"
+        ) as mock_cls:
+            mock_cls.return_value.name = f"{component_name}#tool_approval_fetch"
+            component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["session_id_key"] is session_id_key
+        assert call_kwargs["ui_history"].events == [
+            UILogEventsAgent.ON_TOOL_APPROVAL_FEEDBACK
+        ]
+        # pylint: disable=protected-access
+        assert call_kwargs["ui_history"].log._ui_roles_as == MessageTypeEnum.USER
+        assert call_kwargs["ui_history"].log._success_status is None
+        # pylint: enable=protected-access
+
 
 # ---------------------------------------------------------------------------
 # Tests for _agent_node_invoke_config TAG_NOSTREAM logic

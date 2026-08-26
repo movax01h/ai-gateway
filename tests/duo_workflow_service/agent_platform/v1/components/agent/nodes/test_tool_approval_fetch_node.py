@@ -11,6 +11,9 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node import (
     ToolApprovalFetchNode,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import (
     FlowEvent,
@@ -18,9 +21,15 @@ from duo_workflow_service.agent_platform.v1.state.base import (
     IOKey,
     RuntimeIOKey,
 )
-from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.agent_platform.v1.ui_log import (
+    UIHistory,
+    default_ui_log_writer_class,
+)
+from duo_workflow_service.entities import MessageTypeEnum, WorkflowStatusEnum
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum
+
+_FEEDBACK_EVENTS = [UILogEventsAgent.ON_TOOL_APPROVAL_FEEDBACK]
 
 
 @pytest.fixture(name="conversation_history_key")
@@ -35,23 +44,58 @@ def status_key_fixture():
     return IOKey(target="status")
 
 
-@pytest.fixture(name="tool_approval_fetch_node")
-def tool_approval_fetch_node_fixture(conversation_history_key, status_key):
-    """Fixture for ToolApprovalFetchNode instance."""
-
-    return ToolApprovalFetchNode(
-        name="test_agent#tool_approval_fetch",
-        conversation_history_key=RuntimeIOKey(
-            alias="conversation_history", factory=lambda _: conversation_history_key
-        ),
-        status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
-        approval_decision_key=RuntimeIOKey(
-            alias="tool_approval_decision",
-            factory=lambda _: IOKey(
-                target="context", subkeys=["test_agent", "tool_approval_decision"]
-            ),
+@pytest.fixture(name="ui_history")
+def ui_history_fixture(component_name):
+    """Build a real history: the writer stamps the fields under test, so a mock would be vacuous."""
+    return UIHistory(
+        events=_FEEDBACK_EVENTS,
+        writer_class=default_ui_log_writer_class(
+            events_class=UILogEventsAgent,
+            ui_role_as="user",
+            component_name=component_name,
+            success_status=None,
         ),
     )
+
+
+@pytest.fixture(name="session_id_key")
+def session_id_key_fixture():
+    """Fixture for a subsession-scoped session ID key, as a supervisor would pass."""
+    return IOKey(
+        target="context",
+        subkeys=["supervisor", "active_subsession"],
+        optional=True,
+    )
+
+
+@pytest.fixture(name="make_node")
+def make_node_fixture(conversation_history_key, status_key, ui_history):
+    """Build a node, overriding only what a test cares about."""
+
+    def _make(**kwargs):
+        kwargs.setdefault("ui_history", ui_history)
+        return ToolApprovalFetchNode(
+            name="test_agent#tool_approval_fetch",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            approval_decision_key=RuntimeIOKey(
+                alias="tool_approval_decision",
+                factory=lambda _: IOKey(
+                    target="context", subkeys=["test_agent", "tool_approval_decision"]
+                ),
+            ),
+            **kwargs,
+        )
+
+    return _make
+
+
+@pytest.fixture(name="tool_approval_fetch_node")
+def tool_approval_fetch_node_fixture(make_node):
+    """Fixture for ToolApprovalFetchNode instance."""
+    return make_node()
 
 
 @pytest.fixture(name="mock_ai_message_with_tool_calls")
@@ -223,9 +267,78 @@ class TestToolApprovalFetchNodeModify:
             assert "status" in result
             assert result["status"] == WorkflowStatusEnum.EXECUTION.value
 
-            # UI chat log for user feedback is emitted by the flow base via
-            # Command(update=...) — not by this node — so no ui_chat_log in result
-            assert "ui_chat_log" not in result
+            # This node owns the UI chat log entry for the user's feedback, and
+            # emits exactly one so the message is not duplicated in the session
+            # view (the flow base only translates the payload into the event).
+            # The shape is asserted field-for-field because it is the
+            # client-facing contract, and because the entry must stay
+            # attributed: an untagged user bubble can land outside the
+            # subsession it belongs to.
+            (entry,) = result["ui_chat_log"]
+            assert entry == {
+                "component_name": component_name,
+                "subsession_id": None,
+                "message_type": MessageTypeEnum.USER,
+                "content": user_feedback,
+                # Left unset, matching HumanInputComponent's user bubble: the
+                # same kind of entry carries the same status on both paths.
+                "status": None,
+                "message_id": entry["message_id"],
+                "tool_info": None,
+                # The fragile one: the writer defaults it to `[]` when the
+                # kwarg is omitted, so the node must pass `None`.
+                "additional_context": None,
+                "message_sub_type": None,
+                "correlation_id": None,
+                "timestamp": entry["timestamp"],
+            }
+            assert entry["message_id"].startswith("user-")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("active_subsession", "expected_subsession_id"),
+        [
+            # A supervisor writes the subsession as an int; nodes stringify it.
+            (2, "2"),
+            # 0 is a real subsession ID, not an absent one.
+            (0, "0"),
+            (None, None),
+        ],
+    )
+    async def test_modify_attributes_feedback_to_active_subsession(
+        self,
+        make_node,
+        session_id_key,
+        base_flow_state,
+        component_name,
+        mock_ai_message_with_tool_calls,
+        active_subsession,
+        expected_subsession_id,
+    ):
+        """Under a supervisor, the feedback carries the subsession that raised the approval."""
+        state = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [mock_ai_message_with_tool_calls]
+            },
+            "context": {
+                **base_flow_state.get("context", {}),
+                "supervisor": {"active_subsession": active_subsession},
+            },
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.MODIFY, message="use a different approach"
+            )
+
+            result = await make_node(session_id_key=session_id_key).run(state)
+
+        (entry,) = result["ui_chat_log"]
+        assert entry["subsession_id"] == expected_subsession_id
+        assert entry["component_name"] == component_name
 
     @pytest.mark.asyncio
     async def test_modify_without_message_raises_error(
@@ -344,8 +457,7 @@ class TestToolApprovalFetchNodeTracking:
     @pytest.fixture(name="tracking_fetch_node")
     def tracking_fetch_node_fixture(
         self,
-        conversation_history_key,
-        status_key,
+        make_node,
         approval_requests_key,
         flow_id,
         flow_type,
@@ -357,21 +469,7 @@ class TestToolApprovalFetchNodeTracking:
             flow_type=flow_type,
             internal_event_client=mock_internal_event_client,
         )
-        return ToolApprovalFetchNode(
-            name="test_agent#tool_approval_fetch",
-            conversation_history_key=RuntimeIOKey(
-                alias="conversation_history", factory=lambda _: conversation_history_key
-            ),
-            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
-            approval_decision_key=RuntimeIOKey(
-                alias="tool_approval_decision",
-                factory=lambda _: IOKey(
-                    target="context", subkeys=["test_agent", "tool_approval_decision"]
-                ),
-            ),
-            tracker=tracker,
-            approval_requests_key=approval_requests_key,
-        )
+        return make_node(tracker=tracker, approval_requests_key=approval_requests_key)
 
     @pytest.fixture(name="state_with_tool_calls")
     def state_with_tool_calls_fixture(

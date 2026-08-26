@@ -39,6 +39,9 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
         component_name: Optional human-readable name of the component that owns this
             writer (e.g. ``"supervisor"``).  Embedded in every log entry as
             ``component_name`` when provided.
+        success_status: ``status`` to stamp on success entries.  Defaults to
+            ``ToolStatus.SUCCESS``; ``None`` suits roles that report no outcome of
+            their own, such as a ``user`` entry echoing what the user just said.
     """
 
     def __init__(
@@ -47,12 +50,14 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
         events_class: type[E],
         ui_role_as: MessageTypeEnum,
         component_name: Optional[str] = None,
+        success_status: Optional[ToolStatus] = ToolStatus.SUCCESS,
     ):
         super().__init__(log_callback)
 
         self._events_class = events_class
         self._ui_roles_as = ui_role_as
         self._component_name = component_name
+        self._success_status = success_status
 
     @property
     @override
@@ -61,7 +66,7 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
 
     @override
     def _log_success(self, message: str, **kwargs: Any) -> UiChatLog:
-        return self._build_log_entry(message, ToolStatus.SUCCESS, **kwargs)
+        return self._build_log_entry(message, self._success_status, **kwargs)
 
     @override
     def _log_warning(self, *args: Any, **kwargs: Any) -> UiChatLog:
@@ -72,7 +77,7 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
         return self._build_log_entry(message, ToolStatus.FAILURE, **kwargs)
 
     def _build_log_entry(
-        self, message: str, status: ToolStatus, **kwargs: Any
+        self, message: str, status: Optional[ToolStatus], **kwargs: Any
     ) -> UiChatLog:
         """Build a UI log entry with the configured message_type and component_name."""
         return UiChatLog(
@@ -93,8 +98,9 @@ class DefaultUILogWriter[E: BaseUILogEvents](BaseUILogWriter[E]):
 
 def default_ui_log_writer_class[E: BaseUILogEvents](
     events_class: type[E],
-    ui_role_as: Literal["agent", "tool", "request"],
+    ui_role_as: Literal["agent", "tool", "request", "user"],
     component_name: Optional[str] = None,
+    success_status: Optional[ToolStatus] = ToolStatus.SUCCESS,
 ) -> Callable[[UILogCallback], DefaultUILogWriter[E]]:
     """Factory that creates a ``DefaultUILogWriter`` bound to *events_class*.
 
@@ -104,9 +110,13 @@ def default_ui_log_writer_class[E: BaseUILogEvents](
     Args:
         events_class: The ``BaseUILogEvents`` subclass that defines the valid events.
         ui_role_as: The message type role.  Clients key human-in-the-loop
-            approval controls off ``"request"``.
+            approval controls off ``"request"``; ``"user"`` records what the user
+            themselves said, and is not a value components expose through their
+            ``ui_role_as`` config.
         component_name: Optional human-readable name of the component that owns this
             writer.  Embedded in every log entry when provided.
+        success_status: ``status`` to stamp on success entries.  Pass ``None`` for a
+            ``"user"`` entry, which reports no outcome of its own.
 
     Returns:
         A partial that constructs a ``DefaultUILogWriter`` when called with a
@@ -117,4 +127,5 @@ def default_ui_log_writer_class[E: BaseUILogEvents](
         events_class=events_class,
         ui_role_as=MessageTypeEnum(ui_role_as),
         component_name=component_name,
+        success_status=success_status,
     )

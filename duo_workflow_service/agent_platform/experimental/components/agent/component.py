@@ -729,6 +729,17 @@ class AgentComponent(AgentComponentBase):
                     factory=lambda _: IOKey(target="status"),
                 ),
                 approval_decision_key=self._tool_approval_decision_key,
+                # See v1 AgentComponentBase._attach_tool_approval_nodes.
+                ui_history=UIHistory(
+                    events=[UILogEventsAgent.ON_TOOL_APPROVAL_FEEDBACK],
+                    writer_class=default_ui_log_writer_class(
+                        events_class=UILogEventsAgent,
+                        ui_role_as="user",
+                        component_name=self.name,
+                        success_status=None,
+                    ),
+                ),
+                session_id_key=self._session_id_key,
                 tracker=tracker,
                 approval_requests_key=approval_requests_key,
             )

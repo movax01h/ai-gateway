@@ -38,6 +38,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
 )
+from duo_workflow_service.entities import MessageTypeEnum
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
 
@@ -2301,6 +2302,38 @@ class TestAgentComponentToolApprovalExecutionFlow:
 
         call_kwargs = mock_tool_approval_request_node_cls.call_args[1]
         assert call_kwargs["session_id_key"] is session_id_key
+
+    def test_attach_wires_approval_fetch_node_for_attribution(
+        self,
+        all_node_mocks,  # pylint: disable=unused-argument
+        mock_tool_approval_fetch_node_cls,
+        mock_router,
+        agent_component_with_tool_approval,
+        component_name,
+        bind_as_subagent,
+    ):
+        """The feedback entry's attribution and its fixed event list are invisible from graph topology.
+
+        The event list is fixed rather than read from ``ui_log_events`` for the
+        same reason the request node's is: the pair is enabled by
+        ``require_tool_approval``, so a config omitting it would silently drop
+        the user's own message from the session view.
+        """
+        session_id_key = bind_as_subagent(agent_component_with_tool_approval)
+
+        agent_component_with_tool_approval.attach(StateGraph(FlowState), mock_router)
+
+        call_kwargs = mock_tool_approval_fetch_node_cls.call_args[1]
+        assert call_kwargs["session_id_key"] is session_id_key
+
+        ui_history = call_kwargs["ui_history"]
+        assert ui_history.events == [UILogEventsAgent.ON_TOOL_APPROVAL_FEEDBACK]
+        # pylint: disable=protected-access
+        assert ui_history.log._component_name == component_name
+        assert ui_history.log._ui_roles_as == MessageTypeEnum.USER
+        # The user's own message reports no outcome, as on the HumanInput path.
+        assert ui_history.log._success_status is None
+        # pylint: enable=protected-access
 
     @pytest.mark.usefixtures("all_node_mocks")
     def test_attach_passes_tracker_and_shared_key_to_approval_nodes(
