@@ -21,7 +21,10 @@ additional_properties:
   estimated_input_tokens:
     description: Number of input tokens estimated by the approximate token counter.
 milestone: '17.6'
+milestone_removed: '18.11'
 introduced_by_url: https://gitlab.com/gitlab-org/duo-workflow/duo-workflow-service/-/merge_requests/153
+removed_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5074
+status: removed
 tiers:
   - premium
   - ultimate
