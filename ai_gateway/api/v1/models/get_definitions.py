@@ -15,14 +15,20 @@ router = APIRouter()
 
 # Identifier used for the pseudo-model created when a unit primitive has multiple default models.
 # The pseudo-model represents the load-balanced default. Its provider is reported as
-# "Load-balanced" since requests are distributed across providers transparently.
+# "Multiple providers" since requests are distributed across providers transparently.
 # NOTE: Multiple default models should only be used for the same model across different providers,
 # because a single model name (from the first default model) will be used when displaying the
 # default model to the user.
 _PSEUDO_DEFAULT_MODEL_IDENTIFIER = "__default__"
 
 # Provider label for the load-balanced pseudo-model.
-_LOAD_BALANCED_PROVIDER = "Load-balanced"
+_LOAD_BALANCED_PROVIDER = "Multiple providers"
+
+# Description for the load-balanced pseudo-model. It replaces the underlying model's
+# description to explain why no single provider is listed.
+_LOAD_BALANCED_DESCRIPTION = (
+    "GitLab balances requests across model providers to maintain availability."
+)
 
 
 class _GetModelResponseModel(BaseModel):
@@ -90,9 +96,7 @@ async def get_models():
                 name=pseudo_name,
                 identifier=pseudo_identifier,
                 provider=_LOAD_BALANCED_PROVIDER,
-                description=(
-                    first_definition.description if first_definition else None
-                ),
+                description=_LOAD_BALANCED_DESCRIPTION,
                 cost_indicator=(
                     first_definition.cost_indicator if first_definition else None
                 ),

@@ -167,15 +167,18 @@ def test_get_models_returns_correct_data_with_flag_enabled(client):
     assert expected0.items() <= resp0.items()
     assert set(resp0["unit_primitives"]) == set(expected0["unit_primitives"])
 
-    # The pseudo-model should appear in the models list with the first default model's name
-    # and a "Load-balanced" provider.
+    # The pseudo-model should appear in the models list with the first default model's name,
+    # a "Multiple providers" provider and a description explaining the load balancing.
     pseudo_model = next(
         (m for m in data["models"] if m["identifier"] == pseudo_identifier), None
     )
     assert pseudo_model is not None
     assert pseudo_model["name"] == "Model 1"
-    assert pseudo_model["provider"] == "Load-balanced"
-    assert pseudo_model["description"] == "Fast, cost-effective responses."
+    assert pseudo_model["provider"] == "Multiple providers"
+    assert (
+        pseudo_model["description"]
+        == "GitLab balances requests across model providers to maintain availability."
+    )
     assert pseudo_model["cost_indicator"] == "$"
 
     # config2 has a single default model: default_model should point directly to it.
