@@ -11,6 +11,18 @@ class NotifiableException(Exception):
     pass
 
 
+class UnrecoverableWorkflowException(NotifiableException):
+    """Raised when a session can never be executed again, whatever the client does.
+
+    Unlike a generic failure this is a *rejection*: the session is already in a terminal-by-nature condition (e.g. its
+    checkpoints have passed the retention window), so the run never starts. Callers must therefore track it as
+    ``WORKFLOW_REJECT`` and must not drive a ``drop`` status event — there is no execution to fail.
+
+    It is a ``NotifiableException`` because the message explains to the user what to do next and is safe to display
+    verbatim.
+    """
+
+
 class NamespaceLevelWorkflowNotSupportedException(NotifiableException):
     """Raised when a workflow doesn't support namespace-level execution."""
 

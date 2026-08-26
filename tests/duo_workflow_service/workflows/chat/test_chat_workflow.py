@@ -51,6 +51,12 @@ from lib.feature_flags import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
+# Stands in for "this session already has state to continue from". Its contents are
+# irrelevant to get_graph_input, which only checks whether a checkpoint exists at all,
+# but it must not be None: without a checkpoint the graph is started fresh instead of
+# being handed a Command.
+EXISTING_CHECKPOINT = {"thread_ts": "1970-01-01T00:00:00.000000+00:00"}
+
 
 @pytest.fixture(name="flow_type")
 def flow_type_fixture() -> GLReportingEventContext:
@@ -765,7 +771,7 @@ async def test_get_graph_input_resume_with_goal(mock_uuid, workflow_with_project
     mock_uuid.return_value = UUID("11111111-2222-3333-4444-555555555555")
 
     result = await workflow_with_project.get_graph_input(
-        "New input", WorkflowStatusEventEnum.RESUME, None
+        "New input", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     assert result.goto == "agent"
@@ -793,7 +799,7 @@ async def test_get_graph_input_resume_with_goal(mock_uuid, workflow_with_project
 async def test_get_graph_input_retry_with_empty_goal(workflow_with_project):
     """Test RETRY with empty goal (connection retry) does not add HumanMessage."""
     result = await workflow_with_project.get_graph_input(
-        "", WorkflowStatusEventEnum.RETRY, None
+        "", WorkflowStatusEventEnum.RETRY, EXISTING_CHECKPOINT
     )
 
     assert result.goto == "agent"
@@ -808,13 +814,37 @@ async def test_get_graph_input_retry_with_goal_adds_human_message(
 ):
     """Test RETRY with non-empty goal (user message after cancel) adds HumanMessage."""
     result = await workflow_with_project.get_graph_input(
-        "New input", WorkflowStatusEventEnum.RETRY, None
+        "New input", WorkflowStatusEventEnum.RETRY, EXISTING_CHECKPOINT
     )
 
     assert result.goto == "agent"
     assert result.update["status"] == WorkflowStatusEnum.EXECUTION
     assert "conversation_history" in result.update
     assert "ui_chat_log" in result.update
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_event",
+    [
+        WorkflowStatusEventEnum.RETRY,
+        WorkflowStatusEventEnum.RESUME,
+    ],
+)
+async def test_get_graph_input_without_checkpoint_starts_fresh(
+    workflow_with_project, status_event
+):
+    """A session with no checkpoint has no state for LangGraph to apply a Command to.
+
+    This is what Rails reports as `stalled`, and it covers a reconnect that lands before the first checkpoint was
+    written. Start the graph fresh rather than returning a Command that cannot be serialised.
+    """
+    result = await workflow_with_project.get_graph_input(
+        "New input", status_event, None
+    )
+
+    assert result["status"] == WorkflowStatusEnum.NOT_STARTED
+    assert result["goal"] == "New input"
 
 
 @pytest.mark.asyncio
@@ -856,7 +886,7 @@ async def test_get_graph_input_retry_always_goes_to_agent(workflow_with_project)
 async def test_get_graph_input_resume_with_approval(workflow_with_approval):
     """Test graph input with approved tool calls."""
     result = await workflow_with_approval.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     assert result.goto == "run_tools"
@@ -884,7 +914,7 @@ async def test_get_graph_input_resume_with_rejected_approval(
     )
 
     result = await workflow_with_rejected_approval.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     assert result.goto == "agent"
@@ -1169,7 +1199,7 @@ async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project
 
     # Resume the workflow
     result = await workflow_with_project.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     # Verify the state update includes the new preapproved_tools
@@ -1188,7 +1218,7 @@ async def test_agent_resume_with_updated_denied_tools(workflow_with_project):
     workflow_with_project._denied_tools = ["create_merge_request"]
 
     result = await workflow_with_project.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     assert result.goto == "agent"
@@ -1907,7 +1937,7 @@ async def test_get_graph_input_resume_with_approval_tracks_resolution(
     )
 
     await workflow_with_approval.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     internal_event_client.track_event.assert_called_once_with(
@@ -1941,7 +1971,7 @@ async def test_get_graph_input_resume_with_rejection_feedback_tracks_modificatio
     )
 
     await workflow_with_project.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     internal_event_client.track_event.assert_called_once_with(
@@ -1973,7 +2003,7 @@ async def test_get_graph_input_resume_with_plain_rejection_tracks_rejection(
     )
 
     await workflow_with_project.get_graph_input(
-        "", WorkflowStatusEventEnum.RESUME, None
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     internal_event_client.track_event.assert_called_once_with(
@@ -2001,7 +2031,7 @@ async def test_get_graph_input_resume_without_approval_tracks_nothing(
     workflow_with_project._approval = None
 
     await workflow_with_project.get_graph_input(
-        "hello", WorkflowStatusEventEnum.RESUME, None
+        "hello", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
     )
 
     internal_event_client.track_event.assert_not_called()

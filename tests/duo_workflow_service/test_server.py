@@ -3719,10 +3719,6 @@ def test_extract_error_message_bad_status_event_is_collapsed(status_event, error
     "message",
     [
         pytest.param(
-            "Stalled workflow can not be executed. Please create a new workflow.",
-            id="stalled",
-        ),
-        pytest.param(
             "Archived workflow can not be executed. Please create a new workflow.",
             id="archived",
         ),

@@ -33,7 +33,7 @@ from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
     InvalidRequestException,
-    NotifiableException,
+    UnrecoverableWorkflowException,
 )
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
@@ -2949,7 +2949,7 @@ async def test_archived_workflow_raises_error(
     workflow_id,
     workflow_type,
 ):
-    """Test that archived workflows raise NotifiableException."""
+    """Test that archived workflows raise UnrecoverableWorkflowException."""
     workflow_config = {
         "first_checkpoint": None,
         "latest_checkpoint": None,
@@ -2971,26 +2971,43 @@ async def test_archived_workflow_raises_error(
 
     config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
 
-    with pytest.raises(NotifiableException) as exc_info:
+    with pytest.raises(UnrecoverableWorkflowException) as exc_info:
         await gitlab_workflow._get_initial_status_event(config)
 
     assert (
         "Archived workflow can not be executed. Please create a new workflow."
         in str(exc_info.value)
     )
+    # The gRPC layer reports `type(last_error).__name__`, which resolves to the cause.
+    assert isinstance(exc_info.value.__cause__, UnsupportedStatusEvent)
 
 
 @pytest.mark.asyncio
-async def test_stalled_workflow_raises_error(
+@pytest.mark.parametrize(
+    "workflow_status,expected_event",
+    [
+        ("running", WorkflowStatusEventEnum.RETRY),
+        ("failed", WorkflowStatusEventEnum.RETRY),
+        ("input_required", WorkflowStatusEventEnum.RESUME),
+        ("stopped", WorkflowStatusEventEnum.STOP_RECOVERY),
+    ],
+)
+async def test_stalled_workflow_is_not_rejected(
     http_client,
     workflow_id,
     workflow_type,
+    workflow_status,
+    expected_event,
 ):
-    """Test that stalled workflows raise NotifiableException."""
+    """Rails reports `stalled` for the whole window between `start` and the first checkpoint, so it must never reject a
+    run.
+
+    The wire event stays whatever the current Rails status accepts; starting the graph fresh is the caller's decision.
+    """
     workflow_config = {
         "first_checkpoint": None,
         "latest_checkpoint": None,
-        "workflow_status": "created",
+        "workflow_status": workflow_status,
         "agent_privileges_names": ["read_repository"],
         "pre_approved_agent_privileges_names": [],
         "mcp_enabled": True,
@@ -3008,12 +3025,9 @@ async def test_stalled_workflow_raises_error(
 
     config: CustomRunnableConfig = {"configurable": {"thread_id": workflow_id}}
 
-    with pytest.raises(NotifiableException) as exc_info:
-        await gitlab_workflow._get_initial_status_event(config)
+    status_event, _ = await gitlab_workflow._get_initial_status_event(config)
 
-    assert "Stalled workflow can not be executed. Please create a new workflow." in str(
-        exc_info.value
-    )
+    assert status_event == expected_event
 
 
 @pytest.mark.asyncio

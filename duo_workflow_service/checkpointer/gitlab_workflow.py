@@ -61,7 +61,7 @@ from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
     InvalidRequestException,
-    NotifiableException,
+    UnrecoverableWorkflowException,
 )
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
@@ -565,7 +565,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 self._session_start_time = time.monotonic()
 
             return self
-        except (UnsupportedStatusEvent, ForbiddenStatusEvent) as e:
+        except (
+            UnsupportedStatusEvent,
+            ForbiddenStatusEvent,
+            UnrecoverableWorkflowException,
+        ) as e:
             reject_properties = InternalEventAdditionalProperties(
                 label=EventLabelEnum.WORKFLOW_REJECT_LABEL.value,
                 property=repr(e),
@@ -631,13 +635,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             error_msg = (
                 "Archived workflow can not be executed. Please create a new workflow."
             )
-            raise NotifiableException(error_msg) from UnsupportedStatusEvent(error_msg)
-
-        if self._workflow_config["stalled"]:
-            error_msg = (
-                "Stalled workflow can not be executed. Please create a new workflow."
+            raise UnrecoverableWorkflowException(error_msg) from UnsupportedStatusEvent(
+                error_msg
             )
-            raise NotifiableException(error_msg) from UnsupportedStatusEvent(error_msg)
 
         if status in [
             WorkflowStatusEnum.INPUT_REQUIRED,

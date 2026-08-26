@@ -339,6 +339,18 @@ class Workflow(AbstractWorkflow):
             case WorkflowStatusEventEnum.START:
                 return self.get_workflow_state(goal)
 
+            case _ if checkpoint_tuple is None:
+                # Every branch below returns a `Command(goto=...)`, which LangGraph can
+                # only apply to a thread that already has state. With no checkpoint it
+                # takes the Command as the initial input and fails serialising it, so
+                # start fresh instead — the same fallback the agent platform flows use.
+                logger.info(
+                    "No saved checkpoint to continue from; starting the graph fresh",
+                    workflow_id=self._workflow_id,
+                    status_event=str(status_event),
+                )
+                return self.get_workflow_state(goal)
+
             case _:
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
