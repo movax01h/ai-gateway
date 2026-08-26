@@ -229,33 +229,20 @@ class Flow(AbstractWorkflow):
             # Handle case where approval is None
             return Command(resume=event)
 
-        ui_chat_log_update: list[UiChatLog] = []
-
         match self._approval.WhichOneof("user_decision"):
             case UserDecision.APPROVE:
                 event = FlowEvent(event_type=FlowEventType.APPROVE)
             case UserDecision.REJECT:
                 if message := self._approval.rejection.message:
+                    # Rejection with feedback. The user's message is written to
+                    # `ui_chat_log` by whichever component owns the interrupt
+                    # (`HumanInputComponent`'s FetchNode, `ToolApprovalFetchNode`),
+                    # so it is recorded exactly once and carries that component's
+                    # attribution. Emitting it here as well would duplicate it.
                     event = FlowEvent(
                         event_type=FlowEventType.MODIFY,
                         message=message,
                     )
-                    # Emit the user's feedback as a UI chat log entry, mirroring
-                    # the chat workflow pattern. Uses Command(update=...) so the
-                    # entry is appended alongside prior approval logs.
-                    ui_chat_log_update = [
-                        UiChatLog(
-                            message_type=MessageTypeEnum.USER,
-                            message_sub_type=None,
-                            content=message,
-                            message_id=f"user-{uuid4()!s}",
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            status=ToolStatus.SUCCESS,
-                            correlation_id=None,
-                            tool_info=None,
-                            additional_context=None,
-                        )
-                    ]
                 else:
                     event = FlowEvent(
                         event_type=FlowEventType.REJECT,
@@ -266,8 +253,6 @@ class Flow(AbstractWorkflow):
                     f"Unexpected approval decision: {self._approval.WhichOneof('user_decision')}"
                 )
 
-        if ui_chat_log_update:
-            return Command(resume=event, update={"ui_chat_log": ui_chat_log_update})
         return Command(resume=event)
 
     @override

@@ -677,7 +677,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tools_registry")
-    async def test_resume_command_refreshes_inputs_and_appends_rejection_log(
+    async def test_resume_command_refreshes_inputs_without_emitting_rejection_log(
         self,
         mock_flow_metadata,
         user,
@@ -686,13 +686,14 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_checkpointer,
         flow_type: GLReportingEventContext,
     ):
-        """Both refreshed inputs and a rejection message land in the same update.
+        """Refreshed inputs survive, and the rejection message is not logged here.
 
         When additional context is sent alongside a rejection approval that
-        carries a message, the resume Command must merge both keys into its
-        `update`: `context.inputs` (refreshed per-turn inputs) and `ui_chat_log`
-        (the user's feedback entry). This guards against a future refactor
-        dropping either key from the combined `state_update`.
+        carries a message, the resume Command must still carry `context.inputs`
+        (refreshed per-turn inputs) in its `update`. It must *not* carry a
+        `ui_chat_log` entry for the feedback: the component that owns the
+        interrupt writes that, and emitting it here too would duplicate the
+        user's message in the session view.
         """
         additional_context = AdditionalContext(
             category="agent_user_environment",
@@ -728,10 +729,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             assert input.update["context"]["inputs"]["agent_user_environment"] == (
                 '{"shell_name": "fish"}'
             )
-            ui_chat_log = input.update["ui_chat_log"]
-            assert len(ui_chat_log) == 1
-            assert ui_chat_log[0]["content"] == rejection_message
-            assert ui_chat_log[0]["message_type"] == MessageTypeEnum.USER
+            assert "ui_chat_log" not in input.update
             assert input.resume["event_type"] == FlowEventType.MODIFY  # type: ignore[index]
 
     @pytest.mark.asyncio

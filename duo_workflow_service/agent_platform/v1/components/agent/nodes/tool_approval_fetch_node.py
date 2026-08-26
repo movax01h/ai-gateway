@@ -8,11 +8,23 @@ from langgraph.types import interrupt
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
+    DEFAULT_SESSION_ID_KEY,
+    resolve_session_id,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
+    UILogEventsAgent,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     FlowEvent,
     FlowEventType,
     FlowState,
     RuntimeIOKey,
+)
+from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
+from duo_workflow_service.agent_platform.v1.ui_log import (
+    DefaultUILogWriter,
+    UIHistory,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
@@ -26,10 +38,9 @@ class ToolApprovalFetchNode:
     2. Waits for APPROVE, REJECT, or MODIFY event
     3. If approved: Continues to tool execution
     4. If rejected: Adds rejection ToolMessages to conversation history
-    5. If modified: Adds rejection ToolMessages + user feedback HumanMessage.
-        The user feedback UI chat log is emitted by the flow base via
-        Command(update=...) to append alongside prior approval logs, matching
-        the chat workflow pattern.
+    5. If modified: Adds rejection ToolMessages + user feedback HumanMessage,
+        and emits the user's feedback as a `ui_chat_log` entry so it is shown
+        in the session view.
     6. Stores approval decision in output_key for router
 
     Args:
@@ -37,6 +48,10 @@ class ToolApprovalFetchNode:
         conversation_history_key: RuntimeIOKey for conversation history
         status_key: RuntimeIOKey for workflow status
         approval_decision_key: RuntimeIOKey for storing approval decision
+        ui_history: UI logging history for the user's feedback entry. Its events
+            must include ``ON_TOOL_APPROVAL_FEEDBACK``, or the entry is dropped.
+        session_id_key: IOKey resolving the active subsession ID, so the feedback
+            is attributed to the subagent whose approval the user answered.
         tracker: Optional tool event tracker for approval-resolution events
         approval_requests_key: Optional RuntimeIOKey shared with
             ToolApprovalRequestNode; reads which tool calls required approval.
@@ -49,6 +64,8 @@ class ToolApprovalFetchNode:
         conversation_history_key: RuntimeIOKey,
         status_key: RuntimeIOKey,
         approval_decision_key: RuntimeIOKey,
+        ui_history: UIHistory[DefaultUILogWriter, UILogEventsAgent],
+        session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tracker: ToolEventTracker | None = None,
         approval_requests_key: RuntimeIOKey | None = None,
     ):
@@ -56,6 +73,8 @@ class ToolApprovalFetchNode:
         self._conversation_history_key = conversation_history_key
         self._status_key = status_key
         self._approval_decision_key = approval_decision_key
+        self._ui_history = ui_history
+        self._session_id_key = session_id_key
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
 
@@ -151,9 +170,11 @@ class ToolApprovalFetchNode:
             return {**history_dict, **status_dict, **decision_dict}
 
         if event["event_type"] == FlowEventType.MODIFY:
-            # User rejected with feedback. The user feedback UI chat log is
-            # emitted by the flow base via Command(update=...) alongside the
-            # resume event, matching the chat workflow pattern.
+            # User rejected with feedback. This node owns the `ui_chat_log`
+            # entry for that feedback: the flow base only translates the
+            # transport payload into a MODIFY event, so emitting it here keeps
+            # the message recorded exactly once, attributed to the component
+            # that owned the interrupt.
             last_message = existing_history[-1]
 
             if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
@@ -179,7 +200,22 @@ class ToolApprovalFetchNode:
                 WorkflowStatusEnum.EXECUTION, state
             )
             decision_dict = approval_decision_iokey.to_nested_dict(FlowEventType.MODIFY)
-            return {**history_dict, **status_dict, **decision_dict}
+
+            self._ui_history.log.success(
+                event["message"],
+                event=UILogEventsAgent.ON_TOOL_APPROVAL_FEEDBACK,
+                # The writer defaults `additional_context` to `[]` when the
+                # kwarg is omitted; the user's message carries none.
+                additional_context=None,
+                subsession_id=resolve_session_id(self._session_id_key, state),
+            )
+
+            return {
+                **history_dict,
+                **status_dict,
+                **decision_dict,
+                **self._ui_history.pop_state_updates(),
+            }
 
         # For any other event type, raise error
         raise ValueError(
