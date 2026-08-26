@@ -1,6 +1,7 @@
 # see docs/model_selection for documentation
 # PLEASE ENSURE ALL SELECTED MODELS ARE SORTED ALPHABETICALLY
 
+
 configurable_unit_primitives:
   - feature_setting: "duo_chat"
     unit_primitives:
@@ -229,7 +230,6 @@ configurable_unit_primitives:
       - "gemini_3_5_flash_vertex"
       - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
-      - "glm_5_2_fireworks"
       - "gpt_5"
       - "gpt_5_3_codex"
       - "gpt_5_mini"
@@ -241,12 +241,14 @@ configurable_unit_primitives:
       - "gpt_5_6_luna"
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
-      - "kimi_k2_6_fireworks"
-      - "kimi_k3_fireworks"
-      - "minimax_m3_fireworks"
+
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
+        - "glm_5_2_fireworks"
+        - "kimi_k2_6_fireworks"
+        - "kimi_k3_fireworks"
+        - "minimax_m3_fireworks"
         - "qwen_3_6_27b_fireworks"
 
   - feature_setting: "duo_agent_platform_agentic_chat"
@@ -289,7 +291,6 @@ configurable_unit_primitives:
       - "gemini_3_5_flash_vertex"
       - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
-      - "glm_5_2_fireworks"
       - "gpt_5"
       - "gpt_5_3_codex"
       - "gpt_5_mini"
@@ -301,12 +302,14 @@ configurable_unit_primitives:
       - "gpt_5_6_luna"
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
-      - "kimi_k2_6_fireworks"
-      - "kimi_k3_fireworks"
-      - "minimax_m3_fireworks"
+
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
+        - "glm_5_2_fireworks"
+        - "kimi_k2_6_fireworks"
+        - "kimi_k3_fireworks"
+        - "minimax_m3_fireworks"
         - "qwen_3_6_27b_fireworks"
 
   - feature_setting: "duo_developer"
@@ -347,7 +350,6 @@ configurable_unit_primitives:
       - "gemini_3_5_flash_vertex"
       - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
-      - "glm_5_2_fireworks"
       - "gpt_5"
       - "gpt_5_3_codex"
       - "gpt_5_mini"
@@ -359,12 +361,14 @@ configurable_unit_primitives:
       - "gpt_5_6_luna"
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
-      - "kimi_k2_6_fireworks"
-      - "kimi_k3_fireworks"
-      - "minimax_m3_fireworks"
+
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
+        - "glm_5_2_fireworks"
+        - "kimi_k2_6_fireworks"
+        - "kimi_k3_fireworks"
+        - "minimax_m3_fireworks"
         - "qwen_3_6_27b_fireworks"
 
   - feature_setting: "categorize_question"
