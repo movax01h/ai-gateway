@@ -1,6 +1,8 @@
 # pylint: disable=import-outside-toplevel
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +14,8 @@ from duo_workflow_service.gitlab.executor_http_client import (
     ExecutorGitLabHttpClient,
     _is_retryable_error,
     _RetryableStatusError,
+    _RetryAfter,
+    _WaitRetryAfter,
 )
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
@@ -31,11 +35,15 @@ def mock_tenacity_sleep_fixture():
         yield sleep_mock
 
 
-def http_action_response(body: str, status_code: int = 200):
+def http_action_response(
+    body: str, status_code: int = 200, headers: dict | None = None
+):
     """Build the ActionResponse an executor returns for a runHTTPRequest action."""
     action_response = contract_pb2.ActionResponse()
     action_response.httpResponse.statusCode = status_code
     action_response.httpResponse.body = body
+    if headers:
+        action_response.httpResponse.headers.update(headers)
     return action_response
 
 
@@ -659,11 +667,11 @@ async def test_http_call_exhausts_retries_on_repeated_500s_with_json_body(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [400, 403, 404, 422, 429])
+@pytest.mark.parametrize("status_code", [400, 403, 404, 422])
 async def test_http_call_does_not_retry_non_retryable_4xx_errors(
     client, monkeypatch_execute_http_response, status_code
 ):
-    """Test that _call does NOT retry 4xx client errors other than 401."""
+    """Test that _call does NOT retry 4xx client errors other than 401 and 429."""
     error_response = contract_pb2.ActionResponse()
     error_response.httpResponse.statusCode = status_code
     error_response.httpResponse.body = '{"message": "Client error"}'
@@ -966,4 +974,276 @@ async def test_retry_backoff_schedule_covers_replica_lag_window(
     waits = [call.args[0] for call in mock_tenacity_sleep.call_args_list]
 
     assert waits == [3, 9, 27]
+    assert monkeypatch_execute_http_response.call_count == 4
+
+
+# ---------------------------------------------------------------------------
+# Tests for 429 retry behaviour and Retry-After handling
+#
+# GitLab's throttled responder answers 429 with a `text/plain` body and a
+# `Retry-After` header holding `period - (now % period)` -- the seconds left in
+# the current quota window. Workhorse forwards every response header verbatim,
+# so honouring it is strictly better than guessing.
+# ---------------------------------------------------------------------------
+
+
+THROTTLED_BODY = "Retry later\n"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        # delta-seconds, the form GitLab sends
+        ("42", 42.0),
+        ("0", 0.0),
+        ("  7  ", 7.0),
+        # a negative delta is clamped rather than turned into a negative wait
+        ("-5", 0.0),
+        # an executor that joins repeated headers must not defeat parsing
+        ("42, 42", 42.0),
+        # absent or unparsable falls back to the exponential ladder
+        ("", None),
+        ("   ", None),
+        ("soon", None),
+        ("4.5", None),
+    ],
+)
+def test_retry_after_parses_delta_seconds(value, expected):
+    assert _RetryAfter({"Retry-After": value}).seconds() == expected
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({}, id="no-headers"),
+        pytest.param({"Content-Type": "text/plain"}, id="unrelated-header"),
+        pytest.param(None, id="headers-missing-entirely"),
+        pytest.param("not-a-mapping", id="headers-not-a-mapping"),
+    ],
+)
+def test_retry_after_absent_header_yields_none(headers):
+    """Without a usable header there is nothing to honour, so the ladder takes over."""
+    assert _RetryAfter(headers).seconds() is None
+
+
+@pytest.mark.parametrize("name", ["Retry-After", "retry-after", "RETRY-AFTER"])
+def test_retry_after_matches_header_name_case_insensitively(name):
+    """Workhorse canonicalises the name, but other executors need not."""
+    assert _RetryAfter({name: "42"}).seconds() == 42.0
+
+
+def test_retry_after_parses_http_date():
+    """RFC 7231 also permits an HTTP-date; handle it rather than silently ignoring it."""
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=30)
+
+    parsed = _RetryAfter(
+        {"Retry-After": format_datetime(retry_at, usegmt=True)}
+    ).seconds()
+
+    assert parsed is not None
+    assert 25 <= parsed <= 30
+
+
+def test_retry_after_clamps_past_http_date():
+    """A date already in the past means "retry now", not a negative wait."""
+    retry_at = datetime.now(timezone.utc) - timedelta(seconds=30)
+
+    parsed = _RetryAfter(
+        {"Retry-After": format_datetime(retry_at, usegmt=True)}
+    ).seconds()
+
+    assert parsed == 0.0
+
+
+def test_retry_after_measures_http_date_from_wait_time():
+    """The date form is relative, so it must be read when we are about to sleep, not when the error was raised."""
+
+    class _FrozenRetryAfter(_RetryAfter):
+        def _now(self):
+            return datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    retry_at = datetime(2026, 1, 1, 0, 0, 42, tzinfo=timezone.utc)
+
+    parsed = _FrozenRetryAfter(
+        {"Retry-After": format_datetime(retry_at, usegmt=True)}
+    ).seconds()
+
+    assert parsed == 42.0
+
+
+def test_retry_after_treats_http_date_without_timezone_as_utc():
+    """RFC 7231 says an HTTP-date with no zone is UTC; a naive datetime must not be compared to an aware one."""
+
+    class _FrozenRetryAfter(_RetryAfter):
+        def _now(self):
+            return datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    parsed = _FrozenRetryAfter({"Retry-After": "Thu, 01 Jan 2026 00:00:42"}).seconds()
+
+    assert parsed == 42.0
+
+
+@pytest.mark.asyncio
+async def test_http_call_retries_429_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """A 429 is a rate limit, i.e. "try again later", so it must be retried."""
+    monkeypatch_execute_http_response.side_effect = [
+        http_action_response(THROTTLED_BODY, status_code=429),
+        http_action_response('{"key": "value"}'),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_http_call_exhausts_retries_on_repeated_429s(
+    client, monkeypatch_execute_http_response
+):
+    """A namespace that stays over quota gets the 429 back once the budget is spent."""
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        THROTTLED_BODY, status_code=429, headers={"Retry-After": "5"}
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test", parse_json=False)
+
+    assert isinstance(result, GitLabHttpResponse)
+    assert result.status_code == 429
+    assert result.body == THROTTLED_BODY
+    assert monkeypatch_execute_http_response.call_count == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header_name", ["Retry-After", "retry-after", "RETRY-AFTER"])
+async def test_http_call_honours_retry_after_header(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep, header_name
+):
+    """The server's own reset window is used instead of the exponential ladder.
+
+    The header name is matched case-insensitively: Workhorse canonicalises it, but other executors need not.
+    """
+    monkeypatch_execute_http_response.side_effect = [
+        http_action_response(
+            THROTTLED_BODY, status_code=429, headers={header_name: "12"}
+        ),
+        http_action_response('{"key": "value"}'),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    # 12s from the header, not the 3s first rung of the ladder.
+    assert [call.args[0] for call in mock_tenacity_sleep.call_args_list] == [12.0]
+
+
+@pytest.mark.asyncio
+async def test_http_call_caps_retry_after(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep
+):
+    """A long reset window must not stall a single call indefinitely."""
+    monkeypatch_execute_http_response.side_effect = [
+        http_action_response(
+            THROTTLED_BODY, status_code=429, headers={"Retry-After": "600"}
+        ),
+        http_action_response('{"key": "value"}'),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        await client.aget("/api/v4/test")
+
+    assert [call.args[0] for call in mock_tenacity_sleep.call_args_list] == [
+        _WaitRetryAfter.MAX_SECONDS
+    ]
+
+
+@pytest.mark.asyncio
+async def test_http_call_falls_back_to_ladder_without_retry_after(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep
+):
+    """Without the header there is nothing to honour, so the exponential ladder applies."""
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        THROTTLED_BODY, status_code=429
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        await client.aget("/api/v4/test", parse_json=False)
+
+    assert [call.args[0] for call in mock_tenacity_sleep.call_args_list] == [3, 9, 27]
+
+
+@pytest.mark.asyncio
+async def test_retry_after_is_honoured_for_5xx_too(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep
+):
+    """Retry-After is not specific to 429; a 503 may carry it as well."""
+    monkeypatch_execute_http_response.side_effect = [
+        http_action_response(
+            "Service Unavailable", status_code=503, headers={"Retry-After": "8"}
+        ),
+        http_action_response('{"key": "value"}'),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        await client.aget("/api/v4/test")
+
+    assert [call.args[0] for call in mock_tenacity_sleep.call_args_list] == [8.0]
+
+
+@pytest.mark.asyncio
+async def test_timeout_retries_ignore_retry_after(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep
+):
+    """A timeout carries no status response, so it keeps the exponential ladder."""
+    monkeypatch_execute_http_response.side_effect = [
+        asyncio.TimeoutError(),
+        http_action_response('{"key": "value"}'),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        await client.aget("/api/v4/test")
+
+    assert [call.args[0] for call in mock_tenacity_sleep.call_args_list] == [3]
+
+
+@pytest.mark.asyncio
+async def test_graphql_retries_429_and_succeeds(
+    client, monkeypatch_execute_http_response, mock_tenacity_sleep
+):
+    """Graphql() honours Retry-After on a throttled /api/graphql call."""
+    monkeypatch_execute_http_response.side_effect = [
+        http_action_response(
+            THROTTLED_BODY, status_code=429, headers={"Retry-After": "15"}
+        ),
+        http_action_response(
+            json.dumps({"data": {"currentUser": {"username": "eve"}}})
+        ),
+    ]
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.graphql("{ currentUser { username } }")
+
+    assert result["currentUser"]["username"] == "eve"
+    assert [call.args[0] for call in mock_tenacity_sleep.call_args_list] == [15.0]
+
+
+@pytest.mark.asyncio
+async def test_graphql_exhausts_retries_on_repeated_429s(
+    client, monkeypatch_execute_http_response
+):
+    """Graphql() surfaces the throttle once the budget is spent."""
+    monkeypatch_execute_http_response.return_value = http_action_response(
+        THROTTLED_BODY, status_code=429, headers={"Retry-After": "5"}
+    )
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(Exception, match="GraphQL request failed with HTTP 429"):
+            await client.graphql("{ currentUser { username } }")
+
     assert monkeypatch_execute_http_response.call_count == 4
