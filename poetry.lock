@@ -1251,13 +1251,13 @@ gmpy2 = ["gmpy2"]
 
 [[package]]
 name = "editorconfig-checker"
-version = "3.8.0"
+version = "3.11.1"
 description = "Python wrapper around invoking editorconfig-checker (https://github.com/editorconfig-checker/editorconfig-checker)"
 optional = false
 python-versions = ">=2.7"
 groups = ["lint"]
 files = [
-    {file = "editorconfig_checker-3.8.0.tar.gz", hash = "sha256:aad0e967cf9e72399ff862188e36b43dbfc480918c36e21d2751dd0e32b1e6fb"},
+    {file = "editorconfig_checker-3.11.1.tar.gz", hash = "sha256:043b5ae504bc2e6d4497ac4e3058f143339eb3cffd56abb7a215c44ebfd73a1b"},
 ]
 
 [[package]]
