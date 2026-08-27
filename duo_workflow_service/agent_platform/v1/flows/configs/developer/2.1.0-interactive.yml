@@ -105,6 +105,12 @@ components:
       - from: "context:project_http_url_to_repo"
         as: "project_url"
         optional: true
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: true
       - from: "context:current_date"
         as: "today"
       - from: "context:inputs.agent_platform_standard_context.primary_branch"

@@ -35,3 +35,7 @@ something stopped you verifying a point, say so.
   Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
   {%- endif %}
 </env>
+
+{% include 'agents_dot_md/base/1.0.0.jinja' %}
+
+{% include 'workspace_agent_skills/base/1.0.0.jinja' %}
