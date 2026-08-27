@@ -127,7 +127,18 @@ components:
 
 routers:
   - from: "build_review_context"
-    to: "fetch_mr_diffs"
+    condition:
+      # merge_request_iid is unvalidated context:goal, which can arrive empty
+      # See https://gitlab.com/gitlab-com/request-for-help/-/work_items/5233
+      #
+      # Gating here is sufficient since every downstream
+      # step reads the same value, and correct since otherwise
+      # post_duo_code_review's non-nullable IID would force a placeholder,
+      # posting the review to an unrelated MR.
+      input: "context:build_review_context.execution_result"
+      routes:
+        "success": "fetch_mr_diffs"
+        "default_route": "abort"
   - from: "fetch_mr_diffs"
     to: "explore_relevant_directories"
   - from: "explore_relevant_directories"
