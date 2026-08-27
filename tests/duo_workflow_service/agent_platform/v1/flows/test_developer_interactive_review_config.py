@@ -4,6 +4,9 @@ Only the non-obvious invariants are tested here; loading and dry-run compilation
 test_registry.py and test_configs.py.
 """
 
+import pytest
+
+from ai_gateway.prompts.base import jinja_env
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 
@@ -49,3 +52,54 @@ def test_review_agent_cannot_write_anything():
         "find_files",
         "list_dir",
     }
+
+
+def test_review_agent_receives_the_workspace_context_the_supervisor_has():
+    """Observed: the reviewer raised findings that a repository skill already settles.
+
+    ``workspace_agent_skills`` and ``user_rule`` are flow-level context — ``_process_additional_context``
+    puts them in state for every component — so the reviewer missed them only because it never bound
+    them. Without them it reviews against generic conventions instead of the repository's own.
+    """
+    bound = {input_["as"] for input_ in _review_agent()["inputs"]}
+
+    assert "workspace_agent_skills" in bound
+    assert "agents_dot_md" in bound
+
+
+def test_the_review_prompt_renders_the_workspace_context_it_binds():
+    """A binding with no render site is inert: the input resolves and is then dropped silently."""
+    template = jinja_env.get_template("local_code_review/system/1.0.0.jinja")
+
+    rendered = template.render(
+        today="2026-08-26",
+        agents_dot_md="AGENTS.md body",
+        workspace_agent_skills="<available_skills>skill catalogue</available_skills>",
+    )
+
+    assert "AGENTS.md body" in rendered
+    assert "<available_skills>skill catalogue</available_skills>" in rendered
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        pytest.param({}, id="omitted"),
+        pytest.param({"agents_dot_md": "", "workspace_agent_skills": ""}, id="empty"),
+    ],
+)
+def test_the_review_prompt_stays_inert_when_the_client_sends_no_workspace_context(
+    context,
+):
+    """Both inputs are optional, so the blocks must vanish rather than render empty envelopes.
+
+    Omitted and empty are covered separately: the partials guard on truthiness so both behave the
+    same today, but a guard rewritten as ``is defined`` would silently start emitting an empty
+    envelope for the empty case.
+    """
+    rendered = jinja_env.get_template("local_code_review/system/1.0.0.jinja").render(
+        today="August 27, 2026", **context
+    )
+
+    assert "<AGENTS.md>" not in rendered
+    assert "<workspace_agent_skills>" not in rendered
