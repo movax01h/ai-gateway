@@ -214,6 +214,7 @@ class TestCodeCompletions:
             "editor_lang",
             "stream",
             "context_max_percent",
+            "max_prompt_tokens",
             "code_context",
             "expected_language_id",
             "expected_output",
@@ -227,6 +228,7 @@ class TestCodeCompletions:
                 False,
                 1.0,
                 None,
+                None,
                 LanguageId.PYTHON,
                 "random_suggestion",
             ),
@@ -239,6 +241,7 @@ class TestCodeCompletions:
                 1.0,
                 None,
                 None,
+                None,
                 "random_suggestion",
             ),
             (
@@ -248,6 +251,7 @@ class TestCodeCompletions:
                 None,
                 False,
                 1.0,
+                None,
                 None,
                 LanguageId.PYTHON,
                 "random_suggestion",
@@ -259,6 +263,7 @@ class TestCodeCompletions:
                 None,
                 False,
                 0.5,
+                32767,
                 ["some context"],
                 LanguageId.PYTHON,
                 "random_suggestion",
@@ -274,6 +279,7 @@ class TestCodeCompletions:
         editor_lang: str,
         stream: bool,
         context_max_percent: float,
+        max_prompt_tokens: int,
         code_context: list,
         expected_language_id: LanguageId,
         expected_output: str,
@@ -321,6 +327,7 @@ class TestCodeCompletions:
                 stream=stream,
                 code_context=code_context,
                 context_max_percent=context_max_percent,
+                max_prompt_tokens=max_prompt_tokens,
             )
 
         mock_add_content.assert_called_with(
@@ -328,6 +335,7 @@ class TestCodeCompletions:
             suffix=suffix,
             suffix_reserved_percent=CodeCompletions.SUFFIX_RESERVED_PERCENT,
             context_max_percent=context_max_percent,
+            max_prompt_tokens=max_prompt_tokens,
             code_context=code_context,
         )
 
