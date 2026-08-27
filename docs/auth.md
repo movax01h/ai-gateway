@@ -152,50 +152,194 @@ you can disable the auth logic by changing the following application setting in 
 AIGW_AUTH__BYPASS_EXTERNAL=true
 ```
 
-## JWK Signing Key and Validation Key
+## Rotate AI Gateway and Duo Workflow Service JWT keys
 
-The JWK signing key is used to sign User JWTs when requested by a GitLab instance.
-The validation key is a secondary key used purely for token validation whenever the signing key expires or is rotated.
-This ensures we always have a key in place to sign and validate tokens.
+This page is the single canonical runbook for rotating the self-signed JWT keys used by
+AI Gateway and the Duo Workflow Service. Do not duplicate these steps elsewhere; link here
+instead.
 
-### JWK signing key rotation
+The JWK signing key is used to sign User JWTs when requested by a GitLab instance. The
+validation key is a secondary key used purely for token validation whenever the signing key
+expires or is rotated. This ensures we always have a key in place to sign and validate tokens.
 
-The `AIGW_SELF_SIGNED_JWT__SIGNING_KEY` and `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY` private keys should be rotated yearly.
-There is an issue created to remind us of this: <https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/514>.
+Operational context for running this against production, including the change-request
+process, lives in the [AI Gateway runbook](https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/ai-gateway/README.md#rotating-jwt-signing-keys).
 
-#### Keep already issued tokens valid during the key rotation
+The signing and validation keys must be rotated yearly. Rotation happens in two phases
+separated by three days so existing tokens remain valid.
 
-Once we rotate the `AIGW_SELF_SIGNED_JWT__SIGNING_KEY`, already issued JWT tokens would stop being valid immediately.
-In order to continue supporting already issued JWT tokens for up to the intended lifetime, we introduced the `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY`.
+> [!IMPORTANT]
+> Start with staging and validate it before changing production. Notify
+> `#g_ai-core-infra` before production work. Avoid Fridays and public holidays,
+> and ensure sufficient team coverage.
 
-During the rotation of `AIGW_SELF_SIGNED_JWT__SIGNING_KEY`, `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY` will contain the value of the old `AIGW_SELF_SIGNED_JWT__SIGNING_KEY`.
-New tokens will be issued with a new value for `AIGW_SELF_SIGNED_JWT__SIGNING_KEY`.
-The AI Gateway has both keys in the JWKS, so it is able to decode tokens with either of the keys.
+Anyone with Vault access to the relevant paths can perform these rotations, not just AI Core
+Infra team members. For additional help, contact the `#g_ai-core-infra` channel.
 
-#### Steps to rotate the key
+### Vault locations
 
-**Before performing any production-related changes, notify the AI Core Infra team in `#g_ai-core-infra`** so they can quickly react to any incident.
+| Service | Staging | Production |
+|---|---|---|
+| AI Gateway | [Open staging Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway/) | [Open production Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway/) |
+| AI Gateway Custom | [Open staging Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway-custom/) | [Open production Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway-custom/) |
+| AI Gateway Panda | [Open staging Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway-panda/) | [Open production Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway-panda/) |
+| Duo Workflow Service | [Open staging Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/duo-workflow-svc/) | [Open production Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/duo-workflow-svc/) |
 
-Tokens should be rotated in the following vaults for both staging and production environments. Anyone with vault access can perform these rotations, not just AI Core Infra team members. For additional help, contact the `#g_ai-core-infra` channel.
+GLGO is deployed through Runway as well, but its Vault path is not listed here because
+it is owned by the GLGO service rather than this team. Ask in `#g_ai-core-infra` or the
+GLGO owners for access to `GLGO_KNOWN_ISSUER_KEYS_CC` before starting a rotation.
 
-| Staging | Production |
-|---------|------------|
-| [AI Gateway](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway/) | [AI Gateway](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway/) |
-| [AI Gateway Custom](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway-custom/) | [AI Gateway Custom](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway-custom/) |
-| [AI Gateway Panda](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway-panda/) | [AI Gateway Panda](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway-panda/) |
+The affected variables are:
 
-Start by updating staging first and verifying it works as expected before proceeding to production. When updating production, make sure changes are made outside of public holidays and Fridays, and that there is sufficient team coverage to support in case of an incident.
+| Service | Active key | Transitional validation key |
+|---|---|---|
+| AI Gateway | `AIGW_SELF_SIGNED_JWT__SIGNING_KEY` | `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY` |
+| Duo Workflow Service | `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` | `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` |
+| GLGO | `GLGO_KNOWN_ISSUER_KEYS_CC` | not applicable, holds trusted public keys |
 
-1. Update the `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY` environment variable in the [staging vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/ai-gateway/) with the current `AIGW_SELF_SIGNED_JWT__SIGNING_KEY` value.
-1. Update the value `AIGW_SELF_SIGNED_JWT__SIGNING_KEY` in the staging vault with a new key. A new key can be generated by the following command: `openssl genrsa -out jwt_signing.key 2048`.
-1. Verify staging is working as expected before proceeding to production.
-1. Repeat the same steps for production using the [production vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/ai-gateway/).
-1. Create a Slack reminder in `#g_ai-core-infra` to be triggered after 3 days of updating the initial keys, to update the `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY` value ([Example](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/514#note_1958167234))
-1. Create a new issue as a reminder to rotate the JWK Signing Key with a due date 1 month before the rotation schedule ([Example](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/514))
-1. Create a Slack reminder in `#g_ai-core-infra` to be triggered 1 month before the next rotation schedule
-1. Update the value of `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY` from the vault to a new key. A new key can be generated by the following command: `openssl genrsa -out jwt_validation.key 2048`
+`GLGO_KNOWN_ISSUER_KEYS_CC` is a comma-separated list of `<issuer>;<public-key>` pairs. It
+holds one entry per AI Gateway deployment that signs requests to GLGO, so a rotation edits
+only the entry for the deployment whose signing key changed.
 
-For the equivalent key rotation procedure for the Duo Workflow Service, see [JWK signing key rotation](duo_workflow_service.md#jwk-signing-key-rotation) in the Duo Workflow Service documentation.
+### Phase 1: Rotate the signing keys
+
+Complete every step in staging before repeating the process in production.
+
+#### 1. Preserve the outgoing keys
+
+For each service, copy the current signing key into its validation key:
+
+- Copy `AIGW_SELF_SIGNED_JWT__SIGNING_KEY` to
+  `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY`.
+- Copy `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` to
+  `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY`.
+
+This allows existing tokens to remain valid after the active keys change.
+
+#### 2. Generate new signing keys
+
+Generate a separate private key for each service:
+
+```shell
+openssl genrsa -out ai_gateway_signing.key 2048
+openssl genrsa -out duo_workflow_signing.key 2048
+```
+
+Do not commit these files or share their contents in an issue, merge request,
+Slack message, or job log.
+
+#### 3. Update GLGO trust first
+
+This step applies only to the AI Gateway key. AI Gateway signs the Amazon Q token requests it
+sends to GLGO, and GLGO verifies them against a static public key. There is no JWKS endpoint
+for GLGO to discover the new key, so trust must be established before the private key changes.
+
+Extract the public key:
+
+```shell
+openssl rsa \
+  -in ai_gateway_signing.key \
+  -pubout \
+  -out ai_gateway_signing.pub
+```
+
+Before changing `AIGW_SELF_SIGNED_JWT__SIGNING_KEY`, append the new public key
+to `GLGO_KNOWN_ISSUER_KEYS_CC`:
+
+```plaintext
+,<issuer>;<new-public-key>
+```
+
+For production, the issuer is:
+
+```plaintext
+https://cloud.gitlab.com
+```
+
+The resulting addition is:
+
+```plaintext
+,https://cloud.gitlab.com;<new AI Gateway public key>
+```
+
+Preserve the existing key. GLGO must temporarily trust both the outgoing and
+incoming AI Gateway keys. Redeploy GLGO and confirm it starts successfully
+before continuing.
+
+#### 4. Activate the new keys
+
+Update Vault with the generated private keys:
+
+- Set `AIGW_SELF_SIGNED_JWT__SIGNING_KEY` to `ai_gateway_signing.key`.
+- Set `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` to
+  `duo_workflow_signing.key`.
+
+Redeploy the affected services so they load the new Vault versions.
+
+For DWS, deploy through the
+[Duo Workflow Service deployment pipelines](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc/-/pipelines).
+
+#### 5. Validate the environment
+
+Confirm:
+
+- AI Gateway authentication works.
+- A Duo Agent Platform workflow completes successfully.
+- An Amazon Q request succeeds through GLGO.
+- Service logs show no JWT validation errors.
+- HTTP 401 rates remain at their normal baseline.
+
+After staging passes these checks, repeat Phase 1 in production,
+**including step 6**. Each environment gets its own Phase 2 reminder,
+scheduled three days after *that environment's* signing-key rotation
+(not three days after the first, staging, rotation). You will end up
+with two separate Phase 2 reminders — one for staging, one for
+production — each retiring the validation key for its own environment.
+
+#### 6. Schedule Phase 2
+
+Create a reminder in `#g_ai-core-infra` to complete Phase 2 three days later.
+
+### Phase 2: Retire the outgoing keys
+
+After three days, complete these steps in staging and then production.
+
+1. Generate separate replacement validation keys:
+
+   ```shell
+   openssl genrsa -out ai_gateway_validation.key 2048
+   openssl genrsa -out duo_workflow_validation.key 2048
+   ```
+
+1. Update Vault:
+
+   - Replace `AIGW_SELF_SIGNED_JWT__VALIDATION_KEY`.
+   - Replace `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY`.
+
+1. Redeploy AI Gateway and Duo Workflow Service.
+
+1. Remove the outgoing AI Gateway public key from
+   `GLGO_KNOWN_ISSUER_KEYS_CC`. Keep the new public key.
+
+1. Redeploy GLGO.
+
+1. Repeat the validation checks from Phase 1.
+
+1. Delete all locally generated key files securely.
+
+1. Create an issue and Slack reminder one month before the next annual
+   rotation.
+
+### Rollback
+
+Vault retains secret version history.
+
+If authentication fails:
+
+1. Restore the previous Vault version of the affected key.
+1. Restore the previous `GLGO_KNOWN_ISSUER_KEYS_CC` value when applicable.
+1. Redeploy the affected services.
+1. Confirm JWT errors and HTTP 401 rates return to baseline.
 
 ## Authorization in AI Gateway
 
