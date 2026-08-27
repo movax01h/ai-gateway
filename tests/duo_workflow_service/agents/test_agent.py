@@ -11,6 +11,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.prompt_values import ChatPromptValue
+from langgraph.types import Overwrite
 
 from ai_gateway.prompts.base import Prompt
 from duo_workflow_service.agents.agent import Agent, AgentPromptTemplate, build_agent
@@ -551,10 +552,69 @@ class TestAgentOptimizerPipeline:
             optimizer_pipeline=mock_pipeline,
         )  # type: ignore[call-arg]
 
-        await agent.run(workflow_state)
+        result = await agent.run(workflow_state)
 
         mock_pipeline.optimize.assert_awaited_once_with(original_messages)
-        assert workflow_state["conversation_history"][prompt_name] == optimized_messages
+        # The rewrite comes back as an Overwrite channel update; the input
+        # state must stay untouched (gitlab-org/gitlab#623342).
+        history_update = result["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        assert history_update.value[prompt_name][:-1] == optimized_messages
+        assert workflow_state["conversation_history"][prompt_name] == original_messages
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_get_event")
+    async def test_agent_run_rewrite_persists_on_api_error(
+        self,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: CategoryEnum,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+    ):
+        """A rewrite that ran before a failing LLM call must still persist."""
+        original_messages: list[BaseMessage] = [HumanMessage(content="test message")]
+        optimized_messages: list[BaseMessage] = [HumanMessage(content="optimized")]
+
+        mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+        mock_pipeline.optimize = AsyncMock(
+            return_value=(
+                optimized_messages,
+                [OptimizationResult(messages=optimized_messages, was_modified=True)],
+            )
+        )
+
+        workflow_state["conversation_history"][prompt_name] = original_messages
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+            optimizer_pipeline=mock_pipeline,
+        )  # type: ignore[call-arg]
+
+        with patch.object(
+            agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.side_effect = APIStatusError(
+                message="Test API error",
+                response=Mock(status_code=500),
+                body={"error": {"message": "Server error"}},
+            )
+
+            result = await agent.run(workflow_state)
+
+        assert result["status"] == WorkflowStatusEnum.ERROR
+        history_update = result["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        assert history_update.value[prompt_name][:-1] == optimized_messages
+        assert history_update.value[prompt_name][-1].content.startswith(
+            "There was an error processing your request:"
+        )
+        assert workflow_state["conversation_history"][prompt_name] == original_messages
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_get_event", "mock_ainvoke")
