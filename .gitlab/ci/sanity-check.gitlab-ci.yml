@@ -1,0 +1,31 @@
+# Child pipeline for the SWE-bench sanity check (CEF eval).
+#
+# Started fire-and-forget by the `sanity-check-trigger` job in
+# .gitlab/ci/test.gitlab-ci.yml: the trigger job succeeds as soon as this
+# pipeline starts, so a failure here never blocks or delays the parent
+# MR/branch pipeline. The result shows up as a downstream pipeline.
+#
+# SANITY_CHECK_EVAL_SHA and PARENT_PIPELINE_ID are forwarded by the trigger
+# job because CI_MERGE_REQUEST_* variables are not available here.
+
+sanity-tests:
+  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}alpine:3.24
+  stage: test
+  rules:
+    # Required: without rules the implicit `only: branches/tags` default
+    # applies, which never matches the merge request ref this child pipeline
+    # runs on, so the downstream pipeline creation fails with no jobs.
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+  variables:
+    CEF_SERVICE_URL: "https://cef.runway.gitlab.net"
+    CEF_POLL_INTERVAL: "60"
+    CEF_POLL_TIMEOUT: "5400"
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      ./scripts/submit_cef_eval.sh \
+        "master" \
+        "${SANITY_CHECK_EVAL_SHA:-$CI_COMMIT_SHA}" \
+        "$CI_PROJECT_PATH" \
+        "AIGW sanity-tests CI: pipeline $CI_PIPELINE_ID (parent pipeline: ${PARENT_PIPELINE_ID:-none})"

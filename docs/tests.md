@@ -171,7 +171,25 @@ The jobs require the `ANTHROPIC_API_KEY` CI variable to be configured.
 
 The `sanity-tests` CI job submits a SWE-bench evaluation to the
 [CEF service](https://cef.runway.gitlab.net) via `scripts/submit_cef_eval.sh` and polls until it
-completes. It runs on MR pipelines that change `duo_workflow_service/**`.
+completes. It runs in a child pipeline (`.gitlab/ci/sanity-check.gitlab-ci.yml`) started by the
+`sanity-check-trigger` job (`.gitlab/ci/test.gitlab-ci.yml`) on MR pipelines and pushes to
+`main` that change Duo Workflow Service dependencies. The trigger waits for `tests:unit` and
+then succeeds as soon as the child pipeline starts (fire-and-forget), so the ~30 min eval never
+blocks or delays the parent pipeline; the result appears as a downstream pipeline. The wait on
+unit tests is deliberate: a registered CEF experiment cannot be canceled and consumes a
+dedicated VM, so the delay lets rapidly superseded pipelines auto-cancel before submitting.
+
+### Triaging sanity-check failures
+
+The AI Core Infra group (`category:model evaluation infra`) triages failures of the child
+pipeline, distinguishing:
+
+- Infra/setup failures in CEF (GDK provisioning, CEF service availability, LLM provider quota,
+  GCP infra quota): fixed by the group.
+- Legit failures caused by the code changes in the MR: routed back to the MR author.
+
+Tracking the false-failure rate is a prerequisite for making the job blocking (Phase 3, see
+[ai-evaluation#1019](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/work_items/1019)).
 
 ### `CEF_SERVICE_ACCOUNT_PAT`
 

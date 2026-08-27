@@ -127,30 +127,36 @@ check-dws-dependencies:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-sanity-tests:
-  image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}alpine:3.24
+# Fire-and-forget child pipeline for the SWE-bench sanity check (CEF eval).
+# The trigger job succeeds as soon as the child pipeline starts, so the
+# ~30 min eval gives a signal on relevant MRs and pushes to the default
+# branch without blocking or extending the parent pipeline.
+sanity-check-trigger:
   stage: test
-  needs: []
-  allow_failure: true  # TODO: to be removed once swe-bench pipelines are stable enough
+  # Debounce: a registered CEF experiment cannot be canceled and consumes a
+  # dedicated VM (~30 min), so waiting on unit tests lets rapidly superseded
+  # pipelines auto-cancel before the eval is submitted, and skips the eval
+  # entirely when the code is broken.
+  needs:
+    - tests:unit
+  allow_failure: true  # a misconfigured child pipeline must never block MRs
   rules:
-    # Manual trigger on any AIGW merge request. Kept manual because the eval
-    # takes ~30 minutes, so authors run it on demand (see MR checklist).
+    # Only changes that can affect agent quality are worth a CEF eval; the
+    # push rule (rather than any pipeline source) keeps scheduled/web/API
+    # pipelines on the default branch from firing it.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: manual
+      changes: !reference [.duo-workflow-service-dependencies, changes]
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: !reference [.duo-workflow-service-dependencies, changes]
   variables:
-    CEF_SERVICE_URL: "https://cef.runway.gitlab.net"
-    # Polling controls: interval between polls and overall timeout (seconds).
-    CEF_POLL_INTERVAL: "60"
-    CEF_POLL_TIMEOUT: "5400"
-  before_script:
-    - apk add --no-cache curl jq
-  script:
-    - |
-      ./scripts/submit_cef_eval.sh \
-        "master" \
-        "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-$CI_COMMIT_SHA}" \
-        "$CI_PROJECT_PATH" \
-        "AIGW sanity-tests CI: pipeline $CI_PIPELINE_ID"
+    # CI_MERGE_REQUEST_* variables are not available in child pipelines, so
+    # forward the SHA to evaluate (empty outside merged-results pipelines; the
+    # child falls back to its own CI_COMMIT_SHA) and the parent pipeline ID
+    # for traceability of the CEF experiment.
+    SANITY_CHECK_EVAL_SHA: $CI_MERGE_REQUEST_SOURCE_BRANCH_SHA
+    PARENT_PIPELINE_ID: $CI_PIPELINE_ID
+  trigger:
+    include: .gitlab/ci/sanity-check.gitlab-ci.yml
 
 regression-tests:
   <<: *test-base
