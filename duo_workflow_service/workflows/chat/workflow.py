@@ -43,6 +43,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tools.start_flow import (
     enabled_flow_identifiers,
@@ -401,10 +402,27 @@ class Workflow(AbstractWorkflow):
                         correlation_id=None,
                         tool_info=None,
                         additional_context=self._additional_context,
+                        parent_ts=self._turn_parent_ts(checkpoint_tuple),
                     )
                     state_update["ui_chat_log"] = [new_message_chat_log]
 
                 return Command(goto=next_step, update=state_update)
+
+    def _turn_parent_ts(
+        self, checkpoint_tuple: Optional[GitLabCheckpoint]
+    ) -> Optional[str]:
+        """Checkpoint this turn continues/forks from.
+
+        Stamped on the user message so a client can retry the turn.
+        """
+
+        # If the frontend sends a specific thread_ts to resume from
+        # retrying/selecting a branch, we mark that as the parent in the response.
+        resume_checkpoint_ts = self._resolve_resume_checkpoint_ts()
+        if resume_checkpoint_ts:
+            return resume_checkpoint_ts
+
+        return (checkpoint_tuple or {}).get("threadTs")
 
     def _track_tool_approval_resolved(self, outcome: EventPropertyEnum) -> None:
         """Track that a pending tool approval was resolved."""
