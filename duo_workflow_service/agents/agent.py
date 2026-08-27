@@ -10,6 +10,7 @@ from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
+from langgraph.types import Overwrite
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry
@@ -97,10 +98,33 @@ class Agent(BaseAgent):
                 if event and event["event_type"] == WorkflowEventType.STOP:
                     return {"status": WorkflowStatusEnum.CANCELLED}
 
+            optimized_history: list[BaseMessage] = []
+            history_rewritten = False
+
             try:
                 history = state["conversation_history"].get(self.name, [])
-                optimized_history, _ = await self.optimizer_pipeline.optimize(history)
-                state["conversation_history"][self.name] = optimized_history
+                (
+                    optimized_history,
+                    optimization_results,
+                ) = await self.optimizer_pipeline.optimize(history)
+                history_rewritten = any(
+                    result.was_modified for result in optimization_results
+                )
+                if history_rewritten:
+                    # Rebind on a copy: the input state aliases the live channel
+                    # value and the checkpointer's delta baseline, so an in-place
+                    # rewrite is invisible to persistence and lost on the next
+                    # turn (https://gitlab.com/gitlab-org/gitlab/-/issues/623342).
+                    state = cast(
+                        DuoWorkflowStateType,
+                        {
+                            **state,
+                            "conversation_history": {
+                                **state["conversation_history"],
+                                self.name: optimized_history,
+                            },
+                        },
+                    )
 
                 input = self._prepare_input(state)
 
@@ -112,10 +136,22 @@ class Agent(BaseAgent):
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
-                return {
+                response = {
                     "conversation_history": {self.name: [model_completion]},
                     **self._respond_to_human(state, model_completion),
                 }
+                if history_rewritten:
+                    # Overwrite bypasses the append-only reducer so the rewrite
+                    # replaces the channel value; keep whatever message the
+                    # response path chose to append (e.g. a guardrail warning).
+                    appended = response["conversation_history"][self.name]
+                    response["conversation_history"] = Overwrite(
+                        {
+                            **state["conversation_history"],
+                            self.name: [*optimized_history, *appended],
+                        }
+                    )
+                return response
             except APIStatusError as error:
                 log_exception(error, extra={"context": "Error processing agent"})
 
@@ -136,8 +172,19 @@ class Agent(BaseAgent):
                     content=f"There was an error processing your request: {error}"
                 )
 
+                error_history_update: dict[str, Any] | Overwrite = {
+                    self.name: [error_message]
+                }
+                if history_rewritten:
+                    error_history_update = Overwrite(
+                        {
+                            **state["conversation_history"],
+                            self.name: [*optimized_history, error_message],
+                        }
+                    )
+
                 return {
-                    "conversation_history": {self.name: [error_message]},
+                    "conversation_history": error_history_update,
                     "status": WorkflowStatusEnum.ERROR,
                     "ui_chat_log": [
                         UiChatLog(

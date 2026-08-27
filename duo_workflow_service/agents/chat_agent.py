@@ -1,11 +1,12 @@
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from uuid import uuid4
 
 import structlog
 from anthropic import APIStatusError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langgraph.types import Overwrite
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
@@ -200,7 +201,9 @@ class ChatAgent:
 
         return approval_required, approval_messages
 
-    def _handle_wrong_messages_order_for_tool_execution(self, state: ChatWorkflowState):
+    def _handle_wrong_messages_order_for_tool_execution(
+        self, history: List[BaseMessage]
+    ) -> bool:
         # A special fix for the following use case:
         #
         # - A user is asked to approve/deny a tool execution
@@ -210,12 +213,9 @@ class ChatAgent:
         #
         # Expected to be refactored in:
         # - https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1461
-        if (
-            self.name in state["conversation_history"]
-            and len(state["conversation_history"][self.name]) > 1
-        ):
-            tool_call_message = state["conversation_history"][self.name][-2]
-            user_message = state["conversation_history"][self.name][-1]
+        if len(history) > 1:
+            tool_call_message = history[-2]
+            user_message = history[-1]
 
             if (
                 isinstance(tool_call_message, AIMessage)
@@ -230,16 +230,19 @@ class ChatAgent:
                     for tool_call in getattr(tool_call_message, "tool_calls", [])
                 ]
 
-                state["conversation_history"][self.name][-2:] = [
+                history[-2:] = [
                     tool_call_message,
                     *messages,
                     user_message,
                 ]
+                return True
+
+        return False
 
     def _handle_approval_rejection(
-        self, state: ChatWorkflowState, approval_state: ApprovalStateRejection
-    ) -> list[BaseMessage]:
-        last_message = state["conversation_history"][self.name][-1]
+        self, history: List[BaseMessage], approval_state: ApprovalStateRejection
+    ) -> bool:
+        last_message = history[-1] if history else None
 
         # An empty text box for tool cancellation results in a 'null' message. Converting to None
         # todo: remove this line once we have fixed the frontend to return None instead of 'null'
@@ -262,9 +265,8 @@ class ChatAgent:
             for tool_call in getattr(last_message, "tool_calls", [])
         ]
 
-        # update history
-        state["conversation_history"][self.name].extend(messages)
-        return messages
+        history.extend(messages)
+        return bool(messages)
 
     async def _get_agent_response(self, state: ChatWorkflowState) -> BaseMessage:
         return await self.prompt_adapter.get_response(
@@ -440,6 +442,20 @@ class ChatAgent:
             return base
         return [*base, *optimizer_logs]
 
+    def _replace_history_update(
+        self, state: ChatWorkflowState, messages: List[BaseMessage]
+    ) -> Overwrite:
+        """Whole-channel update replacing this agent's history.
+
+        A rewrite must be returned as a channel update, never applied by mutating the
+        input state: the input aliases the live channel value and the checkpointer's
+        delta baseline, so an in-place edit is invisible to persistence and the
+        rewrite is lost on the next turn
+        (https://gitlab.com/gitlab-org/gitlab/-/issues/623342). ``Overwrite`` bypasses
+        the append-only reducer; spreading the current value keeps other agents' keys.
+        """
+        return Overwrite({**state["conversation_history"], self.name: messages})
+
     def _detect_compact_command(
         self, state: ChatWorkflowState
     ) -> tuple[bool, str | None]:
@@ -469,7 +485,7 @@ class ChatAgent:
     ) -> Dict[str, Any]:
         """Handle a user-initiated ``/compact`` slash command.
 
-        Runs compaction in manual mode, replaces conversation_history in place, and returns a single tool-card UI entry.
+        Runs compaction in manual mode and returns the compacted history as a channel update plus a tool-card UI entry.
         On failure or no-op, returns a status entry and leaves history unchanged.
         """
         if self._manual_compactor is None:
@@ -524,15 +540,25 @@ class ChatAgent:
                 "ui_chat_log": list(result.ui_chat_logs),
             }
 
-        state["conversation_history"][self.name] = result.messages
-
         return {
             "status": WorkflowStatusEnum.INPUT_REQUIRED,
+            "conversation_history": self._replace_history_update(
+                state, result.messages
+            ),
             "ui_chat_log": list(result.ui_chat_logs),
         }
 
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = state.get("approval", None)
+
+        # Work on a copy: the input state aliases the live channel value and the
+        # checkpointer's delta baseline (see _replace_history_update), so every
+        # history change below must flow back as a channel update, never as a
+        # mutation of the input.
+        history: List[BaseMessage] = list(
+            state.get("conversation_history", {}).get(self.name, [])
+        )
+        history_modified = False
 
         # When the conversation ends with an AIMessage (no new user input), we have two scenarios:
         # 1. AIMessage has pending tool_calls: This occurs when the workflow was interrupted
@@ -542,7 +568,6 @@ class ChatAgent:
         # 2. AIMessage has no tool_calls: The AI already responded, and there's no new user
         #    input to process. Return INPUT_REQUIRED to wait for actual user input.
         if not approval_state:
-            history = state.get("conversation_history", {}).get(self.name, [])
             if history and isinstance(history[-1], AIMessage):
                 last_ai = history[-1]
 
@@ -562,9 +587,8 @@ class ChatAgent:
                         )
                         for tc in last_ai.tool_calls
                     ]
-                    state["conversation_history"][self.name].extend(
-                        synthetic_tool_messages
-                    )
+                    history.extend(synthetic_tool_messages)
+                    history_modified = True
                 else:
                     log.info(
                         "No new user input detected, skipping LLM call",
@@ -579,21 +603,38 @@ class ChatAgent:
         if is_compact:
             return await self._handle_manual_compaction(state, compact_user_instruction)
 
-        self._handle_wrong_messages_order_for_tool_execution(state)
+        history_modified |= self._handle_wrong_messages_order_for_tool_execution(
+            history
+        )
 
         # Handle approval rejection
         if isinstance(approval_state, ApprovalStateRejection):
-            self._handle_approval_rejection(state, approval_state)
+            history_modified |= self._handle_approval_rejection(history, approval_state)
 
-        history = state["conversation_history"].get(self.name, [])
         (
             optimized_history,
             optimization_results,
         ) = await self._optimizer_pipeline.optimize(history)
-        state["conversation_history"][self.name] = optimized_history
+        history_modified |= any(result.was_modified for result in optimization_results)
+        history = optimized_history
+        # The LLM call reads the state, so rebind the working history on a copy.
+        state = cast(
+            ChatWorkflowState,
+            {
+                **state,
+                "conversation_history": {
+                    **state["conversation_history"],
+                    self.name: history,
+                },
+            },
+        )
         optimizer_ui_logs: List[UiChatLog] = [
             entry for result in optimization_results for entry in result.ui_chat_logs
         ]
+        # retry_malformed_tool_calls appends its correction trace to the working
+        # history; growth past this point must persist so the stored history
+        # matches what the model saw.
+        pre_llm_message_count = len(history)
 
         try:
             with GitLabServiceContext(
@@ -633,6 +674,10 @@ class ChatAgent:
                         )
 
             response = await self._build_response(agent_response, state)
+            if history_modified or len(history) > pre_llm_message_count:
+                response["conversation_history"] = self._replace_history_update(
+                    state, [*history, agent_response]
+                )
             response["ui_chat_log"] = self._append_optimizer_ui_logs(
                 response["ui_chat_log"], optimizer_ui_logs
             )
@@ -658,8 +703,13 @@ class ChatAgent:
             ui_chat_logs = self._append_optimizer_ui_logs(
                 [ui_chat_log], optimizer_ui_logs
             )
+            history_update: Dict[str, Any] | Overwrite = {self.name: [error_message]}
+            if history_modified or len(history) > pre_llm_message_count:
+                history_update = self._replace_history_update(
+                    state, [*history, error_message]
+                )
             return {
-                "conversation_history": {self.name: [error_message]},
+                "conversation_history": history_update,
                 "status": WorkflowStatusEnum.INPUT_REQUIRED,
                 "ui_chat_log": ui_chat_logs,
             }

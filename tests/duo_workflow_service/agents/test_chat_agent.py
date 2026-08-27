@@ -12,12 +12,15 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langgraph.channels.binop import BinaryOperatorAggregate
+from langgraph.types import Overwrite
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
+from duo_workflow_service.checkpointer.gitlab_workflow import _serialize_channel_blobs
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     build_compaction_tool_card,
@@ -35,6 +38,7 @@ from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
     UiChatLog,
+    _conversation_history_reducer,
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -404,9 +408,19 @@ class TestChatAgentToolCallMessageOrdering:
 
         result = await chat_agent.run(input_with_tool_call_issue)
 
-        conversation_history = result["conversation_history"]["Chat Agent"]
-
-        assert len(conversation_history) == 1
+        # The reorder is a rewrite, so it comes back as an Overwrite channel
+        # update; the input state stays untouched (gitlab-org/gitlab#623342).
+        history_update = result["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        reordered = history_update.value["Chat Agent"]
+        assert isinstance(reordered[2], ToolMessage)
+        assert isinstance(reordered[3], ToolMessage)
+        assert reordered[-1].content == "I understand your clarification."
+        assert input_with_tool_call_issue["conversation_history"]["Chat Agent"] == [
+            HumanMessage(content="Can you help me?"),
+            ai_message_with_tool_call,
+            human_followup,
+        ]
 
         chat_agent.prompt_adapter.get_response.assert_called_once_with(
             {
@@ -1162,13 +1176,19 @@ class TestAgentRetryWithPendingToolCalls:
 
         result = await chat_agent.run(state)
 
-        history = state["conversation_history"]["test_agent"]
-        assert len(history) == 4
+        # Synthetic ToolMessages come back inside an Overwrite channel update;
+        # the input state stays untouched (gitlab-org/gitlab#623342).
+        history_update = result["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        history = history_update.value["test_agent"]
+        assert len(history) == 5
         assert isinstance(history[2], ToolMessage)
         assert isinstance(history[3], ToolMessage)
         assert "interrupted" in history[2].content
         assert history[2].tool_call_id == "call_1"
         assert history[3].tool_call_id == "call_2"
+        assert history[4].id == "response-msg"
+        assert len(state["conversation_history"]["test_agent"]) == 2
 
         assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
 
@@ -1303,6 +1323,169 @@ class TestChatAgentOptimizerPipeline:
         pipeline.optimize.assert_awaited_once_with(original)
         called_state = chat_agent.prompt_adapter.get_response.call_args[0][0]
         assert called_state["conversation_history"]["Chat Agent"] == replaced
+
+    @pytest.mark.asyncio
+    async def test_rewritten_history_returned_as_overwrite_without_mutating_state(
+        self, system_template_override, mock_toolset
+    ):
+        """A history rewrite must come back as an Overwrite channel update.
+
+        Mutating the input state instead would alias the checkpointer's delta baseline and mask the rewrite from
+        persistence (gitlab-org/gitlab#623342).
+        """
+        original = [HumanMessage(content="old-1"), HumanMessage(content="old-2")]
+        replaced = [AIMessage(content="summary"), HumanMessage(content="old-2")]
+        result = OptimizationResult(messages=replaced, was_modified=True)
+        pipeline = _make_optimizer_pipeline_with_result(
+            result, optimized_history=replaced
+        )
+        response_msg = AIMessage(content="Assistant reply", id="assistant-id")
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline, response_msg=response_msg
+        )
+        other_agent_history = [AIMessage(content="other agent message")]
+        state = {
+            **self._input_state(),
+            "conversation_history": {
+                "Chat Agent": original,
+                "Other Agent": other_agent_history,
+            },
+        }
+        input_history_dict = state["conversation_history"]
+
+        response = await chat_agent.run(state)
+
+        history_update = response["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        assert history_update.value["Chat Agent"] == [*replaced, response_msg]
+        assert history_update.value["Other Agent"] == other_agent_history
+        assert input_history_dict["Chat Agent"] == original
+
+    @pytest.mark.asyncio
+    async def test_rewrite_reaches_checkpointer_as_compaction_delta(
+        self, system_template_override, mock_toolset
+    ):
+        """Regression for https://gitlab.com/gitlab-org/gitlab/-/issues/623342.
+
+        Drives the rewrite through the real conversation_history reducer channel and the checkpointer's delta
+        serializer, with the baseline aliased to the live channel value the way GitLabWorkflow.aput caches it. The old
+        in-place mutation made the rewrite invisible here (a plain append blob); the Overwrite update must yield a
+        compaction snapshot.
+        """
+        original = [HumanMessage(content=f"m{i}") for i in range(6)]
+        replaced = [AIMessage(content="summary"), HumanMessage(content="m5")]
+        result = OptimizationResult(messages=replaced, was_modified=True)
+        pipeline = _make_optimizer_pipeline_with_result(
+            result, optimized_history=replaced
+        )
+        response_msg = AIMessage(content="Assistant reply", id="assistant-id")
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline, response_msg=response_msg
+        )
+
+        channel = BinaryOperatorAggregate(dict, _conversation_history_reducer)
+        channel.update([{"Chat Agent": original}])
+        live_value = channel.get()
+        # GitLabWorkflow.aput caches its delta baseline as a shallow copy of
+        # channel_values, so the inner dict aliases the live channel value.
+        aliased_baseline = {"conversation_history": live_value}
+
+        state = {**self._input_state(), "conversation_history": live_value}
+        response = await chat_agent.run(state)
+        channel.update([response["conversation_history"]])
+
+        checkpoint = {"channel_values": {"conversation_history": channel.checkpoint()}}
+        blobs, is_compaction = _serialize_channel_blobs(
+            checkpoint, {"conversation_history": "2"}, aliased_baseline
+        )
+
+        assert is_compaction
+        assert blobs[0]["step_action"] == "compaction"
+
+    @pytest.mark.asyncio
+    async def test_retry_correction_trace_persists_as_overwrite(
+        self, system_template_override, mock_toolset
+    ):
+        """Malformed-tool-call retries extend the working history; the trace must persist so the stored history matches
+        what the model saw."""
+        malformed = AIMessage(
+            content="I'll call a tool",
+            tool_calls=[{"name": "read_file", "args": {"bad": True}, "id": "call_1"}],
+        )
+        corrected = AIMessage(content="Done without tools", id="corrected-id")
+        pipeline = _make_passthrough_pipeline()
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            side_effect=[malformed, corrected]
+        )
+        mock_toolset.validate_tool_call.side_effect = [
+            MalformedToolCallError("bad args", tool_call=malformed.tool_calls[0]),
+        ]
+        original = [HumanMessage(content="hi")]
+        state = {
+            **self._input_state(),
+            "conversation_history": {"Chat Agent": original},
+        }
+
+        response = await chat_agent.run(state)
+
+        history_update = response["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        persisted = history_update.value["Chat Agent"]
+        assert persisted[0] == original[0]
+        assert persisted[1] == malformed
+        assert isinstance(persisted[2], ToolMessage)
+        assert persisted[-1] == corrected
+        assert state["conversation_history"]["Chat Agent"] == original
+
+    @pytest.mark.asyncio
+    async def test_unmodified_history_returned_as_plain_append(
+        self, system_template_override, mock_toolset
+    ):
+        result = OptimizationResult(
+            messages=[HumanMessage(content="hi")], was_modified=False
+        )
+        pipeline = _make_optimizer_pipeline_with_result(result)
+        response_msg = AIMessage(content="Assistant reply", id="assistant-id")
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline, response_msg=response_msg
+        )
+
+        response = await chat_agent.run(self._input_state())
+
+        assert response["conversation_history"] == {"Chat Agent": [response_msg]}
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.agents.chat_agent.log_exception")
+    async def test_rewrite_survives_slash_command_validation_error(
+        self, _mock_log_exception, system_template_override, mock_toolset
+    ):
+        original = [HumanMessage(content="old")]
+        replaced = [AIMessage(content="summary")]
+        result = OptimizationResult(messages=replaced, was_modified=True)
+        pipeline = _make_optimizer_pipeline_with_result(
+            result, optimized_history=replaced
+        )
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            side_effect=SlashCommandValidationError("The command does not exist.")
+        )
+        state = {
+            **self._input_state(),
+            "conversation_history": {"Chat Agent": original},
+        }
+
+        response = await chat_agent.run(state)
+
+        history_update = response["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        assert history_update.value["Chat Agent"][:-1] == replaced
+        assert isinstance(history_update.value["Chat Agent"][-1], AIMessage)
+        assert state["conversation_history"]["Chat Agent"] == original
 
     @pytest.mark.asyncio
     async def test_auto_compaction_emits_tool_card_after_assistant_entry(
@@ -1529,14 +1712,13 @@ class TestChatAgentManualCompaction:
         input,
     ):
         """On success the /compact command is stripped, user_instruction is forwarded, the UI log carries the summary
-        tool card produced by the CompactionOptimizer, and conversation_history is replaced in place."""
+        tool card produced by the CompactionOptimizer, and conversation_history is returned as an Overwrite update."""
         prior_history = [
             HumanMessage(content="task"),
             AIMessage(content="working on it"),
         ]
-        state = self._state_with_history(
-            input, prior_history + [HumanMessage(content=last_user_message)]
-        )
+        full_history = prior_history + [HumanMessage(content=last_user_message)]
+        state = self._state_with_history(input, full_history)
         compactor_result = mock_manual_compactor.optimize_manual.return_value
 
         result = await chat_agent.run(state)
@@ -1550,8 +1732,13 @@ class TestChatAgentManualCompaction:
 
         assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
         assert result["ui_chat_log"] == list(compactor_result.ui_chat_logs)
-        # History is replaced in place with the compacted messages.
-        assert state["conversation_history"]["Chat Agent"] == compactor_result.messages
+        # The compacted history comes back as a channel Overwrite; the input
+        # state must stay untouched because it aliases the checkpointer's
+        # delta baseline (gitlab-org/gitlab#623342).
+        history_update = result["conversation_history"]
+        assert isinstance(history_update, Overwrite)
+        assert history_update.value["Chat Agent"] == compactor_result.messages
+        assert state["conversation_history"]["Chat Agent"] == full_history
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

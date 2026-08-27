@@ -8,6 +8,7 @@ from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
+from langgraph.types import Overwrite
 
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.prompts.config.base import PromptConfig
@@ -1287,13 +1288,21 @@ async def test_agent_run_with_cancel_tool_message(
     assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED
     assert "ui_chat_log" in result
 
+    # The cancellation ToolMessage comes back inside an Overwrite channel
+    # update; the input state stays untouched (gitlab-org/gitlab#623342).
+    history_update = result["conversation_history"]
+    assert isinstance(history_update, Overwrite)
     tool_messages = [
         msg
-        for msg in state["conversation_history"]["test_prompt"]
+        for msg in history_update.value["test_prompt"]
         if hasattr(msg, "tool_call_id")
     ]
     assert len(tool_messages) == 1
     assert expected_tool_message == tool_messages[0].content
+    assert state["conversation_history"]["test_prompt"] == [
+        HumanMessage(content="Create a file"),
+        ai_message_with_tools,
+    ]
 
 
 @pytest.mark.asyncio
