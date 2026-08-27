@@ -1,0 +1,9 @@
+{%- if cancelled_turn -%}
+<cancelled-turn>
+The user stopped the previous turn before it completed. The following exchange was discarded by the rollback and is provided for reference only:
+{% for entry in cancelled_turn if entry.content -%}
+{{ entry.message_type | upper }}: {{ entry.content }}
+{% endfor -%}
+</cancelled-turn>
+{% endif -%}
+{{ goal }}

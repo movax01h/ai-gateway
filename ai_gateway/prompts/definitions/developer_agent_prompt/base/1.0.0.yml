@@ -1,0 +1,10 @@
+---
+name: Developer Agent Prompt
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'developer_agent_prompt/system/1.0.0.jinja' %}
+  user: |
+    {% include 'developer_agent_prompt/user/1.0.0.jinja' %}
+params:
+  timeout: 120
