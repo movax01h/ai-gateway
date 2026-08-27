@@ -326,35 +326,8 @@ Both keys are passed to `LocalAuthProvider` (from `gitlab_cloud_connector`), whi
 
 ### JWK signing key rotation
 
-The `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` and `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` private keys should be rotated yearly.
+Both keys must be rotated yearly, together with the AI Gateway keys.
+
+The rotation procedure lives in one place for both services: [Rotate AI Gateway and Duo Workflow Service JWT keys](../docs/auth.md#rotate-ai-gateway-and-duo-workflow-service-jwt-keys). Follow it there rather than duplicating the steps here, because the two services are rotated in the same window and the AI Gateway half has an ordering requirement that affects GLGO.
+
 For a reminder issue template, see this [DWS key rotation issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2289).
-
-#### Keep already issued tokens valid during key rotation
-
-Once `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` is rotated, tokens signed with the old key would immediately stop being valid.
-To continue supporting already-issued tokens for up to their intended lifetime, set `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` to the value of the **old** signing key before deploying the new one.
-DWS will then accept tokens validated by either key during the transition period.
-
-#### Steps to rotate the key
-
-**Before performing any production-related changes, notify the AI Core Infra team in `#g_ai-core-infra`** so they can quickly react to any incident.
-
-Tokens should be rotated in the following vaults for both staging and production environments. Anyone with vault access to the `service/duo-workflow-svc` paths can perform these rotations, not just AI Core Infra team members. For additional help, contact the `#g_ai-core-infra` channel.
-
-| Staging | Production |
-|---------|------------|
-| [Duo Workflow Service](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/duo-workflow-svc/) | [Duo Workflow Service](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/duo-workflow-svc/) |
-
-Start by updating staging first and verifying it works as expected before proceeding to production. When updating production, make sure changes are made outside of public holidays and Fridays, and that there is sufficient team coverage to support in case of an incident.
-
-1. Update the `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` environment variable in the [staging Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/staging/service/duo-workflow-svc/) with the **current** value of `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY`.
-1. Generate a new signing key: `openssl genrsa -out jwt_signing.key 2048`
-1. Update `DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY` in the staging Vault with the newly generated key.
-1. Deploy a new revision of the DWS to staging (ask a Runway team member or an SRE, or anyone with permission to run Runway jobs in the [duo-workflow-svc deployments pipeline](https://gitlab.com/gitlab-com/gl-infra/platform/runway/deployments/duo-workflow-svc/-/pipelines)).
-1. Confirm DWS is working correctly on staging (for example, test Duo Agent Platform on <https://staging.gitlab.com> and verify via GCP logs).
-1. Repeat the same steps for production using the [production Vault](https://vault.gitlab.net/ui/vault/secrets-engines/runway/kv/list/env/production/service/duo-workflow-svc/). Ensure changes are made outside of public holidays and Fridays, and that there is sufficient team coverage.
-1. Create a Slack reminder in `#g_ai-core-infra` to be triggered 3 days after the signing key rotation, to rotate the validation key.
-1. Create a new issue as a reminder to rotate the keys again with a due date 1 month before the next rotation schedule.
-1. Create a Slack reminder in `#g_ai-core-infra` to be triggered 1 month before the next rotation schedule.
-1. After 3 days, generate a new validation key: `openssl genrsa -out jwt_validation.key 2048`
-1. Update `DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY` in the Vault with the newly generated key.
