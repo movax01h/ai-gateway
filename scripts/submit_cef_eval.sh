@@ -51,7 +51,7 @@ PAYLOAD=$(jq -n \
     },
     evaluate_config: {
       langsmith: {
-        "dataset": "swe.validation_stratified_b06f4db4_p30.all.next",
+        "dataset": "swe.swebench-verified.validation-stratified-b06f4db4-p30",
         "split": "base",
         "limit": 1
       },
