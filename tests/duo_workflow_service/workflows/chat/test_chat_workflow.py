@@ -2078,3 +2078,28 @@ async def test_get_graph_input_resume_without_approval_tracks_nothing(
     )
 
     internal_event_client.track_event.assert_not_called()
+
+
+class TestWebSearchTogglePropagation:
+    """The toggle is re-read on every turn, so a mid-conversation change takes effect."""
+
+    @pytest.mark.parametrize("toggle", [True, False])
+    def test_compile_passes_current_workflow_config_toggle_to_create_agent(
+        self,
+        workflow_with_project,
+        mock_tools_registry,
+        toggle,
+    ):
+        workflow = workflow_with_project
+        workflow._workflow_config = {"web_search_enabled": toggle}
+
+        with (
+            patch("duo_workflow_service.workflows.chat.workflow.StateGraph"),
+            patch(
+                "duo_workflow_service.workflows.chat.workflow.create_agent",
+                return_value=MagicMock(),
+            ) as mock_create_agent,
+        ):
+            workflow._compile("Test goal", mock_tools_registry, MagicMock())
+
+        assert mock_create_agent.call_args.kwargs["web_search_enabled"] is toggle

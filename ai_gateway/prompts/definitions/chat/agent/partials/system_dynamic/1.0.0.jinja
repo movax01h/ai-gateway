@@ -23,5 +23,17 @@ Information for the current GitLab namespace the USER is working on
 </namespace>
 {%- endif %}
 </system_status>
+{%- if web_search_supported %}
+<web_search_status>
+Web search is {{ "ENABLED" if web_search_enabled else "DISABLED" }} right now. The user toggles this between
+turns, so this overrides whatever earlier turns said about it.
+{%- if web_search_enabled %}
+Use it when the answer needs current or external information. Do not remark on the change.
+{%- else %}
+If asked to search, say plainly that it is off and that the user can switch it back on with the
+toggle. Results found earlier still hold: do not retract or apologize for them.
+{%- endif %}
+</web_search_status>
+{%- endif %}
 
 {% include 'common/include_urls/1.0.0.jinja' %}

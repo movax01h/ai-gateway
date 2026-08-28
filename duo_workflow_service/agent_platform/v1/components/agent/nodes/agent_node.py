@@ -278,13 +278,17 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
 
     @staticmethod
-    def _predefined_runtime_variables() -> dict[str, str]:
+    def _predefined_runtime_variables() -> dict[str, Any]:
         now = datetime.now()
 
         return {
             "current_date": now.strftime("%Y-%m-%d"),
             "current_time": now.strftime("%H:%M:%S"),
             "current_timezone": now.tzname() or "",
+            # Flow Registry components don't support the web-search toggle yet;
+            # only the classic chat agent resolves this via WebSearchState.
+            "web_search_supported": False,
+            "web_search_enabled": False,
         }
 
     def _check_and_increment_cycle_count(self, state: FlowState) -> tuple[int, dict]:
