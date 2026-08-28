@@ -50,6 +50,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 parentTs
                 metadata
                 compressedCheckpoint
+                currentThread @gl_introduced(version: "19.4.0")
             }
             archived
             stalled

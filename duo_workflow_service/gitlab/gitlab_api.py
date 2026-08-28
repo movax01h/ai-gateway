@@ -42,8 +42,8 @@ class Checkpoint(TypedDict, total=False):
     threadTs: str
     parentTs: str
     metadata: str
-    # Compaction group. Only GitLab 19.4+ selects it (see queries/versioned);
-    # _hydrate_incremental_state keeps its in-memory default when it is absent.
+    # Compaction group, tagged @gl_introduced(version: "19.4.0"); backends
+    # without it return null and _hydrate_incremental_state keeps its default.
     currentThread: int
 
 

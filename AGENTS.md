@@ -25,6 +25,8 @@ This repository contains two main services:
 
 Each layer only uses entities from the layer directly below it (enforced via CI static scanning).
 
+**GitLab GraphQL version compatibility** (Duo Workflow Service): Add new fields to the newest file in `duo_workflow_service/gitlab/queries/versioned/` with `@gl_introduced(version: "X.Y.0")` instead of creating a new versioned file. See `duo_workflow_service/gitlab/queries/README.md`.
+
 ### Key Dependencies
 
 - **FastAPI**: Web framework for API endpoints

@@ -62,14 +62,18 @@ class TestQueryVersionSelection:
         assert "duoWorkflowStatusCheck" in result
 
     def test_query_selection_gitlab_19_3_or_above(self):
-        """GitLab >= 19.3 has incrementalCheckpointsEnabled but not currentThread."""
+        """GitLab >= 19.3 selects currentThread tagged with its milestone.
+
+        A 19.3 backend strips the tagged field and returns null for it; a 19.4 backend resolves it when present, so a
+        resume restores the compaction group.
+        """
         result = fetch_query_for_version("19.3.0")
 
         assert "incrementalCheckpointsEnabled" in result
-        assert "currentThread" not in result
+        assert 'currentThread @gl_introduced(version: "19.4.0")' in result
 
     def test_query_selection_gitlab_19_4_or_above(self):
-        """GitLab >= 19.4 selects currentThread, so a resume restores the group."""
+        """GitLab >= 19.4 gets the same query; the backend resolves the tagged field."""
         result = fetch_query_for_version("19.4.0")
 
         assert "currentThread" in result
@@ -94,8 +98,13 @@ class TestQueryVersionSelection:
         assert "currentThread" in fetch_query_for_version(version)
 
     def test_pre_release_does_not_reach_forward(self):
-        """19.3.0-pre is still a 19.3 instance; it must not get 19.4 fields."""
-        assert "currentThread" not in fetch_query_for_version("19.3.0-pre")
+        """19.3.0-pre gets 19.4 fields only with the @gl_introduced tag.
+
+        The 19.3 backend strips the tagged field, so the query stays valid there and the field resolves to null.
+        """
+        result = fetch_query_for_version("19.3.0-pre")
+
+        assert 'currentThread @gl_introduced(version: "19.4.0")' in result
 
     def test_query_selection_unknown_version_returns_fallback(self):
         """Unknown/unparsable version returns the fallback (oldest) query."""
