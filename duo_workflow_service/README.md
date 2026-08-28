@@ -337,3 +337,15 @@ Both keys must be rotated yearly, together with the AI Gateway keys.
 The rotation procedure lives in one place for both services: [Rotate AI Gateway and Duo Workflow Service JWT keys](../docs/auth.md#rotate-ai-gateway-and-duo-workflow-service-jwt-keys). Follow it there rather than duplicating the steps here, because the two services are rotated in the same window and the AI Gateway half has an ordering requirement that affects GLGO.
 
 For a reminder issue template, see this [DWS key rotation issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2289).
+
+## GitLab GraphQL queries
+
+`gitlab/queries/versioned/` holds the GraphQL queries DWS sends to GitLab, one file per
+GitLab milestone that needs a query change.
+
+To add a field, add it to the newest existing file and tag it with
+`@gl_introduced(version: "X.Y.0")` instead of creating a new versioned file.
+
+See [`gitlab/queries/README.md`](gitlab/queries/README.md) for the full rules, including when a
+new versioned file is still needed and how to handle `null` values for fields older backends
+strip out.
