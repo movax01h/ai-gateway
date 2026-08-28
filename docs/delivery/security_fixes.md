@@ -112,6 +112,35 @@ Once an eligible confidential security issue is assigned to an engineer:
    (e.g. `main`, `stable-18-4-ee`) are diverged between canonical and security
    repos — the following steps bring them back in sync.
 
+1. **Activate the merge-train keep-alive schedule.**
+   Merging the security fix in the previous step diverges `main` (and any
+   affected stable branches) between the canonical repository and the security
+   fork. The push mirror then rejects new canonical commits until the
+   **Sync security fork → canonical** step below brings the two back together.
+
+   As described in [#2370](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2370),
+   this can silently prevent Runway deployments from the security fork for
+   several days.
+
+   In the security fork, go to **Build > Pipeline schedules** and activate the
+   merge-train schedule. The schedule sets `MERGE_TRAIN` to `true`, which runs
+   the `merge-train-trigger` job in `.gitlab-ci.yml`. That job triggers
+   [`gitlab-org/merge-train`](https://gitlab.com/gitlab-org/merge-train), which
+   copies new canonical commits into `security/main` on every run.
+
+   Deactivate the schedule again in the **Sync security fork → canonical** step,
+   once the sync back to canonical completes. Leaving it active only wastes
+   pipeline minutes; it does not create a disclosure risk, because commits flow
+   from canonical into the security fork, never the other way.
+
+   > The schedule and its `MERGE_TRAIN` variable are both created by hand on the
+   > security fork, and activating and deactivating it is manual too. The
+   > upstream `release-platform` component can automate that, but only off a
+   > `vX.Y.Z` tag, and our patch tags are `self-hosted-vX.Y.Z-ee`. The
+   > security-to-canonical sync stays manual for the same reason. See
+   > [#2370](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2370)
+   > for background.
+
 1. **Cut the private patch tags in the fork.**
    Once every backport MR for this release is merged, open the latest pipeline
    of each stable branch in the security fork and run the manual
@@ -180,6 +209,11 @@ Once an eligible confidential security issue is assigned to an engineer:
    reports a divergence on the tag, delete the tag in the security fork; the
    mirror recreates it from canonical.
 
+   Once `canonical:main` contains `security:main` again, deactivate the
+   merge-train keep-alive schedule in **Build > Pipeline schedules** on the
+   security fork. The embargo window is over, and the ordinary push mirror
+   can take back over.
+
 1. **Verify the release artifacts.**
    After the sync MRs are merged and the canonical tag pipelines complete,
    confirm the patched images are available. See
@@ -205,11 +239,11 @@ git push origin <branch_name>
     Instead, cherry-pick only the real fix commits onto canonical, then force-push canonical over the security
     mirror as a last-resort reset. See [this issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2153) for an example.
     Related information can be found at [How to sync Security repository with Canonical repository](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/how_to_sync_security_with_canonical.md).
-  - You could encounter a merge conflict at step 7 (the canonical sync) if other developers changed the same code.
+  - You could encounter a merge conflict at the **Sync security fork → canonical** step if other developers changed the same code.
     You need to manually fix the merge conflict and ask a maintainer to merge it.
   - Other developers may notice their change is not deployed to production because of a mirroring failure due to a merge conflict.
-    This can happen if they changed the same code while you were working on steps 3–6.
-    To resolve this, finish step 7 and ask them to rebase their feature branches.
+    This can happen if they changed the same code while you were working on the steps from **Merge all security-fork MRs** through **Publish the patched images**.
+    To resolve this, finish the **Sync security fork → canonical** step and ask them to rebase their feature branches.
 
 ## References
 

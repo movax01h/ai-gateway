@@ -127,6 +127,16 @@ When you need to backport a fix to a specific AI Gateway release version:
 
 1. **Notify stakeholders**: Inform customers or stakeholders that they can update their installation with the new image version.
 
+#### Keeping the security fork in sync
+
+While a security fix is under embargo on the security fork, its branches diverge from the canonical repository. The push mirror then rejects updates, so new canonical commits stop reaching the fork, which can leave the fork's GitLab-managed deployments stuck until the fix is synced back.
+
+To keep deployments moving, a pipeline schedule on the security fork sets `MERGE_TRAIN=true`, which runs the `merge-train-trigger` job in `.gitlab-ci.yml`. That job triggers [`gitlab-org/merge-train`](https://gitlab.com/gitlab-org/merge-train) to copy new canonical commits into the fork. The job only ever runs on the security fork, and only from a schedule.
+
+Sync only ever flows from canonical into the security fork. Pushing tagged security releases back to canonical stays manual by design; see the [discussion in #2370](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2370#note_3433871034) for details.
+
+For when to activate and deactivate the schedule, see [`security_fixes.md`](./security_fixes.md#process).
+
 ## Semantic releases in AI Gateway
 
 Aside from the custom release process for self-hosted solutions, we also create [releases](https://docs.gitlab.com/user/project/releases/) via
