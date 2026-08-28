@@ -202,6 +202,13 @@ Internal event definitions validation:
   rules:
     - if: $CI_SERVER_HOST == "gitlab.com"
 
+# Cache taint-signature analysis results between pipeline runs so unchanged
+# files are not re-analyzed on every scan.
+# https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#incremental-scanning
+gitlab-advanced-sast:
+  variables:
+    GITLAB_ADV_SAST_INCR_SCAN: "true"
+
 .poetry:
   cache:
     key:
