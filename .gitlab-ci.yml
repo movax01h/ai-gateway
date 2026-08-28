@@ -250,3 +250,26 @@ pages:
     - <<: *if-commit-message-pipeline-expedited
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Replays canonical commits into the security fork while a security fix is embargoed,
+# so canonical's push mirror does not start failing once the two branches diverge.
+# Triggered by a MERGE_TRAIN=true pipeline schedule on the fork; the runbook is in
+# docs/delivery/security_fixes.md.
+merge-train-trigger:
+  stage: .post
+  resource_group: merge-train-$CI_PROJECT_PATH
+  rules:
+    - <<: *if-not-security-project
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $MERGE_TRAIN == "true"
+  trigger:
+    project: gitlab-org/merge-train
+    branch: master
+    strategy: depend
+  variables:
+    # Selects merge-train's gitlab.com HTTPS job over its ops.gitlab.net SSH one.
+    MERGE_RELEASE_PLATFORM: "1"
+    SOURCE_PROJECT: gitlab-org/modelops/applied-ml/code-suggestions/ai-assist
+    SOURCE_BRANCH: main
+    TARGET_PROJECT: $CI_PROJECT_PATH
+    TARGET_BRANCH: $CI_DEFAULT_BRANCH
