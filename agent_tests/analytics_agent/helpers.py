@@ -3,10 +3,20 @@
 Provides GLQL mock data and response builders for analytics agent tests.
 """
 
-from typing import Any
+import json
+import re
+from typing import Any, Callable
 from unittest.mock import AsyncMock
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+
+# Real production error from the GLQL compiler when a Pipeline query uses a
+# group filter (POST api/v4/glql returns it with HTTP 400). Captured verbatim
+# from a live GDK instance's compiler on 2026-08-25.
+PIPELINES_GROUP_SCOPE_ERROR = (
+    "Error: `group` is not a recognized field for pipelines. "
+    "Valid fields: status, ref, sha, source, scope, updated, author."
+)
 
 
 def glql_response(
@@ -127,6 +137,86 @@ def mock_glql_response(
         mock_gitlab_client.apost.return_value = GitLabHttpResponse(
             status_code=200, body=response
         )
+
+
+def _query_line(glql_yaml: str) -> str:
+    """The `query:` line of a GLQL block, or the whole string when there is none.
+
+    The GLQL endpoint also accepts a bare query expression with no YAML keys
+    (Analytics::Glql::ParserService treats non-hash input as the query), so the
+    fallback keeps filter checks working for that shape. When a `query:` key is
+    present, only that line is scanned so titles or field lists cannot
+    false-positive.
+    """
+    match = re.search(r"^\s*query:(.*)$", glql_yaml, re.MULTILINE)
+    return match.group(1) if match else glql_yaml
+
+
+def has_group_filter(glql_yaml: str) -> bool:
+    """Whether the GLQL query line filters on group (via =, != or in)."""
+    return bool(re.search(r"\bgroup\s*(!?=|in\b)", _query_line(glql_yaml)))
+
+
+def has_project_filter(glql_yaml: str) -> bool:
+    """Whether the GLQL query line filters on project (via =, != or in)."""
+    return bool(re.search(r"\bproject\s*(!?=|in\b)", _query_line(glql_yaml)))
+
+
+def is_project_scoped(queries: list[str]) -> bool:
+    """Whether at least one query filters on project and none filters on group."""
+    return (
+        bool(queries)
+        and any(has_project_filter(q) for q in queries)
+        and not any(has_group_filter(q) for q in queries)
+    )
+
+
+def glql_http_error(message: str, status_code: int = 400) -> GitLabHttpResponse:
+    """Build the HTTP error response the GLQL endpoint returns for compile failures.
+
+    The real api/v4/glql endpoint answers a rejected query with a non-2xx status and body ``{"error": message}``.
+
+    Args:
+        message: The compiler error message
+        status_code: HTTP status code (defaults to 400)
+
+    Returns:
+        GitLabHttpResponse carrying the error body
+    """
+    return GitLabHttpResponse(status_code=status_code, body={"error": message})
+
+
+def mock_glql_responder(
+    mock_gitlab_client: AsyncMock,
+    fn: Callable[[str], GitLabHttpResponse],
+) -> None:
+    """Configure the mock GitLab client to answer each GLQL call via `fn`.
+
+    `fn` receives the posted glql_yaml string and returns a GitLabHttpResponse,
+    so a test can make the response depend on the query. Example: return the
+    400 group-scope error when the query uses a group filter, success
+    otherwise:
+
+        def respond(glql_yaml: str) -> GitLabHttpResponse:
+            if has_group_filter(glql_yaml):
+                return glql_http_error(PIPELINES_GROUP_SCOPE_ERROR)
+            return GitLabHttpResponse(
+                status_code=200, body=glql_response(SAMPLE_PIPELINES)
+            )
+
+        mock_glql_responder(mock_gitlab_client, respond)
+
+    Args:
+        mock_gitlab_client: The mocked GitLab client
+        fn: Callable mapping the posted glql_yaml string to a response
+    """
+
+    async def apost(path: str, body: str, **_kwargs: Any) -> GitLabHttpResponse:
+        del path  # unused - the mock answers every GLQL POST
+        request = json.loads(body)
+        return fn(request["glql_yaml"])
+
+    mock_gitlab_client.apost = AsyncMock(side_effect=apost)
 
 
 IDE_ADDITIONAL_CONTEXT = (

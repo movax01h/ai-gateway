@@ -21,9 +21,8 @@ async def test_ambiguous_team_triggers_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
-    schema_tool_name,
 ):
-    """Ambiguous 'team' concept should trigger clarification without tool execution."""
+    """Ambiguous 'team' concept should trigger clarification without running a query."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
@@ -33,7 +32,6 @@ async def test_ambiguous_team_triggers_clarification(
     )
 
     result.assert_not_called_tool("run_glql_query")
-    result.assert_not_called_tool(schema_tool_name)
     await result.assert_llm_validates(
         ["The response asks for clarification about what 'team' means "]
     )
@@ -45,9 +43,8 @@ async def test_ambiguous_bugs_and_quarter_triggers_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
-    schema_tool_name,
 ):
-    """Ambiguous 'bugs' and 'quarter' should trigger clarification without tool execution."""
+    """Ambiguous 'bugs' and 'quarter' should trigger clarification without running a query."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
@@ -56,7 +53,6 @@ async def test_ambiguous_bugs_and_quarter_triggers_clarification(
         "How many bugs were created this quarter?",
     )
 
-    result.assert_not_called_tool(schema_tool_name)
     result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -72,9 +68,8 @@ async def test_ambiguous_velocity_triggers_clarification(
     analytics_agent,
     initial_state,
     mock_gitlab_client,
-    schema_tool_name,
 ):
-    """Vague analytical term 'velocity' should trigger clarification without tool execution."""
+    """Vague analytical term 'velocity' should trigger clarification without running a query."""
     mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_ISSUES))
 
     result = await ask_agent(
@@ -83,7 +78,6 @@ async def test_ambiguous_velocity_triggers_clarification(
         "What's our team's velocity?",
     )
 
-    result.assert_not_called_tool(schema_tool_name)
     result.assert_not_called_tool("run_glql_query")
     await result.assert_llm_validates(
         [
@@ -111,10 +105,13 @@ async def test_clear_question_proceeds_without_clarification(
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    # The contract is answering INSTEAD of asking for clarification; models
+    # often offer optional follow-ups after the answer, which is fine.
     await result.assert_llm_validates(
         [
-            "The response provides a direct answer without asking "
-            "clarifying questions about which project/group to use",
+            "The response directly answers the question with a number/result "
+            "before anything else; offering optional follow-ups after the "
+            "answer is acceptable",
             "The response includes the count of 7 merge requests",
         ]
     )

@@ -4,6 +4,8 @@ Validates that the agent generates correct GLQL queries for Pipeline analytics, 
 metrics, filters, and result interpretation.
 """
 
+import re
+
 import pytest
 
 from agent_tests.helpers import ask_agent
@@ -13,8 +15,28 @@ from .helpers import (
     SAMPLE_PIPELINE_ANALYTICS_BY_STATUS,
     SAMPLE_PIPELINE_ANALYTICS_WEEKLY,
     glql_analytics_response,
+    has_group_filter,
     mock_glql_response,
 )
+
+
+def _is_group_scoped_trend_query(glql_yaml: str) -> bool:
+    """Whether a single query is an analytics-mode Pipeline trend query at group scope.
+
+    Checks the facts the test proves without pinning the time granularity: analytics mode, Pipeline
+    type, group filter, a finished/started time dimension, a relative time filter, and the
+    successRate metric.
+    """
+    return bool(
+        re.search(r"^\s*mode:\s*analytics\b", glql_yaml, re.MULTILINE)
+        and re.search(r"\btype\s*=\s*Pipeline\b", glql_yaml)
+        and has_group_filter(glql_yaml)
+        and re.search(
+            r"^\s*dimensions:.*\b(finished|started)\b", glql_yaml, re.MULTILINE
+        )
+        and re.search(r"\b(finished|started)\s*(>=?|<=?)\s*-\d+[dwmy]\b", glql_yaml)
+        and re.search(r"^\s*metrics:.*\bsuccessRate\b", glql_yaml, re.MULTILINE)
+    )
 
 
 @pytest.mark.flow_versions("1.0.0")
@@ -106,14 +128,17 @@ async def test_pipeline_trends_over_time_group_scope(
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+
+    # The query facts are checked deterministically; granularity (daily vs
+    # weekly bucketing) is the agent's choice and is deliberately not pinned.
+    queries = result.get_tool_call_args("run_glql_query", "glql_yaml")
+    assert any(_is_group_scoped_trend_query(q) for q in queries), (
+        "Expected an analytics-mode Pipeline query at group scope with a "
+        "finished/started time dimension, a relative time filter, and the "
+        f"successRate metric. Queries: {queries}"
+    )
     await result.assert_llm_validates(
         [
-            "The GLQL query uses mode: analytics",
-            "The GLQL query includes type = Pipeline",
-            'The GLQL query includes group = "gitlab-org" (not project)',
-            "The GLQL query uses finished (or started) as a dimension",
-            "The GLQL query filters by finished or started using a relative time expression",
-            "The GLQL query includes successRate as a metric",
-            "The response references the weekly trend across the three data points",
+            "The response describes the pipeline success rate trend over time",
         ]
     )

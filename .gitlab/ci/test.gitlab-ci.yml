@@ -92,6 +92,7 @@ tests:agents:analytics:
       changes:
         - duo_workflow_service/agent_platform/v1/flows/configs/analytics_agent/**/*
         - agent_tests/analytics_agent/**/*
+        - agent_tests/*.py
       when: on_success
     - when: manual
   parallel:

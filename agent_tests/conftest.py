@@ -14,6 +14,7 @@ Requires ANTHROPIC_API_KEY environment variable.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Type
 from unittest.mock import MagicMock
 
@@ -24,6 +25,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
+    from ai_gateway.model_selection.models import ChatAnthropicParams
     from duo_workflow_service.entities.state import ChatWorkflowState
 
 
@@ -112,13 +114,45 @@ def validation_model(request):
     return request.config.getoption("--validation-model")
 
 
+@lru_cache(maxsize=None)
+def _production_params(model_name: str) -> ChatAnthropicParams:
+    """Params from the direct-Anthropic models.yml entry matching this API model name.
+
+    Raises:
+        ValueError: if no anthropic-provider entry in models.yml matches model_name.
+    """
+    from ai_gateway.model_selection import ModelSelectionConfig
+    from ai_gateway.model_selection.models import ModelClassProvider
+
+    definitions = ModelSelectionConfig(default_models_override={}).get_llm_definitions()
+    for definition in definitions.values():
+        if (
+            definition.model_class_provider == ModelClassProvider.ANTHROPIC
+            and definition.params.model == model_name
+        ):
+            return definition.params
+    raise ValueError(
+        f"No model_class_provider=anthropic entry in ai_gateway/model_selection/"
+        f"models.yml has params.model == {model_name!r}. Agent tests only run "
+        f"against production-configured models."
+    )
+
+
 @pytest.fixture
 def real_llm(execution_model):
-    """Real Anthropic model for testing, configured via --execution-model."""
-    return ChatAnthropic(  # type: ignore[call-arg]
-        model=execution_model,
-        max_tokens=4096,
-    )
+    """Real Anthropic model configured via --execution-model.
+
+    Temperature is read from the direct-Anthropic row (model_class_provider: anthropic) in
+    ai_gateway/model_selection/models.yml for the model name, because agent tests call the Anthropic API directly.
+    Production resolves model_tags to the vertex/litellm row, which shares the same temperature today. Only
+    temperature is applied from the row; other params (top_p, top_k, extra_headers) are not, and max_tokens=4096 is a
+    deliberate test cost cap versus production's higher limit.
+    """
+    kwargs: dict[str, Any] = {"model": execution_model, "max_tokens": 4096}
+    params = _production_params(execution_model)
+    if params.temperature is not None:
+        kwargs["temperature"] = params.temperature
+    return ChatAnthropic(**kwargs)  # type: ignore[call-arg]
 
 
 @pytest.fixture
