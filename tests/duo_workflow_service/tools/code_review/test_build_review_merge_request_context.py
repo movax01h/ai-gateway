@@ -4,8 +4,13 @@ from unittest.mock import AsyncMock, _Call, patch
 
 import pytest
 from langchain_core.tools import ToolException
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
+from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
+    validate_against_schema,
+)
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.security.prompt_security import PromptSecurity
 from duo_workflow_service.tools.code_review.build_review_merge_request_context import (
     BuildReviewMergeRequestContext,
     BuildReviewMergeRequestContextInput,
@@ -1001,3 +1006,522 @@ async def test_group_level_custom_instructions_failure_is_not_fatal(
 
     assert '<file_diff filename="calculator.rb">' in response
     assert "Tool runtime exception" not in response
+
+
+# --- Incremental diff annotation -------------------------------------------------
+#
+# The merge request diff and the compare against the baseline are both taken against
+# the current head, so the two are matched on (path, new_line).
+#
+# The invariant these tests protect: only the "delta" state may narrow the model's
+# focus. Every other state must leave every line unmarked. Reporting "delta" over an
+# empty or incomplete marker set would quietly cut review coverage in production
+# without failing anything a human would notice.
+
+BASELINE_SHA = "aaaa1111"
+HEAD_SHA = "bbbb2222"
+
+# calculator.rb in the diffs_data fixture adds "    a + b" at new_line 7.
+CALCULATOR_COMPARE_DIFF = {
+    "old_path": "calculator.rb",
+    "new_path": "calculator.rb",
+    "diff": "@@ -4,7 +4,7 @@ class Calculator\n   end\n \n   def subtract(a, b)\n-    # TODO: Implement\n+    a + b\n   end\n end",
+}
+
+
+@pytest.fixture(name="mr_data_with_refs")
+def mr_data_with_refs_fixture(mr_data):
+    return {**mr_data, "diff_refs": {"head_sha": HEAD_SHA}, "source_project_id": 1}
+
+
+@pytest.fixture(name="two_file_diffs")
+def two_file_diffs_fixture():
+    """Two reviewable files that both add a line at new_line 7.
+
+    The shared line number is what exposes matching on new_line alone.
+    """
+    hunk = "@@ -4,7 +4,7 @@\n   end\n \n   def thing(a, b)\n-    # TODO\n+    a + b\n   end\n end"
+    return [
+        {"old_path": path, "new_path": path, "generated_file": False, "diff": hunk}
+        for path in ("alpha.rb", "beta.rb")
+    ]
+
+
+@pytest.fixture(name="two_hunk_diffs")
+def two_hunk_diffs_fixture():
+    """One file adding a line in each of two hunks, at new_line 7 and new_line 82."""
+    return [
+        {
+            "old_path": "calculator.rb",
+            "new_path": "calculator.rb",
+            "generated_file": False,
+            "diff": (
+                "@@ -4,7 +4,7 @@ class Calculator\n   end\n \n   def subtract(a, b)\n-    # TODO: Implement\n+    a + b\n   end\n end\n"
+                "@@ -80,3 +80,4 @@ class Calculator\n   def divide(a, b)\n     a / b\n+    raise if b.zero?\n   end"
+            ),
+        }
+    ]
+
+
+def _aget_responses(mr_data, diffs_data, *extra):
+    """Build the aget side effects in the order _build_context issues them.
+
+    The order is load-bearing: merge request metadata, then diffs, then custom
+    instructions, then the compare (only when a baseline is supplied), then the
+    original file contents. If the compare ever moves earlier, these tests hand it
+    the custom-instructions exception and report "failed" for the wrong reason.
+    """
+    return [
+        GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+        GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+        Exception("Custom instructions not found"),
+        *extra,
+    ]
+
+
+def _file_content():
+    return GitLabHttpResponse(
+        status_code=200,
+        body=json.dumps(
+            {"content": base64.b64encode(b"class Calculator\nend").decode()}
+        ),
+    )
+
+
+def _compare_calls(gitlab_client_mock):
+    return [
+        str(call)
+        for call in gitlab_client_mock.aget.call_args_list
+        if "repository/compare" in str(call)
+    ]
+
+
+def _marker_count(response):
+    """Count marked diff lines, not the review_scope prose naming the attribute."""
+    return response.count('since_last_review="true">')
+
+
+NO_COMPARE = object()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        # Five other flows call this tool and none of their prompts describe the
+        # block, so without a baseline it must be absent, not present and inert.
+        {},
+        # Lightweight mode returns file paths only, so there is nothing to mark.
+        {"lightweight": True, "baseline_sha": BASELINE_SHA},
+    ],
+)
+async def test_review_scope_omits_the_block_entirely(
+    gitlab_client_mock, metadata, mr_data_with_refs, diffs_data, kwargs
+):
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(mr_data_with_refs, diffs_data, _file_content())
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id=1, merge_request_iid=123, **kwargs)
+
+    assert "review_scope" not in response
+    assert _marker_count(response) == 0
+    assert _compare_calls(gitlab_client_mock) == []
+
+
+@pytest.mark.asyncio
+async def test_review_scope_marks_only_the_hunk_that_changed(
+    gitlab_client_mock, metadata, mr_data_with_refs, two_hunk_diffs
+):
+    # The canonical second-review shape: an older hunk the model already saw, and a
+    # newer one it has not. Only the newer hunk may be marked.
+    compare = {
+        "diffs": [
+            {
+                "new_path": "calculator.rb",
+                "diff": "@@ -80,3 +80,4 @@ class Calculator\n   def divide(a, b)\n     a / b\n+    raise if b.zero?\n   end",
+            }
+        ]
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            two_hunk_diffs,
+            GitLabHttpResponse(status_code=200, body=json.dumps(compare)),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    assert '<review_scope state="delta">' in response
+    assert _marker_count(response) == 1
+    assert (
+        '<line type="added" old_line="" new_line="82" since_last_review="true">    raise if b.zero?</line>'
+        in response
+    )
+    assert '<line type="added" old_line="" new_line="7">    a + b</line>' in response
+    # One compare for the whole merge request, not one per changed file.
+    assert len(_compare_calls(gitlab_client_mock)) == 1
+
+
+@pytest.mark.asyncio
+async def test_review_scope_matches_on_file_path_as_well_as_line(
+    gitlab_client_mock, metadata, mr_data_with_refs, two_file_diffs
+):
+    # Both files add a line at new_line 7. Only alpha.rb is in the compare, so
+    # matching on the line number alone would wrongly mark beta.rb too.
+    compare = {"diffs": [{"new_path": "alpha.rb", "diff": two_file_diffs[0]["diff"]}]}
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            two_file_diffs,
+            GitLabHttpResponse(status_code=200, body=json.dumps(compare)),
+            _file_content(),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    assert _marker_count(response) == 1
+    alpha = response.split('<file_diff filename="alpha.rb">')[1].split("</file_diff>")[
+        0
+    ]
+    beta = response.split('<file_diff filename="beta.rb">')[1].split("</file_diff>")[0]
+    assert 'new_line="7" since_last_review="true"' in alpha
+    assert "since_last_review" not in beta
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "has_head_sha,baseline,compare,expected",
+    [
+        # Nothing to compare against.
+        (False, BASELINE_SHA, NO_COMPARE, "failed"),
+        # The head has not moved since the last review.
+        (True, HEAD_SHA, NO_COMPARE, "no_new_lines"),
+        # A force push orphans the baseline commit and the compare 404s.
+        (
+            True,
+            BASELINE_SHA,
+            GitLabHttpResponse(
+                status_code=404, body='{"message":"404 Commit Not Found"}'
+            ),
+            "failed",
+        ),
+        # The client raises rather than returning a response.
+        (True, BASELINE_SHA, RuntimeError("connection reset"), "failed"),
+        # A timed-out compare returns only part of what changed.
+        (
+            True,
+            BASELINE_SHA,
+            {"diffs": [CALCULATOR_COMPARE_DIFF], "compare_timeout": True},
+            "truncated",
+        ),
+        # A patch dropped for exceeding the size limit.
+        (
+            True,
+            BASELINE_SHA,
+            {
+                "diffs": [
+                    CALCULATOR_COMPARE_DIFF,
+                    {"old_path": "huge.rb", "new_path": "huge.rb", "diff": ""},
+                ]
+            },
+            "truncated",
+        ),
+        # A merge from the target branch, plus files this review filters out.
+        # Neither is reviewable here, so this must not be reported as a delta.
+        (
+            True,
+            BASELINE_SHA,
+            {
+                "diffs": [
+                    {
+                        "new_path": "unrelated/other.rb",
+                        "diff": "@@ -1,1 +1,2 @@\n ctx\n+brand new",
+                    },
+                    {"new_path": "app.log", "diff": "@@ -1,1 +1,2 @@\n ctx\n+log line"},
+                ]
+            },
+            "no_new_lines",
+        ),
+    ],
+)
+async def test_review_scope_falls_back_to_a_full_review(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    mr_data_with_refs,
+    diffs_data,
+    has_head_sha,
+    baseline,
+    compare,
+    expected,
+):
+    # Only "delta" may narrow the model's focus. Every other state has to leave the
+    # whole diff unmarked, so an absent marker is never read as "already reviewed".
+    extra = []
+    if compare is not NO_COMPARE:
+        extra.append(
+            compare
+            if isinstance(compare, (GitLabHttpResponse, Exception))
+            else GitLabHttpResponse(status_code=200, body=json.dumps(compare))
+        )
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs if has_head_sha else mr_data,
+            diffs_data,
+            *extra,
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=baseline
+    )
+
+    assert f'<review_scope state="{expected}">' in response
+    assert _marker_count(response) == 0
+    # The review still runs over the full diff rather than failing the step.
+    assert '<file_diff filename="calculator.rb">' in response
+    if compare is NO_COMPARE:
+        assert _compare_calls(gitlab_client_mock) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source_project_id,expected_project",
+    [
+        # For a fork, both commits live in the source project.
+        (99, 99),
+        # Older API responses omit source_project_id. Sending the compare to
+        # /projects/None/ would 404 and silently disable the feature on every review.
+        (None, 7),
+    ],
+)
+async def test_review_scope_compares_in_the_project_holding_both_commits(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    source_project_id,
+    expected_project,
+):
+    data = {**mr_data, "diff_refs": {"head_sha": HEAD_SHA}}
+    if source_project_id:
+        data["source_project_id"] = source_project_id
+
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            data,
+            diffs_data,
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
+            ),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    await tool._arun(project_id=7, merge_request_iid=123, baseline_sha=BASELINE_SHA)
+
+    calls = _compare_calls(gitlab_client_mock)
+    assert len(calls) == 1
+    assert f"/projects/{expected_project}/repository/compare" in calls[0]
+    assert f"from={BASELINE_SHA}" in calls[0]
+    assert f"to={HEAD_SHA}" in calls[0]
+    # straight=true keeps the compare to the two commits. The merge base default
+    # would, after a rebase, return the whole merge request and mark every line.
+    assert "straight=true" in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_review_scope_block_survives_tool_response_security(
+    gitlab_client_mock, metadata, mr_data_with_refs, diffs_data
+):
+    # This tool's responses run through PromptSecurity, whose encode_dangerous_tags
+    # rewrites any tag named in DANGEROUS_TAGS. It only matches a tag with no
+    # attributes, so adding review_scope there mangles the closing tag alone and the
+    # block spills into the rest of the input. Nothing else covers that path.
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            diffs_data,
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
+            ),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    secured = PromptSecurity.apply_security_to_tool_response(
+        response, "build_review_merge_request_context"
+    )
+
+    assert '<review_scope state="delta">' in secured
+    assert "</review_scope>" in secured
+    assert "&lt;/review_scope&gt;" not in secured
+    assert _marker_count(secured) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bogus",
+    ["HEAD~1", "the previous review", "main", "aaa", "zzzz1111", ""],
+)
+async def test_review_scope_ignores_a_baseline_that_is_not_a_sha(
+    gitlab_client_mock, metadata, mr_data_with_refs, diffs_data, bogus
+):
+    # security_review and fix_pipeline expose this tool in an agent toolset, so the
+    # baseline can come from a model. A value that is not a commit SHA must be dropped
+    # before it costs a compare and renders a block into a prompt that never
+    # describes one, rather than 404ing its way to state="failed".
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(mr_data_with_refs, diffs_data, _file_content())
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(project_id=1, merge_request_iid=123, baseline_sha=bogus)
+
+    assert "review_scope" not in response
+    assert _marker_count(response) == 0
+    assert _compare_calls(gitlab_client_mock) == []
+
+
+@pytest.mark.asyncio
+async def test_review_scope_marks_a_line_after_added_content_starting_with_plus_plus(
+    gitlab_client_mock, metadata, mr_data_with_refs
+):
+    # An added line whose own text starts with "++" reaches the walker as "+++...".
+    # Skipping it as file metadata drops the line and leaves every later counter in
+    # the hunk one short. The two diffs then disagree about new_line, the
+    # intersection empties, and a genuinely new line goes unmarked while the model is
+    # told to comment on marked lines only.
+    mr_diffs = [
+        {
+            "old_path": "bump.c",
+            "new_path": "bump.c",
+            "generated_file": False,
+            "diff": "@@ -1,2 +1,4 @@\n int main(void) {\n+++counter;\n+  doSomething();\n }",
+        }
+    ]
+    # The compare covers the newer commit only, so its hunk starts past the "++" line
+    # and carries it as context. Its counters were never skewed.
+    compare = {
+        "diffs": [
+            {
+                "new_path": "bump.c",
+                "diff": "@@ -2,1 +2,2 @@\n ++counter;\n+  doSomething();\n",
+            }
+        ]
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            mr_diffs,
+            GitLabHttpResponse(status_code=200, body=json.dumps(compare)),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    assert '<review_scope state="delta">' in response
+    assert _marker_count(response) == 1
+    assert (
+        '<line type="added" old_line="" new_line="3" since_last_review="true">  doSomething();</line>'
+        in response
+    )
+    # The "++" line is an added line at new_line 2, not metadata. Its number is what
+    # a comment on it would anchor to.
+    assert '<line type="added" old_line="" new_line="2">++counter;</line>' in response
+
+
+def test_baseline_sha_is_hidden_from_the_model_but_open_to_the_flow(metadata):
+    # security_review and fix_pipeline expose this tool in an agent toolset. The
+    # baseline is meaningless to both, so the schema they show the model must be the
+    # one they had before the field existed, while the code_review flow config can
+    # still set it through inputs.
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    model_facing = convert_to_openai_tool(tool)["function"]["parameters"]["properties"]
+    assert "baseline_sha" not in model_facing
+    # The rest of the schema is untouched, so this is not hiding the wrong field.
+    assert "merge_request_iid" in model_facing
+
+    # DeterministicStepComponent calls ainvoke with a plain dict, which validates
+    # against args_schema. The injected field has to survive that.
+    assert "baseline_sha" in tool.args_schema.model_json_schema()["properties"]
+    parsed = tool._parse_input(
+        {"project_id": 1, "merge_request_iid": 123, "baseline_sha": BASELINE_SHA}, None
+    )
+    assert parsed["baseline_sha"] == BASELINE_SHA
+
+    # And the flow config's inputs: list still validates against that schema.
+    validate_against_schema(
+        tool.args_schema, {"project_id", "merge_request_iid", "baseline_sha"}
+    )
+
+
+def test_walk_diff_lines_keeps_metadata_skipping_outside_a_hunk(metadata):
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    raw = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+        "@@ -1,1 +1,2 @@\n ctx\n+added\n"
+    )
+
+    walked = [(kind, new, text) for kind, _, new, text in tool._walk_diff_lines(raw)]
+
+    assert walked == [
+        ("chunk_header", 1, "@@ -1,1 +1,2 @@"),
+        ("context", 1, "ctx"),
+        ("added", 2, "added"),
+    ]
+
+
+def test_added_line_keys_ignores_pairs_without_a_path_or_diff(metadata):
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    pairs = [
+        (None, "@@ -1,1 +1,2 @@\n+x\n"),
+        ("b.py", None),
+        ("c.py", "@@ -1,1 +1,2 @@\n ctx\n+y\n"),
+    ]
+
+    assert tool._added_line_keys(pairs) == {("c.py", 2)}
+
+
+def test_has_collapsed_diff_distinguishes_a_dropped_patch_from_a_patchless_change(
+    metadata,
+):
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    assert tool._has_collapsed_diff([{"new_path": "huge.rb", "diff": ""}]) is True
+    # A new file is entirely added lines, so a patchless one is a dropped patch.
+    assert (
+        tool._has_collapsed_diff([{"new_path": "c.rb", "diff": "", "new_file": True}])
+        is True
+    )
+    # A pure rename and a deletion have no added line to lose.
+    assert (
+        tool._has_collapsed_diff(
+            [{"new_path": "b.md", "diff": "", "renamed_file": True}]
+        )
+        is False
+    )
+    assert (
+        tool._has_collapsed_diff(
+            [{"old_path": "d.rb", "new_path": None, "diff": "", "deleted_file": True}]
+        )
+        is False
+    )

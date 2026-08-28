@@ -10,6 +10,11 @@ components:
         as: "project_id"
       - from: "context:goal"
         as: "merge_request_iid"
+      # Marks the lines added since the previous review. Only this step needs it:
+      # the prescan and metadata steps below do not feed the review prompt.
+      - from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        as: "baseline_sha"
+        optional: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -147,6 +152,12 @@ components:
       - from: "context:inputs.code_review_context.duo_code_review_bot_name"
         as: "duo_code_review_bot_name"
         optional: true
+      # Same value the build_review_context step gets. The prompt only needs to know
+      # whether it is set: it is set on exactly the runs where that step renders the
+      # <review_scope> block, so it gates the guidance for reading that block.
+      - from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        as: "last_reviewed_head_sha"
+        optional: true
     toolset:
       - "post_duo_code_review"
     max_correction_attempts: 3
@@ -195,4 +206,10 @@ flow:
         duo_code_review_bot_name:
           type: string
           description: Username of the bot that authors Duo Code Review comments
+          optional: true
+        # Optional so the flow still runs against a GitLab that does not send it.
+        # When it is missing the review falls back to covering the whole diff.
+        last_reviewed_head_sha:
+          type: string
+          description: Head commit SHA of the merge request at the previous review
           optional: true
