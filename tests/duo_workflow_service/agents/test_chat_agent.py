@@ -20,6 +20,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
+from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.checkpointer.gitlab_workflow import _serialize_channel_blobs
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
@@ -474,6 +475,7 @@ class TestChatAgentToolCallMessageOrdering:
                 "approval": None,
             },
             system_template_override=system_template_override,
+            web_search=WebSearchState(),
         )
 
     @pytest.mark.asyncio

@@ -10,6 +10,7 @@ from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
+from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
@@ -18,9 +19,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
-from duo_workflow_service.slash_commands.goal_parser import (
-    is_slash_command,
-)
+from duo_workflow_service.slash_commands.goal_parser import is_slash_command
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -57,7 +56,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             gitlab_instance_info, model_metadata
         )
         dynamic_template_context = self._build_dynamic_template_context(
-            project, namespace
+            project, namespace, _kwargs.get("web_search", WebSearchState())
         )
         denied_tools = list(dict.fromkeys(input.get("denied_tools", []) or []))
         system_template_override = _kwargs.get("system_template_override")
@@ -150,6 +149,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         self,
         project: Project | None,
         namespace: Namespace | None,
+        web_search: WebSearchState,
     ) -> dict[str, Any]:
         caching_status = prompt_caching_enabled_in_current_request()
         user_opted_out_of_caching = caching_status == "false"
@@ -162,6 +162,8 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             "current_time": datetime.now().strftime("%H:%M:%S"),
             "current_timezone": datetime.now().astimezone().tzname(),
             "should_show_current_time": should_show_current_time,
+            "web_search_supported": web_search.supported,
+            "web_search_enabled": web_search.active,
             "project": project,
             "namespace": namespace,
         }

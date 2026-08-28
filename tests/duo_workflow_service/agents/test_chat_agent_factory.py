@@ -10,6 +10,7 @@ from duo_workflow_service.agents.chat_agent_factory import (
     _extract_manual_compactor,
     create_agent,
 )
+from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     CompactionOptimizer,
@@ -39,8 +40,8 @@ def mock_toolset_fixture():
 
 
 class TestCreateAgent:
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_with_prompt_registry(
         self,
         mock_is_client_capable,
@@ -86,8 +87,8 @@ class TestCreateAgent:
             },
         )
 
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_with_agent_name_override(
         self,
         mock_is_client_capable,
@@ -132,8 +133,8 @@ class TestCreateAgent:
             },
         )
 
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_without_override_defaults_to_chat(
         self,
         mock_is_client_capable,
@@ -166,13 +167,15 @@ class TestCreateAgent:
         assert call_kwargs["bind_tools_params"] == {}
 
     @pytest.mark.parametrize(
-        "feature_enabled,client_capable,web_search_enabled,expected_params,test_description",
+        "feature_enabled,client_capable,web_search_enabled,expected_params,"
+        "expected_state,test_description",
         [
             (
                 True,
                 True,
                 True,
                 {"web_search_options": {}},
+                WebSearchState(supported=True, active=True),
                 "all three conditions met",
             ),
             (
@@ -180,6 +183,7 @@ class TestCreateAgent:
                 True,
                 False,
                 {},
+                WebSearchState(supported=True, active=False),
                 "feature and capability enabled but workflow toggle off",
             ),
             (
@@ -187,6 +191,7 @@ class TestCreateAgent:
                 True,
                 True,
                 {},
+                WebSearchState(supported=False, active=False),
                 "feature flag disabled",
             ),
             (
@@ -194,6 +199,7 @@ class TestCreateAgent:
                 False,
                 True,
                 {},
+                WebSearchState(supported=False, active=False),
                 "client not capable",
             ),
             (
@@ -201,16 +207,22 @@ class TestCreateAgent:
                 False,
                 False,
                 {},
+                WebSearchState(supported=False, active=False),
                 "all conditions disabled",
             ),
         ],
     )
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch(
+        "duo_workflow_service.agents.chat_agent_factory.native_web_search_available",
+        return_value=True,
+    )
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_web_search_options_conditional(
         self,
         mock_is_client_capable,
         mock_is_feature_enabled,
+        mock_native_web_search_available,
         user,
         mock_tools_registry,
         mock_toolset,
@@ -219,6 +231,7 @@ class TestCreateAgent:
         client_capable,
         web_search_enabled,
         expected_params,
+        expected_state,
         test_description,
     ):
         """Test that web_search_options requires feature flag, client capability, and workflow toggle."""
@@ -244,6 +257,10 @@ class TestCreateAgent:
             f"Failed for scenario: {test_description}"
         )
 
+        assert agent.web_search == expected_state, (
+            f"Failed for scenario: {test_description}"
+        )
+
         assert mock_is_feature_enabled.call_count == 1
         mock_is_feature_enabled.assert_any_call(FeatureFlag.DAP_WEB_SEARCH)
 
@@ -260,8 +277,8 @@ class TestCreateAgent:
         ],
     )
     @patch("duo_workflow_service.agents.chat_agent_factory.native_web_search_available")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_web_search_options_requires_native_support(
         self,
         mock_is_client_capable,
@@ -298,8 +315,8 @@ class TestCreateAgent:
         call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
         assert call_kwargs["bind_tools_params"] == expected_params
 
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_with_compaction_default_config(
         self,
         mock_is_client_capable,
@@ -337,8 +354,8 @@ class TestCreateAgent:
         # The manual compactor is the same object as the pipeline optimizer — no duplicate.
         assert agent._manual_compactor is optimizers[0]
 
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_with_custom_compaction_config(
         self,
         mock_is_client_capable,
@@ -377,8 +394,8 @@ class TestCreateAgent:
         # The manual compactor is the same object as the pipeline optimizer — no duplicate.
         assert agent._manual_compactor is optimizers[0]
 
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_feature_enabled")
-    @patch("duo_workflow_service.agents.chat_agent_factory.is_client_capable")
+    @patch("duo_workflow_service.agents.web_search.is_feature_enabled")
+    @patch("duo_workflow_service.agents.web_search.is_client_capable")
     def test_create_agent_without_compaction(
         self,
         mock_is_client_capable,

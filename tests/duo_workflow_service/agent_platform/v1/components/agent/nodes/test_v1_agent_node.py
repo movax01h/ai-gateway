@@ -1446,10 +1446,14 @@ class TestPredefinedRuntimeVariables:
             "current_date",
             "current_time",
             "current_timezone",
+            "web_search_supported",
+            "web_search_enabled",
         }
         datetime.strptime(result["current_date"], "%Y-%m-%d")
         datetime.strptime(result["current_time"], "%H:%M:%S")
         assert isinstance(result["current_timezone"], str)
+        assert result["web_search_supported"] is False
+        assert result["web_search_enabled"] is False
 
     @pytest.mark.asyncio
     async def test_runtime_variables_included_in_prompt_invocation(

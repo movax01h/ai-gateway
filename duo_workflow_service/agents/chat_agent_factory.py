@@ -6,7 +6,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import DefaultPromptAdapter
-from duo_workflow_service.client_capabilities import is_client_capable
+from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.components.tools_registry import Toolset, ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.builder import (
     FlowContext,
@@ -21,7 +21,6 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 from duo_workflow_service.tools.web_search import native_web_search_available
 from lib.events import GLReportingEventContext
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 
 def _extract_manual_compactor(
@@ -62,6 +61,8 @@ def create_agent(
     # Use agent_name_override for chat-partial flows, default to "chat"
     agent_name = agent_name_override if agent_name_override else "chat"
 
+    web_search = WebSearchState.resolve(web_search_enabled)
+
     # Include web_search_options when the feature flag is on, the client can
     # render search results, AND the user enabled web search for this session.
     #
@@ -70,12 +71,7 @@ def create_agent(
     # exclusive: binding both offers the model two ways to answer one query and bills the fallback
     # for work the provider would have done.
     bind_tools_params: dict[str, dict] = {}
-    if (
-        is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH)
-        and is_client_capable("web_search")
-        and web_search_enabled
-        and native_web_search_available()
-    ):
+    if web_search.active and native_web_search_available():
         bind_tools_params["web_search_options"] = {}
 
     prompt: Prompt = prompt_registry.get_on_behalf(
@@ -115,4 +111,5 @@ def create_agent(
         optimizer_pipeline=optimizer_pipeline,
         manual_compactor=manual_compactor,
         tracker=tracker,
+        web_search=web_search,
     )

@@ -16,6 +16,7 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
 )
+from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.entities.state import ChatWorkflowState, WorkflowStatusEnum
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
@@ -1198,3 +1199,87 @@ class TestFeatureFlagPropagationToStaticTemplateContext:
             _, first_kwargs = mock_formatter.call_args_list[0]
             assert context_key in first_kwargs
             assert first_kwargs[context_key] is expected_enabled
+
+
+@pytest.mark.parametrize(
+    "prompt_template",
+    [
+        {
+            "system_static": "Static system prompt.",
+            "system_dynamic": "{% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}",
+            "user": "{{ message.content }}",
+        }
+    ],
+)
+class TestWebSearchStatus:
+    @pytest.mark.parametrize(
+        ("web_search", "expected_status"),
+        [
+            (WebSearchState(supported=False, active=False), None),
+            (WebSearchState(supported=True, active=True), "ENABLED"),
+            (WebSearchState(supported=True, active=False), "DISABLED"),
+        ],
+        ids=["not_supported", "toggled_on", "toggled_off"],
+    )
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+    def test_web_search_status_reflects_the_current_toggle(
+        self,
+        mock_get_model_metadata,
+        model_provider,
+        prompt_config,
+        sample_chat_workflow_state: ChatWorkflowState,
+        web_search,
+        expected_status,
+    ):
+        mock_get_model_metadata.return_value = None
+
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            result = template.invoke(
+                sample_chat_workflow_state,
+                agent_name="test_agent",
+                web_search=web_search,
+            )
+
+        content = "\n".join(
+            str(msg.content)
+            for msg in result.to_messages()
+            if isinstance(msg, SystemMessage)
+        )
+
+        if expected_status is None:
+            assert "<web_search_status>" not in content
+        else:
+            assert f"Web search is {expected_status} right now" in content
+            assert ("do not retract or apologize" in content) is (not web_search.active)
+            assert ("Do not remark on the change" in content) is web_search.active
+
+    @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+    def test_web_search_status_defaults_to_absent_when_caller_says_nothing(
+        self,
+        mock_get_model_metadata,
+        model_provider,
+        prompt_config,
+        sample_chat_workflow_state: ChatWorkflowState,
+    ):
+        """A caller that never resolved web search must not get a status block."""
+        mock_get_model_metadata.return_value = None
+
+        template = ChatAgentPromptTemplate(model_provider, prompt_config)
+
+        with patch.object(
+            GitLabServiceContext, "get_current_instance_info", return_value=None
+        ):
+            result = template.invoke(
+                sample_chat_workflow_state, agent_name="test_agent"
+            )
+
+        content = "\n".join(
+            str(msg.content)
+            for msg in result.to_messages()
+            if isinstance(msg, SystemMessage)
+        )
+        assert "<web_search_status>" not in content

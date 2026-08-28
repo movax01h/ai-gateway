@@ -381,7 +381,14 @@ class AgentComponentBase(BaseComponent):
 
     # Variables injected by the node runner at execution time — never component inputs.
     _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset(
-        {"history", "current_date", "current_time", "current_timezone"}
+        {
+            "history",
+            "current_date",
+            "current_time",
+            "current_timezone",
+            "web_search_supported",
+            "web_search_enabled",
+        }
     )
 
     @model_validator(mode="after")

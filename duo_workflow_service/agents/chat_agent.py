@@ -17,6 +17,7 @@ from duo_workflow_service.agents.tool_call_validator import (
     retry_malformed_tool_calls,
     validate_tool_calls,
 )
+from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     CompactionOptimizer,
@@ -123,6 +124,7 @@ class ChatAgent:
         optimizer_pipeline: HistoryOptimizerPipeline,
         manual_compactor: CompactionOptimizer | None = None,
         tracker: ToolEventTracker | None = None,
+        web_search: WebSearchState = WebSearchState(),
     ):
         self.name = name
         self.prompt_adapter = prompt_adapter
@@ -132,6 +134,7 @@ class ChatAgent:
         self._manual_compactor = manual_compactor
         self.toolset = toolset
         self._tracker = tracker
+        self.web_search = web_search
 
     async def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
@@ -270,7 +273,9 @@ class ChatAgent:
 
     async def _get_agent_response(self, state: ChatWorkflowState) -> BaseMessage:
         return await self.prompt_adapter.get_response(
-            state, system_template_override=self.system_template_override
+            state,
+            system_template_override=self.system_template_override,
+            web_search=self.web_search,
         )
 
     async def _build_response(
