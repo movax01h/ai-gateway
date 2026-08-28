@@ -54,12 +54,7 @@ def check_provider_accessible(provider, model_endpoint=None, api_key=None):
     print(f"Testing if provider {provider_name} is accessible ...")
 
     if provider == "bedrock":
-        boto3_bedrock = boto3.client(
-            provider,
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION_NAME"),
-        )
+        boto3_bedrock = boto3.client("bedrock")
 
         try:
             boto3_bedrock.list_foundation_models()
@@ -68,6 +63,9 @@ def check_provider_accessible(provider, model_endpoint=None, api_key=None):
             error_message = f"""
                 >> An error occurred while contacting provider {provider}: {e}
                 >> Potential cause(s) are:
+                >> - Credentials are not configured:
+                >>   Refer to AWS boto3 documentation on configuring credentials:
+                >>   https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html#configuring-credentials
                 >> - Access keys are not valid:
                 >>   Make sure the following environment variables are set to the correct values:
                 >>   - AWS_ACCESS_KEY_ID
@@ -298,30 +296,6 @@ def check_provider_specific_env_variables(provider):
                 "per-model API key passed with --api-key; make sure one of them is provided.\n"
             )
         return
-
-    if not provider == "bedrock":
-        return
-    provider_name = provider.capitalize()
-    missing_vars = []
-
-    required_vars = [
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_REGION_NAME",
-    ]
-
-    print(f"Testing specific environment variables for provider {provider_name} ...")
-
-    for var in required_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-
-    if missing_vars:
-        error_message = f"Missing environment variables: {', '.join(missing_vars)} for provider {provider_name}\n"
-        raise ValueError(error_message)
-    print(
-        f">> Specific environment variables for provider {provider_name} are set correctly ✔\n"
-    )
 
 
 def check_suggestions_model_access(
