@@ -146,6 +146,16 @@ class AgentResult:
                 )
         return self
 
+    def get_tool_call_args(self, tool_name: str, key: str) -> list[str]:
+        """Return the value of `key` for each call to tool_name.
+
+        Calls missing the key contribute an empty string, so the returned list
+        always has one entry per matching call.
+        """
+        return [
+            str(tc.args.get(key, "")) for tc in self.tool_calls if tc.name == tool_name
+        ]
+
     def assert_has_tool_calls(self) -> "AgentResult":
         """Assert that the agent made at least one tool call."""
         assert (
@@ -170,6 +180,42 @@ class AgentResult:
                 f"\n\nResponse: {self.content[:1000]}"
             )
         return self
+
+    async def assert_llm_validates_any(self, criteria: list[str]) -> "AgentResult":
+        """Assert response passes LLM-as-judge validation for at least one criterion.
+
+        Each criterion is judged on its own through the same validation path as
+        assert_llm_validates. Passes as soon as any single criterion passes.
+
+        Args:
+            criteria: List of atomic criteria; at least one must hold
+        """
+        model = self.validation_model or DEFAULT_VALIDATION_MODEL
+        failures: list[str] = []
+        judge_error: str | None = None
+        for criterion in criteria:
+            result = await validate_with_llm(self.content, [criterion], model=model)
+            if result.all_passed:
+                return self
+            for r in result.results:
+                failures.append(f"  - {r.criterion}: {r.explanation}")
+            if result.error:
+                # validate_with_llm already retries internally, so an error here
+                # is persistent; skip remaining criteria to avoid doomed calls.
+                failures.append(f"    Error: {result.error}")
+                judge_error = result.error
+                break
+        failure_detail = "\n".join(failures)
+        prefix = (
+            f"LLM judge errored ({judge_error}); remaining criteria skipped.\n"
+            if judge_error
+            else ""
+        )
+        raise AssertionError(
+            f"{prefix}LLM validation failed: none of the criteria passed:\n"
+            f"{failure_detail}"
+            f"\n\nResponse: {self.content[:1000]}"
+        )
 
 
 async def ask_agent(

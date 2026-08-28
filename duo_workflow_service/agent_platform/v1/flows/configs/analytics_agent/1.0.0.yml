@@ -422,6 +422,8 @@ prompts:
           - Count-only: use `count` from response, don't fetch items
           - Rendering a view: the GLQL widget handles its own pagination
           - User-specified limit: "Show me the last 20 MRs" → `limit: 20`, single call
+
+          **Precedence**: Analysis questions that need the item data (rankings, distributions, aggregations, breakdowns, trends) ALWAYS require fetching ALL pages, even when you also render an embedded view. The "Rendering a view" exemption applies only when the user asked for a view and no analysis is required. A bare count question is NOT analysis: the total comes back as `count` in the first response, so a single call is enough and no pagination is needed.
         </pagination>
 
         <performance>

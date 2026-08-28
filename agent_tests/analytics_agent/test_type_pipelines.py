@@ -7,8 +7,19 @@ sorting constraints, and scope requirements.
 import pytest
 
 from agent_tests.helpers import ask_agent
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
-from .helpers import SAMPLE_PIPELINES, glql_response, mock_glql_response
+from .helpers import (
+    PIPELINES_GROUP_SCOPE_ERROR,
+    SAMPLE_PIPELINES,
+    glql_http_error,
+    glql_response,
+    has_group_filter,
+    has_project_filter,
+    is_project_scoped,
+    mock_glql_responder,
+    mock_glql_response,
+)
 
 
 @pytest.mark.flow_versions("1.0.0")
@@ -142,10 +153,10 @@ async def test_pipeline_no_sorting(
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
-    await result.assert_llm_validates(
+    await result.assert_llm_validates_any(
         [
-            "The GLQL embedded view does NOT include a sort parameter "
-            "and/or the response explains that sorting is not supported",
+            "The GLQL embedded view does NOT include a sort parameter",
+            "The response explains that sorting is not supported",
         ]
     )
 
@@ -158,7 +169,14 @@ async def test_pipeline_requires_project_filter(
     mock_gitlab_client,
 ):
     """Listing individual pipelines (standard mode) must use project, not group, scope."""
-    mock_glql_response(mock_gitlab_client, glql_response(SAMPLE_PIPELINES))
+
+    def respond(glql_yaml: str) -> GitLabHttpResponse:
+        # Group-scoped queries fail exactly as production does for Pipeline.
+        if has_group_filter(glql_yaml):
+            return glql_http_error(PIPELINES_GROUP_SCOPE_ERROR)
+        return GitLabHttpResponse(status_code=200, body=glql_response(SAMPLE_PIPELINES))
+
+    mock_glql_responder(mock_gitlab_client, respond)
 
     result = await ask_agent(
         analytics_agent,
@@ -167,10 +185,27 @@ async def test_pipeline_requires_project_filter(
         "with their ref, sha, and duration",
     )
 
-    await result.assert_llm_validates(
-        [
-            "The GLQL query uses project filter, not group filter, "
-            "and/or the response explains that listing individual pipelines "
-            "requires a project scope (standard mode doesn't support group)",
-        ]
-    )
+    result.assert_has_tool_calls().assert_called_tool("run_glql_query")
+    queries = result.get_tool_call_args("run_glql_query", "glql_yaml")
+    group_queries = [q for q in queries if has_group_filter(q)]
+
+    if group_queries:
+        # A group query was attempted: the agent must recover with a
+        # project-scoped query, or explain the project-scope requirement.
+        final_query_recovered = bool(
+            queries
+            and has_project_filter(queries[-1])
+            and not has_group_filter(queries[-1])
+        )
+        if not final_query_recovered:
+            await result.assert_llm_validates(
+                [
+                    "The response explains that listing individual pipelines "
+                    "requires a project scope",
+                ]
+            )
+    else:
+        assert is_project_scoped(queries), (
+            "Expected the pipeline queries to use a project filter when no "
+            f"group filter was attempted. Queries: {queries}"
+        )

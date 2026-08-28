@@ -4,6 +4,8 @@ Validates that the agent generates correct GLQL queries for Project type, includ
 sorting, and scope requirements.
 """
 
+import re
+
 import pytest
 
 from agent_tests.helpers import ask_agent
@@ -85,12 +87,11 @@ async def test_project_archived_filter(
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
-    await result.assert_llm_validates(
-        [
-            "The GLQL query includes type = Project",
-            "The GLQL query filters for archived projects, using either archivedOnly = true or includeArchived = true",
-        ]
-    )
+    queries = result.get_tool_call_args("run_glql_query", "glql_yaml")
+    assert any(
+        re.search(r"(archivedOnly|includeArchived)\s*=\s*true", q) for q in queries
+    ), f"Expected an archived-projects filter in the GLQL queries: {queries}"
+    await result.assert_llm_validates(["The GLQL query includes type = Project"])
 
 
 @pytest.mark.flow_versions("1.0.0")

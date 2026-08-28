@@ -35,9 +35,12 @@ async def test_count_query_single_call(
 
     result.assert_tool_call_count("run_glql_query", 1)
     result.assert_tool_call_count(schema_tool_name, 1)
+    # The single call is asserted deterministically above; the judge only
+    # checks the stated number, since auditing pagination from prose invites
+    # misfires (e.g. a `limit: 20` echoed in the query text).
     await result.assert_llm_validates(
         [
-            "The response provides the correct count/number of issues 150 without paginating.",
+            "The response states there are 150 open issues",
         ]
     )
 
@@ -75,8 +78,21 @@ async def test_full_analysis_paginates(
     initial_state,
     mock_gitlab_client,
     schema_tool_name,
+    execution_model,
+    request,
 ):
     """Full data analysis should paginate (multiple tool calls)."""
+    # claude-opus-4-7 answers analysis questions in a single call despite the
+    # temperature and prompt-precedence fixes; see
+    # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2770
+    if execution_model.startswith("claude-opus-4-7"):
+        request.node.add_marker(
+            pytest.mark.xfail(
+                reason="claude-opus-4-7 answers analysis questions without paginating",
+                strict=True,
+            )
+        )
+
     page1 = glql_response(
         generate_issues(100),
         count=250,

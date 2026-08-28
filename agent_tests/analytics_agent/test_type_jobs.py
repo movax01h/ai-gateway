@@ -8,7 +8,12 @@ import pytest
 
 from agent_tests.helpers import ask_agent
 
-from .helpers import SAMPLE_JOBS, glql_response, mock_glql_response
+from .helpers import (
+    SAMPLE_JOBS,
+    glql_response,
+    is_project_scoped,
+    mock_glql_response,
+)
 
 
 @pytest.mark.flow_versions("1.0.0")
@@ -141,10 +146,10 @@ async def test_job_no_sorting(
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
     result.assert_has_tool_calls().assert_called_tool("run_glql_query")
-    await result.assert_llm_validates(
+    await result.assert_llm_validates_any(
         [
-            "The GLQL embedded view does NOT include a sort parameter "
-            "and/or the response explains that jobs do not support sorting",
+            "The GLQL embedded view does NOT include a sort parameter",
+            "The response explains that jobs do not support sorting",
         ]
     )
 
@@ -165,9 +170,8 @@ async def test_job_requires_project_filter(
         "Show me failed jobs in the gitlab-org group",
     )
 
-    await result.assert_llm_validates(
-        [
-            "The GLQL query uses project filter, not group filter, "
-            "and/or the response explains that jobs require a project filter",
-        ]
-    )
+    queries = result.get_tool_call_args("run_glql_query", "glql_yaml")
+    if not is_project_scoped(queries):
+        await result.assert_llm_validates(
+            ["The response explains that jobs require a project filter"]
+        )

@@ -12,6 +12,7 @@ from .helpers import (
     SAMPLE_JOBS,
     SAMPLE_MRS,
     glql_response,
+    is_project_scoped,
     mock_glql_response,
 )
 
@@ -116,9 +117,8 @@ async def test_scope_the_source_does_not_allow_is_not_used(
     )
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
-    await result.assert_llm_validates(
-        [
-            "The GLQL query uses a project filter, not a group filter, "
-            "and/or the response explains that jobs can only be queried per project",
-        ]
-    )
+    queries = result.get_tool_call_args("run_glql_query", "glql_yaml")
+    if not is_project_scoped(queries):
+        await result.assert_llm_validates(
+            ["The response explains that jobs can only be queried per project"]
+        )
