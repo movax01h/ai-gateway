@@ -52,11 +52,9 @@ from lib.feature_flags import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
 
-# Stands in for "this session already has state to continue from". Its contents are
-# irrelevant to get_graph_input, which only checks whether a checkpoint exists at all,
-# but it must not be None: without a checkpoint the graph is started fresh instead of
-# being handed a Command.
-EXISTING_CHECKPOINT = {"thread_ts": "1970-01-01T00:00:00.000000+00:00"}
+# Stands in for "this session already has state to continue from".
+# Without a checkpoint the graph is started fresh instead of being handed a Command.
+EXISTING_CHECKPOINT = {"threadTs": "1970-01-01T00:00:00.000000+00:00"}
 
 
 @pytest.fixture(name="flow_type")
@@ -794,6 +792,42 @@ async def test_get_graph_input_resume_with_goal(mock_uuid, workflow_with_project
     )
     assert len(result.update["ui_chat_log"][-1]["additional_context"]) == 1
     assert result.update["ui_chat_log"][-1]["additional_context"][0].category == "file"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("resume_checkpoint_ts", "checkpoint_tuple", "expected_parent_ts"),
+    [
+        (None, EXISTING_CHECKPOINT, EXISTING_CHECKPOINT["threadTs"]),
+        ("pinned-checkpoint-ts", EXISTING_CHECKPOINT, "pinned-checkpoint-ts"),
+        (None, {"metadata": "{}"}, None),
+    ],
+    ids=[
+        "Forks from the tip of the session",
+        "Retry forks from the pinned checkpoint, not the tip",
+        "Unset when the instance returned no threadTs",
+    ],
+)
+async def test_get_graph_input_stamps_parent_ts(
+    workflow_with_project, resume_checkpoint_ts, checkpoint_tuple, expected_parent_ts
+):
+    workflow_with_project._resume_checkpoint_ts = resume_checkpoint_ts
+
+    result = await workflow_with_project.get_graph_input(
+        "New input", WorkflowStatusEventEnum.RESUME, checkpoint_tuple
+    )
+
+    assert result.update["ui_chat_log"][-1]["parent_ts"] == expected_parent_ts
+
+
+@pytest.mark.asyncio
+async def test_get_graph_input_start_has_no_parent_ts(workflow_with_project):
+    """A session's first message forks from nothing, so there is no checkpoint to retry from."""
+    result = await workflow_with_project.get_graph_input(
+        "Test goal", WorkflowStatusEventEnum.START, None
+    )
+
+    assert result["ui_chat_log"][0].get("parent_ts") is None
 
 
 @pytest.mark.asyncio

@@ -158,6 +158,7 @@ class UiChatLog(TypedDict):
     required_plan: NotRequired[Optional[str]]
     component_name: NotRequired[Optional[str]]
     subsession_id: NotRequired[Optional[str]]
+    parent_ts: NotRequired[Optional[str]]
 
 
 def _plan_reducer(current: Plan, new: Optional[Plan]) -> Plan:
