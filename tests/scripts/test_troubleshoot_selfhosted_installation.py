@@ -23,12 +23,11 @@ class TestCheckProviderSpecificEnvVariables:
 
         assert "--api-key" in capsys.readouterr().out
 
-    def test_bedrock_still_requires_aws_variables(self, monkeypatch):
+    def test_bedrock_does_not_raise(self, monkeypatch):
         for var in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION_NAME"):
             monkeypatch.delenv(var, raising=False)
 
-        with pytest.raises(ValueError, match="Missing environment variables"):
-            ts.check_provider_specific_env_variables("bedrock")
+        ts.check_provider_specific_env_variables("bedrock")
 
 
 class TestCheckBedrockMantleAccessible:
@@ -100,6 +99,34 @@ class TestCheckProviderAccessibleRouting:
         monkeypatch.setattr(ts.requests, "get", fail_get)
 
         ts.check_provider_accessible("custom_openai", MANTLE_ENDPOINT, "a-key")
+
+    def test_bedrock_uses_default_credential_chain(self, monkeypatch, capsys):
+        seen = {}
+        mock_client = MagicMock()
+
+        def fake_boto3_client(*args, **kwargs):
+            seen["args"] = args
+            seen["kwargs"] = kwargs
+            return mock_client
+
+        monkeypatch.setattr(ts.boto3, "client", fake_boto3_client)
+
+        ts.check_provider_accessible("bedrock")
+
+        assert seen == {"args": ("bedrock",), "kwargs": {}}
+        mock_client.list_foundation_models.assert_called_once()
+        assert "Provider Bedrock is accessible" in capsys.readouterr().out
+
+    def test_bedrock_raises_runtime_error_when_inaccessible(self, monkeypatch):
+        mock_client = MagicMock()
+        mock_client.list_foundation_models.side_effect = Exception("boom")
+
+        monkeypatch.setattr(ts.boto3, "client", lambda *args, **kwargs: mock_client)
+
+        with pytest.raises(
+            RuntimeError, match="An error occurred while contacting provider bedrock"
+        ):
+            ts.check_provider_accessible("bedrock")
 
 
 class TestTroubleshootWiring:
