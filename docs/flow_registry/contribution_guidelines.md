@@ -709,6 +709,93 @@ When contributing components, you must:
    - Common patterns
    - Integration with other components
 
+## Foundational agent prompts
+
+Some flow configs in this repository are foundational agents whose system prompts encode
+knowledge about the Flow Registry framework itself (for example, the
+[Flow Creator](../../duo_workflow_service/agent_platform/v1/flows/configs/flow_creator/README.md)). The constraints below apply to
+anyone editing an agent system prompt in a flow config.
+
+### Prompt authoring constraints
+
+- **System prompts are rendered with Jinja2** ([`ai_gateway/prompts/base.py`](../../ai_gateway/prompts/base.py)),
+  so `{{ variable }}` is the correct, intended syntax for values a prompt receives through its
+  `inputs` (for example `{{project_id}}` bound from `context:project_id`). The constraint below
+  applies only to **meta prompts** — prompts that teach an agent how to *write other prompts or
+  flow YAML* for the Flow Registry (the Flow Creator is the canonical example). Ordinary flow
+  prompts should keep using `{{ }}` variables as usual.
+- **In a meta prompt, wrap any literal `{{ }}` you want the agent to see in
+  `{% raw %} ... {% endraw %}` blocks.** A meta prompt often needs to show placeholder syntax
+  verbatim — for example, teaching the agent to emit `{{alias}}` in the flow YAML it generates.
+  Because the meta prompt is itself Jinja2-rendered at load time, an unescaped `{{alias}}` is read
+  as a variable *of the meta prompt itself*; it is unresolved and crashes flow loading with an
+  unhelpful `NoneType: None` error. Wrapping it in a raw block passes the literal through
+  untouched. An earlier convention used `<<variable>>` notation to sidestep the collision. Do not
+  use it: Jinja2 treats it as inert literal text that never substitutes, so generated flow YAML
+  that copies it is broken.
+- **Mandatory URL fetches must be reachable from the runner environment.** If a prompt instructs
+  the agent to fetch documentation before responding, every URL must be accessible from the
+  environment where the flow executes. An unreachable mandatory fetch hangs the session until
+  timeout.
+
+#### Examples: documenting placeholder syntax in a meta prompt
+
+These examples all come from a **meta prompt** — one that teaches an agent to emit
+`{{project_id}}` in the flow YAML it generates. In an ordinary flow prompt, `{{project_id}}` is
+just a variable and needs no escaping. The escaping below is required *only* because the meta
+prompt must show the literal `{{project_id}}` to the agent rather than have it substituted.
+
+**Bad** — unescaped `{{ }}` in a meta prompt. Jinja2 treats `{{project_id}}` as a variable of the
+*meta prompt itself*. It is unresolved at load time, so flow loading crashes with
+`NoneType: None`:
+
+```yaml
+prompt_template:
+  system: |
+    You teach developers to author flows. Tell them to include this line
+    in the flow YAML they generate:
+    Project ID: {{project_id}}
+```
+
+**Bad** — `<<project_id>>`. Jinja2 never substitutes this form, so it is inert. The agent copies
+the literal `<<project_id>>` into the flow YAML it generates, which then fails silently because
+the placeholder is never filled in:
+
+```yaml
+prompt_template:
+  system: |
+    You teach developers to author flows. Tell them to include this line
+    in the flow YAML they generate:
+    Project ID: <<project_id>>
+```
+
+**Good** — wrap the literal in `{% raw %} ... {% endraw %}`. The placeholder is documented to the
+agent verbatim and is not substituted when the meta prompt loads:
+
+```yaml
+prompt_template:
+  system: |
+    You teach developers to author flows. Tell them to include this line
+    in the flow YAML they generate:
+    Project ID: {% raw %}{{project_id}}{% endraw %}
+```
+
+The [Flow Creator](../../duo_workflow_service/agent_platform/v1/flows/configs/flow_creator/README.md) config uses this `{% raw %}` form; see its
+`prompt_template` for a live reference.
+
+### Keeping framework documentation in sync
+
+Foundational agents that document the framework read the pages in `docs/flow_registry/` at
+response time. When a framework capability ships — a new component, parameter, or constraint, or
+a breaking change to a context envelope — update the relevant version page (for example,
+[`v1.md`](v1.md)) in the same merge request. An out-of-date reference page degrades every agent
+response that relies on it.
+
+Failure patterns discovered through real sessions should also be added to
+[Common Pitfalls to Avoid](#common-pitfalls-to-avoid) and, where an agent encodes hard rules
+about them, to the agent's prompt. For the agent-specific process, see the
+[Flow Creator maintenance guide](../../duo_workflow_service/agent_platform/v1/flows/configs/flow_creator/README.md).
+
 ## Review Process
 
 ### What Reviewers Look For

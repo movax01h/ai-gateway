@@ -1,3 +1,5 @@
+# Maintenance guide for this agent (update triggers, hard-rule process, review
+# requirements): see README.md in this directory.
 version: "v1"
 environment: chat-partial
 name: "Flow Creator"
