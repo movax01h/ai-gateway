@@ -1,0 +1,135 @@
+version: v1
+environment: ambient
+components:
+  - name: "sast_vulnerability_details_component"
+    type: DeterministicStepComponent
+    inputs:
+      - from: "context:goal"
+        as: vulnerability_id
+    tool_name: "get_vulnerability_details"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "validate_sast_vulnerability_component"
+    type: AgentComponent
+    prompt_id: "validate_sast_vulnerability_agent_prompt"
+    prompt_version: "1.0.0"
+    response_schema_id: "validate_sast_vulnerability"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+    toolset: []
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+  - name: "sast_vulnerability_source_file_component"
+    type: OneOffComponent
+    prompt_id: "sast_vulnerability_source_file_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+    toolset:
+      - "get_repository_file"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "sast_vulnerability_lines_component"
+    type: OneOffComponent
+    prompt_id: "sast_vulnerability_lines_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:sast_vulnerability_source_file_component.tool_responses"
+        as: vulnerability_source_code
+    toolset:
+      - "extract_lines_from_text"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "sast_vulnerability_report_component"
+    type: AgentComponent
+    prompt_id: "sast_vulnerability_report_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:sast_vulnerability_lines_component.tool_responses"
+        as: vulnerable_lines
+      - from: "context:sast_vulnerability_source_file_component.tool_responses"
+        as: vulnerability_source_code
+    toolset: []
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "sast_fp_detection_agent"
+    type: AgentComponent
+    prompt_id: "sast_fp_detection_agent_prompt"
+    prompt_version: "1.1.0-dev"
+    response_schema_id: "sast_fp_detection"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_report_component.final_answer"
+        as: vulnerability_details
+    toolset:
+      - "read_file"
+      - "get_repository_file"
+      - "list_repository_tree"
+      - "find_files"
+      - "gitlab_blob_search"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "sast_post_results_to_gitlab_component"
+    type: OneOffComponent
+    prompt_id: "sast_post_results_to_gitlab_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:sast_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:sast_fp_detection_agent.final_answer"
+        as: sast_fp_detection_analysis
+    toolset:
+      - "post_sast_fp_analysis_to_gitlab"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+routers:
+  - from: "sast_vulnerability_details_component"
+    to: "validate_sast_vulnerability_component"
+  - from: "validate_sast_vulnerability_component"
+    condition:
+      input: "context:validate_sast_vulnerability_component.final_answer.decision"
+      routes:
+        "valid": "sast_vulnerability_source_file_component"
+        "invalid": "end"
+  - from: "sast_vulnerability_source_file_component"
+    condition:
+      input: "context:sast_vulnerability_source_file_component.execution_result"
+      routes:
+        "success": "sast_vulnerability_lines_component"
+        "default_route": "end"
+  - from: "sast_vulnerability_lines_component"
+    condition:
+      input: "context:sast_vulnerability_lines_component.execution_result"
+      routes:
+        "success": "sast_vulnerability_report_component"
+        "default_route": "end"
+  - from: "sast_vulnerability_report_component"
+    to: "sast_fp_detection_agent"
+  - from: "sast_fp_detection_agent"
+    to: "sast_post_results_to_gitlab_component"
+  - from: "sast_post_results_to_gitlab_component"
+    to: "end"
+flow:
+  entry_point: "sast_vulnerability_details_component"
