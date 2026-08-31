@@ -60,10 +60,23 @@ query PipelineFindings(
                             }
                             ... on VulnerabilityLocationDependencyScanning {
                                 file
+                                blobPath
+                                dependency {
+                                    version
+                                    package {
+                                        name
+                                    }
+                                }
                             }
                             ... on VulnerabilityLocationContainerScanning {
                                 image
                                 operatingSystem
+                                dependency {
+                                    version
+                                    package {
+                                        name
+                                    }
+                                }
                             }
                         }
 

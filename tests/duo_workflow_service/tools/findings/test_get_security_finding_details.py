@@ -9,6 +9,12 @@ from duo_workflow_service.tools.findings.get_security_finding_details import (
     GetSecurityFindingDetails,
     GetSecurityFindingDetailsInput,
 )
+from duo_workflow_service.tools.findings.queries import (
+    GET_SECURITY_FINDING_DETAILS_QUERY,
+)
+from tests.duo_workflow_service.tools.query_test_helpers import (
+    extract_location_fragment,
+)
 
 # editorconfig-checker-disable
 GET_SECURITY_FINDINGS_JSON = """
@@ -278,3 +284,21 @@ class TestFormatDisplayMessage:
             tool.format_display_message(args)
             == "Get details for security finding 1e9a2bf7... on ref 'my-feature-branch'"
         )
+
+
+class TestQueryContent:
+    """Tests for the GraphQL query content."""
+
+    @pytest.mark.parametrize(
+        "location_type",
+        [
+            "VulnerabilityLocationDependencyScanning",
+            "VulnerabilityLocationContainerScanning",
+        ],
+    )
+    def test_location_fragment_includes_dependency(self, location_type):
+        """Test the DS and CS location fragments select dependency package data."""
+        fragment = extract_location_fragment(
+            GET_SECURITY_FINDING_DETAILS_QUERY, location_type
+        )
+        assert "dependency { version package { name } }" in fragment
