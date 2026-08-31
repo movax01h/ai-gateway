@@ -36,7 +36,12 @@ class SecurityFindingSeverity(StrEnum):
 
 
 class SecurityFindingReportType(StrEnum):
-    """Valid security finding report types."""
+    """Valid security finding report types.
+
+    Mirrors Rails `Security::Scan.scan_types` (sent lowercased as plain strings) —
+    this is NOT the GraphQL `VulnerabilityReportType` enum used by
+    `list_vulnerabilities`, which stays uppercase and includes GENERIC.
+    """
 
     SAST = "SAST"
     DEPENDENCY_SCANNING = "DEPENDENCY_SCANNING"
@@ -46,7 +51,7 @@ class SecurityFindingReportType(StrEnum):
     COVERAGE_FUZZING = "COVERAGE_FUZZING"
     API_FUZZING = "API_FUZZING"
     CLUSTER_IMAGE_SCANNING = "CLUSTER_IMAGE_SCANNING"
-    GENERIC = "GENERIC"
+    SARIF = "SARIF"
 
 
 class ListSecurityFindingsInput(BaseModel):
@@ -73,7 +78,8 @@ class ListSecurityFindingsInput(BaseModel):
     )
     state: Optional[list[SecurityFindingState | str]] = Field(
         default=None,
-        description="Filter by states (e.g., [DETECTED, DISMISSED]). Default includes all states.",
+        description="Filter by states (e.g., [DETECTED, DISMISSED]). Default includes all states. "
+        "When provided, this takes precedence and include_dismissed is ignored.",
     )
     per_page: Optional[int] = Field(
         default=100,
@@ -86,7 +92,9 @@ class ListSecurityFindingsInput(BaseModel):
         description="Whether to fetch all pages of results (default: True)",
     )
     include_dismissed: Optional[bool] = Field(
-        default=True, description="Include dismissed findings (default: True)"
+        default=True,
+        description="Include dismissed findings (default: True). "
+        "Ignored when an explicit state filter is provided.",
     )
 
 
@@ -125,17 +133,51 @@ class ListSecurityFindings(DuoBaseTool):
         """Convert enum or string to string value."""
         return item.value if isinstance(item, StrEnum) else item
 
+    def _validate_filter_values(
+        self,
+        values: Optional[list[Any]],
+        enum_cls: Type[StrEnum],
+        filter_name: str,
+    ) -> Optional[list[str]]:
+        """Validate filter values against an enum, normalizing to canonical form and dropping duplicates."""
+        if not values:
+            return None
+
+        valid_values = [member.value for member in enum_cls]
+        normalized: list[str] = []
+        for item in values:
+            raw = self._normalize_enum_value(item)
+            value = raw.strip().upper()
+            if value not in valid_values:
+                raise ToolException(
+                    f"Invalid {filter_name} value: '{raw}'. "
+                    f"Valid values: {', '.join(valid_values)}"
+                )
+            # Duplicate severity values would duplicate result rows server-side
+            # (the finder unnests them into a lateral join), so dedupe here.
+            if value not in normalized:
+                normalized.append(value)
+        return normalized
+
     def _prepare_state_filter(
-        self, include_dismissed: bool, state: Optional[list[SecurityFindingState | str]]
-    ) -> Optional[list[SecurityFindingState | str]]:
-        """Prepare the state filter based on include_dismissed flag."""
-        if not include_dismissed and not state:
-            return [
-                SecurityFindingState.DETECTED,
-                SecurityFindingState.CONFIRMED,
-                SecurityFindingState.RESOLVED,
-            ]
-        return state
+        self, include_dismissed: bool, state: Optional[list[str]]
+    ) -> list[str]:
+        """Prepare the state filter based on include_dismissed flag.
+
+        The backend only includes dismissed findings when a state filter is passed explicitly, so a state filter is
+        always sent when none is given. Known limitation: any state filter drops findings whose occurrence row has a
+        NULL vulnerability_id, and the resolver offers no unfiltered scope — see
+        https://gitlab.com/gitlab-org/gitlab/-/issues/616503.
+        """
+        if state:
+            return state
+        if include_dismissed:
+            return [member.value for member in SecurityFindingState]
+        return [
+            SecurityFindingState.DETECTED.value,
+            SecurityFindingState.CONFIRMED.value,
+            SecurityFindingState.RESOLVED.value,
+        ]
 
     def _build_query_variables(
         self,
@@ -143,12 +185,15 @@ class ListSecurityFindings(DuoBaseTool):
         ref: str,
         per_page: int,
         cursor: Optional[str],
-        severity: Optional[list[SecurityFindingSeverity | str]],
-        report_type: Optional[list[SecurityFindingReportType | str]],
+        severity: Optional[list[str]],
+        report_type: Optional[list[str]],
         scanner: Optional[list[str]],
-        state: Optional[list[SecurityFindingState | str]],
+        state: Optional[list[str]],
     ) -> dict[str, Any]:
-        """Build GraphQL query variables."""
+        """Build GraphQL query variables.
+
+        severity/report_type/state arrive pre-validated as canonical uppercase strings.
+        """
         variables: dict[str, Any] = {
             "fullPath": project_path,
             "ref": ref,
@@ -157,16 +202,17 @@ class ListSecurityFindings(DuoBaseTool):
 
         if cursor:
             variables["after"] = cursor
+        # The securityReportFindings resolver takes severity/reportType as plain
+        # strings matched against lowercase-keyed Rails enums; state is a real
+        # GraphQL enum and must stay uppercase.
         if severity:
-            variables["severity"] = [self._normalize_enum_value(s) for s in severity]
+            variables["severity"] = [s.lower() for s in severity]
         if report_type:
-            variables["reportType"] = [
-                self._normalize_enum_value(rt) for rt in report_type
-            ]
+            variables["reportType"] = [rt.lower() for rt in report_type]
         if scanner:
             variables["scanner"] = scanner
         if state:
-            variables["state"] = [self._normalize_enum_value(s) for s in state]
+            variables["state"] = state
 
         return variables
 
@@ -223,10 +269,10 @@ class ListSecurityFindings(DuoBaseTool):
         ref: str,
         fetch_all_pages: bool,
         per_page: int,
-        severity: Optional[list[SecurityFindingSeverity | str]],
-        report_type: Optional[list[SecurityFindingReportType | str]],
+        severity: Optional[list[str]],
+        report_type: Optional[list[str]],
         scanner: Optional[list[str]],
-        state: Optional[list[SecurityFindingState | str]],
+        state: Optional[list[str]],
     ) -> dict[str, Any]:
         """Fetch findings from GitLab GraphQL API with pagination.
 
@@ -298,16 +344,27 @@ class ListSecurityFindings(DuoBaseTool):
         project_path = kwargs.pop("project_full_path")
         ref = kwargs.pop("ref")
 
+        # Validate outside the try block so a rejected filter value surfaces
+        # as-is instead of being wrapped as a request failure.
+        severity = self._validate_filter_values(
+            kwargs.pop("severity", None), SecurityFindingSeverity, "severity"
+        )
+        report_type = self._validate_filter_values(
+            kwargs.pop("report_type", None), SecurityFindingReportType, "report_type"
+        )
+        validated_state = self._validate_filter_values(
+            kwargs.pop("state", None), SecurityFindingState, "state"
+        )
+
         try:
             fetch_all_pages = kwargs.pop("fetch_all_pages", True)
             per_page = kwargs.pop("per_page", 100)
-            severity = kwargs.pop("severity", None)
-            report_type = kwargs.pop("report_type", None)
             scanner = kwargs.pop("scanner", None)
             include_dismissed = kwargs.pop("include_dismissed", True)
-            state = kwargs.pop("state", None)
+            if include_dismissed is None:
+                include_dismissed = True
 
-            state = self._prepare_state_filter(include_dismissed, state)
+            state = self._prepare_state_filter(include_dismissed, validated_state)
 
             result = await self._fetch_findings(
                 project_path,
@@ -333,21 +390,10 @@ class ListSecurityFindings(DuoBaseTool):
                     "metadata": {
                         "total_pages": 1 if not fetch_all_pages else "all",
                         "filters_applied": {
-                            "severity": (
-                                [self._normalize_enum_value(s) for s in severity]
-                                if severity
-                                else None
-                            ),
-                            "report_type": (
-                                [self._normalize_enum_value(rt) for rt in report_type]
-                                if report_type
-                                else None
-                            ),
-                            "state": (
-                                [self._normalize_enum_value(s) for s in state]
-                                if state
-                                else None
-                            ),
+                            "severity": severity,
+                            "report_type": report_type,
+                            "state": state,
+                            "state_filter_defaulted": validated_state is None,
                             "scanner": scanner,
                         },
                     },

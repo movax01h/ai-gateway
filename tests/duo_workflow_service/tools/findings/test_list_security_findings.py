@@ -12,6 +12,10 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     SecurityFindingSeverity,
     SecurityFindingState,
 )
+from duo_workflow_service.tools.findings.queries import LIST_SECURITY_FINDINGS_QUERY
+from tests.duo_workflow_service.tools.query_test_helpers import (
+    extract_location_fragment,
+)
 
 # editorconfig-checker-disable
 PIPELINE_FINDINGS_JSON = """
@@ -153,8 +157,8 @@ class TestListSecurityFindings:
         )
         call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
         variables = call_body["variables"]
-        assert variables["severity"] == ["HIGH"]
-        assert variables["reportType"] == ["SAST"]
+        assert variables["severity"] == ["high"]
+        assert variables["reportType"] == ["sast"]
         query = call_body["query"]
         assert "location {" in query
         assert "... on VulnerabilityLocationSast {" in query
@@ -181,6 +185,270 @@ class TestListSecurityFindings:
         variables = call_body["variables"]
         assert "state" in variables
         assert set(variables["state"]) == {"DETECTED", "CONFIRMED", "RESOLVED"}
+
+    async def test_arun_filters_sent_lowercase_from_mixed_case_strings(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that mixed-case string filters are accepted and sent lowercase."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "severity": [" Critical ", SecurityFindingSeverity.HIGH],
+                "report_type": ["sast", "Dependency_Scanning"],
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        variables = call_body["variables"]
+        assert variables["severity"] == ["critical", "high"]
+        assert variables["reportType"] == ["sast", "dependency_scanning"]
+
+    async def test_arun_duplicate_filter_values_deduped(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that duplicate filter values are deduplicated before being sent.
+
+        Duplicate severities would duplicate every matching result row server-side.
+        """
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "severity": ["HIGH", "high", SecurityFindingSeverity.HIGH, "CRITICAL"],
+                "report_type": ["sast", "SAST"],
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        variables = call_body["variables"]
+        assert variables["severity"] == ["high", "critical"]
+        assert variables["reportType"] == ["sast"]
+
+    async def test_arun_sarif_report_type(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that the SARIF report type is accepted and sent lowercase."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "report_type": [SecurityFindingReportType.SARIF],
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert call_body["variables"]["reportType"] == ["sarif"]
+
+    async def test_arun_state_sent_uppercase(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that state values stay UPPERCASE (GraphQL VulnerabilityState enum)."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "state": ["detected", SecurityFindingState.DISMISSED],
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert call_body["variables"]["state"] == ["DETECTED", "DISMISSED"]
+
+    async def test_arun_default_state_includes_dismissed(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that the include_dismissed=True default sends all four states.
+
+        Rails only includes dismissed findings when a state filter is passed explicitly, so the tool must send one by
+        default.
+        """
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert set(call_body["variables"]["state"]) == {
+            "DETECTED",
+            "CONFIRMED",
+            "RESOLVED",
+            "DISMISSED",
+        }
+
+    async def test_arun_surfaces_dependency_package_data(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that dependency package data from DS/CS locations reaches the tool output."""
+        nodes = pipeline_findings_response_data["data"]["project"]["pipelines"][
+            "nodes"
+        ][0]["securityReportFindings"]["nodes"]
+        nodes[0]["reportType"] = "DEPENDENCY_SCANNING"
+        nodes[0]["location"] = {
+            "file": "go.sum",
+            "dependency": {"version": "1.2.3", "package": {"name": "left-pad"}},
+        }
+        nodes[1]["reportType"] = "CONTAINER_SCANNING"
+        nodes[1]["location"] = {
+            "image": "registry.example.com/app:latest",
+            "dependency": {"version": "1.1.1t", "package": {"name": "openssl"}},
+        }
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        response = json.loads(
+            await tool.arun(
+                {
+                    "project_full_path": "gitlab-duo/myproject",
+                    "ref": "security/sast-fix-773-173",
+                }
+            )
+        )
+        ds_location = response["findings"][0]["location"]
+        assert ds_location["dependency"]["package"]["name"] == "left-pad"
+        assert ds_location["dependency"]["version"] == "1.2.3"
+        cs_location = response["findings"][1]["location"]
+        assert cs_location["dependency"]["package"]["name"] == "openssl"
+        assert cs_location["dependency"]["version"] == "1.1.1t"
+
+    async def test_arun_metadata_reports_state_filter_defaulted(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that metadata says whether the state filter was defaulted or explicit."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+
+        response = json.loads(
+            await tool.arun(
+                {
+                    "project_full_path": "gitlab-duo/myproject",
+                    "ref": "security/sast-fix-773-173",
+                }
+            )
+        )
+        assert response["metadata"]["filters_applied"]["state_filter_defaulted"] is True
+
+        response = json.loads(
+            await tool.arun(
+                {
+                    "project_full_path": "gitlab-duo/myproject",
+                    "ref": "security/sast-fix-773-173",
+                    "state": [SecurityFindingState.DETECTED],
+                }
+            )
+        )
+        assert (
+            response["metadata"]["filters_applied"]["state_filter_defaulted"] is False
+        )
+
+    async def test_arun_include_dismissed_null_behaves_as_default(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that an explicit include_dismissed=None falls back to the documented True default."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "include_dismissed": None,
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert set(call_body["variables"]["state"]) == {
+            "DETECTED",
+            "CONFIRMED",
+            "RESOLVED",
+            "DISMISSED",
+        }
+
+    async def test_arun_explicit_state_overrides_include_dismissed(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that an explicit state filter is used as-is."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "state": [SecurityFindingState.DETECTED],
+                "include_dismissed": True,
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert call_body["variables"]["state"] == ["DETECTED"]
+
+    async def test_arun_explicit_dismissed_state_wins_over_include_dismissed_false(
+        self, gitlab_client_mock, metadata, pipeline_findings_response_data
+    ):
+        """Test that an explicit state filter takes precedence over include_dismissed."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=pipeline_findings_response_data
+        )
+        tool = ListSecurityFindings(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "gitlab-duo/myproject",
+                "ref": "security/sast-fix-773-173",
+                "state": [SecurityFindingState.DISMISSED],
+                "include_dismissed": False,
+            }
+        )
+        call_body = json.loads(gitlab_client_mock.apost.call_args[1]["body"])
+        assert call_body["variables"]["state"] == ["DISMISSED"]
+
+    @pytest.mark.parametrize(
+        "filter_kwargs, invalid_value",
+        [
+            ({"severity": ["moderate"]}, "moderate"),
+            ({"report_type": ["GENERIC"]}, "GENERIC"),
+            ({"report_type": ["bogus"]}, "bogus"),
+            ({"state": ["open"]}, "open"),
+        ],
+    )
+    async def test_arun_invalid_filter_values(
+        self, gitlab_client_mock, metadata, filter_kwargs, invalid_value
+    ):
+        """Test that invalid filter values raise ToolException without an HTTP call."""
+        tool = ListSecurityFindings(metadata=metadata)
+        with pytest.raises(ToolException) as exc_info:
+            await tool.arun(
+                {
+                    "project_full_path": "gitlab-duo/myproject",
+                    "ref": "security/sast-fix-773-173",
+                    **filter_kwargs,
+                }
+            )
+        message = str(exc_info.value)
+        assert message.startswith("Invalid")
+        assert invalid_value in message
+        assert "Valid values" in message
+        gitlab_client_mock.apost.assert_not_called()
 
     async def test_arun_pagination(self, gitlab_client_mock, metadata):
         """Test that the tool correctly handles pagination."""
@@ -354,3 +622,24 @@ class TestListSecurityFindings:
         assert "severity: CRITICAL, HIGH" in msg
         assert "type: SAST" in msg
         assert "state: DETECTED" in msg
+
+
+@pytest.mark.parametrize(
+    "location_type",
+    [
+        "VulnerabilityLocationDependencyScanning",
+        "VulnerabilityLocationContainerScanning",
+    ],
+)
+def test_query_location_fragment_includes_dependency(location_type):
+    """The DS and CS location fragments should select dependency package data."""
+    fragment = extract_location_fragment(LIST_SECURITY_FINDINGS_QUERY, location_type)
+    assert "dependency { version package { name } }" in fragment
+
+
+def test_query_dependency_scanning_fragment_includes_blob_path():
+    """The DS location fragment should select blobPath."""
+    fragment = extract_location_fragment(
+        LIST_SECURITY_FINDINGS_QUERY, "VulnerabilityLocationDependencyScanning"
+    )
+    assert "blobPath" in fragment

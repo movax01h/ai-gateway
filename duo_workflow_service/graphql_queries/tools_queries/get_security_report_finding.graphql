@@ -230,10 +230,22 @@ query GetSecurityReportFinding($projectFullPath: ID!, $ref: String!, $findingUui
             ... on VulnerabilityLocationDependencyScanning {
               blobPath
               file
+              dependency {
+                version
+                package {
+                  name
+                }
+              }
             }
             ... on VulnerabilityLocationContainerScanning {
               image
               operatingSystem
+              dependency {
+                version
+                package {
+                  name
+                }
+              }
             }
             ... on VulnerabilityLocationCoverageFuzzing {
               startLine

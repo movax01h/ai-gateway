@@ -199,6 +199,7 @@ GET_VULNERABILITY_DETAILS_QUERY = """
                 __typename
                 ... on VulnerabilityLocationClusterImageScanning {
                     image
+                    operatingSystem
                     kubernetesResource {
                         agent {
                             id
@@ -206,10 +207,22 @@ GET_VULNERABILITY_DETAILS_QUERY = """
                             webPath
                         }
                     }
+                    dependency {
+                        version
+                        package {
+                            name
+                        }
+                    }
                 }
                 ... on VulnerabilityLocationContainerScanning {
                     image
                     containerRepositoryUrl
+                    dependency {
+                        version
+                        package {
+                            name
+                        }
+                    }
                 }
                 ... on VulnerabilityLocationCoverageFuzzing {
                     blobPath
@@ -228,6 +241,12 @@ GET_VULNERABILITY_DETAILS_QUERY = """
                 ... on VulnerabilityLocationDependencyScanning {
                     blobPath
                     file
+                    dependency {
+                        version
+                        package {
+                            name
+                        }
+                    }
                 }
                 ... on VulnerabilityLocationGeneric {
                     description
