@@ -222,6 +222,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.PostSastFpAnalysisToGitlab,
         tools.PostSecretFpAnalysisToGitlab,
         tools.PostDuoCodeReview,
+        tools.SubmitMergeRequestRiskClassification,
         SubmitMrReview,
         ReplyToDiscussion,
         SetDiscussionResolved,

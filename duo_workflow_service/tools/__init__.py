@@ -29,6 +29,7 @@ from .project import *
 from .render_ui import *
 from .repository_files import *
 from .request_user_clarification import *
+from .risk_classification import *
 from .run_glql_query import *
 from .search import *
 from .search_system import *
