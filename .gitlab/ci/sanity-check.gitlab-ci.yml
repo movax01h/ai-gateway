@@ -25,7 +25,6 @@ sanity-tests:
   script:
     - |
       ./scripts/submit_cef_eval.sh \
-        "master" \
         "${SANITY_CHECK_EVAL_SHA:-$CI_COMMIT_SHA}" \
         "$CI_PROJECT_PATH" \
         "AIGW sanity-tests CI: pipeline $CI_PIPELINE_ID (parent pipeline: ${PARENT_PIPELINE_ID:-none})"
