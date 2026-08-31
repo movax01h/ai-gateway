@@ -7,13 +7,14 @@
 # pinned here.
 #
 # Usage:
-#   submit_cef_eval.sh <gl_commit> <aigw_commit> <aigw_project_path> <notes>
+#   submit_cef_eval.sh <aigw_commit> <aigw_project_path> <notes> [gl_commit]
 #
 # Positional arguments:
-#   gl_commit          GitLab commit/ref to evaluate against (e.g. "master").
 #   aigw_commit        AI Gateway commit SHA to evaluate.
 #   aigw_project_path  AI Gateway project path (e.g. "group/project").
 #   notes              Free-form notes attached to the experiment.
+#   gl_commit          Optional GitLab commit/ref to evaluate against. Omit to
+#                      let CEF pick its own pre-tested GitLab commit.
 #
 # Required environment variables:
 #   CEF_SERVICE_URL          Base URL of the CEF service.
@@ -26,15 +27,15 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-  echo "Usage: $0 <gl_commit> <aigw_commit> <aigw_project_path> <notes>" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+  echo "Usage: $0 <aigw_commit> <aigw_project_path> <notes> [gl_commit]" >&2
   exit 2
 fi
 
-GL_COMMIT=$1
-AIGW_COMMIT=$2
-AIGW_PROJECT_PATH=$3
-NOTES=$4
+AIGW_COMMIT=$1
+AIGW_PROJECT_PATH=$2
+NOTES=$3
+GL_COMMIT=${4:-}
 
 PAYLOAD=$(jq -n \
   --arg gl_commit "$GL_COMMIT" \
@@ -42,7 +43,6 @@ PAYLOAD=$(jq -n \
   --arg aigw_project_path "$AIGW_PROJECT_PATH" \
   --arg notes "$NOTES" \
   '{
-    gl_commit: $gl_commit,
     aigw_commit: $aigw_commit,
     aigw_project_path: $aigw_project_path,
     model_selection: {
@@ -64,7 +64,8 @@ PAYLOAD=$(jq -n \
       timeout: 1200
     },
     notes: $notes
-  }')
+  }
+  | if $gl_commit == "" then . else .gl_commit = $gl_commit end')
 
 if ! RESPONSE=$(curl --fail-with-body -sS -X POST "$CEF_SERVICE_URL/v1/experiments/register" \
   -H "Authorization: Bearer $CEF_SERVICE_ACCOUNT_PAT" \
