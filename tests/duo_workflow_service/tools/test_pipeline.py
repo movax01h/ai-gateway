@@ -571,14 +571,23 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
 ):
     """Test that pipelines with no failed jobs return an informational response."""
     # API returns empty list when scope[]=failed is passed and there are no failures
-    jobs_response: list = []
-
-    mock_response = GitLabHttpResponse(
-        status_code=200,
-        body=json.dumps(jobs_response),
-        headers={"X-Next-Page": ""},
-    )
-    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+    responses = [
+        GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps([]),
+            headers={"X-Next-Page": ""},
+        ),
+        GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 123,
+                "status": "success",
+                "started_at": "2026-01-01T00:00:00Z",
+                "yaml_errors": None,
+            },
+        ),
+    ]
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses)
 
     tool = GetPipelineFailingJobs(metadata=metadata)
 
@@ -590,13 +599,107 @@ async def test_get_pipeline_failing_jobs_with_pipeline_url_no_failed_jobs(
     assert response_json == {
         "pipeline_id": 123,
         "failed_jobs": "No failing jobs found in this pipeline.",
+        "pipeline_status": "success",
+        "pipeline_started_at": "2026-01-01T00:00:00Z",
     }
 
-    gitlab_client_mock.aget.assert_called_once_with(
+    assert gitlab_client_mock.aget.call_args_list[0] == call(
         path="/api/v4/projects/namespace%2Fproject/pipelines/123/jobs",
         params={"page": "1", "per_page": 100, "scope[]": "failed"},
         parse_json=False,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pipeline_response", "expected_extra"),
+    [
+        pytest.param(
+            # Observed on a real instance: a rejected configuration for which GitLab recorded
+            # no yaml_errors. The null started_at is the only usable signal, which is why
+            # callers must not key off yaml_errors alone.
+            GitLabHttpResponse(
+                status_code=200,
+                body={"status": "failed", "started_at": None, "yaml_errors": None},
+            ),
+            {"pipeline_status": "failed", "pipeline_started_at": None},
+            id="never_started_without_yaml_errors",
+        ),
+        pytest.param(
+            GitLabHttpResponse(
+                status_code=200,
+                body={
+                    "status": "failed",
+                    "started_at": None,
+                    "yaml_errors": "jobs config should contain at least one visible job",
+                },
+            ),
+            {
+                "pipeline_status": "failed",
+                "pipeline_started_at": None,
+                "yaml_errors": "jobs config should contain at least one visible job",
+            },
+            id="never_started_with_yaml_errors",
+        ),
+        pytest.param(
+            # A failing job retried before the flow reached it leaves the pipeline running with
+            # nothing in the failed scope. The status must reach the caller so this is not
+            # mistaken for a rejected configuration.
+            GitLabHttpResponse(
+                status_code=200,
+                body={
+                    "status": "running",
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "yaml_errors": None,
+                },
+            ),
+            {
+                "pipeline_status": "running",
+                "pipeline_started_at": "2026-01-01T00:00:00Z",
+            },
+            id="retried_job_leaves_pipeline_running",
+        ),
+        pytest.param(
+            # Pipeline detail is supplementary, so a failure to read it must not fail the tool.
+            GitLabHttpResponse(status_code=404, body={"message": "404 Not Found"}),
+            {},
+            id="pipeline_fetch_failed",
+        ),
+        pytest.param(
+            # Same for a transport-level failure: the primary "no failing jobs" result has
+            # already been determined, so a network error on the follow-up must not lose it.
+            Exception("Network connection error"),
+            {},
+            id="pipeline_fetch_raised",
+        ),
+    ],
+)
+async def test_get_pipeline_failing_jobs_no_failed_jobs_reports_pipeline_state(
+    gitlab_client_mock, metadata, pipeline_response, expected_extra
+):
+    """Report whether a pipeline with zero failing jobs ever started."""
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(
+                status_code=200,
+                body=json.dumps([]),
+                headers={"X-Next-Page": ""},
+            ),
+            pipeline_response,
+        ]
+    )
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+
+    response_json = json.loads(
+        await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
+    )
+
+    assert response_json == {
+        "pipeline_id": 123,
+        "failed_jobs": "No failing jobs found in this pipeline.",
+        **expected_extra,
+    }
 
 
 @pytest.mark.asyncio
@@ -615,6 +718,14 @@ async def test_get_pipeline_failing_jobs_with_merge_request_url_no_failed_jobs(
             body=json.dumps([]),
             headers={"X-Next-Page": ""},
         ),
+        GitLabHttpResponse(
+            status_code=200,
+            body={
+                "id": 10,
+                "status": "success",
+                "started_at": "2026-01-01T00:00:00Z",
+            },
+        ),
     ]
 
     gitlab_client_mock.aget = AsyncMock(side_effect=responses)
@@ -628,6 +739,8 @@ async def test_get_pipeline_failing_jobs_with_merge_request_url_no_failed_jobs(
         "merge_request": {"id": 1, "title": "Merge Request 1"},
         "pipeline_id": 10,
         "failed_jobs": "No failing jobs found in this pipeline.",
+        "pipeline_status": "success",
+        "pipeline_started_at": "2026-01-01T00:00:00Z",
     }
 
 
