@@ -1,0 +1,16 @@
+query GetGroupLabels($fullPath: ID!, $name: String, $withSimilar: Boolean!, $includeAncestors: Boolean!) {
+    group(fullPath: $fullPath) {
+        exact: labels(title: $name, includeAncestorGroups: $includeAncestors, first: 5) @skip(if: $withSimilar) {
+            nodes {
+                id
+                title
+            }
+        }
+        similar: labels(searchTerm: $name, searchIn: [TITLE], includeAncestorGroups: $includeAncestors, first: 50) @include(if: $withSimilar) { # codespell:ignore
+            nodes {
+                id
+                title
+            }
+        }
+    }
+}

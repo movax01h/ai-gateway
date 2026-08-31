@@ -86,6 +86,7 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
 """
 
 DateString = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]
+LabelName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class HealthStatus(str, Enum):
@@ -509,11 +510,14 @@ class CreateWorkItemInput(ParentResourceInput):
     assignee_ids: Optional[List[int]] = Field(
         default=None, description="IDs of users to assign"
     )
+    labels: Optional[List[LabelName]] = Field(
+        default=None,
+        description="""Exact label names to set on the work item, e.g. ['bug', 'group::ai framework'].""",
+    )
     label_ids: Optional[List[str]] = Field(
         default=None,
-        description="""Label global IDs or numeric IDs to add to the work item..
-        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123)
-        To find label IDs: First fetch the project labels, then pass the numeric IDs from the response.""",
+        description="""Label global IDs or numeric IDs to set on the work item.
+        Only use this if you already have the IDs; otherwise use 'labels'.""",
     )
     confidential: Optional[bool] = Field(
         default=None, description="Set to true to create a confidential work item."
@@ -629,15 +633,23 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         default=None,
         description="The state of the work item. Use 'opened' or 'closed'.",
     )
+    add_labels: Optional[List[LabelName]] = Field(
+        default=None,
+        description="""Exact label names to add to the work item, e.g. ['bug', 'group::ai framework'].""",
+    )
+    remove_labels: Optional[List[LabelName]] = Field(
+        default=None,
+        description="Exact label names to remove from the work item.",
+    )
     add_label_ids: Optional[List[str]] = Field(
         default=None,
         description="""Label global IDs or numeric IDs to add to the work item.
-        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123)""",
+        Only use this if you already have the IDs; otherwise use 'add_labels'.""",
     )
     remove_label_ids: Optional[List[str]] = Field(
         default=None,
-        description="""Label global IDs or numeric IDs to add to the work item.
-        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123).""",
+        description="""Label global IDs or numeric IDs to remove from the work item.
+        Only use this if you already have the IDs; otherwise use 'remove_labels'.""",
     )
     hierarchy_widget: Optional[Dict[Literal["parent_id"], str]] = Field(
         default=None,

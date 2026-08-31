@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.tools.work_item import (
     TodoAction,
@@ -535,6 +536,16 @@ def test_update_work_item_format_display_message(input_data, expected_message):
     tool = UpdateWorkItem(description="update work item")
     message = tool.format_display_message(input_data)
     assert message == expected_message
+
+
+def test_update_work_item_input_rejects_a_blank_label_name():
+    """A name that is only whitespace is a broken argument, not a missing label."""
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        UpdateWorkItemInput(
+            project_id="namespace/project",
+            work_item_iid=42,
+            add_labels=["testing", " "],
+        )
 
 
 def test_update_work_item_input_with_valid_hierarchy_widget():

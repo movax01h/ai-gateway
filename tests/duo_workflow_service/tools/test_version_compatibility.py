@@ -22,6 +22,7 @@ from duo_workflow_service.tools.version_compatibility import (
     supports_glql_schema_endpoint,
     supports_group_level_custom_instructions,
     supports_hierarchy_widget,
+    supports_labels_by_name,
     supports_licensed_feature_availability,
     supports_note_resolved_and_resolvable_fields,
 )
@@ -185,6 +186,23 @@ class TestVersionCompatibilityFunctions:
         """End to end from the header string, without mocking the parser."""
         mock_gitlab_version.get.return_value = reported
         assert supports_glql_schema_endpoint() is expected
+
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            ("19.4.0", True),
+            ("19.4.0-pre-g1234abcd", True),
+            ("19.3.0", False),
+            (None, True),
+            ("", True),
+        ],
+    )
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    def test_labels_by_name_reads_raw_version_strings(
+        self, mock_gitlab_version, reported, expected
+    ):
+        mock_gitlab_version.get.return_value = reported
+        assert supports_labels_by_name() is expected
 
 
 class TestVersionConstants:
