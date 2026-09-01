@@ -8,6 +8,7 @@ from duo_workflow_service.agent_platform.v1.components.base import BaseComponent
 from duo_workflow_service.agent_platform.v1.routers.router import BaseRouter, Router
 from duo_workflow_service.agent_platform.v1.state import FlowState, IOKey
 from lib.events import GLReportingEventContext
+from lib.internal_events.ai_context import AIContext
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
@@ -443,6 +444,11 @@ class TestRouter:
         assert call_kwargs["additional_properties"].property == "create_fix"
         assert call_kwargs["additional_properties"].value == "test-flow-id"
         assert call_kwargs["additional_properties"].extra == {"is_default_route": False}
+        assert call_kwargs["ai_context"] == AIContext(
+            workflow_id="test-flow-id",
+            flow_type="fix_pipeline",
+            agent_name=None,
+        )
 
     @patch("duo_workflow_service.agent_platform.v1.routers.router.duo_workflow_metrics")
     def test_track_route_decision_with_default_route(self, mock_metrics):
@@ -472,6 +478,57 @@ class TestRouter:
         call_kwargs = mock_event_client.track_event.call_args[1]
         assert call_kwargs["additional_properties"].property == "invalid_route"
         assert call_kwargs["additional_properties"].extra == {"is_default_route": True}
+        assert call_kwargs["ai_context"] == AIContext(
+            workflow_id="test-flow-id",
+            flow_type="fix_pipeline",
+            agent_name=None,
+        )
+
+    @patch("duo_workflow_service.agent_platform.v1.routers.router.duo_workflow_metrics")
+    def test_track_route_decision_includes_agent_name_in_ai_context(self, mock_metrics):
+        """Test _track_route_decision includes agent_name in the AIContext when set."""
+        from_component = self.create_mock_component("decide_approach")
+        to_component = self.create_mock_component("to")
+        mock_event_client = Mock(spec=InternalEventsClient)
+        flow_type = GLReportingEventContext.from_workflow_definition("fix_pipeline")
+
+        router = Router(
+            from_component=from_component,
+            to_component=to_component,
+            flow_id="test-flow-id",
+            flow_type=flow_type,
+            agent_name="supervisor",
+            internal_event_client=mock_event_client,
+        )
+
+        router._track_route_decision("create_fix", is_default_route=False)
+
+        call_kwargs = mock_event_client.track_event.call_args[1]
+        assert call_kwargs["ai_context"] == AIContext(
+            workflow_id="test-flow-id",
+            flow_type="fix_pipeline",
+            agent_name="supervisor",
+        )
+
+    @patch("duo_workflow_service.agent_platform.v1.routers.router.duo_workflow_metrics")
+    def test_track_route_decision_no_internal_event_client_skips_track_event(
+        self, mock_metrics
+    ):
+        """Test _track_route_decision does not call track_event when no client is set."""
+        from_component = self.create_mock_component("decide_approach")
+        to_component = self.create_mock_component("to")
+        flow_type = GLReportingEventContext.from_workflow_definition("fix_pipeline")
+
+        router = Router(
+            from_component=from_component,
+            to_component=to_component,
+            flow_id="test-flow-id",
+            flow_type=flow_type,
+            agent_name="supervisor",
+        )
+
+        # Should not raise even without an internal_event_client
+        router._track_route_decision("create_fix", is_default_route=False)
 
     @patch(
         "duo_workflow_service.agent_platform.v1.routers.base.IOKey.parse_key",

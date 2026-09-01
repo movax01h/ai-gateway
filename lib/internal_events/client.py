@@ -131,6 +131,7 @@ class InternalEventsClient:
         event_name: str,
         additional_properties: Optional[InternalEventAdditionalProperties] = None,
         category: Optional[str] = "default_category",
+        ai_context: Optional[AIContext] = None,
         **kwargs,
     ) -> None:
         """Send internal event to Snowplow.
@@ -140,7 +141,15 @@ class InternalEventsClient:
                 <action>_<target_of_action>_<where/when>. Reference:
                 https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/quick_start.html#defining-event-and-metrics
             additional_properties: Additional properties for the event.
-            category:  the location where the event happened ideally classname which invoked the event.
+            category: the location where the event happened ideally classname which invoked the event.
+            ai_context: Optional explicit AIContext to attach to the event. When provided, its
+                ``workflow_id``, ``flow_type``, and ``agent_name`` fields take precedence over
+                values extracted from ``extra``/``kwargs``. Token fields (``input_tokens``,
+                ``output_tokens``, ``total_tokens``, ``cache_read``, ``cache_creation``,
+                ``ephemeral_5m_input_tokens``, ``ephemeral_1h_input_tokens``) on the explicit
+                context also take precedence. Passing this parameter is the preferred path for
+                new callers; the implicit extraction from ``extra``/``kwargs`` is retained for
+                backwards compatibility.
         """
         if not self.enabled:
             self._logger.debug("Internal events disabled")
@@ -170,6 +179,36 @@ class InternalEventsClient:
 
         session_id = additional_properties.value
         event_property = self.truncate_string(additional_properties.property)
+        resolved_session_id = str(session_id) if session_id is not None else None
+
+        if ai_context is not None:
+            resolved_ai_context = AIContext(
+                session_id=resolved_session_id,
+                workflow_id=ai_context.workflow_id,
+                flow_type=ai_context.flow_type,
+                agent_name=ai_context.agent_name,
+                input_tokens=ai_context.input_tokens,
+                output_tokens=ai_context.output_tokens,
+                total_tokens=ai_context.total_tokens,
+                ephemeral_5m_input_tokens=ai_context.ephemeral_5m_input_tokens,
+                ephemeral_1h_input_tokens=ai_context.ephemeral_1h_input_tokens,
+                cache_read=ai_context.cache_read,
+                cache_creation=ai_context.cache_creation,
+            )
+        else:
+            resolved_ai_context = AIContext(
+                session_id=resolved_session_id,
+                workflow_id=extra.get("workflow_id"),
+                flow_type=extra.get("workflow_type"),
+                agent_name=extra.get("agent_name"),
+                input_tokens=new_context.get("input_tokens"),
+                output_tokens=new_context.get("output_tokens"),
+                total_tokens=new_context.get("total_tokens"),
+                ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
+                ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
+                cache_read=extra.get("cache_read"),
+                cache_creation=extra.get("cache_creation"),
+            )
 
         self._logger.info(
             "Building AIContext",
@@ -177,39 +216,26 @@ class InternalEventsClient:
             label=additional_properties.label,
             property=event_property,
             session_id=session_id,
-            workflow_id=extra.get("workflow_id"),
-            flow_type=extra.get("workflow_type"),
-            agent_name=extra.get("agent_name"),
-            input_tokens=new_context.get("input_tokens"),
-            input_tokens_type=type(new_context.get("input_tokens")).__name__,
-            output_tokens=new_context.get("output_tokens"),
-            output_tokens_type=type(new_context.get("output_tokens")).__name__,
-            total_tokens=new_context.get("total_tokens"),
-            total_tokens_type=type(new_context.get("total_tokens")).__name__,
-            ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
-            ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
-            cache_read=extra.get("cache_read"),
-            cache_creation=extra.get("cache_creation"),
-        )
-
-        ai_context = AIContext(
-            session_id=str(session_id) if session_id is not None else None,
-            workflow_id=extra.get("workflow_id"),
-            flow_type=extra.get("workflow_type"),
-            agent_name=extra.get("agent_name"),
-            input_tokens=new_context.get("input_tokens"),
-            output_tokens=new_context.get("output_tokens"),
-            total_tokens=new_context.get("total_tokens"),
-            ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
-            ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
-            cache_read=extra.get("cache_read"),
-            cache_creation=extra.get("cache_creation"),
+            workflow_id=resolved_ai_context.workflow_id,
+            flow_type=resolved_ai_context.flow_type,
+            agent_name=resolved_ai_context.agent_name,
+            input_tokens=resolved_ai_context.input_tokens,
+            input_tokens_type=type(resolved_ai_context.input_tokens).__name__,
+            output_tokens=resolved_ai_context.output_tokens,
+            output_tokens_type=type(resolved_ai_context.output_tokens).__name__,
+            total_tokens=resolved_ai_context.total_tokens,
+            total_tokens_type=type(resolved_ai_context.total_tokens).__name__,
+            ephemeral_5m_input_tokens=resolved_ai_context.ephemeral_5m_input_tokens,
+            ephemeral_1h_input_tokens=resolved_ai_context.ephemeral_1h_input_tokens,
+            cache_read=resolved_ai_context.cache_read,
+            cache_creation=resolved_ai_context.cache_creation,
+            explicit_ai_context_provided=ai_context is not None,
         )
 
         structured_event = StructuredEvent(
             context=[
                 SelfDescribingJson(self.STANDARD_CONTEXT_SCHEMA, new_context),
-                SelfDescribingJson(self.AI_CONTEXT_SCHEMA, asdict(ai_context)),
+                SelfDescribingJson(self.AI_CONTEXT_SCHEMA, asdict(resolved_ai_context)),
             ],
             category=category,  # type: ignore[arg-type]
             action=event_name,

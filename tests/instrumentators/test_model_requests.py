@@ -236,6 +236,7 @@ class TestWatchContainer:
             input_tokens=1,
             output_tokens=2,
             total_tokens=3,
+            ai_context=None,
             **container.labels,
             model_provider=container.model_provider,
             additional_properties=InternalEventAdditionalProperties(

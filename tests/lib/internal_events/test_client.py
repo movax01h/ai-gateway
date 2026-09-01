@@ -368,3 +368,246 @@ class TestTruncateString:
         assert result.startswith(prefix)
         assert result.endswith("...")
         assert len(result) == InternalEventsClient.MAX_VALUE_LENGTH
+
+
+class TestInternalEventsClientExplicitAIContext:
+    """Test InternalEventsClient with explicit AIContext parameter."""
+
+    @pytest.fixture
+    def mock_tracker(self):
+        return Mock()
+
+    @pytest.fixture
+    def client(self, mock_tracker):
+        with (
+            patch("lib.internal_events.client.requests.Session"),
+            patch("lib.internal_events.client.LoggingAsyncEmitter"),
+            patch("lib.internal_events.client.Tracker") as tracker_class,
+        ):
+            tracker_class.return_value = mock_tracker
+            client = InternalEventsClient(
+                enabled=True,
+                endpoint="https://test.endpoint.com",
+                app_id="test_app",
+                namespace="test_namespace",
+                batch_size=1,
+                thread_count=1,
+            )
+            yield client
+
+    def _find_ai_context(self, structured_event):
+        for ctx in structured_event.context:
+            if ctx.schema == InternalEventsClient.AI_CONTEXT_SCHEMA:
+                return ctx.data
+        return None
+
+    def test_explicit_ai_context_workflow_fields_take_precedence_over_extra(
+        self, client, mock_tracker
+    ):
+        """Explicit AIContext workflow_id/flow_type/agent_name override values in extra."""
+        from lib.internal_events.ai_context import AIContext
+
+        current_event_context.set(EventContext())
+
+        explicit_ctx = AIContext(
+            workflow_id="explicit-wf-id",
+            flow_type="explicit_flow",
+            agent_name="explicit_agent",
+        )
+        additional_properties = InternalEventAdditionalProperties(
+            label="test",
+            workflow_id="implicit-wf-id",
+            workflow_type="implicit_flow",
+            agent_name="implicit_agent",
+        )
+
+        client.track_event(
+            "test_event",
+            additional_properties=additional_properties,
+            ai_context=explicit_ctx,
+        )
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_ctx_data = self._find_ai_context(structured_event)
+
+        assert ai_ctx_data is not None
+        assert ai_ctx_data["workflow_id"] == "explicit-wf-id"
+        assert ai_ctx_data["flow_type"] == "explicit_flow"
+        assert ai_ctx_data["agent_name"] == "explicit_agent"
+
+    def test_explicit_ai_context_token_fields_take_precedence_over_kwargs(
+        self, client, mock_tracker
+    ):
+        """Explicit AIContext token fields override values from kwargs."""
+        from lib.internal_events.ai_context import AIContext
+
+        current_event_context.set(EventContext())
+
+        explicit_ctx = AIContext(
+            input_tokens=999,
+            output_tokens=888,
+            total_tokens=1887,
+            cache_read=77,
+            cache_creation=66,
+            ephemeral_5m_input_tokens=55,
+            ephemeral_1h_input_tokens=44,
+        )
+
+        client.track_event(
+            "test_event",
+            ai_context=explicit_ctx,
+            input_tokens=1,
+            output_tokens=2,
+            total_tokens=3,
+        )
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_ctx_data = self._find_ai_context(structured_event)
+
+        assert ai_ctx_data is not None
+        assert ai_ctx_data["input_tokens"] == 999
+        assert ai_ctx_data["output_tokens"] == 888
+        assert ai_ctx_data["total_tokens"] == 1887
+        assert ai_ctx_data["cache_read"] == 77
+        assert ai_ctx_data["cache_creation"] == 66
+        assert ai_ctx_data["ephemeral_5m_input_tokens"] == 55
+        assert ai_ctx_data["ephemeral_1h_input_tokens"] == 44
+
+    def test_explicit_ai_context_none_falls_back_to_implicit_extraction(
+        self, client, mock_tracker
+    ):
+        """When ai_context=None, implicit extraction from extra/kwargs still works."""
+        current_event_context.set(EventContext())
+
+        additional_properties = InternalEventAdditionalProperties(
+            label="test",
+            workflow_id="implicit-wf-id",
+            workflow_type="implicit_flow",
+            agent_name="implicit_agent",
+            cache_read=10,
+            cache_creation=20,
+        )
+
+        client.track_event(
+            "test_event",
+            additional_properties=additional_properties,
+            ai_context=None,
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+        )
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_ctx_data = self._find_ai_context(structured_event)
+
+        assert ai_ctx_data is not None
+        assert ai_ctx_data["workflow_id"] == "implicit-wf-id"
+        assert ai_ctx_data["flow_type"] == "implicit_flow"
+        assert ai_ctx_data["agent_name"] == "implicit_agent"
+        assert ai_ctx_data["input_tokens"] == 100
+        assert ai_ctx_data["output_tokens"] == 50
+        assert ai_ctx_data["total_tokens"] == 150
+        assert ai_ctx_data["cache_read"] == 10
+        assert ai_ctx_data["cache_creation"] == 20
+
+    def test_explicit_ai_context_session_id_from_additional_properties_value(
+        self, client, mock_tracker
+    ):
+        """session_id in AIContext is always derived from additional_properties.value."""
+        from lib.internal_events.ai_context import AIContext
+
+        current_event_context.set(EventContext())
+
+        explicit_ctx = AIContext(workflow_id="wf-123")
+        additional_properties = InternalEventAdditionalProperties(
+            label="test",
+            value=42,
+        )
+
+        client.track_event(
+            "test_event",
+            additional_properties=additional_properties,
+            ai_context=explicit_ctx,
+        )
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_ctx_data = self._find_ai_context(structured_event)
+
+        assert ai_ctx_data is not None
+        assert ai_ctx_data["session_id"] == "42"
+        assert ai_ctx_data["workflow_id"] == "wf-123"
+
+    def test_explicit_ai_context_partial_fields_use_explicit_for_set_fields(
+        self, client, mock_tracker
+    ):
+        """Explicit AIContext with only some fields set: set fields override implicit,
+        None fields on explicit context still override implicit (explicit wins entirely)."""
+        from lib.internal_events.ai_context import AIContext
+
+        current_event_context.set(EventContext())
+
+        # Only workflow_id is set on explicit context; flow_type and agent_name are None
+        explicit_ctx = AIContext(workflow_id="explicit-wf")
+        additional_properties = InternalEventAdditionalProperties(
+            label="test",
+            workflow_id="implicit-wf",
+            workflow_type="implicit_flow",
+            agent_name="implicit_agent",
+        )
+
+        client.track_event(
+            "test_event",
+            additional_properties=additional_properties,
+            ai_context=explicit_ctx,
+        )
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_ctx_data = self._find_ai_context(structured_event)
+
+        assert ai_ctx_data is not None
+        # Explicit context is used entirely when provided; None fields on it stay None
+        assert ai_ctx_data["workflow_id"] == "explicit-wf"
+        assert ai_ctx_data["flow_type"] is None
+        assert ai_ctx_data["agent_name"] is None
+
+    def test_explicit_ai_context_standard_context_payload_unchanged(
+        self, client, mock_tracker
+    ):
+        """Passing explicit ai_context does not alter the gitlab_standard payload."""
+        from lib.internal_events.ai_context import AIContext
+
+        current_event_context.set(EventContext())
+
+        explicit_ctx = AIContext(workflow_id="wf-abc", flow_type="chat")
+        additional_properties = InternalEventAdditionalProperties(
+            label="test",
+            workflow_id="wf-abc",
+        )
+
+        client.track_event(
+            "test_event",
+            additional_properties=additional_properties,
+            ai_context=explicit_ctx,
+            input_tokens=5,
+            output_tokens=10,
+            total_tokens=15,
+        )
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        standard_ctx = next(
+            ctx
+            for ctx in structured_event.context
+            if ctx.schema == InternalEventsClient.STANDARD_CONTEXT_SCHEMA
+        )
+        # Token values still appear in the standard context (backwards compat)
+        assert standard_ctx.data["input_tokens"] == 5
+        assert standard_ctx.data["output_tokens"] == 10
+        assert standard_ctx.data["total_tokens"] == 15
+        # workflow_id still appears in extra (backwards compat)
+        assert standard_ctx.data["extra"]["workflow_id"] == "wf-abc"
