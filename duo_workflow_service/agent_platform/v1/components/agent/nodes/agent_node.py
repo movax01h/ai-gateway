@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
 from typing import Any, ClassVar, Optional, Sequence, Type, cast
@@ -42,7 +43,7 @@ from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
-__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError"]
+__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError", "CycleBudget"]
 
 log = structlog.stdlib.get_logger("agent_node")
 
@@ -59,6 +60,40 @@ class AgentStuckError(Exception):
     This indicates the agent is stuck in an unrecoverable loop where the LLM repeatedly produces truncated responses
     despite recovery attempts.
     """
+
+
+@dataclass(frozen=True, kw_only=True)
+class CycleBudget:
+    """How many reasoning cycles an agent may spend before it must wrap up.
+
+    These four knobs are meaningless in isolation - ``max_cycles`` is the soft
+    limit, ``cycle_count_key`` is where the running total is kept,
+    ``iteration_warning_offset`` schedules the approaching-limit nudge relative
+    to ``max_cycles``, and ``max_wrap_up_retries`` bounds the grace period after
+    the limit is hit - so they travel together as one value.
+
+    The default instance is "unlimited": no soft limit, and therefore no
+    counter, no warning, and no wrap-up phase.
+
+    Attributes:
+        max_cycles: Soft limit on reasoning cycles. ``None`` disables cycle
+            accounting entirely.
+        cycle_count_key: ``RuntimeIOKey`` resolving the state location holding
+            the running cycle count. Required for the limit to take effect;
+            when ``None`` the limit is inert.
+        max_wrap_up_retries: How many further cycles the agent gets to produce a
+            final answer once ``max_cycles`` is reached, before it is forced to
+            stop.
+        iteration_warning_offset: Number of cycles before ``max_cycles`` at which
+            a one-time warning ``HumanMessage`` is injected, telling the agent it
+            is approaching the soft limit. ``None`` disables the warning, as does
+            a ``None`` ``max_cycles``.
+    """
+
+    max_cycles: Optional[int] = None
+    cycle_count_key: Optional[RuntimeIOKey] = None
+    max_wrap_up_retries: int = 3
+    iteration_warning_offset: Optional[int] = None
 
 
 class AgentFinalOutput(BaseAgentOutput):
@@ -138,10 +173,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             agent's conversation-history slot) so checkpoints can report per-agent
             context utilisation.  When ``None``, no limit is stamped and the
             notifier falls back to the global context-window limit.
-        iteration_warning_offset: Number of cycles before ``max_cycles`` at which a
-            one-time warning ``HumanMessage`` is injected, telling the agent it is
-            approaching the soft limit. ``None`` disables the warning. Ignored when
-            ``max_cycles`` is ``None``.
+        cycle_budget: How many reasoning cycles this agent may spend before it
+            must wrap up. See :class:`CycleBudget`. Defaults to an unlimited
+            budget (no soft limit, no counter, no warning).
     """
 
     name: str
@@ -160,10 +194,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]]
     _max_context_tokens: Optional[int]
     _invoke_config: RunnableConfig
-    _max_cycles: Optional[int]
-    _cycle_count_key: Optional[RuntimeIOKey]
-    _max_wrap_up_retries: int
-    _iteration_warning_offset: Optional[int]
+    _cycle_budget: CycleBudget
 
     def __init__(
         self,
@@ -179,10 +210,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         response_schema: Optional[Type[BaseAgentOutput]] = None,
         ui_history: Optional[UIHistory[UILogWriterAgentTools, UILogEventsAgent]] = None,
         max_context_tokens: Optional[int] = None,
-        max_cycles: Optional[int] = None,
-        cycle_count_key: Optional[RuntimeIOKey] = None,
-        max_wrap_up_retries: int = 3,
-        iteration_warning_offset: Optional[int] = None,
+        cycle_budget: CycleBudget = CycleBudget(),
         prompt_template_inputs: Optional[dict[str, Any]] = None,
     ):
         self._flow_id = flow_id
@@ -198,10 +226,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._ui_history = ui_history
         self._max_context_tokens = max_context_tokens
         self._invoke_config = invoke_config
-        self._max_cycles = max_cycles
-        self._cycle_count_key = cycle_count_key
-        self._max_wrap_up_retries = max_wrap_up_retries
-        self._iteration_warning_offset = iteration_warning_offset
+        self._cycle_budget = cycle_budget
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
@@ -298,10 +323,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             A tuple of (new_cycle_count, state_update_dict).
             state_update_dict is empty when max_cycles is not configured.
         """
-        if self._max_cycles is None or self._cycle_count_key is None:
+        budget = self._cycle_budget
+        if budget.max_cycles is None or budget.cycle_count_key is None:
             return 0, {}
 
-        cycle_count_iokey = self._cycle_count_key.to_iokey(state)
+        cycle_count_iokey = budget.cycle_count_key.to_iokey(state)
         current_count: int = cycle_count_iokey.value_from_state(state) or 0
         new_count = current_count + 1
         state_update = cycle_count_iokey.to_nested_dict(new_count)
@@ -333,7 +359,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             {
                 "agent_name": self.name,
                 "cycle_count": cycle_count,
-                "max_cycles": self._max_cycles,
+                "max_cycles": self._cycle_budget.max_cycles,
             },
         )
 
@@ -348,7 +374,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             label=component_name_from_node(self.name),
             property="workflow_id",
             value=self._flow_id,
-            max_cycles=self._max_cycles,
+            max_cycles=self._cycle_budget.max_cycles,
             cycle_count=cycle_count,
         )
         self._internal_event_client.track_event(
@@ -387,32 +413,33 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         cycle_count, cycle_count_state_update = self._check_and_increment_cycle_count(
             state
         )
+        budget = self._cycle_budget
         wrap_up_active = (
-            self._max_cycles is not None and cycle_count >= self._max_cycles
+            budget.max_cycles is not None and cycle_count >= budget.max_cycles
         )
         if wrap_up_active:
             log.warning(
                 "Agent reached max_cycles soft limit; injecting wrap-up instruction",
                 agent=self.name,
                 cycle_count=cycle_count,
-                max_cycles=self._max_cycles,
+                max_cycles=budget.max_cycles,
             )
             await self._tag_langsmith_soft_limit(cycle_count)
 
-            if cycle_count == self._max_cycles:
+            if cycle_count == budget.max_cycles:
                 self._track_max_cycles_reached(cycle_count)
             history = [*history, HumanMessage(content=self._wrap_up_message())]
         elif (
-            self._max_cycles is not None
-            and self._iteration_warning_offset is not None
-            and cycle_count == self._max_cycles - self._iteration_warning_offset
+            budget.max_cycles is not None
+            and budget.iteration_warning_offset is not None
+            and cycle_count == budget.max_cycles - budget.iteration_warning_offset
         ):
-            cycles_remaining = self._max_cycles - cycle_count
+            cycles_remaining = budget.max_cycles - cycle_count
             log.warning(
                 "Agent approaching max_cycles soft limit; injecting warning",
                 agent=self.name,
                 cycle_count=cycle_count,
-                max_cycles=self._max_cycles,
+                max_cycles=budget.max_cycles,
                 cycles_remaining=cycles_remaining,
             )
             history = [
@@ -478,13 +505,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                         "re-injecting wrap-up instruction",
                         agent=self.name,
                         wrap_up_retries=wrap_up_retries,
-                        max_wrap_up_retries=self._max_wrap_up_retries,
+                        max_wrap_up_retries=budget.max_wrap_up_retries,
                     )
-                    if wrap_up_retries >= self._max_wrap_up_retries:
+                    if wrap_up_retries >= budget.max_wrap_up_retries:
                         raise AgentStuckError(
                             f"Agent '{self.name}' is stuck: "
                             f"ignored the wrap-up instruction {wrap_up_retries} times in a row, "
-                            f"exceeding the maximum of {self._max_wrap_up_retries} retries."
+                            f"exceeding the maximum of {budget.max_wrap_up_retries} retries."
                         )
                     history = restore_message_consistency(
                         [

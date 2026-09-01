@@ -39,6 +39,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     DEFAULT_SESSION_ID_KEY,
     AgentNode,
+    CycleBudget,
     FinalResponseNode,
     ToolApprovalFetchNode,
     ToolApprovalRequestNode,
@@ -334,6 +335,21 @@ class AgentComponentBase(BaseComponent):
         if v < 1:
             raise ValueError("max_wrap_up_retries must be at least 1.")
         return v
+
+    @property
+    def _cycle_budget(self) -> CycleBudget:
+        """Build the ``CycleBudget`` passed to this component's ``AgentNode``.
+
+        Shared by ``AgentComponent.attach()`` and ``SupervisorAgentComponent.attach()``
+        so the mapping from the resolved max-cycles fields to ``CycleBudget`` only
+        needs to be maintained in one place.
+        """
+        return CycleBudget(
+            max_cycles=self._max_cycles_threshold,
+            cycle_count_key=self._cycle_count_key,
+            max_wrap_up_retries=self.max_wrap_up_retries,
+            iteration_warning_offset=self._iteration_warning_offset,
+        )
 
     @model_validator(mode="after")
     def validate_and_resolve_response_schema(self) -> Self:
@@ -978,10 +994,7 @@ class AgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
-            max_cycles=self._max_cycles_threshold,
-            cycle_count_key=self._cycle_count_key,
-            max_wrap_up_retries=self.max_wrap_up_retries,
-            iteration_warning_offset=self._iteration_warning_offset,
+            cycle_budget=self._cycle_budget,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

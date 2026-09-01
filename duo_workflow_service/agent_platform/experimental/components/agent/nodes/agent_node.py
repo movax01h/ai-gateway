@@ -4,6 +4,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentFinalOutput,
     AgentNode,
     AgentStuckError,
+    CycleBudget,
 )
 
-__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError"]
+__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError", "CycleBudget"]

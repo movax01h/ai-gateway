@@ -1,6 +1,7 @@
 # pylint: disable=file-naming-for-tests, too-many-lines
 import copy
 import importlib
+from dataclasses import fields, replace
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, call, patch
 
@@ -16,6 +17,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentFinalOutput,
     AgentNode,
     AgentStuckError,
+    CycleBudget,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -1562,8 +1564,19 @@ def make_agent_node_fixture(
     cycle_count_key,
 ):
     """Factory building an AgentNode with soft-cycle-limit defaults, overridable per test."""
+    default_budget = CycleBudget(
+        max_cycles=3, cycle_count_key=cycle_count_key, max_wrap_up_retries=2
+    )
+    budget_field_names = {field.name for field in fields(CycleBudget)}
 
     def _make(**overrides):
+        # Accept CycleBudget fields as flat kwargs so call sites stay terse
+        # (e.g. ``make_agent_node(iteration_warning_offset=1)``).
+        budget_overrides = {
+            name: overrides.pop(name)
+            for name in list(overrides)
+            if name in budget_field_names
+        }
         kwargs = {
             "flow_id": flow_id,
             "flow_type": CategoryEnum.DEVELOPER,
@@ -1576,9 +1589,7 @@ def make_agent_node_fixture(
             "internal_event_client": mock_internal_event_client,
             "invoke_config": {},
             "optimizer_pipeline": optimizer_pipeline,
-            "max_cycles": 3,
-            "cycle_count_key": cycle_count_key,
-            "max_wrap_up_retries": 2,
+            "cycle_budget": replace(default_budget, **budget_overrides),
         }
         kwargs.update(overrides)
         return AgentNode(**kwargs)

@@ -1799,7 +1799,7 @@ class TestAgentComponentMaxWrapUpRetries:
         component.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_wrap_up_retries"] == 5
+        assert call_kwargs["cycle_budget"].max_wrap_up_retries == 5
 
 
 class TestAgentComponentCompaction:

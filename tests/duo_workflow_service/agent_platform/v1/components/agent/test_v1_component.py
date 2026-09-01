@@ -2635,8 +2635,8 @@ class TestAgentComponentMaxCyclesWarningOffset:
         component.attach(mock_state_graph, mock_router)
 
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
-        assert agent_call_kwargs["max_cycles"] == 50
-        assert agent_call_kwargs["iteration_warning_offset"] == 5
+        assert agent_call_kwargs["cycle_budget"].max_cycles == 50
+        assert agent_call_kwargs["cycle_budget"].iteration_warning_offset == 5
 
 
 class TestAgentComponentMaxWrapUpRetries:
@@ -2678,4 +2678,4 @@ class TestAgentComponentMaxWrapUpRetries:
         component.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_wrap_up_retries"] == 5
+        assert call_kwargs["cycle_budget"].max_wrap_up_retries == 5
