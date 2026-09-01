@@ -578,8 +578,8 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_cycles"] == 7
-        assert call_kwargs["iteration_warning_offset"] == 6
+        assert call_kwargs["cycle_budget"].max_cycles == 7
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 6
 
     @pytest.mark.usefixtures(
         "mock_tool_node_cls",
@@ -605,9 +605,9 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_cycles"] == 10
-        assert isinstance(call_kwargs["max_cycles"], int)
-        assert call_kwargs["iteration_warning_offset"] == 3
+        assert call_kwargs["cycle_budget"].max_cycles == 10
+        assert isinstance(call_kwargs["cycle_budget"].max_cycles, int)
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 3
 
     @pytest.mark.usefixtures(
         "mock_tool_node_cls",
@@ -626,7 +626,10 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_cycles"] == AgentComponentBase._DEFAULT_MAX_CYCLES
+        assert (
+            call_kwargs["cycle_budget"].max_cycles
+            == AgentComponentBase._DEFAULT_MAX_CYCLES
+        )
 
 
 class TestAgentNodeInvokeConfig:

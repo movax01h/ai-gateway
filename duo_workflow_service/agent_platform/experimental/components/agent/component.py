@@ -25,6 +25,7 @@ from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.experimental.components.agent.nodes import (
     DEFAULT_SESSION_ID_KEY,
     AgentNode,
+    CycleBudget,
     FinalResponseNode,
     ToolApprovalFetchNode,
     ToolApprovalRequestNode,
@@ -647,9 +648,11 @@ class AgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
-            max_cycles=self.max_cycles,
-            cycle_count_key=self._cycle_count_key,
-            max_wrap_up_retries=self.max_wrap_up_retries,
+            cycle_budget=CycleBudget(
+                max_cycles=self.max_cycles,
+                cycle_count_key=self._cycle_count_key,
+                max_wrap_up_retries=self.max_wrap_up_retries,
+            ),
             prompt_template_inputs={"tools_enabled": self._tools_enabled()},
         )
         tracker = ToolEventTracker(

@@ -669,10 +669,7 @@ class SupervisorAgentComponent(AgentComponentBase):
                     component_name=self.name,
                 ),
             ),
-            max_cycles=self._max_cycles_threshold,
-            cycle_count_key=self._cycle_count_key,
-            max_wrap_up_retries=self.max_wrap_up_retries,
-            iteration_warning_offset=self._iteration_warning_offset,
+            cycle_budget=self._cycle_budget,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

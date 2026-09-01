@@ -679,8 +679,8 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_cycles"] == 7
-        cycle_count_key = call_kwargs["cycle_count_key"]
+        assert call_kwargs["cycle_budget"].max_cycles == 7
+        cycle_count_key = call_kwargs["cycle_budget"].cycle_count_key
         assert isinstance(cycle_count_key, RuntimeIOKey)
         # Resolve the RuntimeIOKey (state unused for supervisor's own standalone key)
         resolved = cycle_count_key.to_iokey({})
@@ -707,7 +707,10 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_cycles"] == AgentComponentBase._DEFAULT_MAX_CYCLES
+        assert (
+            call_kwargs["cycle_budget"].max_cycles
+            == AgentComponentBase._DEFAULT_MAX_CYCLES
+        )
 
     @pytest.mark.parametrize("max_cycles", [0, -5])
     def test_max_cycles_validator_rejects_non_positive(
@@ -737,8 +740,8 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_cycles"] == 7
-        assert call_kwargs["iteration_warning_offset"] == 2
+        assert call_kwargs["cycle_budget"].max_cycles == 7
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 2
 
     @pytest.mark.usefixtures(
         "mock_tool_node_cls",
@@ -759,7 +762,7 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["iteration_warning_offset"] == 10
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 10
 
     @pytest.mark.usefixtures(
         "mock_tool_node_cls",
@@ -779,7 +782,7 @@ class TestSupervisorMaxCycles:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["iteration_warning_offset"] == 6
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 6
 
 
 class TestSupervisorMaxWrapUpRetries:
@@ -832,7 +835,7 @@ class TestSupervisorMaxWrapUpRetries:
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["max_wrap_up_retries"] == expected
+        assert call_kwargs["cycle_budget"].max_wrap_up_retries == expected
 
 
 class TestSupervisorDelegationEventWiring:
