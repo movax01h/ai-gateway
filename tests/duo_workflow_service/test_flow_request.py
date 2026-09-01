@@ -269,6 +269,26 @@ class TestWorkflowDefinitionKeyFromProto:
         )
         assert workflow_definition_key_from_proto(req) == "software_development"
 
+    def test_empty_flow_config_id_falls_back_to_workflow_definition(self):
+        # Regression: clients like duo-cli 8.92.0 and Rails (nil flow_config_id) explicitly
+        # set flowConfigId="". HasField() returns True for empty strings, so without the
+        # bool(flowConfigId) guard the billing key becomes "/v1" instead of the correct
+        # workflowDefinition fallback.
+        req = contract_pb2.StartWorkflowRequest(
+            flowConfigId="",
+            flowConfigSchemaVersion="v1",
+            workflowDefinition="software_development",
+        )
+        assert workflow_definition_key_from_proto(req) == "software_development"
+
+    def test_empty_flow_config_id_without_workflow_definition_returns_empty(self):
+        # Same client bug, no workflowDefinition set — must return "" not "/v1".
+        req = contract_pb2.StartWorkflowRequest(
+            flowConfigId="",
+            flowConfigSchemaVersion="v1",
+        )
+        assert workflow_definition_key_from_proto(req) == ""
+
     def test_experimental(self):
         req = contract_pb2.StartWorkflowRequest(
             flowConfigId="duo_planner",
@@ -375,6 +395,29 @@ class TestBillingContextFromProto:
         ctx = self._billing_context(req)
         assert ctx.feature_qualified_name == "software_development"
         assert ctx.value == "software_development"
+
+    def test_ai_catalog_flow_with_empty_flow_config_id_does_not_produce_empty_billing_key(
+        self,
+    ):
+        """Regression: AI Catalog inline-config flows with flowConfigId="" must not bill as "/v1".
+
+        Clients (e.g. Rails with nil flow_config_id, duo-cli 8.92.0) send:
+        flowConfigId="", flowConfigSchemaVersion="v1", flowConfig=<struct>
+        HasField("flowConfigId") returns True even for "", so without the bool() guard
+        the billing key was "/v1" — an empty feature_qualified_name in ClickHouse.
+        """
+        flow_config = Struct()
+        flow_config.update({"version": "v1"})
+        req = contract_pb2.StartWorkflowRequest(
+            flowConfigId="",
+            flowConfigSchemaVersion="v1",
+            flowConfig=flow_config,
+        )
+        ctx = self._billing_context(req)
+        # Must fall back to the workflowDefinition default, not produce "/v1"
+        assert ctx.feature_qualified_name != "/v1"
+        assert ctx.feature_qualified_name == "software_development"
+        assert ctx.feature_ai_catalog_item is True
 
 
 def test_legacy_workflow_names_match_workflows_lookup():
