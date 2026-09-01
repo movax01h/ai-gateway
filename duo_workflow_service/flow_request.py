@@ -190,6 +190,14 @@ def workflow_definition_key_from_proto(
     Returns the deprecated workflowDefinition-style string for auth, billing, and metrics.  flowVersion is intentionally
     excluded — billing keys on flow identity, not patch version.
     """
-    if request.HasField("flowConfigId") and request.flowConfigSchemaVersion:
+    # Guard against clients that explicitly set flowConfigId="" (e.g. duo-cli 8.92.0, Rails with nil
+    # flow_config_id). HasField() returns True even for empty strings, so without this check the
+    # billing key becomes "/v1" instead of falling back to workflowDefinition.
+    # Mirrors the same guard in normalize_flow_request.
+    if (
+        request.HasField("flowConfigId")
+        and request.flowConfigId
+        and request.flowConfigSchemaVersion
+    ):
         return f"{request.flowConfigId}/{request.flowConfigSchemaVersion}"
     return request.workflowDefinition
