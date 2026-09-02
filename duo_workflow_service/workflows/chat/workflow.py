@@ -34,6 +34,11 @@ from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
 )
+from duo_workflow_service.entities.attachments import (
+    Attachment,
+    attachment_content_blocks,
+    split_attachment_envelopes,
+)
 from duo_workflow_service.entities.message_ingestion import assemble_user_message
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
@@ -294,7 +299,44 @@ class Workflow(AbstractWorkflow):
 
         return Routes.STOP
 
+    def _turn_context(
+        self,
+    ) -> tuple[Optional[list[AdditionalContext]], list[Attachment]]:
+        """Split this turn's additional context into prompt context and attachments.
+
+        Attachments must not travel on inside the additional-context list: that
+        list is rendered verbatim into the prompt by the additional-context
+        partial and is echoed back to the client on every ``UiChatLog``, either
+        of which would turn a base64 payload into prose.
+
+        Returns:
+            The context to keep rendering, and the turn's attachments. When the
+            turn carries no attachments the context is handed back untouched
+            (``None`` included), so the overwhelmingly common path is unchanged.
+
+        Raises:
+            NotifiableException: If an attachment is malformed, of an unsupported
+                media type, or over the size caps. The user is the only one who
+                can act on that, so the reason has to reach them rather than the
+                generic failure message.
+        """
+        try:
+            remaining, attachments = split_attachment_envelopes(
+                self._additional_context
+            )
+        except ValueError as exc:
+            raise NotifiableException(f"Could not attach your files: {exc}") from exc
+
+        if not attachments:
+            return self._additional_context, []
+
+        # Normalise an emptied list back to None so an attachments-only turn
+        # looks like a turn that never carried additional context at all.
+        return remaining or None, attachments
+
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
+        additional_context, attachments = self._turn_context()
+
         initial_ui_chat_log = UiChatLog(
             message_sub_type=None,
             message_type=MessageTypeEnum.USER,
@@ -304,13 +346,15 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
-            additional_context=self._additional_context,
+            additional_context=additional_context,
         )
 
         conversation_history: List[BaseMessage] = []
 
         conversation_history.append(
-            assemble_user_message(goal, self._additional_context),
+            assemble_user_message(
+                goal, additional_context, attachment_content_blocks(attachments)
+            ),
         )
 
         return ChatWorkflowState(
@@ -352,6 +396,7 @@ class Workflow(AbstractWorkflow):
                 return self.get_workflow_state(goal)
 
             case _:
+                additional_context, attachments = self._turn_context()
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
                     "preapproved_tools": self._preapproved_tools or [],
@@ -359,6 +404,10 @@ class Workflow(AbstractWorkflow):
                 }
                 next_step = "agent"
                 new_chat_message = goal
+                # Attachments ride a plain user turn only. The approval and
+                # rejection branches below build no HumanMessage for them to
+                # attach to, so anything sent with those is dropped.
+                sent_attachments: list[Attachment] = []
 
                 match self._approval and self._approval.WhichOneof("user_decision"):
                     case "approval":
@@ -378,16 +427,30 @@ class Workflow(AbstractWorkflow):
                             else EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_REJECTION
                         )
                     case _:
-                        if goal:
+                        # A turn carrying only attachments still has something to
+                        # say, so an empty goal is no longer reason to skip it.
+                        if goal or attachments:
+                            sent_attachments = attachments
                             state_update["conversation_history"] = {
                                 self._agent.name: [
                                     assemble_user_message(
-                                        goal, self._additional_context
+                                        goal,
+                                        additional_context,
+                                        attachment_content_blocks(attachments),
                                     )
                                 ]
                             }
 
-                if new_chat_message and new_chat_message != "null":
+                if attachments and not sent_attachments:
+                    logger.warning(
+                        "Discarding attachments sent alongside a tool approval decision",
+                        workflow_id=self._workflow_id,
+                        count=len(attachments),
+                    )
+
+                if sent_attachments or (
+                    new_chat_message and new_chat_message != "null"
+                ):
                     new_message_chat_log = UiChatLog(
                         message_type=MessageTypeEnum.USER,
                         message_sub_type=None,
@@ -397,7 +460,7 @@ class Workflow(AbstractWorkflow):
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
                         tool_info=None,
-                        additional_context=self._additional_context,
+                        additional_context=additional_context,
                         parent_ts=self._turn_parent_ts(checkpoint_tuple),
                     )
                     state_update["ui_chat_log"] = [new_message_chat_log]

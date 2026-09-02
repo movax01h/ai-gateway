@@ -1,4 +1,5 @@
 # pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg
+import base64
 import json
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from uuid import UUID
@@ -2143,3 +2144,247 @@ class TestWebSearchTogglePropagation:
             workflow._compile("Test goal", mock_tools_registry, MagicMock())
 
         assert mock_create_agent.call_args.kwargs["web_search_enabled"] is toggle
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\npixels"
+PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+
+
+def attachment_envelope(**overrides) -> AdditionalContext:
+    payload = {
+        "mime_type": "image/png",
+        "data": PNG_B64,
+        "filename": "screenshot.png",
+    }
+    payload.update(overrides)
+    return AdditionalContext(category="attachments", content=json.dumps(payload))
+
+
+FILE_CONTEXT = AdditionalContext(
+    category="file",
+    id="test-file-id",
+    content="test content",
+    metadata={"path": "/test/file.py"},
+)
+
+
+def image_blocks(message) -> list:
+    return [
+        block
+        for block in message.content
+        if isinstance(block, dict) and block.get("type") == "image"
+    ]
+
+
+class TestChatAttachments:
+    """User-uploaded images riding the `attachments` additional-context category.
+
+    The two entry points are the opening turn (`get_workflow_state`) and every
+    later turn (the plain-message branch of `get_graph_input`).
+    """
+
+    @pytest.fixture(name="workflow_with_attachment")
+    def workflow_with_attachment_fixture(self, workflow_with_project):
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(),
+        ]
+        return workflow_with_project
+
+    def _first_turn(self, workflow):
+        state = workflow.get_workflow_state("what is in this screenshot?")
+        return state["conversation_history"]["test_prompt"][0], state["ui_chat_log"][0]
+
+    async def _later_turn(self, workflow, goal="what is in this screenshot?"):
+        result = await workflow.get_graph_input(
+            goal, WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+        )
+        return result
+
+    # --- delivery -------------------------------------------------------
+
+    def test_first_turn_sends_the_image_alongside_the_text(
+        self, workflow_with_attachment
+    ):
+        message, _ = self._first_turn(workflow_with_attachment)
+
+        assert message.content[0] == {
+            "type": "text",
+            "text": "what is in this screenshot?",
+        }
+        (image,) = image_blocks(message)
+        assert image["base64"] == PNG_B64
+        assert image["mime_type"] == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_later_turn_sends_the_image_alongside_the_text(
+        self, workflow_with_attachment
+    ):
+        result = await self._later_turn(workflow_with_attachment)
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert message.content[0]["text"] == "what is in this screenshot?"
+        assert image_blocks(message)[0]["base64"] == PNG_B64
+
+    def test_every_attachment_becomes_its_own_block(self, workflow_with_project):
+        workflow_with_project._additional_context = [
+            attachment_envelope(filename="a.png"),
+            attachment_envelope(filename="b.webp", mime_type="image/webp"),
+        ]
+
+        message, _ = self._first_turn(workflow_with_project)
+
+        assert [block["mime_type"] for block in image_blocks(message)] == [
+            "image/png",
+            "image/webp",
+        ]
+
+    # --- keeping base64 out of the text/UI paths ------------------------
+
+    def test_attachments_are_kept_out_of_the_prompt_context(
+        self, workflow_with_attachment
+    ):
+        """The additional-context partial renders `content` verbatim, so a base64 payload left in the list would reach
+        the model as prose."""
+        message, _ = self._first_turn(workflow_with_attachment)
+
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+
+    def test_attachments_are_kept_out_of_the_ui_chat_log(
+        self, workflow_with_attachment
+    ):
+        """The UI log is echoed back to the client on every checkpoint."""
+        _, ui_log = self._first_turn(workflow_with_attachment)
+
+        assert ui_log["additional_context"] == [FILE_CONTEXT]
+
+    @pytest.mark.asyncio
+    async def test_attachments_are_kept_out_of_both_paths_on_a_later_turn(
+        self, workflow_with_attachment
+    ):
+        result = await self._later_turn(workflow_with_attachment)
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+        assert result.update["ui_chat_log"][-1]["additional_context"] == [FILE_CONTEXT]
+
+    def test_an_attachments_only_turn_reports_no_additional_context(
+        self, workflow_with_project
+    ):
+        """Emptying the list must look like the turn never carried context at all."""
+        workflow_with_project._additional_context = [attachment_envelope()]
+
+        message, ui_log = self._first_turn(workflow_with_project)
+
+        assert message.additional_kwargs["additional_context"] is None
+        assert ui_log["additional_context"] is None
+
+    # --- turns that carry only attachments ------------------------------
+
+    @pytest.mark.asyncio
+    async def test_a_later_turn_with_no_text_still_reaches_the_model(
+        self, workflow_with_project
+    ):
+        """`if goal:` used to drop the turn; an image alone is still a question."""
+        workflow_with_project._additional_context = [attachment_envelope()]
+
+        result = await self._later_turn(workflow_with_project, goal="")
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert image_blocks(message)[0]["base64"] == PNG_B64
+        assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
+
+    @pytest.mark.asyncio
+    async def test_a_later_turn_with_neither_text_nor_attachments_is_still_dropped(
+        self, workflow_with_project
+    ):
+        workflow_with_project._additional_context = None
+
+        result = await self._later_turn(workflow_with_project, goal="")
+
+        assert "conversation_history" not in result.update
+        assert "ui_chat_log" not in result.update
+
+    # --- no attachments: byte-identical to before ------------------------
+
+    def test_text_only_turns_keep_plain_string_content(self, workflow_with_project):
+        message, ui_log = self._first_turn(workflow_with_project)
+
+        assert message.content == "what is in this screenshot?"
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+        assert ui_log["additional_context"] == [FILE_CONTEXT]
+
+    def test_a_turn_with_no_context_at_all_is_unchanged(self, workflow_with_project):
+        workflow_with_project._additional_context = None
+
+        message, ui_log = self._first_turn(workflow_with_project)
+
+        assert message.content == "what is in this screenshot?"
+        assert message.additional_kwargs["additional_context"] is None
+        assert ui_log["additional_context"] is None
+
+    # --- validation ------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "envelope,expected",
+        [
+            (
+                attachment_envelope(mime_type="application/pdf"),
+                "unsupported media type 'application/pdf'",
+            ),
+            (attachment_envelope(data="not base64!!"), "is not valid base64 data"),
+            (
+                AdditionalContext(category="attachments", content="not json"),
+                "invalid JSON content",
+            ),
+        ],
+    )
+    def test_a_bad_attachment_rejects_the_turn_with_a_visible_reason(
+        self, workflow_with_project, envelope, expected
+    ):
+        """A generic failure would leave the user with no idea what to change.
+
+        `NotifiableException` is what `_handle_compile_and_run_exception` renders
+        verbatim into the chat.
+        """
+        workflow_with_project._additional_context = [envelope]
+
+        with pytest.raises(NotifiableException, match=expected):
+            workflow_with_project.get_workflow_state("look at this")
+
+    @pytest.mark.asyncio
+    async def test_a_bad_attachment_rejects_a_later_turn_too(
+        self, workflow_with_project
+    ):
+        workflow_with_project._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        with pytest.raises(NotifiableException, match="unsupported media type"):
+            await self._later_turn(workflow_with_project)
+
+    # --- approval decisions carry no user message ------------------------
+
+    @pytest.mark.asyncio
+    async def test_attachments_sent_with_an_approval_are_dropped_loudly(
+        self, workflow_with_approval
+    ):
+        """The approval branch builds no HumanMessage, so there is nothing to attach to.
+
+        Warn rather than fail silently.
+        """
+        workflow_with_approval._additional_context = [attachment_envelope()]
+
+        with patch(
+            "duo_workflow_service.workflows.chat.workflow.logger"
+        ) as mock_logger:
+            result = await self._later_turn(workflow_with_approval, goal="")
+
+        assert result.goto == "run_tools"
+        assert "conversation_history" not in result.update
+        assert "ui_chat_log" not in result.update
+        mock_logger.warning.assert_called_once_with(
+            "Discarding attachments sent alongside a tool approval decision",
+            workflow_id="1234",
+            count=1,
+        )
