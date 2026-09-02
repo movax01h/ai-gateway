@@ -4,6 +4,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.types import Send
 
+from duo_workflow_service.entities.image_blocks import strip_image_payloads
 from duo_workflow_service.entities.state import (
     AdditionalContext,
     ApprovalStateRejection,
@@ -34,6 +35,12 @@ class CustomEncoder(json.JSONEncoder):
             ),
         ):
             data = o.model_dump()
+            if "content" in data:
+                # Applies to every message role: an image can arrive as a user
+                # attachment or as a tool result, and either would otherwise be
+                # persisted (and re-read) on every checkpoint for the rest of
+                # the session.
+                data["content"] = strip_image_payloads(data["content"])
             data.update({"type": o.__class__.__name__})
             return data
         if isinstance(o, Send):
