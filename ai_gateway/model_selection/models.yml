@@ -651,6 +651,21 @@ models:
       thinking_level: "high"
       streaming: "true"
 
+  - name: "Gemini 3.8 Flash"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "gemini_3_8_flash_vertex"
+    description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000
+    model_class_provider: google_genai
+    family:
+      - gemini
+    params:
+      model: "gemini-3.8-flash"
+      max_tokens: 65_536
+      thinking_level: "high"
+      streaming: "true"
+
   - name: "GPT-5.6 Sol"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_6_sol"
