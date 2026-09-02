@@ -7,6 +7,7 @@ from langchain_core.tools import ToolException
 from packaging.version import InvalidVersion
 from pydantic import ValidationError
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.security import (
     ConfirmVulnerability,
     ConfirmVulnerabilityInput,
@@ -83,6 +84,21 @@ def vulnerability_data_fixture():
             },
         },
     ]
+
+
+@pytest.fixture(name="empty_vulnerabilities_response")
+def empty_vulnerabilities_response_fixture():
+    """Fixture for a GraphQL response carrying no vulnerabilities."""
+    return {
+        "data": {
+            "project": {
+                "vulnerabilities": {
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [],
+                }
+            }
+        }
+    }
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -521,6 +537,140 @@ class TestListVulnerabilities:
 
         assert len(result["vulnerabilities"]) == 2
         assert gitlab_client_mock.apost.call_count == 1
+
+    @patch(
+        "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
+        return_value=True,
+    )
+    async def test_empty_results_when_report_access_denied(
+        self,
+        _mock_supports_scope,
+        gitlab_client_mock,
+        metadata,
+        empty_vulnerabilities_response,
+    ):
+        """Test an empty list caused by missing dashboard access raises."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=empty_vulnerabilities_response
+        )
+        gitlab_client_mock.aget = AsyncMock(
+            return_value=GitLabHttpResponse(status_code=403, body="403 Forbidden")
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        with pytest.raises(ToolException) as exc_info:
+            await tool.arun({"project_full_path": "namespace/project"})
+
+        assert "Vulnerability report access denied: namespace/project" in str(
+            exc_info.value
+        )
+        gitlab_client_mock.aget.assert_awaited_once_with(
+            path="/api/v4/projects/namespace%2Fproject/vulnerabilities",
+            params={"per_page": 1},
+            parse_json=False,
+        )
+
+    @patch(
+        "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
+        return_value=True,
+    )
+    async def test_empty_results_when_report_access_granted(
+        self,
+        _mock_supports_scope,
+        gitlab_client_mock,
+        metadata,
+        empty_vulnerabilities_response,
+    ):
+        """Test a genuinely clean project still returns an empty result."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=empty_vulnerabilities_response
+        )
+        gitlab_client_mock.aget = AsyncMock(
+            return_value=GitLabHttpResponse(status_code=200, body="[]")
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert result["vulnerabilities"] == []
+        assert result["summary"]["total"] == 0
+
+    @patch(
+        "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
+        return_value=True,
+    )
+    async def test_empty_results_when_report_access_check_fails(
+        self,
+        _mock_supports_scope,
+        gitlab_client_mock,
+        metadata,
+        empty_vulnerabilities_response,
+    ):
+        """Test a failing access check leaves the empty result untouched."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=empty_vulnerabilities_response
+        )
+        gitlab_client_mock.aget = AsyncMock(side_effect=Exception("Network error"))
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+        result = json.loads(response)
+
+        assert result["summary"]["total"] == 0
+
+    @patch(
+        "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
+        return_value=True,
+    )
+    async def test_report_access_not_checked_when_results_returned(
+        self,
+        _mock_supports_scope,
+        gitlab_client_mock,
+        metadata,
+        vulnerability_data,
+    ):
+        """Test a non-empty listing skips the access check."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": vulnerability_data,
+                        }
+                    }
+                }
+            }
+        )
+        gitlab_client_mock.aget = AsyncMock()
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+
+        assert len(json.loads(response)["vulnerabilities"]) == 4
+        gitlab_client_mock.aget.assert_not_awaited()
+
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    async def test_report_access_not_checked_on_unsupported_gitlab(
+        self,
+        mock_gitlab_version,
+        gitlab_client_mock,
+        metadata,
+        empty_vulnerabilities_response,
+    ):
+        """Test instances too old for the ai_workflows scope are not probed."""
+        mock_gitlab_version.get.return_value = "18.10.0"
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=empty_vulnerabilities_response
+        )
+        gitlab_client_mock.aget = AsyncMock()
+
+        tool = ListVulnerabilities(metadata=metadata)
+        response = await tool.arun({"project_full_path": "namespace/project"})
+
+        assert json.loads(response)["summary"]["total"] == 0
+        gitlab_client_mock.aget.assert_not_awaited()
 
 
 class TestDisplayMessageFormatting:

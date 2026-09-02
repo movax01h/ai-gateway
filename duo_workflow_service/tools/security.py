@@ -2,19 +2,28 @@ import json
 from collections import Counter
 from enum import StrEnum
 from typing import Any, ClassVar, Optional, Type
+from urllib.parse import quote
 
+import structlog
 from langchain_core.tools import ToolException
 from packaging.version import Version
 from pydantic import BaseModel, Field, field_validator
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
+from duo_workflow_service.tools.version_compatibility import (
+    supports_project_vulnerabilities_rest_scope,
+)
 from duo_workflow_service.tools.vulnerabilities.queries.vulnerabilities import (
     LIST_VULNERABILITIES_QUERY,
 )
+from duo_workflow_service.tracking.errors import log_exception
 from lib.context import gitlab_version
+
+log = structlog.stdlib.get_logger("workflow")
 
 PROJECT_IDENTIFICATION_DESCRIPTION = """
 The project must be specified using its full path (e.g., 'namespace/project' or 'group/subgroup/project').
@@ -226,6 +235,11 @@ class ListVulnerabilities(DuoBaseTool):
             if not cursor:
                 break
 
+        # A returned vulnerability proves the caller can read the project's report, so
+        # the permission check only needs to run when nothing came back.
+        if not all_vulnerabilities:
+            await self._verify_vulnerability_report_access(project_full_path)
+
         severity_counts = Counter(
             vuln.get("severity", "UNKNOWN") for vuln in all_vulnerabilities
         )
@@ -249,6 +263,51 @@ class ListVulnerabilities(DuoBaseTool):
                     "total_items": len(all_vulnerabilities),
                 },
             }
+        )
+
+    async def _verify_vulnerability_report_access(self, project_full_path: str) -> None:
+        """Raise if the caller cannot read the project's vulnerability report.
+
+        GraphQL silently drops vulnerabilities the caller may not read, so a user
+        without security dashboard access gets an empty list instead of an error. The
+        REST list endpoint authorizes `read_security_resource` explicitly and answers
+        403, which separates "no access" from "no vulnerabilities".
+        """
+        if not supports_project_vulnerabilities_rest_scope():
+            return
+
+        encoded_path = quote(project_full_path, safe="")
+
+        try:
+            response = await self.gitlab_client.aget(
+                path=f"/api/v4/projects/{encoded_path}/vulnerabilities",
+                params={"per_page": 1},
+                parse_json=False,
+            )
+        except Exception as e:
+            log_exception(
+                e,
+                extra={
+                    "context": "Vulnerability report access check failed",
+                    "tool": self.name,
+                },
+            )
+            return
+
+        if not isinstance(response, GitLabHttpResponse) or response.status_code != 403:
+            return
+
+        log.info(
+            "Vulnerability report access denied",
+            tool=self.name,
+            project_full_path=project_full_path,
+        )
+
+        raise ToolException(
+            f"Vulnerability report access denied: {project_full_path}. "
+            "The project is readable but its security dashboard is not, so no "
+            "vulnerabilities could be listed. This empty result is caused by missing "
+            "access and must not be reported as the project having no vulnerabilities."
         )
 
     def format_display_message(
