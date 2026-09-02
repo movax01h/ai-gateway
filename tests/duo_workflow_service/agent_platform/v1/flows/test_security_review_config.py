@@ -5,6 +5,8 @@ options, input declarations, routing) rather than on ``FlowConfig`` machinery �
 generic ``FlowConfig`` behavior is covered in ``test_flow_config.py``.
 """
 
+import pytest
+
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.tools.mr_review import SubmitMrReviewInput
 
@@ -101,3 +103,40 @@ class TestSecurityReviewTriggerContext:
             "mention": "respond_to_comment",
             "default_route": "apply_triggered_label",
         }
+
+
+class TestSecurityReviewToolNames:
+    """Guard that context-gathering stages declare the correct blob-search tool name.
+
+    Both ``build_review_context`` and ``prescan_codebase`` must use
+    ``gitlab_blob_search`` — the registered tool name — not the bare ``blob_search``
+    alias that has never existed in the registry.  A mismatch causes the tool to be
+    silently dropped at flow-build time, leaving the agent without repo-wide search.
+    See gitlab-org/gitlab#627166.
+    """
+
+    CONTEXT_STAGES = ("build_review_context", "prescan_codebase")
+
+    @staticmethod
+    def _toolset_names(config: FlowConfig, component_name: str) -> list[str]:
+        component = next(
+            c for c in config.components if c.get("name") == component_name
+        )
+        names = []
+        for entry in component["toolset"]:
+            if isinstance(entry, str):
+                names.append(entry)
+            elif isinstance(entry, dict):
+                names.extend(entry.keys())
+        return names
+
+    @pytest.mark.parametrize("stage", CONTEXT_STAGES)
+    def test_context_stages_declare_gitlab_blob_search(self, stage):
+        config = FlowConfig.from_yaml_config("security_review", "1.0.0")
+        tool_names = self._toolset_names(config, stage)
+        assert "gitlab_blob_search" in tool_names, (
+            f"Component '{stage}' must declare 'gitlab_blob_search' in its toolset"
+        )
+        assert "blob_search" not in tool_names, (
+            f"Component '{stage}' must not declare the non-existent 'blob_search' tool"
+        )

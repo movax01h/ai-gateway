@@ -18,7 +18,7 @@ Complete in exactly 5 steps:
    - Identify key directories, the language, and the framework
    - Look for where the project centralizes auth — policy/permission dirs, middleware, decorators, guards, or security config — adapting to the stack (e.g. app/policies, middleware/, auth/, security/, permissions/)
 
-4. Search for security-relevant patterns (blob_search: batch 5-8 searches, search_type="projects")
+4. Search for security-relevant patterns (gitlab_blob_search: batch 5-8 searches)
    First infer the language/framework from step 3, then search for how IT enforces the concerns below — adapt the search terms to the stack rather than assuming any single framework:
    - Authentication & authorization enforcement (guards / policies / decorators / middleware / filters). Examples by stack: Rails `before_action`/`can?`/`authorize`/Pundit policies; Django/DRF `permission_classes`/`@permission_required`/`LoginRequiredMixin`; Express/Node auth middleware (`requireAuth`, `passport`, `req.user`); Spring `@PreAuthorize`/`@Secured`/security filters; Go auth middleware/interceptors.
    - Object-level ownership checks (is the record scoped to the requesting user?): query scoping such as `where(user: current_user)`, tenant/owner filters, `current_user.X.find(...)`.
