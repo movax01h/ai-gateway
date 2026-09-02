@@ -18,6 +18,7 @@ from langgraph.checkpoint.base import (
     CheckpointTuple,
 )
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.errors import GraphRecursionError
 
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -61,6 +62,11 @@ from lib.context import (
     llm_operations,
 )
 from lib.context.tool_executions import init_tool_executions, tool_executions
+from lib.context.tool_loop import (
+    init_tool_loop_counters,
+    record_tool_calls,
+    tool_loop_stats,
+)
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -3222,6 +3228,256 @@ async def test_track_workflow_completion_skips_orbit_summary_on_pause(
         c[1]["event_name"] for c in internal_event_client.track_event.call_args_list
     ]
     assert EventEnum.ORBIT_DAP_SESSION_SUMMARY.value not in event_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expected_ending"),
+    [
+        pytest.param("finished", "success", id="finished"),
+        # A gracefully handled user stop raises nothing, so only the Rails status
+        # distinguishes it from a normal finish.
+        pytest.param("stopped", "stopped", id="stopped"),
+    ],
+)
+async def test_track_workflow_completion_fires_tool_loop_session_summary(
+    gitlab_workflow,
+    internal_event_client,
+    workflow_id,
+    workflow_type,
+    status,
+    expected_ending,
+):
+    """Test that duo_workflow_tool_loop_session_summary fires when tools were used."""
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    init_tool_loop_counters()
+    record_tool_calls(
+        [
+            ("run_command", {"cmd": "git fetch"}, "fatal"),
+            ("run_command", {"cmd": "git fetch"}, "fatal"),
+            ("read_file", {"path": "a.py"}, "body"),
+        ]
+    )
+
+    await gitlab_workflow._track_workflow_completion(status)
+
+    summary_calls = [
+        c
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"] == EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
+    ]
+    assert len(summary_calls) == 1
+
+    additional_props = summary_calls[0][1]["additional_properties"]
+    assert additional_props.value == workflow_id
+    assert additional_props.extra["workflow_type"] == workflow_type.value
+    assert additional_props.extra["total_tool_calls"] == 3
+    assert additional_props.extra["unique_tool_calls"] == 2
+    assert additional_props.extra["max_consecutive_identical_calls"] == 2
+    assert additional_props.extra["max_consecutive_identical_with_result"] == 2
+    assert additional_props.extra["session_ending"] == expected_ending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("initialise", "calls", "status"),
+    [
+        pytest.param(True, [], "finished", id="no-tools-ran"),
+        # offline mode returns before init, so the counters are never installed
+        pytest.param(False, [], "finished", id="counters-never-initialised"),
+        # counters reset on each resume, so firing on pause reports partial figures
+        pytest.param(
+            True,
+            [("grep", {"q": "x"}, "hit")],
+            WorkflowStatusEnum.INPUT_REQUIRED,
+            id="pause-input-required",
+        ),
+        pytest.param(
+            True,
+            [("grep", {"q": "x"}, "hit")],
+            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+            id="pause-plan-approval-required",
+        ),
+    ],
+)
+async def test_track_workflow_completion_skips_tool_loop_summary(
+    gitlab_workflow,
+    internal_event_client,
+    initialise,
+    calls,
+    status,
+):
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    if initialise:
+        init_tool_loop_counters()
+        record_tool_calls(calls)
+    else:
+        tool_loop_stats.set(None)
+
+    await gitlab_workflow._track_workflow_completion(status)
+
+    event_names = [
+        c[1]["event_name"] for c in internal_event_client.track_event.call_args_list
+    ]
+    assert EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value not in event_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value", "expected_ending"),
+    [
+        pytest.param(
+            GraphRecursionError,
+            GraphRecursionError("recursion limit of 600 exceeded"),
+            "failure",
+            id="recursion-limit",
+        ),
+        pytest.param(
+            RuntimeError, RuntimeError("agent stuck"), "failure", id="generic-failure"
+        ),
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+            "stopped",
+            id="user-stop",
+        ),
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError(),
+            "aborted",
+            id="task-abort",
+        ),
+    ],
+)
+async def test_aexit_fires_tool_loop_summary_on_terminal_failures(
+    gitlab_workflow,
+    internal_event_client,
+    workflow_id,
+    exc_type,
+    exc_value,
+    expected_ending,
+):
+    """The endings a tool loop actually produces never reach _track_workflow_completion.
+
+    A recursion-limit death or a stuck agent returns from the exc_type branch in __aexit__, so gating the summary on the
+    Rails status alone made the sessions this metric exists to measure the only ones it could not see.
+    """
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._status_handler = AsyncMock()
+
+    init_tool_loop_counters()
+    record_tool_calls([("run_command", {"cmd": "git fetch"}, "fatal")] * 3)
+
+    await gitlab_workflow.__aexit__(exc_type, exc_value, None)
+
+    summary_calls = [
+        c
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"] == EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
+    ]
+    assert len(summary_calls) == 1
+
+    props = summary_calls[0][1]["additional_properties"]
+    assert props.value == workflow_id
+    assert props.extra["total_tool_calls"] == 3
+    assert props.extra["max_consecutive_identical_calls"] == 3
+    assert props.extra["session_ending"] == expected_ending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value"),
+    [
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST),
+            id="infra-stop",
+        ),
+        pytest.param(
+            InvalidRequestException,
+            InvalidRequestException("empty goal"),
+            id="invalid-request",
+        ),
+    ],
+)
+async def test_aexit_skips_tool_loop_summary_when_session_stays_resumable(
+    gitlab_workflow,
+    internal_event_client,
+    exc_type,
+    exc_value,
+):
+    """These endings leave the session running/resumable for a client reconnect.
+
+    The counters reset on resume, so emitting here would report a fragment of the session and count the same work twice
+    once the client comes back.
+    """
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._status_handler = AsyncMock()
+
+    init_tool_loop_counters()
+    record_tool_calls([("grep", {"q": "x"}, "hit")])
+
+    with patch.object(gitlab_workflow, "_reconcile_session_status", AsyncMock()):
+        await gitlab_workflow.__aexit__(exc_type, exc_value, None)
+
+    event_names = [
+        c[1]["event_name"] for c in internal_event_client.track_event.call_args_list
+    ]
+    assert EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value not in event_names
+
+
+@pytest.mark.asyncio
+async def test_aexit_fires_tool_loop_summary_exactly_once_on_clean_exit(
+    gitlab_workflow,
+    internal_event_client,
+):
+    """The clean path emits via _track_workflow_completion; __aexit__ must not double up."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    init_tool_loop_counters()
+    record_tool_calls([("grep", {"q": "x"}, "hit")])
+
+    await gitlab_workflow.__aexit__(None, None, None)
+
+    summary_calls = [
+        c
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"] == EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
+    ]
+    assert len(summary_calls) == 1
+    assert summary_calls[0][1]["additional_properties"].extra["session_ending"] == (
+        "success"
+    )
+
+
+@pytest.mark.asyncio
+async def test_aexit_fires_tool_loop_summary_once_despite_teardown_error(
+    gitlab_workflow,
+    internal_event_client,
+):
+    """A completed workflow with a teardown error still finishes, and still reports once."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._pending_finish = True
+
+    init_tool_loop_counters()
+    record_tool_calls([("grep", {"q": "x"}, "hit")])
+
+    await gitlab_workflow.__aexit__(RuntimeError, RuntimeError("stream closed"), None)
+
+    summary_calls = [
+        c
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"] == EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
+    ]
+    assert len(summary_calls) == 1
 
 
 # ---------------------------------------------------------------------------

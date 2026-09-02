@@ -1,0 +1,31 @@
+---
+description: Tracks session-level repeated tool call statistics for a Duo Agent Platform flow, used to size the "agent stuck in a tool loop" failure mode. Counts only tool calls made by Flow Registry v1 agent components; one-off components, whose error-correction retries repeat a call by design and are already bounded by max_correction_attempts, are excluded, as are flows served by the legacy chat workflow (including chat-partial flows)
+internal_events: true
+action: duo_workflow_tool_loop_session_summary
+product_group: agent_execution
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Required by validator but not populated. Remove once schema is published (see https://gitlab.com/gitlab-org/gitlab/-/work_items/596959)
+  property:
+    description: Required by validator but not populated. Remove once schema is published (see https://gitlab.com/gitlab-org/gitlab/-/work_items/596959)
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen within the same session
+  workflow_type:
+    description: "Type of flow the tool calls were made in (e.g. developer, fix_pipeline). Only flows whose tools run through a v1 agent component appear here"
+  session_ending:
+    description: "How the session ended: success, stopped, aborted or failure. Distinguishes a session that completed normally from one that died at the recursion limit or was cancelled, so repeat counts can be compared across endings"
+  total_tool_calls:
+    description: "Number of tool calls executed by v1 agent components in the session. Not a session-wide total: tool calls made through other execution paths are not counted"
+  unique_tool_calls:
+    description: Number of distinct tool-and-arguments combinations among the counted calls
+  max_consecutive_identical_calls:
+    description: Longest run of consecutive tool calls with the same tool name and arguments
+  max_consecutive_identical_with_result:
+    description: Longest run of consecutive tool calls with the same tool name, arguments and result. Lower than max_consecutive_identical_calls when the repeated call returned changing results, which indicates legitimate polling rather than a stuck agent
+milestone: '19.4'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2777
+tiers:
+  - premium
+  - ultimate

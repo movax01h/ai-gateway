@@ -26,6 +26,7 @@ class EventEnum(StrEnum):
     COMPACTION_EXECUTED = "duo_workflow_compaction_executed"
     LEGACY_TRIM_EXECUTED = "duo_workflow_legacy_trim_executed"
     WORKFLOW_MAX_CYCLES_REACHED = "duo_workflow_max_cycles_reached"
+    WORKFLOW_TOOL_LOOP_SESSION_SUMMARY = "duo_workflow_tool_loop_session_summary"
     WORKFLOW_MERGE_REQUEST_CREATED = "duo_workflow_merge_request_created"
     WORKFLOW_SUBAGENT_DELEGATED = "duo_workflow_subagent_delegated"
     WORKFLOW_SUBAGENT_RETURNED = "duo_workflow_subagent_returned"

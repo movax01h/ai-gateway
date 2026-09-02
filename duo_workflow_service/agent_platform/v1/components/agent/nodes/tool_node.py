@@ -31,6 +31,7 @@ from duo_workflow_service.tools.toolset import Toolset
 from lib.context import (
     is_orbit_tool,
     orbit_tool_call_count,
+    record_tool_calls,
     total_tool_call_count,
 )
 from lib.hidden_layer_log import set_hidden_layer_log_context
@@ -106,6 +107,18 @@ class ToolNode:
                     orbit_tool_call_count.set(orbit_tool_call_count.get() + 1)
 
         tools_responses = await self._execute_tool_calls(tool_calls, session_id)
+
+        # Recorded after execution because the repeat metrics key on the result
+        # as well as the call: an identical call returning an identical result is
+        # a stuck agent, whereas a changing result is legitimate polling. Scoped
+        # to calls that actually ran, matching the counters above.
+        record_tool_calls(
+            [
+                (tool_call["name"], tool_call.get("args", {}), response.content)
+                for tool_call, response in zip(tool_calls, tools_responses)
+                if tool_call["name"] in self._toolset
+            ]
+        )
 
         # If any todo_write call was made, write its args to state so downstream
         # components can read the task list.

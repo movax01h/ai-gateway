@@ -45,6 +45,12 @@ from lib.context.tool_executions import (
     init_tool_executions,
     tool_executions,
 )
+from lib.context.tool_loop import (
+    ToolLoopStats,
+    build_tool_loop_session_summary_extras,
+    init_tool_loop_counters,
+    record_tool_calls,
+)
 from lib.context.workflow import (
     get_workflow_id,
     set_workflow_id,
@@ -90,6 +96,11 @@ __all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "orbit_tool_call_count",
     "total_tool_call_count",
     "build_orbit_session_summary_extras",
+    # tool_loop
+    "ToolLoopStats",
+    "init_tool_loop_counters",
+    "record_tool_calls",
+    "build_tool_loop_session_summary_extras",
     # workflow
     "get_workflow_id",
     "set_workflow_id",
