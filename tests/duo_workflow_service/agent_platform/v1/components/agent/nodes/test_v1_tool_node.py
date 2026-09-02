@@ -27,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+from lib.context.tool_loop import init_tool_loop_counters, tool_loop_stats
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum
 from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (
@@ -1785,3 +1786,154 @@ class TestToolNodeConcurrency:
             if not t.done() and t is not asyncio.current_task()
         ]
         assert pending == [], f"Leaked tasks after cancellation: {pending}"
+
+
+class TestToolNodeToolLoopTracking:
+    """Test suite for repeated-tool-call tracking in ToolNode.
+
+    Only the wiring is covered here: that ``run`` records the executed calls
+    together with their results, and that it does so in the parent task's
+    context despite the concurrent ``asyncio.gather`` execution path. The
+    streak arithmetic itself lives in ``tests/lib/context/test_tool_loop.py``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def init_counters(self):
+        init_tool_loop_counters()
+        yield
+        tool_loop_stats.set(None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message_fixture", "runs", "expected"),
+        [
+            pytest.param(
+                "mock_ai_message_with_tool_calls", 1, (1, 1, 1, 1), id="single-call"
+            ),
+            pytest.param(
+                # a loop spans multiple node executions, which is how it must be
+                # observed; the mock tool returns the same response every time
+                "mock_ai_message_with_tool_calls",
+                3,
+                (3, 1, 3, 3),
+                id="repeated-runs-build-a-streak",
+            ),
+            pytest.param(
+                # executed under asyncio.gather; every call must still be counted
+                "mock_ai_message_with_multiple_tool_calls",
+                1,
+                (2, 2, 1, 1),
+                id="concurrent-batch",
+            ),
+            pytest.param(
+                "mock_ai_message_no_tool_calls", 1, (0, 0, 0, 0), id="no-tool-calls"
+            ),
+        ],
+    )
+    async def test_records_executed_calls(
+        self,
+        request,
+        tool_node,
+        base_flow_state,
+        component_name,
+        message_fixture,
+        runs,
+        expected,
+    ):
+        state = base_flow_state.copy()
+        state["conversation_history"] = {
+            component_name: [request.getfixturevalue(message_fixture)]
+        }
+
+        for _ in range(runs):
+            await tool_node.run(state)
+
+        stats = tool_loop_stats.get()
+        assert (
+            stats.total_calls,
+            stats.unique_calls,
+            stats.max_consecutive_args,
+            stats.max_consecutive_args_result,
+        ) == expected
+
+    @pytest.mark.asyncio
+    async def test_changing_results_only_break_the_result_streak(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """The polling case: identical calls, changing results."""
+        mock_tool.ainvoke = AsyncMock(side_effect=["first", "second", "third"])
+        # the default fixture flattens every response to a constant, which would
+        # mask the very difference under test
+        mock_prompt_security.side_effect = lambda response, **_: response
+
+        for _ in range(3):
+            await tool_node.run(flow_state_with_tool_calls)
+
+        stats = tool_loop_stats.get()
+        assert stats.max_consecutive_args == 3
+        assert stats.max_consecutive_args_result == 1
+
+    @pytest.mark.asyncio
+    async def test_result_with_mixed_type_keys_does_not_break_the_run(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """Recording runs after the tools did, so raising here would discard their work.
+
+        Tool results are model- and API-shaped, so a dict can carry keys of
+        mixed types that ``sort_keys=True`` cannot order.
+        """
+        mock_tool.ainvoke = AsyncMock(return_value=[{"type": "text", 1: "body"}])
+        mock_prompt_security.side_effect = lambda response, **_: response
+
+        await tool_node.run(flow_state_with_tool_calls)
+
+        assert tool_loop_stats.get().total_calls == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
+    @pytest.mark.parametrize(
+        "denied_tools",
+        [
+            pytest.param({"test_tool"}, id="stripped-by-deny-rules"),
+            pytest.param(set(), id="hallucinated-tool"),
+        ],
+    )
+    async def test_ignores_calls_that_never_executed(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+        mock_toolset,
+        denied_tools,
+    ):
+        """A call to a tool not in the toolset returns "not found" without running.
+
+        Recording it would let a model hallucinating the same bad name look like a tool loop, and would diverge from the
+        orbit counters, which are also scoped to calls that actually ran.
+        """
+        mock_toolset.__contains__ = Mock(return_value=False)
+        mock_toolset.denied_tools = denied_tools
+
+        await tool_node.run(flow_state_with_tool_calls)
+
+        assert tool_loop_stats.get().total_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_run_succeeds_when_counters_were_never_initialised(
+        self,
+        tool_node,
+        flow_state_with_tool_calls,
+    ):
+        """Offline mode never calls init; recording must degrade to a no-op."""
+        tool_loop_stats.set(None)
+
+        await tool_node.run(flow_state_with_tool_calls)
+
+        assert tool_loop_stats.get() is None
