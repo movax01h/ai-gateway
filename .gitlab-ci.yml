@@ -202,10 +202,14 @@ Internal event definitions validation:
   rules:
     - if: $CI_SERVER_HOST == "gitlab.com"
 
+# Use the same larger runner as tests:unit so the analyzer has enough CPU/memory
+# to run its multi-core scan instead of falling back to a single core.
 # Cache taint-signature analysis results between pipeline runs so unchanged
 # files are not re-analyzed on every scan.
 # https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#incremental-scanning
 gitlab-advanced-sast:
+  tags:
+    - saas-linux-large-amd64
   variables:
     GITLAB_ADV_SAST_INCR_SCAN: "true"
 
