@@ -1,0 +1,44 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "rs_crossexam_result_response",
+    "description": "Structured output for a readiness-score cross-examiner of a scoring evaluator (rubric or coverage). Re-score the assigned evaluator in light of the other evaluators' anonymized findings.",
+    "type": "object",
+    "properties": {
+        "evaluator": {
+            "type": "string",
+            "description": "The evaluator being re-scored.",
+            "enum": ["rubric", "coverage"]
+        },
+        "revised_score": {
+            "type": "integer",
+            "description": "The revised 0-100 score. Keeping it unchanged is allowed ONLY with an explicit defense against the most damaging finding.",
+            "minimum": 0,
+            "maximum": 100
+        },
+        "delta": {
+            "type": "integer",
+            "description": "revised_score minus the original score. Negative when cross-examination lowered the score.",
+            "minimum": -100,
+            "maximum": 100
+        },
+        "most_damaging_finding": {
+            "type": "string",
+            "description": "The single finding across ALL results (including this evaluator's own cons) most damaging to the plan if true. Quote it."
+        },
+        "verdict_on_finding": {
+            "type": "string",
+            "description": "Whether the most damaging finding holds up against the available evidence.",
+            "enum": ["confirmed", "plausible", "refuted"]
+        },
+        "discarded_pros": {
+            "type": "array",
+            "description": "Any of this evaluator's round-1 pros contradicted by its own cons. Empty array if none.",
+            "items": {"type": "string"}
+        },
+        "revision_reason": {
+            "type": "string",
+            "description": "One sentence explaining the revision (or the defense of an unchanged score)."
+        }
+    },
+    "required": ["evaluator", "revised_score", "delta", "most_damaging_finding", "verdict_on_finding", "discarded_pros", "revision_reason"]
+}
