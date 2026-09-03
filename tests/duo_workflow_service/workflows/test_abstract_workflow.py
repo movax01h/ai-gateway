@@ -26,6 +26,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     NotifiableException,
+    WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.tracking import (
@@ -1130,10 +1131,11 @@ async def test_compile_and_run_graph_flushes_notifier(
     "error",
     [
         InvalidRequestException("bad input"),
+        WorkflowAlreadyFinishedException("already finished"),
         Exception(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST),
         Exception("boom"),
     ],
-    ids=["invalid_request", "infra_cancel", "other_error"],
+    ids=["invalid_request", "already_finished", "infra_cancel", "other_error"],
 )
 async def test_handle_compile_and_run_exception_flushes_notifier(workflow, error):
     """Two of these paths return before sending any event, so the flush has to come first."""
@@ -1143,6 +1145,47 @@ async def test_handle_compile_and_run_exception_flushes_notifier(workflow, error
         await workflow._handle_compile_and_run_exception(error, MagicMock(), {})
 
     workflow.checkpoint_notifier.flush_deferred_checkpoint.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_with_already_finished_session(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_fetch_workflow_and_container_data,
+    workflow,
+):
+    """A session Rails already reports as `finished` ends the run with no side-effects.
+
+    There is nothing to execute, so the Rails state must stay `finished` (no failure handling, which would drive a
+    `drop`) and the ui_chat_log of a completed session must not gain a spurious error entry.
+    """
+    mock_tools_registry.return_value = MagicMock()
+    mock_gitlab_workflow.return_value.__aenter__.side_effect = (
+        WorkflowAlreadyFinishedException("already finished")
+    )
+    mock_notifier = AsyncMock()
+    mock_user_interface.return_value = mock_notifier
+
+    with (
+        patch.object(
+            workflow, "_handle_workflow_failure", new_callable=AsyncMock
+        ) as mock_handle_failure,
+        pytest.raises(TraceableException) as exc_info,
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert isinstance(
+        exc_info.value.original_exception, WorkflowAlreadyFinishedException
+    )
+    mock_handle_failure.assert_not_called()
+    mock_notifier.send_event.assert_not_called()
+    # The server layer maps last_error to an OK gRPC status.
+    assert isinstance(workflow.last_error, WorkflowAlreadyFinishedException)
+    assert workflow.is_done
 
 
 @pytest.mark.asyncio

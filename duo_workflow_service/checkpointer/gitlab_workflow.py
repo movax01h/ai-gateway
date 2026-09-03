@@ -62,6 +62,7 @@ from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
     InvalidRequestException,
     UnrecoverableWorkflowException,
+    WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
@@ -569,6 +570,16 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 self._session_start_time = time.monotonic()
 
             return self
+        except WorkflowAlreadyFinishedException as e:
+            # Not a failure and not a rejection: the session simply has no work
+            # left. Skip both the WORKFLOW_REJECT tracking below and the DROP in
+            # the generic handler — dropping would move a `finished` session to
+            # `failed`.
+            self._logger.info(
+                "Session already finished; ending the run without executing the graph",
+                workflow_id=self._workflow_id,
+            )
+            raise e
         except (
             UnsupportedStatusEvent,
             ForbiddenStatusEvent,
@@ -628,6 +639,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             A tuple containing:
                 - WorkflowStatusEventEnum: The status event (START, RESUME, or RETRY)
                 - EventPropertyEnum: The associated event property for tracking
+
+        Raises:
+            UnrecoverableWorkflowException: If the workflow is archived.
+            UnsupportedStatusEvent: If a `created` workflow already has checkpoints.
+            WorkflowAlreadyFinishedException: If the workflow already finished.
         """
         checkpoint_tuple = (
             self._workflow_config.get("latest_checkpoint", None)
@@ -668,6 +684,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     f"Found checkpoint: {checkpoint_tuple}"
                 )
             return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
+
+        if status == WorkflowStatusEnum.FINISHED:
+            # `finished` is terminal in the Rails state machine: the `retry` the
+            # fallback below would send is rejected with a 400 and surfaces as an
+            # INTERNAL gRPC error. Nothing is left to execute, so end the session
+            # cleanly instead — no status event, no graph run, Rails untouched.
+            raise WorkflowAlreadyFinishedException(
+                "Session has already finished and cannot be resumed."
+            )
 
         if status == WorkflowStatusEnum.STOPPED:
             # Pure detection — no checkpoint access here. The resolution of this

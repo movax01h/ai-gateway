@@ -61,6 +61,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     NamespaceLevelWorkflowNotSupportedException,
     NotifiableException,
+    WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.gitlab.events import get_event
@@ -631,6 +632,7 @@ class AbstractWorkflow(ABC):
         is_cancel = str(e) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
         is_infra_cancel = str(e) == AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST
         is_invalid_request = isinstance(e, InvalidRequestException)
+        is_already_finished = isinstance(e, WorkflowAlreadyFinishedException)
 
         self.last_error = e.__cause__ if (is_notifiable or is_notifiable_agent) else e
 
@@ -646,6 +648,18 @@ class AbstractWorkflow(ABC):
         # caller gets a clear signal that the input was wrong.  Skip all side-effects
         # and terminate.
         if is_invalid_request:
+            raise TraceableException(e)
+
+        # The session was already `finished` in Rails, so the graph never ran and no
+        # status event was sent.  Same reasoning as InvalidRequestException: leave the
+        # Rails state alone (a `drop` would move a completed session to `failed`) and
+        # write no error entry into the ui_chat_log.  The server layer maps this to an
+        # OK gRPC status from `last_error`, assigned above.
+        if is_already_finished:
+            self.log.info(
+                "Session already finished; nothing to execute",
+                workflow_id=self._workflow_id,
+            )
             raise TraceableException(e)
 
         # Infrastructure-initiated cancellation (e.g. Workhorse pod rotation, WebSocket
