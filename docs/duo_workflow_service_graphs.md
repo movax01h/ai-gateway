@@ -187,25 +187,6 @@ graph TD;
     classDef last fill:#bfb6fc
 ```
 
-## Graph: `business_context_security_guidelines 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> business_context_security_guidelines_agent;
-    business_context_security_guidelines_agent(business_context_security_guidelines_agent<br>#91;AgentComponent#93;);
-    business_context_security_guidelines_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
 ## Graph: `developer 1.0.0 (experimental)` (Flow Registry)
 
 ```mermaid
@@ -266,6 +247,25 @@ graph TD;
     __start__ --> resolve_dep_bump_pipeline_fix;
     resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
     resolve_dep_bump_pipeline_fix --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `vulnerability_context_agent 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> vulnerability_context_agent;
+    vulnerability_context_agent(vulnerability_context_agent<br>#91;AgentComponent#93;);
+    vulnerability_context_agent --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
