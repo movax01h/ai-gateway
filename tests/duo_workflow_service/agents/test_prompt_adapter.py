@@ -24,6 +24,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.feature_flags import current_feature_flag_context
 
 
@@ -161,6 +162,113 @@ Base chat for {{ gitlab_instance_url }}.
     assert isinstance(system_message, SystemMessage)
     assert "Override for https://gitlab.example.com." in system_message.content
     assert "{{ gitlab_instance_url }}" not in system_message.content
+
+
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_multimodal_content_bypasses_jinja(
+    mock_get_model_metadata,
+    project,
+    namespace,
+):
+    """List-content user messages render text through the template and carry non-text blocks through untouched, instead
+    of flattening them to a repr."""
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base chat.",
+            "user": (
+                "context: {{ message.additional_kwargs.additional_context[0].content }}\n"
+                "{{ message.content }}"
+            ),
+        },
+    )
+    template = ChatAgentPromptTemplate(ModelClassProvider.ANTHROPIC, prompt_config)
+    image_block = {"type": "image", "base64": "abc123", "mime_type": "image/png"}
+    context = [AdditionalContext(category="file", content="def foo(): ...")]
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "test_agent": [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": "What is in this image?"},
+                        image_block,
+                    ],
+                    additional_kwargs={"additional_context": context},
+                )
+            ]
+        },
+        ui_chat_log=[],
+        last_human_input=None,
+        goal="Test goal",
+        project=project,
+        namespace=namespace,
+        approval=None,
+        preapproved_tools=None,
+        denied_tools=None,
+    )
+
+    result = template.invoke(state, agent_name="test_agent")
+
+    user_message = result.to_messages()[-1]
+    assert isinstance(user_message, HumanMessage)
+    assert isinstance(user_message.content, list)
+
+    text_block, *rest = user_message.content
+    assert text_block["type"] == "text"
+    assert "context: def foo(): ..." in text_block["text"]
+    assert "What is in this image?" in text_block["text"]
+    assert "abc123" not in text_block["text"]
+    assert rest == [image_block]
+
+
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_multimodal_without_text_omits_text_block(
+    mock_get_model_metadata,
+    project,
+    namespace,
+):
+    """A blocks-only turn (no text, no context) must not emit an empty text block, which providers reject."""
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base chat.",
+            "user": "{{ message.content }}",
+        },
+    )
+    template = ChatAgentPromptTemplate(ModelClassProvider.ANTHROPIC, prompt_config)
+    image_block = {"type": "image", "base64": "abc123", "mime_type": "image/png"}
+    state = ChatWorkflowState(
+        plan={"steps": []},
+        status=WorkflowStatusEnum.EXECUTION,
+        conversation_history={
+            "test_agent": [
+                HumanMessage(
+                    content=[image_block],
+                    additional_kwargs={"additional_context": None},
+                )
+            ]
+        },
+        ui_chat_log=[],
+        last_human_input=None,
+        goal="Test goal",
+        project=project,
+        namespace=namespace,
+        approval=None,
+        preapproved_tools=None,
+        denied_tools=None,
+    )
+
+    result = template.invoke(state, agent_name="test_agent")
+
+    user_message = result.to_messages()[-1]
+    assert isinstance(user_message, HumanMessage)
+    assert user_message.content == [image_block]
 
 
 @pytest.mark.parametrize(
