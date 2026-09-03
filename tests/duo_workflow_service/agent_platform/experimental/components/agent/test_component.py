@@ -1885,4 +1885,29 @@ class TestWebSearchBinding:
             patch(f"{self._MODULE}.is_feature_enabled", return_value=flag_on),
             patch(f"{self._MODULE}.is_client_capable", return_value=client_capable),
         ):
-            assert component._tools_enabled() == {"web_search": expected}
+            # `run_command` is True because the mock toolset contains every key; it
+            # reflects toolset membership, not the patched flag, which this component
+            # does not consult. `..._follows_toolset_membership` covers that directly.
+            assert component._tools_enabled() == {
+                "web_search": expected,
+                "run_command": True,
+            }
+
+    @pytest.mark.parametrize("in_toolset", [True, False])
+    def test_tools_enabled_run_command_follows_toolset_membership(
+        self, make_agent_component, mock_toolset, in_toolset
+    ):
+        """`run_command` reaches the toolset only when Rails grants the `run_commands` privilege, so membership is the
+        whole answer -- it is what decides whether the prompt describes the tool or its fallback."""
+        # keyed rather than blanket-True: checking membership of the wrong tool name
+        # would answer False here and fail the assertion
+        mock_toolset.__contains__ = Mock(
+            side_effect=lambda name: in_toolset and name == "run_command"
+        )
+        component = make_agent_component()
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=False),
+            patch(f"{self._MODULE}.is_client_capable", return_value=False),
+        ):
+            assert component._tools_enabled()["run_command"] is in_toolset

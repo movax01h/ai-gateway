@@ -33,6 +33,7 @@ components:
       - grep
       - list_vulnerabilities
       - get_vulnerability_details
+      - run_command
       - create_commit
       - create_merge_request_note
     ui_log_events:

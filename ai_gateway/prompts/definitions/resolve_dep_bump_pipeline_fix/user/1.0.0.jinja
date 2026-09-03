@@ -34,23 +34,59 @@ Procedure (apply the guidelines above at each step):
    `read_file` each match to understand usage.
 6. If the bump remediates a CVE, gather advisory context with
    `list_vulnerabilities`/`get_vulnerability_details` and the advisory itself.
-7. For each breaking change, decide a concrete fix (old code → new code),
+{%- if tools_enabled["run_command"] %}
+7. Build the old→new symbol map first-hand with `run_command`, using the package
+   name and versions from step 4: `mkdir -p` one scratch directory per version
+   under `/tmp/`, fetch each version into it as an artifact, and unpack it there.
+   EVERY path must be an absolute `/tmp/...` path. Fetch-only per ecosystem:
+   - Python: `pip download --no-deps --only-binary=:all: --dest /tmp/<dir>
+     -- <pkg>==<ver>`, then `ls -1 /tmp/<dir>` for the wheel filename, then
+     `unzip -o -q /tmp/<dir>/<wheel> -d /tmp/<dir>/src`
+   - npm: `npm pack --ignore-scripts --pack-destination=/tmp/<dir> -- <pkg>@<ver>`,
+     then `tar -xzf /tmp/<dir>/<file>.tgz -C /tmp/<dir>` (without `-C` it unpacks
+     into the working directory instead of your scratch dir)
+   - Ruby: the one exception to the absolute-path rule — `gem fetch` has no
+     destination option, so `gem fetch <pkg> -v <ver>` writes `<pkg>-<ver>.gem`
+     into the WORKING DIRECTORY. Do not invent a flag to move it: pass that
+     filename to `gem unpack <pkg>-<ver>.gem --target /tmp/<dir>`, then delete
+     the stray `.gem`
+   - Go: no fetch-only introspection is available (the module cache lives outside
+     `/tmp/`), so treat a Go bump as documentation-backed and say so in the summary
+   List each version's public symbols with a RECURSIVE grep over the unpacked
+   directory, keeping filenames so you can tell same-named symbols apart. Python:
+   `grep -rE '^(def|class|async def) [A-Za-z]' /tmp/<dir>/src`, plus `__all__` and
+   `^from .* import` lines for re-exports. npm: the bundled `.d.ts`, or
+   `exports`/`main` in `package.json`. Symbols in the NEW listing and absent from
+   the OLD are the only valid replacement candidates for anything the new version
+   removed. A listing carrying a `<truncation_notice>` is INCOMPLETE — two listings
+   cut at different points invent removals that do not exist, so narrow the search
+   and re-run rather than comparing them. If a version yields no usable symbol
+   table, rely on the documented evidence instead and note the gap.
+{%- else %}
+7. `run_command` is not available, so the old→new symbol map must come from
+   documented evidence for the EXACT target version — release notes, changelog,
+   migration guide or advisory. Note in the MR summary that the mapping is
+   documentation-backed rather than verified against the packages themselves.
+{%- endif %}
+8. For each breaking change, decide a concrete fix (old code → new code),
    categorized (API removed, signature changed, import path moved, new required
    parameter, type change, behavior change), each backed by the evidence that
-   establishes it. If a mapping cannot be established from evidence, do not guess:
-   `create_merge_request_note` reporting what broke and that it could not be
-   confirmed, then stop.
-8. If the bump crosses a MAJOR version, also check the release/migration notes for
+   establishes it. Map each removed symbol only to a candidate established in
+   step 7, chosen by signature/behavior — never to a symbol that already
+   existed in the old version, and never on name similarity. If a mapping cannot
+   be established from evidence, do not guess: `create_merge_request_note`
+   reporting what broke and that it could not be confirmed, then stop.
+9. If the bump crosses a MAJOR version, also check the release/migration notes for
    silent behavioral changes touching the code paths you are editing.
-9. `read_file` each file you'll modify to confirm current content (for exact
-   `old_str` matching).
-10. Before committing, critically review your planned changes against the
+10. `read_file` each file you'll modify to confirm current content (for exact
+    `old_str` matching).
+11. Before committing, critically review your planned changes against the
     guidelines above: every mapping is evidence-backed (not name similarity), no
     wrong-but-compiling substitution, no pin/revert of a fixable break, all
     co-bumped dependencies handled, and any major-version behavioral / CVE risk
     addressed. If a change does not hold up, revise it or report-and-stop instead
     of committing.
-11. Apply ALL fixes in a single `create_commit` against `source_branch`, with a
+12. Apply ALL fixes in a single `create_commit` against `source_branch`, with a
     clear one-line commit message naming the dependency.
-12. `create_merge_request_note` — one sentence on what broke, the commit subject,
+13. `create_merge_request_note` — one sentence on what broke, the commit subject,
     the list of files changed, and the `Evidence:` line.
