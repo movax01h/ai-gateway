@@ -6,10 +6,13 @@ from langchain_core.tools import ToolException
 from prometheus_client import Histogram
 
 from contract import contract_pb2
-from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
     truncate_string,
+)
+from duo_workflow_service.workflows.type_definitions import (
+    MAX_MESSAGE_SIZE,
 )
 
 ACTION_LATENCY = Histogram(
@@ -93,7 +96,22 @@ async def _execute_action_and_get_action_response(
 
 async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action) -> str:
     log = structlog.stdlib.get_logger("workflow")
-    actionResponse = await _execute_action_and_get_action_response(metadata, action)
+
+    try:
+        actionResponse = await _execute_action_and_get_action_response(metadata, action)
+    except OutgoingMessageTooLargeError as e:
+        action_class = action.WhichOneof("action")
+        log.error(
+            "Action rejected before send: payload exceeds transport limit",
+            request_id=action.requestID,
+            action_class=action_class,
+        )
+        raise ToolException(
+            f"The {action_class} action was not sent to the executor because its "
+            f"payload exceeds the {MAX_MESSAGE_SIZE // (1024 * 1024)} MiB transport limit. "
+            "Reduce the size of the command or request (e.g. write large content to a "
+            "file in smaller chunks, or split the request) and try again."
+        ) from e
 
     # Return the appropriate response type based on action type
     response_type = actionResponse.WhichOneof("response_type")

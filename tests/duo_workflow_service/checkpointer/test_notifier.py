@@ -11,6 +11,8 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
 )
 from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog, NodePhase
 from duo_workflow_service.checkpointer.notifier import (
+    _OMISSION_MARKER_ID,
+    UI_CHAT_LOG_WIRE_BUDGET,
     UserInterface,
     _agent_token_totals,
 )
@@ -20,7 +22,10 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.executor.outbox import Outbox
-from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from duo_workflow_service.workflows.type_definitions import (
+    MAX_MESSAGE_SIZE,
+    AdditionalContext,
+)
 from lib.context import client_capabilities, gitlab_version
 
 
@@ -2193,3 +2198,132 @@ async def test_pause_cancels_a_trailing_task_scheduled_before_it(
 
     assert outbox.put_action.call_count == 2
     assert checkpoint_notifier.most_recent_new_checkpoint().status == "INPUT_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# ui_chat_log wire bounding tests (via most_recent_new_checkpoint)
+# ---------------------------------------------------------------------------
+
+
+def _make_ui_entry(message_id: str, content: str) -> dict:
+    return {
+        "message_id": message_id,
+        "message_type": MessageTypeEnum.AGENT,
+        "timestamp": "2024-01-01T00:00:00+00:00",
+        "content": content,
+        "status": None,
+        "correlation_id": None,
+        "message_sub_type": None,
+        "tool_info": None,
+        "additional_context": None,
+        "component_name": None,
+    }
+
+
+def _wire_ui_chat_log(checkpoint) -> list:
+    """Extract the ui_chat_log."""
+    return loads(checkpoint.checkpoint)["channel_values"]["ui_chat_log"]
+
+
+def _legacy_client_notifier(outbox, entries) -> UserInterface:
+    """A mid-execution notifier for a client without incremental_streaming."""
+    client_capabilities.set(set())
+    notifier = UserInterface(outbox=outbox, goal="test_goal")
+    notifier.status = WorkflowStatusEnum.EXECUTION
+    notifier.ui_chat_log = list(entries)
+    notifier.steps = []
+    return notifier
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        pytest.param([], id="empty_log"),
+        pytest.param(
+            [_make_ui_entry(f"msg-{i}", "hello") for i in range(3)],
+            id="under_budget_log",
+        ),
+    ],
+)
+def test_checkpoint_under_budget_ui_chat_log_is_sent_in_full(outbox, entries):
+    """Empty or under-budget logs go out complete, with no omission marker."""
+    notifier = _legacy_client_notifier(outbox, entries)
+
+    wire_log = _wire_ui_chat_log(notifier.most_recent_new_checkpoint())
+
+    assert [e["message_id"] for e in wire_log] == [e["message_id"] for e in entries]
+
+
+def test_checkpoint_over_budget_ui_chat_log_does_not_mutate_source(outbox):
+    """self.ui_chat_log must remain complete after composing an over-budget checkpoint (legacy path)."""
+    client_capabilities.set(set())
+    notifier = UserInterface(outbox=outbox, goal="test_goal")
+    large_content = "y" * (UI_CHAT_LOG_WIRE_BUDGET // 2 + 100_000)
+    entries = [_make_ui_entry(f"msg-{i}", large_content) for i in range(4)]
+    notifier.status = WorkflowStatusEnum.EXECUTION
+    notifier.ui_chat_log = list(entries)
+    notifier.steps = []
+
+    notifier.most_recent_new_checkpoint()
+
+    assert notifier.ui_chat_log == entries
+
+
+def test_checkpoint_over_budget_ui_chat_log_keeps_newest_tail_with_marker(outbox):
+    """Over-budget log: newest tail kept, marker prepended, checkpoint fits the transport limit."""
+    # Each entry is ~1.8 MiB so two entries together exceed UI_CHAT_LOG_WIRE_BUDGET.
+    large_content = "x" * (UI_CHAT_LOG_WIRE_BUDGET // 2 + 100_000)
+    entries = [_make_ui_entry(f"msg-{i}", large_content) for i in range(4)]
+    notifier = _legacy_client_notifier(outbox, entries)
+
+    checkpoint = notifier.most_recent_new_checkpoint()
+    wire_log = _wire_ui_chat_log(checkpoint)
+
+    assert wire_log[0]["message_id"] == _OMISSION_MARKER_ID
+    assert "earlier messages are not shown" in wire_log[0]["content"]
+    # Newest entry must be present.
+    assert wire_log[-1]["message_id"] == "msg-3"
+    # The whole serialized checkpoint must fit the transport limit.
+    assert len(checkpoint.checkpoint.encode("utf-8")) <= MAX_MESSAGE_SIZE
+    # Dropped count in marker must be correct.
+    kept_count = len(wire_log) - 1  # exclude marker
+    assert f"_{len(entries) - kept_count} earlier messages" in wire_log[0]["content"]
+
+
+@pytest.mark.parametrize(
+    "last_sent_id,expect_bounded",
+    [
+        pytest.param(None, True, id="first_send_full_log_bounded"),
+        pytest.param("msg-3", False, id="steady_state_small_delta_unchanged"),
+    ],
+)
+def test_checkpoint_ui_chat_log_bounding_incremental_client(
+    outbox,
+    last_sent_id,
+    expect_bounded,
+    gl_version_18_7,  # pylint: disable=unused-argument
+):
+    """Incremental client: first-send/resume bounded with marker; steady-state small deltas unchanged."""
+    client_capabilities.set({"incremental_streaming"})
+    notifier = UserInterface(outbox=outbox, goal="test_goal")
+
+    large_content = "z" * (UI_CHAT_LOG_WIRE_BUDGET // 2 + 100_000)
+    # Build a log large enough that the full log exceeds the budget.
+    entries = [_make_ui_entry(f"msg-{i}", large_content) for i in range(4)]
+    notifier.ui_chat_log = list(entries)
+    notifier.steps = []
+    notifier.status = WorkflowStatusEnum.EXECUTION
+
+    if last_sent_id is not None:
+        # Simulate steady-state: cursor already past the large entries.
+        notifier.last_sent_ui_message_id = last_sent_id
+        # Add a small new entry after the cursor.
+        small_entry = _make_ui_entry("msg-new", "small delta")
+        notifier.ui_chat_log.append(small_entry)
+
+    wire_log = _wire_ui_chat_log(notifier.most_recent_new_checkpoint())
+
+    if expect_bounded:
+        assert wire_log[0]["message_id"] == _OMISSION_MARKER_ID
+    else:
+        assert not any(e["message_id"] == _OMISSION_MARKER_ID for e in wire_log)

@@ -20,6 +20,10 @@ class OutboxSignal(StrEnum):
     NO_MORE_OUTBOUND_REQUESTS = "no_more_outbound_requests"
 
 
+class OutgoingMessageTooLargeError(Exception):
+    """The action payload exceeded the gRPC transport limit and was never sent."""
+
+
 class Outbox:
     """Class to manage outbound requests to clients."""
 
@@ -62,14 +66,14 @@ class Outbox:
 
         return await self._queue.get()
 
-    def fail_action(self, request_id: str, message: str):
+    def fail_action(self, request_id: str, error: Exception):
         """Fail an action by setting an exception on its future."""
-        log.error("Failing action", request_id=request_id, failure_reason=message)
+        log.error("Failing action", request_id=request_id, failure_reason=str(error))
 
         future = self._action_response.get(request_id)
         if future and not future.cancelled():
             try:
-                future.set_exception(Exception(message))
+                future.set_exception(error)
             except asyncio.InvalidStateError:
                 log.warning(
                     "Future for request already in final state when failing",

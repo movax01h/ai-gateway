@@ -54,7 +54,10 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     InvalidWorkflowIdException,
 )
-from duo_workflow_service.executor.outbox import OutboxSignal
+from duo_workflow_service.executor.outbox import (
+    OutboxSignal,
+    OutgoingMessageTooLargeError,
+)
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
@@ -917,20 +920,22 @@ async def test_execute_workflow_when_no_events_ends(
 
 
 @pytest.mark.asyncio
+@patch("duo_workflow_service.server.duo_workflow_metrics")
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
-async def test_execute_workflow_when_message_too_large_cancels_workflow(
+async def test_execute_workflow_when_message_too_large_fails_action_without_cancelling(
     mock_resolve_flow,
     mock_abstract_workflow_class,
+    mock_metrics,
     start_request_iterator,
     mock_context,
     servicer,
 ):
+    """An oversized response-awaiting action (e.g. runCommand) fails only that action; the stream continues."""
     mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
-    mock_workflow.cancel = AsyncMock()
     mock_workflow.cleanup = AsyncMock()
 
     request_id = "test-request-id"
@@ -940,8 +945,11 @@ async def test_execute_workflow_when_message_too_large_cancels_workflow(
                 requestID=request_id,
                 runCommand=contract_pb2.RunCommandAction(program="a" * 5 * 1024 * 1024),
             ),
-            # Calling cancel will always trigger an outbox close which queues
-            # this
+            # A follow-up action proves the send loop survived the oversized one.
+            contract_pb2.Action(
+                requestID="followup-request-id",
+                runCommand=contract_pb2.RunCommandAction(program="echo ok"),
+            ),
             OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
         ]
     )
@@ -952,12 +960,75 @@ async def test_execute_workflow_when_message_too_large_cancels_workflow(
         internal_event_client=create_mock_internal_event_client(),
     )
     assert isinstance(result, AsyncIterable)
-    with pytest.raises(asyncio.CancelledError):
+
+    # Was: pytest.raises(asyncio.CancelledError). Now the oversized action is
+    # dropped and the follow-up action is yielded normally.
+    action = await anext(result)
+    assert action.requestID == "followup-request-id"
+    with pytest.raises(StopAsyncIteration):
         await anext(result)
 
-    mock_workflow.fail_outbox_action.assert_called_once_with(
-        request_id, OUTGOING_MESSAGE_TOO_LARGE
+    mock_workflow.fail_outbox_action.assert_called_once()
+    failed_request_id, error = mock_workflow.fail_outbox_action.call_args.args
+    assert failed_request_id == request_id
+    assert isinstance(error, OutgoingMessageTooLargeError)
+    # server.py maps this exact string to RESOURCE_EXHAUSTED - pin it.
+    assert str(error) == OUTGOING_MESSAGE_TOO_LARGE
+    # Both actions are observed; only the oversized one is counted.
+    assert mock_metrics.observe_outgoing_action_bytes.call_count == 2
+    mock_metrics.count_oversized_outgoing_action.assert_called_once_with(
+        action_class="runCommand"
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.duo_workflow_metrics")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_send_events_oversized_new_checkpoint_does_not_cancel_workflow(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_metrics,
+    servicer,
+):
+    """An oversized newCheckpoint must be skipped without cancelling the workflow task or failing the outbox."""
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    mock_workflow_task = MagicMock()
+    mock_workflow = MagicMock()
+
+    mock_workflow.get_from_outbox = AsyncMock(
+        side_effect=[
+            # Content is irrelevant: send_events always overwrites it with
+            # most_recent_new_checkpoint(). Only HasField("newCheckpoint") matters.
+            contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint()),
+            contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint()),
+            OutboxSignal.NO_MORE_OUTBOUND_REQUESTS,
+        ]
+    )
+
+    mock_notifier = MagicMock()
+    mock_notifier.most_recent_checkpoint_number = MagicMock(side_effect=[1, 2])
+    # First call returns an oversized checkpoint; second returns a small one.
+    oversized_cp = contract_pb2.NewCheckpoint(checkpoint="x" * (5 * 1024 * 1024))
+    small_cp = contract_pb2.NewCheckpoint(checkpoint='{"small": true}')
+    mock_notifier.most_recent_new_checkpoint = MagicMock(
+        side_effect=[oversized_cp, small_cp]
+    )
+    mock_workflow.checkpoint_notifier = mock_notifier
+
+    yielded = []
+    async for action in servicer.send_events(mock_workflow, mock_workflow_task):
+        yielded.append(action)
+
+    # The oversized checkpoint must be skipped; the small one must be yielded.
+    assert len(yielded) == 1
+    mock_workflow_task.cancel.assert_not_called()
+    mock_workflow.fail_outbox_action.assert_not_called()
+    mock_metrics.count_oversized_outgoing_action.assert_called_once_with(
+        action_class="newCheckpoint"
+    )
+    mock_metrics.observe_outgoing_action_bytes.assert_called()
 
 
 @pytest.mark.asyncio
@@ -1096,13 +1167,6 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             None,
             grpc.StatusCode.UNKNOWN,
             "RPC ended with unknown workflow state:",
-        ),
-        (
-            OUTGOING_MESSAGE_TOO_LARGE,
-            False,
-            None,
-            grpc.StatusCode.RESOURCE_EXHAUSTED,
-            "Outgoing message too large",
         ),
         (
             ForbiddenStatusEvent(

@@ -63,6 +63,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     UnrecoverableWorkflowException,
 )
+from duo_workflow_service.executor.outbox import OutgoingMessageTooLargeError
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.gitlab.http_client import (
@@ -726,7 +727,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # to a disconnected executor. FINISH has no monolith backstop, so a
         # post-completion error must not downgrade a finished workflow to failed.
         # See gitlab-org/gitlab#605913.
-        if self._pending_finish and exc_type is not None:
+        if (
+            self._pending_finish
+            and exc_type is not None
+            and not isinstance(exc_value, OutgoingMessageTooLargeError)
+        ):
             # May be a genuine persistence failure, not just a benign disconnect,
             # and it is suppressed below -- so log it.
             self._logger.warning(

@@ -557,6 +557,16 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
 
         observe_mock.assert_called_once_with(1024)
 
+    def test_count_oversized_outgoing_action(self):
+        self.metrics.duo_workflow_oversized_outgoing_action_total = MagicMock()
+
+        self.metrics.count_oversized_outgoing_action(action_class="runCommand")
+
+        self.metrics.duo_workflow_oversized_outgoing_action_total.labels.assert_called_once_with(
+            action_class="runCommand"
+        )
+        self.metrics.duo_workflow_oversized_outgoing_action_total.labels.return_value.inc.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

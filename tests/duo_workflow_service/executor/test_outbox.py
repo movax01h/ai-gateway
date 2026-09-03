@@ -8,6 +8,7 @@ from contract import contract_pb2
 from duo_workflow_service.executor.outbox import (
     Outbox,
     OutboxSignal,
+    OutgoingMessageTooLargeError,
 )
 
 
@@ -282,12 +283,23 @@ class TestOutbox:
         assert action.requestID not in outbox._action_response
 
     @pytest.mark.asyncio
-    async def test_fail_action(self, outbox: Outbox):
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(Exception("Something went wrong"), id="generic_exception"),
+            pytest.param(
+                OutgoingMessageTooLargeError("Message size too large"),
+                id="typed_error_preserved",
+            ),
+        ],
+    )
+    async def test_fail_action(self, outbox: Outbox, error):
         result: asyncio.Future[contract_pb2.ClientEvent] = asyncio.Future()
         request_id = outbox.put_action(contract_pb2.Action(), result=result)
-        outbox.fail_action(request_id, "Something went wrong")
+        outbox.fail_action(request_id, error)
         with pytest.raises(Exception) as excinfo:
             await result
-        assert str(excinfo.value) == "Something went wrong"
+        # The exact exception object set by the caller, type included.
+        assert excinfo.value is error
         assert request_id not in outbox._action_response
         assert request_id not in outbox._legacy_action_response

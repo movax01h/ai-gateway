@@ -6,11 +6,17 @@ __all__ = [
     "AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST",
     "AIO_CANCEL_STOP_WORKFLOW_REQUEST",
     "INFRA_STOP_REASONS",
+    "MAX_MESSAGE_SIZE",
     "OUTGOING_MESSAGE_TOO_LARGE",
     "AdditionalContext",
     "OsInformationContext",
     "ShellInformationContext",
 ]
+
+# Mirrored into the server's grpc.max_send_message_length / max_receive_message_length
+# options and used by payload producers to size themselves against the real limit.
+# Lives here rather than server.py so checkpointer.notifier can import it without a cycle.
+MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
 AIO_CANCEL_STOP_WORKFLOW_REQUEST = "AIO_CANCEL_STOP_WORKFLOW_REQUEST"
 # Distinct cancellation message for infrastructure-initiated stops (e.g. Workhorse pod

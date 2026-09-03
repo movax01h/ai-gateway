@@ -35,6 +35,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     UnrecoverableWorkflowException,
 )
+from duo_workflow_service.executor.outbox import OutgoingMessageTooLargeError
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -51,6 +52,7 @@ from duo_workflow_service.tracking.monitoring_context import (
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    OUTGOING_MESSAGE_TOO_LARGE,
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.billing_events.service import LLMOperation
@@ -2407,6 +2409,31 @@ async def test_aexit_finishes_completed_workflow_despite_teardown_error(
     calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
     assert WorkflowStatusEventEnum.FINISH in calls
     assert WorkflowStatusEventEnum.DROP not in calls
+
+
+@pytest.mark.asyncio
+async def test_aexit_pending_finish_oversized_save_fails_loudly(
+    gitlab_workflow, workflow_id
+):
+    """An oversized terminal checkpoint save must not be suppressed by the pending-finish branch: the workflow is
+    dropped, no FINISH fires, no completion is tracked, and the exception propagates (see !6528)."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+    error = OutgoingMessageTooLargeError(OUTGOING_MESSAGE_TOO_LARGE)
+
+    with (
+        patch.object(gitlab_workflow, "_track_workflow_completion") as mock_completion,
+        patch.object(gitlab_workflow, "_handle_workflow_exception") as mock_exception,
+    ):
+        suppressed = await gitlab_workflow.__aexit__(type(error), error, None)
+
+    assert suppressed is False
+    mock_completion.assert_not_called()
+    mock_exception.assert_awaited_once()
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.FINISH not in calls
+    assert WorkflowStatusEventEnum.DROP in calls
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
+from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 
 log = structlog.stdlib.get_logger("notifier")
 
@@ -50,6 +51,12 @@ _PRE_INTERRUPT_STATUSES = frozenset(
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED.value,
     }
 )
+# Derived from the transport limit so the two cannot drift.
+# The 512 KiB remainder covers plan, node_events, goal, agent_context_usage and proto
+# framing, all small and bounded.
+UI_CHAT_LOG_WIRE_BUDGET = MAX_MESSAGE_SIZE - (512 * 1024)
+
+_OMISSION_MARKER_ID = "ui-chat-log-omission-marker"
 
 _token_estimator = TokenEstimator()
 
@@ -62,6 +69,48 @@ def _agent_token_totals(
         for agent, msgs in conversation_history.items()
         if msgs
     }
+
+
+def _omission_marker(dropped: int) -> UiChatLog:
+    return UiChatLog(
+        message_id=_OMISSION_MARKER_ID,
+        message_type=MessageTypeEnum.AGENT,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        content=f"_{dropped} earlier messages are not shown in the live view. The full history is saved with the workflow._",
+        status=None,
+        correlation_id=None,
+        message_sub_type=None,
+        tool_info=None,
+        additional_context=None,
+        component_name=None,
+    )
+
+
+def _bounded_ui_chat_log(entries: list[UiChatLog]) -> list[UiChatLog]:
+    """Return a wire-safe view of entries bounded to UI_CHAT_LOG_WIRE_BUDGET.
+
+    Clients without incremental_streaming replace their whole chat log with each checkpoint, so the resend grows with
+    the conversation and eventually exceeds MAX_MESSAGE_SIZE.  Nothing is lost because authoritative state is persisted
+    to Rails by the checkpointer.
+
+    Walks entries in reverse order, accumulating byte sizes.  When the budget is exceeded and at least one entry has
+    already been kept, the remaining (older) entries are dropped and an omission marker is prepended.
+
+    A single entry that alone exceeds the budget is deliberately NOT truncated — it falls through to the server fail-
+    safe which drops that checkpoint.
+
+    If everything fits, returns the same object (zero-copy identity fast path).
+    """
+    used = 0
+    kept: list[UiChatLog] = []
+    for entry in reversed(entries):
+        used += len(dumps(entry, cls=CustomEncoder).encode("utf-8")) + 1
+        if used > UI_CHAT_LOG_WIRE_BUDGET and kept:
+            kept.reverse()
+            return [_omission_marker(len(entries) - len(kept))] + kept
+        kept.append(entry)
+
+    return entries
 
 
 class _ThrottleState:
@@ -315,7 +364,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             return self.ui_chat_log
 
         if not is_client_capable("incremental_streaming"):
-            return self.ui_chat_log
+            return _bounded_ui_chat_log(self.ui_chat_log)
 
         if self.last_sent_ui_message_id:
             ui_chat_log_diff_idx = next(
@@ -335,7 +384,12 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             else self.ui_chat_log[-1].get("message_id")
         )
 
-        return self.ui_chat_log[ui_chat_log_diff_idx:]
+        # Apply bounding on the incremental path too: on the first send of a session
+        # (or after a resume of a long workflow) last_sent_ui_message_id is None so
+        # ui_chat_log_diff_idx falls back to 0 and the full rehydrated log is returned.
+        # If the server then drops the oversized message the cursor has already advanced
+        # and an incremental client permanently misses those entries.
+        return _bounded_ui_chat_log(self.ui_chat_log[ui_chat_log_diff_idx:])
 
     def _pop_recent_node_events(self) -> list[dict[str, str]]:
         """Node-lifecycle events to include in this checkpoint.

@@ -28,6 +28,19 @@ AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS = [
     1_048_576,
 ]
 
+# Buckets for outgoing gRPC action sizes (bytes).
+# Top bucket (8 MiB) is above the 4 MiB transport limit so overflow magnitude is visible.
+OUTGOING_ACTION_BYTES_BUCKETS = [
+    1_024,
+    16_384,
+    65_536,
+    262_144,
+    1_048_576,
+    2_097_152,
+    4_194_304,
+    8_388_608,
+]
+
 WORKFLOW_TIME_SCALE_BUCKETS = [
     0.1,
     0.5,
@@ -244,6 +257,21 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             "duo_workflow_audit_events_auto_flush_skipped_total",
             "Count of buffer-full auto-flush attempts skipped because no event loop was running",
             [],
+            registry=registry,
+        )
+
+        self.duo_workflow_outgoing_action_bytes = Histogram(
+            "duo_workflow_outgoing_action_bytes",
+            "Serialized size of outgoing gRPC actions sent to clients",
+            ["action_class"],
+            registry=registry,
+            buckets=OUTGOING_ACTION_BYTES_BUCKETS,
+        )
+
+        self.duo_workflow_oversized_outgoing_action_total = Counter(
+            "duo_workflow_oversized_outgoing_action_total",
+            "Outgoing actions dropped or failed for exceeding MAX_MESSAGE_SIZE",
+            ["action_class"],
             registry=registry,
         )
 
@@ -486,6 +514,18 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             num_bytes: Payload size in bytes (UTF-8 encoded JSON).
         """
         self.audit_events_payload_bytes.observe(num_bytes)
+
+    def observe_outgoing_action_bytes(self, action_class: str, num_bytes: int) -> None:
+        """Record the serialized size of an outgoing gRPC action."""
+        self.duo_workflow_outgoing_action_bytes.labels(
+            action_class=action_class
+        ).observe(num_bytes)
+
+    def count_oversized_outgoing_action(self, action_class: str) -> None:
+        """Increment the counter of outgoing actions dropped or failed for exceeding MAX_MESSAGE_SIZE."""
+        self.duo_workflow_oversized_outgoing_action_total.labels(
+            action_class=action_class
+        ).inc()
 
     def record_time_to_first_response(
         self,
