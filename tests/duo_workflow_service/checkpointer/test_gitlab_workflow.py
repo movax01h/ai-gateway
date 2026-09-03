@@ -35,6 +35,7 @@ from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
     InvalidRequestException,
     UnrecoverableWorkflowException,
+    WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
@@ -5191,6 +5192,72 @@ async def test_workflow_context_manager_stop_recovery(
     mock_duo_workflow_metrics.count_agent_platform_session_retry.assert_called_once_with(
         flow_type=workflow_type.value,
     )
+
+
+@pytest.mark.asyncio
+async def test_get_initial_status_event_finished_raises(
+    http_client, workflow_id, workflow_type
+):
+    """A finished session must never fall through to the catch-all `retry`, which Rails rejects with a 400."""
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "latest_checkpoint": None,
+        "workflow_status": WorkflowStatusEnum.FINISHED,
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,
+    )
+
+    with pytest.raises(WorkflowAlreadyFinishedException):
+        await gitlab_workflow._get_initial_status_event({"configurable": {}})
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_workflow_context_manager_already_finished(
+    mock_duo_workflow_metrics,
+    http_client_for_retry,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+):
+    """Entering with a finished session sends no status event at all: no `retry` (Rails would reject it) and no `drop`
+    (that would downgrade a completed session to failed)."""
+    workflow_config: dict[str, Any] = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "latest_checkpoint": None,
+        "workflow_status": WorkflowStatusEnum.FINISHED,
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": True,
+        "archived": False,
+        "stalled": False,
+    }
+    gitlab_workflow = GitLabWorkflow(
+        http_client_for_retry,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    with pytest.raises(WorkflowAlreadyFinishedException):
+        async with gitlab_workflow:
+            pass
+
+    http_client_for_retry.apatch.assert_not_called()
+    internal_event_client.track_event.assert_not_called()
+    mock_duo_workflow_metrics.count_agent_platform_session_reject.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,7 @@ from duo_workflow_service.errors.typing import (
     EnvelopeVersionMismatchException,
     InvalidRequestException,
     InvalidWorkflowIdException,
+    WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
@@ -1152,6 +1153,15 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             None,
             grpc.StatusCode.INVALID_ARGUMENT,
             "RESPONSE event must include a non-empty message.",
+        ),
+        (
+            WorkflowAlreadyFinishedException(
+                "Session has already finished and cannot be resumed."
+            ),
+            False,
+            None,
+            grpc.StatusCode.OK,
+            "workflow already finished",
         ),
     ],
 )

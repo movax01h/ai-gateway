@@ -43,6 +43,7 @@ from duo_workflow_service.errors.typing import (
     EnvelopeVersionMismatchException,
     InvalidRequestException,
     InvalidWorkflowIdException,
+    WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.executor.outbox import OutboxSignal
 from duo_workflow_service.flow_request import normalize_flow_request
@@ -563,6 +564,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             if workflow.successful_execution():
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow execution success")
+            elif isinstance(workflow.last_error, WorkflowAlreadyFinishedException):
+                # Rails already reports the session as `finished`, so the graph never
+                # started and no status event was sent. There is nothing to run and
+                # nothing went wrong, so the RPC ends cleanly.
+                context.set_code(grpc.StatusCode.OK)
+                context.set_details("workflow already finished")
             elif AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
                 # Infrastructure-initiated stop (e.g. Workhorse pod rotation).
                 # WORKHORSE_SERVER_SHUTDOWN signals a graceful pod drain — return

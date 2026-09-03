@@ -71,6 +71,18 @@ class EnvelopeVersionMismatchException(Exception):
     """
 
 
+class WorkflowAlreadyFinishedException(Exception):
+    """Raised when a run is requested for a session Rails already reports as ``finished``.
+
+    Rails' state machine has no transition out of ``finished``, so the ``retry``
+    event that any non-``created`` session would otherwise send is rejected with
+    an HTTP 400 (``BadStatusEvent``) and surfaces to the caller as an
+    ``INTERNAL`` gRPC error.  There is nothing left to execute, so this is not a
+    failure: no status event is sent, the graph never starts, the Rails state is
+    left untouched, and the RPC ends with ``OK``.
+    """
+
+
 class InvalidRequestException(Exception):
     """Raised when a workflow request contains invalid input and cannot be processed.
 
