@@ -1,0 +1,51 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "rs_falsifier_result_response",
+    "description": "Structured output for the readiness-score falsifier (red team). Use this to submit the single most damaging gating defect and the cheapest experiment that settles it.",
+    "type": "object",
+    "properties": {
+        "evaluator": {
+            "type": "string",
+            "description": "Always 'falsifier'.",
+            "enum": ["falsifier"]
+        },
+        "defect_class": {
+            "type": "string",
+            "description": "The class of the most damaging gating defect. Use 'none' only if you genuinely found no gating-class defect; do not invent one. 'none' is the single signal for a clean result: the fields below key off it.",
+            "enum": [
+                "unverified-causal-premise",
+                "wrong-target",
+                "wrong-root-cause",
+                "criteria-pass-bug-persists",
+                "none"
+            ]
+        },
+        "defect": {
+            "type": "string",
+            "description": "One sentence: the single most damaging defect. Empty string when defect_class is 'none'."
+        },
+        "falsification": {
+            "type": "string",
+            "description": "The cheapest experiment (minutes, not hours) that settles the defect. Empty string when defect_class is 'none'."
+        },
+        "confidence": {
+            "type": "integer",
+            "description": "0-100 confidence that the defect is real. Reported in the verdict summary and revised by cross-examination; it is not averaged into the aggregate readiness score. Must be 0 when defect_class is 'none'.",
+            "minimum": 0,
+            "maximum": 100
+        },
+        "pros": {
+            "type": "array",
+            "description": "At least 3 items: what survived the attack (nearest misses when no gating defect). Each <=140 chars.",
+            "items": {"type": "string"},
+            "minItems": 3
+        },
+        "cons": {
+            "type": "array",
+            "description": "Defects/weaknesses, most damaging first. Each <=140 chars. These feed the verdict's required-amendments list, so list only genuine items and never pad the array to reach a count.",
+            "items": {"type": "string"},
+            "minItems": 1
+        }
+    },
+    "required": ["evaluator", "defect_class", "defect", "falsification", "confidence", "pros", "cons"]
+}

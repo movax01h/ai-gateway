@@ -1,0 +1,47 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "rs_crossexam_falsifier_result_response",
+    "description": "Structured output for the cross-examiner of the readiness-score falsifier. Judge whether the claimed gating defect survives the other evaluators' anonymized evidence, and revise the falsifier's confidence.",
+    "type": "object",
+    "properties": {
+        "evaluator": {
+            "type": "string",
+            "description": "Always 'falsifier'.",
+            "enum": ["falsifier"]
+        },
+        "revised_confidence": {
+            "type": "integer",
+            "description": "The revised 0-100 confidence that the falsifier's gating defect is real. Reported in the verdict summary; it is not averaged into the aggregate readiness score.",
+            "minimum": 0,
+            "maximum": 100
+        },
+        "delta": {
+            "type": "integer",
+            "description": "revised_confidence minus the falsifier's original confidence. Negative when cross-examination lowered the confidence.",
+            "minimum": -100,
+            "maximum": 100
+        },
+        "most_damaging_finding": {
+            "type": "string",
+            "description": "The falsifier's claimed defect, or whichever finding across the results is most damaging if true. Quote it."
+        },
+        "verdict_on_finding": {
+            "type": "string",
+            "description": "Whether the falsifier's gating defect survives the other evaluators' evidence.",
+            "enum": ["confirmed", "plausible", "refuted"]
+        },
+        "resolution_known": {
+            "type": "boolean",
+            "description": "True only if a concrete resolution to the defect exists (a known hook or a one-line plan amendment) derivable from the evaluators' findings. False otherwise."
+        },
+        "resolution": {
+            "type": "string",
+            "description": "The resolution/blocking amendment when resolution_known is true, else an empty string."
+        },
+        "revision_reason": {
+            "type": "string",
+            "description": "One sentence explaining the revision."
+        }
+    },
+    "required": ["evaluator", "revised_confidence", "delta", "most_damaging_finding", "verdict_on_finding", "resolution_known", "resolution", "revision_reason"]
+}

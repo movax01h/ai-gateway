@@ -1,0 +1,39 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "rs_evaluator_result_response",
+    "description": "Structured output for a readiness-score scoring evaluator (rubric or coverage). Use this to submit your assessment of the work plan.",
+    "type": "object",
+    "properties": {
+        "evaluator": {
+            "type": "string",
+            "description": "The evaluator id producing this result.",
+            "enum": ["rubric", "coverage"]
+        },
+        "score": {
+            "type": "integer",
+            "description": "This evaluator's own metric mapped to 0-100. Higher = more confidence the plan is accurate/complete for the spec.",
+            "minimum": 0,
+            "maximum": 100
+        },
+        "pros": {
+            "type": "array",
+            "description": "Exactly 3 strengths. Each <=140 chars, concrete, tied to the actual spec/plan (quote a requirement or a plan step).",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 3
+        },
+        "cons": {
+            "type": "array",
+            "description": "Exactly 3 weaknesses. Each <=140 chars and concrete. If fewer than 3 material cons exist, fill remaining slots with genuine nitpicks prefixed '(minor)' — never fabricate a material issue to hit the count.",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 3
+        },
+        "rationale": {
+            "type": "string",
+            "description": "One sentence on what drove the score. For coverage, include precision/recall counts here.",
+            "examples": ["recall 6/7, precision 5/6; one requirement (rate limiting) uncovered."]
+        }
+    },
+    "required": ["evaluator", "score", "pros", "cons", "rationale"]
+}
