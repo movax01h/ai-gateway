@@ -676,7 +676,15 @@ class WorkItemBaseTool(DuoBaseTool):
         if "errors" in response:
             raise ToolException(f"GraphQL errors: {json.dumps(response['errors'])}")
 
-        updated = response.get("data", {}).get("workItemUpdate", {}).get("workItem", {})
+        update = response.get("workItemUpdate", {})
+        errors = update.get("errors", [])
+        updated = update.get("workItem")
+
+        if errors or not updated:
+            raise ToolException(
+                f"Failed to update work item. Work item errors: {errors}"
+            )
+
         result = {"updated_work_item": updated}
         if warnings:
             result["warnings"] = warnings
