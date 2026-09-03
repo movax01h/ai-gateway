@@ -1,0 +1,180 @@
+---
+version: v1
+environment: ambient
+components:
+  # Deterministic single fetch so every evaluator reads the same JSON:
+  # description = SPEC, agentPlan widget = PLAN, comment thread = NOTES.
+  #
+  # Both steps use the native tools, not their MCP counterparts (e.g. MCP
+  # get_workitem_notes vs native get_work_item_notes): MCP tools execute
+  # client-side over the outbox, which a server-side ambient flow can't
+  # service, so the call never resolves.
+  - name: fetch
+    type: DeterministicStepComponent
+    tool_name: get_work_item
+    inputs:
+      - from: context:goal
+        as: url
+    ui_log_events:
+      - on_tool_execution_success
+      - on_tool_execution_failed
+
+  - name: fetch_notes
+    type: DeterministicStepComponent
+    tool_name: get_work_item_notes
+    inputs:
+      - from: context:goal
+        as: url
+    ui_log_events:
+      - on_tool_execution_success
+      - on_tool_execution_failed
+
+  # Round 1: independent evaluators, each sees the work item and its notes.
+  - name: rubric
+    type: AgentComponent
+    prompt_id: rs_rubric_prompt
+    response_schema_id: rs_evaluator_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:fetch.tool_responses
+        as: work_item
+      - from: context:fetch_notes.tool_responses
+        as: notes
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
+
+  - name: coverage
+    type: AgentComponent
+    prompt_id: rs_coverage_prompt
+    response_schema_id: rs_evaluator_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:fetch.tool_responses
+        as: work_item
+      - from: context:fetch_notes.tool_responses
+        as: notes
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
+routers:
+  # context:goal is an unvalidated work item URL; a failed fetch means no SPEC
+  # and no PLAN, so scoring would emit a misleading number instead of an error.
+  - from: fetch
+    condition:
+      input: context:fetch.execution_result
+      routes:
+        success: fetch_notes
+        default_route: abort
+  # Notes are treated as authoritative spec, so a failed fetch is not recoverable
+  # by scoring on the description alone.
+  - from: fetch_notes
+    condition:
+      input: context:fetch_notes.execution_result
+      routes:
+        success: rubric
+        default_route: abort
+  - from: rubric
+    to: coverage
+  - from: coverage
+    to: end
+flow:
+  entry_point: fetch
+prompts:
+  - prompt_id: rs_rubric_prompt
+    name: rs_rubric
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        You are the RUBRIC evaluator in a plan-readiness scoring flow. You score a
+        drafted work plan against its spec. You have no tools; reason only over what
+        you are given, then submit the rs_evaluator_result structured output.
+
+        You are given one GitLab work item as JSON plus its notes (comments) as JSON.
+        Extract:
+        - SPEC = the work item description.
+        - PLAN = the agentPlan widget content (the drafted work plan). If it is empty
+          or absent, treat the plan as missing and score accordingly (mostly zeros,
+          with cons explaining that no plan was found).
+        - NOTES = the comment thread. Many decisions, clarifications, and scope changes
+          are made in comments, so treat notes as part of the SPEC: a requirement,
+          constraint, or decision stated in a note is authoritative even if the
+          description was never updated. When a note conflicts with the description,
+          the more recent note wins.
+
+        FIRST list the spec's atomic requirements (description AND notes) and the plan's
+        atomic steps. Only then score.
+
+        Score the plan on five sub-dimensions, each 0-20, then sum to a 0-100 score:
+        - Coverage: every spec requirement maps to at least one plan step.
+        - Groundedness: every plan step traces back to the spec (no invented scope).
+        - Specificity: steps name concrete files/modules/APIs/tables, not vague actions.
+        - Feasibility & ordering: dependencies respected, no step needs a later one.
+        - Completeness: tests, migrations, docs, edge cases present where the spec
+          implies them.
+
+        Anchor every dimension on this scale — do NOT default to the 14-17 comfort
+        zone; real plans should spread across the full range:
+        - 20: fully satisfied; you can cite evidence for every item.
+        - 15: strong; exactly one minor lapse.
+        - 10: material gaps; multiple items unsupported.
+        - 5:  mostly failing; isolated bright spots.
+        - 0:  the dimension is absent from the plan.
+
+        For each dimension cite evidence: quote the spec line and the plan step. Base
+        your 3 pros and 3 cons on the strongest and weakest dimensions. Each pro/con
+        <=140 chars. If fewer than 3 material cons exist, fill remaining slots with
+        genuine nitpicks prefixed '(minor)' — never fabricate a material issue to hit
+        the count. Set evaluator = "rubric".
+      user: |
+        Here is the work item JSON:
+        {{work_item}}
+
+        Here are the work item notes (comments) as JSON:
+        {{notes}}
+      placeholder: history
+  - prompt_id: rs_coverage_prompt
+    name: rs_coverage
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        You are the COVERAGE evaluator in a plan-readiness scoring flow. You build a
+        bidirectional requirement-coverage matrix. You have no tools; reason only over
+        what you are given, then submit the rs_evaluator_result structured output.
+
+        You are given one GitLab work item as JSON plus its notes (comments) as JSON.
+        Extract:
+        - SPEC = the work item description.
+        - PLAN = the agentPlan widget content (the drafted work plan). If it is empty
+          or absent, treat the plan as missing and score accordingly.
+        - NOTES = the comment thread. Decisions and scope changes are often made in
+          comments, so fold requirements, constraints, and decisions stated in notes
+          into the SPEC checklist. When a note conflicts with the description, the more
+          recent note wins.
+
+        1. Extract an atomic checklist of requirements from the SPEC (description AND
+          notes).
+        2. Extract the atomic set of actions from the PLAN.
+        3. Map both ways:
+          - GAPS: requirements with no covering plan step (under-planning).
+          - SCOPE CREEP: plan steps with no backing requirement (over-planning).
+        4. recall = covered_requirements / total_requirements;
+          precision = grounded_steps / total_steps;
+          score = round(100 * F1(precision, recall)).
+
+        Pros = the best-covered requirement areas. Cons = the specific gaps and
+        scope-creep items (name them). Each pro/con <=140 chars. If fewer than 3
+        material cons exist, fill remaining slots with genuine nitpicks prefixed
+        '(minor)'. Put the precision/recall counts inside the rationale. Set
+        evaluator = "coverage".
+      user: |
+        Here is the work item JSON:
+        {{work_item}}
+
+        Here are the work item notes (comments) as JSON:
+        {{notes}}
+      placeholder: history
