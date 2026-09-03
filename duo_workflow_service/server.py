@@ -45,7 +45,11 @@ from duo_workflow_service.errors.typing import (
     InvalidWorkflowIdException,
     WorkflowAlreadyFinishedException,
 )
-from duo_workflow_service.executor.outbox import OutboxSignal
+from duo_workflow_service.executor.outbox import (
+    ACTION_TYPES_WITHOUT_RESPONSES,
+    OutboxSignal,
+    OutgoingMessageTooLargeError,
+)
 from duo_workflow_service.flow_request import normalize_flow_request
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
@@ -106,6 +110,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     INFRA_STOP_REASONS,
+    MAX_MESSAGE_SIZE,
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
@@ -133,8 +138,6 @@ _PROPAGATED_EXTRA_CLAIMS = {
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }
-
-MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
 # Defines the limit for metadata/headers sent by the client:
 # https://github.com/grpc/grpc/blob/06f6f5d376a8c7abf067d060a28bf12afb664a7e/include/grpc/impl/channel_arg_names.h#L216C37-L216C59
@@ -589,9 +592,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             elif AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow execution stopped")
-            elif str(workflow.last_error) == OUTGOING_MESSAGE_TOO_LARGE:
-                context.set_code(grpc.StatusCode.RESOURCE_EXHAUSTED)
-                context.set_details("Outgoing message too large.")
             # ForbiddenStatusEvent (HTTP 403) indicates Rails API rejected a status update request.
             # This typically occurs when using deprecated direct connections, as Rails requires all workflow
             # requests (including checkpoints) to route through Workhorse (websocket). We distinguish between:
@@ -723,32 +723,47 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
                 last_checkpoint_notified = checkpoint_number
 
+            action_class = item.WhichOneof("action")
             payload_size = item.ByteSize()
+            duo_workflow_metrics.observe_outgoing_action_bytes(
+                action_class=action_class, num_bytes=payload_size
+            )
 
             if payload_size > MAX_MESSAGE_SIZE:
                 log.error(
                     "Failed to send an outgoing action: Message size too large",
                     request_id=item.requestID,
                     payload_size=payload_size,
-                    action_class=item.WhichOneof("action"),
+                    action_class=action_class,
                 )
-                workflow_task.cancel(OUTGOING_MESSAGE_TOO_LARGE)
+                duo_workflow_metrics.count_oversized_outgoing_action(
+                    action_class=action_class
+                )
 
-                # We also need to fail this action in the outbox otherwise
-                # we can block the checkpointing thread in langgraph which
-                # is waiting on a response from a checkpoint that is too
-                # large.
-                workflow.fail_outbox_action(item.requestID, OUTGOING_MESSAGE_TOO_LARGE)
+                if action_class in ACTION_TYPES_WITHOUT_RESPONSES:
+                    # These action types register no future in the outbox, so nothing
+                    # is blocked on them — dropping one costs the client a UI frame,
+                    # not the run. The notifier bounds checkpoints against
+                    # MAX_MESSAGE_SIZE so arriving here means that bound was violated;
+                    # this is the fail-safe, not the mechanism.
+                    continue
 
-                # Continue so we have a chance to cleanup. Some outgoing
-                # status updates hopefully make it through
+                # For response-awaiting actions (e.g. runHTTPRequest, runCommand)
+                # the tool is blocked on a future.  Reject only that future: the
+                # tool's await raises and surfaces as a recoverable ToolException
+                # (see executor/action.py), letting the agent adapt instead of
+                # losing the whole run.
+                workflow.fail_outbox_action(
+                    item.requestID,
+                    OutgoingMessageTooLargeError(OUTGOING_MESSAGE_TOO_LARGE),
+                )
                 continue
 
             log.info(
                 "Sending an outgoing action",
                 request_id=item.requestID,
                 payload_size=payload_size,
-                action_class=item.WhichOneof("action"),
+                action_class=action_class,
             )
 
             yield item
@@ -756,7 +771,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             log.info(
                 "Sent an outgoing action",
                 request_id=item.requestID,
-                action_class=item.WhichOneof("action"),
+                action_class=action_class,
             )
 
     @override

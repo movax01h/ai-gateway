@@ -399,7 +399,7 @@ async def test_fail_outbox_action(workflow, mock_action):
     workflow._outbox.put_action(mock_action)
 
     item = await workflow.get_from_outbox()
-    workflow.fail_outbox_action(item.requestID, "Something went wrong")
+    workflow.fail_outbox_action(item.requestID, Exception("Something went wrong"))
 
     assert item.requestID not in workflow._outbox._action_response
 

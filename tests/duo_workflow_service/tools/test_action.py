@@ -10,7 +10,11 @@ from duo_workflow_service.executor.action import (
     _execute_action,
     _execute_action_and_get_action_response,
 )
-from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
+from duo_workflow_service.workflows.type_definitions import (
+    MAX_MESSAGE_SIZE,
+    OUTGOING_MESSAGE_TOO_LARGE,
+)
 
 
 @pytest.fixture(name="metadata")
@@ -287,3 +291,67 @@ async def test__execute_action_and_get_action_response_runcommand_error(
 
     expected_text = "Action error: Command failed"
     assert expected_text in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("side_effect", "expected_match", "is_converted_to_tool_exception"),
+    [
+        pytest.param(
+            OutgoingMessageTooLargeError(OUTGOING_MESSAGE_TOO_LARGE),
+            f"exceeds the {MAX_MESSAGE_SIZE // (1024 * 1024)} MiB transport limit",
+            True,
+            id="oversized_payload_becomes_recoverable_tool_exception",
+        ),
+        pytest.param(
+            Exception("connection reset"),
+            "connection reset",
+            False,
+            id="unrelated_outbox_failure_propagates_unchanged",
+        ),
+    ],
+)
+async def test__execute_action_outbox_failure(
+    metadata, side_effect, expected_match, is_converted_to_tool_exception
+):
+    """Only the tool-facing wrapper converts an oversized-payload failure into a recoverable ToolException; any other
+    outbox failure is re-raised unchanged, not masked as a tool error."""
+    action = contract_pb2.Action()
+    action.runCommand.program = "echo hi"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        side_effect=side_effect
+    )
+
+    with pytest.raises(Exception, match=expected_match) as excinfo:
+        await _execute_action(metadata, action)
+
+    if is_converted_to_tool_exception:
+        assert isinstance(excinfo.value, ToolException)
+        # The original failure is chained (`raise ... from e`), not swallowed.
+        assert excinfo.value.__cause__ is side_effect
+        # The message names the action so the LLM knows which call to shrink.
+        assert "runCommand" in str(excinfo.value)
+    else:
+        # The exact same exception object, untouched.
+        assert excinfo.value is side_effect
+        assert not isinstance(excinfo.value, ToolException)
+
+
+@pytest.mark.asyncio
+async def test__execute_action_and_get_action_response_oversized_propagates_typed(
+    metadata,
+):
+    """The shared inner function must NOT convert the typed error: ExecutorGitLabHttpClient (checkpoint saves) relies
+    on it propagating untouched so persistence failures stay loud."""
+    action = contract_pb2.Action()
+    action.runHTTPRequest.path = "/api/v4/ai/duo_workflows/workflows/1/checkpoints"
+    error = OutgoingMessageTooLargeError(OUTGOING_MESSAGE_TOO_LARGE)
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(side_effect=error)
+
+    with pytest.raises(OutgoingMessageTooLargeError) as excinfo:
+        await _execute_action_and_get_action_response(metadata, action)
+
+    assert excinfo.value is error
+    assert not isinstance(excinfo.value, ToolException)

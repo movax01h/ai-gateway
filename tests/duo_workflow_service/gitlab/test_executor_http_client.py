@@ -9,7 +9,7 @@ import pytest
 from langchain_core.tools import ToolException
 
 from contract import contract_pb2
-from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.gitlab.executor_http_client import (
     ExecutorGitLabHttpClient,
     _is_retryable_error,
@@ -1247,3 +1247,20 @@ async def test_graphql_exhausts_retries_on_repeated_429s(
             await client.graphql("{ currentUser { username } }")
 
     assert monkeypatch_execute_http_response.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_call_oversized_payload_propagates_typed_error_without_retry(client):
+    """An oversized outgoing payload is permanent: no retry, no ToolException conversion - the typed error must reach
+    the checkpointer so a failed save is loud."""
+    error = OutgoingMessageTooLargeError("Message size too large")
+
+    with patch(
+        "duo_workflow_service.gitlab.executor_http_client._execute_action_and_get_action_response",
+        new=AsyncMock(side_effect=error),
+    ) as mock_execute:
+        with pytest.raises(OutgoingMessageTooLargeError):
+            await client.apost(path="/api/v4/test", body="{}")
+
+    # Not classified as transient by _is_retryable_error: exactly one attempt.
+    mock_execute.assert_awaited_once()
