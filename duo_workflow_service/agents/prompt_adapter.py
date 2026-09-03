@@ -11,6 +11,10 @@ from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
+from duo_workflow_service.entities.message_ingestion import (
+    non_blank_text_block,
+    split_text_blocks,
+)
 from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
@@ -100,15 +104,38 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                         "input": remaining_text,
                     }
 
-                messages.append(
-                    HumanMessage(
-                        jinja2_formatter(
-                            cast(str, self.prompt_template["user"]),
-                            message=m,
-                            slash_command=slash_command,
+                if isinstance(m.content, str):
+                    messages.append(
+                        HumanMessage(
+                            jinja2_formatter(
+                                cast(str, self.prompt_template["user"]),
+                                message=m,
+                                slash_command=slash_command,
+                            )
                         )
                     )
-                )
+                else:
+                    # Multimodal content: render the template against a text view
+                    # of the message, then reattach the non-text blocks — jinja
+                    # would flatten them to their repr.
+                    text, passthrough_blocks = split_text_blocks(m.content)
+                    rendered = jinja2_formatter(
+                        cast(str, self.prompt_template["user"]),
+                        message=HumanMessage(
+                            content=text, additional_kwargs=m.additional_kwargs
+                        ),
+                        slash_command=slash_command,
+                    )
+                    # A blocks-only turn can render to whitespace; providers
+                    # reject empty text blocks, so omit the block entirely.
+                    messages.append(
+                        HumanMessage(
+                            content=[
+                                *non_blank_text_block(rendered),
+                                *passthrough_blocks,
+                            ]
+                        )
+                    )
             else:
                 messages.append(m)  # AIMessage or ToolMessage
 

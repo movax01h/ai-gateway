@@ -8,7 +8,7 @@ from uuid import uuid4
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
 from jinja2 import DebugUndefined
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.memory import BaseCheckpointSaver
 from langgraph.errors import (
     GraphRecursionError,
@@ -34,6 +34,7 @@ from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
 )
+from duo_workflow_service.entities.message_ingestion import assemble_user_message
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
@@ -307,10 +308,7 @@ class Workflow(AbstractWorkflow):
         conversation_history: List[BaseMessage] = []
 
         conversation_history.append(
-            HumanMessage(
-                content=goal,
-                additional_kwargs={"additional_context": self._additional_context},
-            ),
+            assemble_user_message(goal, self._additional_context),
         )
 
         return ChatWorkflowState(
@@ -381,11 +379,8 @@ class Workflow(AbstractWorkflow):
                         if goal:
                             state_update["conversation_history"] = {
                                 self._agent.name: [
-                                    HumanMessage(
-                                        content=goal,
-                                        additional_kwargs={
-                                            "additional_context": self._additional_context
-                                        },
+                                    assemble_user_message(
+                                        goal, self._additional_context
                                     )
                                 ]
                             }
