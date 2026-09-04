@@ -1,12 +1,16 @@
 # pylint: disable=too-many-lines
+import sys
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.tools import BaseTool
+from pydantic import BaseModel
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from contract import contract_pb2
 from duo_workflow_service import tools
+from duo_workflow_service.components import tools_registry
 from duo_workflow_service.components.tools_registry import (
     _CAPABILITY_DEPENDENT_TOOLS,
     _DEFAULT_TOOLS,
@@ -14,6 +18,9 @@ from duo_workflow_service.components.tools_registry import (
     NO_OP_TOOLS,
     Toolset,
     ToolsRegistry,
+    _features_dir,
+    _merge_feature_tools,
+    discover_feature_tools,
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
@@ -2049,3 +2056,251 @@ class TestCapabilityDependentPreapproval:
 
         assert "run_command" in registry._enabled_tools
         assert "run_command" not in registry._preapproved_tool_names
+
+
+class _FeatureDummyTool(BaseTool):
+    name: str = "feature_dummy_tool"
+    description: str = "dummy"
+
+    def _run(self, *args, **kwargs):
+        return None
+
+
+class TestMergeFeatureTools:
+    @pytest.fixture(autouse=True)
+    def _drop_discovered_modules(self):
+        before = set(sys.modules)
+        yield
+        for name in set(sys.modules) - before:
+            if name.startswith("ai.features."):
+                sys.modules.pop(name, None)
+
+    def test_merges_into_privilege_and_superset(self):
+        privileges = {"read_only_gitlab": [], "read_write_gitlab": []}
+
+        _merge_feature_tools(privileges, {"read_only_gitlab": [_FeatureDummyTool]})
+
+        assert _FeatureDummyTool in privileges["read_only_gitlab"]
+        assert _FeatureDummyTool in privileges["read_write_gitlab"]
+
+    def test_merges_into_files_superset(self):
+        privileges = {"read_only_files": [], "read_write_files": []}
+
+        _merge_feature_tools(privileges, {"read_only_files": [_FeatureDummyTool]})
+
+        assert _FeatureDummyTool in privileges["read_only_files"]
+        assert _FeatureDummyTool in privileges["read_write_files"]
+
+    def test_unknown_privilege_raises(self):
+        privileges = {"read_only_gitlab": []}
+
+        with pytest.raises(ValueError, match="unknown privilege 'read_gitlab'"):
+            _merge_feature_tools(privileges, {"read_gitlab": [_FeatureDummyTool]})
+
+    def test_duplicate_name_in_privilege_map_raises(self):
+        privileges = {"read_only_gitlab": [_FeatureDummyTool], "use_git": []}
+
+        with pytest.raises(ValueError, match="'feature_dummy_tool' is already"):
+            _merge_feature_tools(privileges, {"use_git": [_FeatureDummyTool]})
+
+    def test_duplicate_name_in_reserved_tools_raises(self):
+        privileges = {"read_only_gitlab": []}
+
+        with pytest.raises(ValueError, match="'feature_dummy_tool' is already"):
+            _merge_feature_tools(
+                privileges,
+                {"read_only_gitlab": [_FeatureDummyTool]},
+                reserved=[_FeatureDummyTool],
+            )
+
+    def test_duplicate_name_in_reserved_no_op_tools_raises(self):
+        class _NoOpClash(BaseModel):
+            tool_title: ClassVar[str] = "feature_dummy_tool"
+
+        privileges = {"read_only_gitlab": []}
+
+        with pytest.raises(ValueError, match="'feature_dummy_tool' is already"):
+            _merge_feature_tools(
+                privileges,
+                {"read_only_gitlab": [_FeatureDummyTool]},
+                reserved=[_NoOpClash],
+            )
+
+    def test_duplicate_name_with_capability_dependent_tool_raises(self):
+        class _NotifyClash(_FeatureDummyTool):
+            name: str = tools.NotifyMeWhen.model_fields["name"].default
+
+        privileges = {"read_only_gitlab": []}
+
+        with pytest.raises(ValueError, match="is already registered"):
+            _merge_feature_tools(
+                privileges,
+                {"read_only_gitlab": [_NotifyClash]},
+                reserved=_CAPABILITY_DEPENDENT_TOOLS,
+            )
+
+    def test_discovers_synthetic_feature_tools(self, tmp_path):
+        # features_dir override is honored end to end: the declaration is
+        # loaded from the given tree, not the installed ai.features package.
+        components = tmp_path / "insights" / "fake_feature" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text(
+            "from langchain.tools import BaseTool\n"
+            "class FakeFeatureTool(BaseTool):\n"
+            "    name: str = 'fake_feature_tool'\n"
+            "    description: str = 'fake'\n"
+            "    def _run(self, *a, **k):\n"
+            "        return None\n"
+            "FEATURE_TOOLS = {'read_only_gitlab': [FakeFeatureTool]}\n"
+        )
+
+        discovered = discover_feature_tools(features_dir=tmp_path)
+
+        names = {
+            tc.model_fields["name"].default for tc in discovered["read_only_gitlab"]
+        }
+        assert names == {"fake_feature_tool"}
+
+    def test_unloadable_spec_is_skipped(self, tmp_path, monkeypatch):
+        components = tmp_path / "insights" / "specless" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text("FEATURE_TOOLS = {}\n")
+        monkeypatch.setattr(
+            "importlib.util.spec_from_file_location", lambda *a, **k: None
+        )
+
+        assert discover_feature_tools(features_dir=tmp_path) == {}
+
+    def test_features_dir_falls_back_without_marker(self, monkeypatch, tmp_path):
+        # No marker (wheel install, faked filesystem): fall back to the
+        # fixed-depth derivation instead of failing the caller.
+        orphan = tmp_path / "a" / "b" / "c" / "tools_registry.py"
+        orphan.parent.mkdir(parents=True)
+        monkeypatch.setattr(tools_registry, "__file__", str(orphan))
+
+        assert (
+            tools_registry._features_dir()
+            == (tmp_path / "a" / "ai" / "features").resolve()
+        )
+
+    def test_missing_tree_is_silent(self, tmp_path):
+        assert discover_feature_tools(features_dir=tmp_path / "does-not-exist") == {}
+
+    def test_synthetic_tree_does_not_touch_sys_modules(self, tmp_path):
+        # An override tree executes throwaway modules; the real ai.features
+        # namespace must stay untouched (a synthetic feature must never shadow
+        # or pre-create a real package entry).
+        components = tmp_path / "insights" / "fake_cached" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text("FEATURE_TOOLS = {}\n")
+
+        discover_feature_tools(features_dir=tmp_path)
+
+        assert "ai.features.insights.fake_cached.components" not in sys.modules
+
+    def test_broken_module_raises_and_is_not_cached(self, tmp_path):
+        components = tmp_path / "insights" / "fake_broken" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text("raise RuntimeError('boom')\n")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            discover_feature_tools(features_dir=tmp_path)
+
+        assert "ai.features.insights.fake_broken.components" not in sys.modules
+
+    def test_real_tree_branch_imports_the_package(self, tmp_path, monkeypatch):
+        components = tmp_path / "insights" / "real_feature" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text("")
+        monkeypatch.setattr(tools_registry, "_features_dir", lambda: tmp_path)
+
+        imported = []
+
+        def fake_import(name):
+            imported.append(name)
+            module = MagicMock()
+            module.FEATURE_TOOLS = {"read_only_gitlab": [_FeatureDummyTool]}
+            return module
+
+        monkeypatch.setattr(tools_registry.importlib, "import_module", fake_import)
+
+        discovered = discover_feature_tools()
+
+        assert imported == ["ai.features.insights.real_feature.components"]
+        assert discovered == {"read_only_gitlab": [_FeatureDummyTool]}
+
+    def test_tool_without_name_default_is_rejected(self):
+        class _NamelessTool(BaseTool):
+            description: str = "nameless"
+
+            def _run(self, *args, **kwargs):
+                return None
+
+        privileges = {"read_only_gitlab": []}
+
+        with pytest.raises(ValueError, match="declares no default"):
+            _merge_feature_tools(privileges, {"read_only_gitlab": [_NamelessTool]})
+
+    def test_run_mcp_tools_privilege_is_rejected(self):
+        privileges = {"read_only_gitlab": [], "run_mcp_tools": []}
+
+        with pytest.raises(ValueError, match="rebuilds at runtime"):
+            _merge_feature_tools(privileges, {"run_mcp_tools": [_FeatureDummyTool]})
+
+    def test_feature_tool_is_gated_by_its_privilege(self, tool_metadata, monkeypatch):
+        # Registry-level gating: a merged feature tool is enabled exactly when
+        # its privilege is enabled.
+        merged = {k: list(v) for k, v in tools_registry._AGENT_PRIVILEGES.items()}
+        _merge_feature_tools(merged, {"read_only_gitlab": [_FeatureDummyTool]})
+        monkeypatch.setattr(tools_registry, "_AGENT_PRIVILEGES", merged)
+
+        with_privilege = ToolsRegistry(
+            enabled_tools=["read_only_gitlab"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+        without_privilege = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert with_privilege.get("feature_dummy_tool") is not None
+        assert without_privilege.get("feature_dummy_tool") is None
+
+    def test_merge_does_not_mutate_the_static_lists(self):
+        read_only = [_FeatureDummyTool]
+        privileges = {"read_only_gitlab": read_only, "read_write_gitlab": []}
+
+        class _OtherTool(_FeatureDummyTool):
+            name: str = "other_feature_tool"
+
+        _merge_feature_tools(privileges, {"read_only_gitlab": [_OtherTool]})
+
+        assert read_only == [_FeatureDummyTool]
+        assert privileges["read_only_gitlab"] == [_FeatureDummyTool, _OtherTool]
+
+    def test_discovery_skips_non_identifier_directory_names(self, tmp_path):
+        features = tmp_path / "ai" / "features"
+        components = features / "insights" / "evil.pkg" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text("FEATURE_TOOLS = {}\n")
+
+        assert discover_feature_tools(features_dir=features) == {}
+
+    def test_discovery_skips_keyword_directory_names(self, tmp_path):
+        components = tmp_path / "insights" / "class" / "components"
+        components.mkdir(parents=True)
+        (components / "__init__.py").write_text("FEATURE_TOOLS = {}\n")
+
+        assert discover_feature_tools(features_dir=tmp_path) == {}
+
+    def test_discovery_defaults_to_the_real_features_tree(self):
+        # No override-vs-default equivalence: the default path imports the real
+        # packages, while an override executes throwaway modules whose relative
+        # imports are unavailable by design.
+        root = _features_dir()
+
+        assert root.parts[-2:] == ("ai", "features")
+        assert root.is_dir()
+        assert isinstance(discover_feature_tools(), dict)
