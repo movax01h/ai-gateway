@@ -271,6 +271,29 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `advanced_code_review 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_mr_data;
+    fetch_mr_data(fetch_mr_data<br>#91;DeterministicStepComponent#93;);
+    review(review<br>#91;AgentComponent#93;);
+    publish_review(publish_review<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_data --> review;
+    review --> publish_review;
+    publish_review --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `agentic_chat 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
