@@ -15,6 +15,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
+    RUNTIME_INJECTED_VARS,
     RoutingError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes import AgentNode
@@ -118,10 +119,7 @@ class OneOffComponent(BaseComponent):
             data["inputs"] = ["context:goal"]
         return data
 
-    # Variables injected by the node runner at execution time — never component inputs.
-    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset(
-        {"history", "current_date", "current_time", "current_timezone"}
-    )
+    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = RUNTIME_INJECTED_VARS
 
     @model_validator(mode="after")
     def validate_prompt_variable_coverage(self) -> Self:

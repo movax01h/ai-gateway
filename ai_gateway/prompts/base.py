@@ -73,6 +73,7 @@ from ai_gateway.prompts.caching import (
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.feature_roots import feature_prompt_root
+from ai_gateway.prompts.model_variables import bind_model_variables
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from lib.billing_events.service import LLMOperationType
@@ -562,7 +563,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         prompt_tpl = (
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
-            else self._build_prompt_template(config)
+            else bind_model_variables(
+                self._build_prompt_template(config), model_provider, model_metadata
+            )
         )
         prompt = self._chain_cache_control_injection_points_converter(
             model_kwargs, prompt_tpl, model_provider
@@ -920,13 +923,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             )
 
     @classmethod
-    def _build_prompt_template(cls, config: PromptConfig) -> Runnable[Any, PromptValue]:
+    def _build_prompt_template(cls, config: PromptConfig) -> ChatPromptTemplate:
         messages = prompt_template_to_messages(config.prompt_template)
 
-        return cast(
-            Runnable[Any, PromptValue],
-            ChatPromptTemplate.from_messages(messages, template_format="jinja2"),
-        )
+        return ChatPromptTemplate.from_messages(messages, template_format="jinja2")
 
 
 class BasePromptRegistry(ABC):

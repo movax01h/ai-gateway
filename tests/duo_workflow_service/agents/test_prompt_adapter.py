@@ -799,7 +799,7 @@ class TestChatAgentPromptTemplate:
     )
     @patch("duo_workflow_service.agents.prompt_adapter.datetime")
     @patch(
-        "duo_workflow_service.agents.prompt_adapter.prompt_caching_enabled_in_current_request"
+        "ai_gateway.prompts.model_variables.prompt_caching_enabled_in_current_request"
     )
     def test_current_time_included_only_for_openai_models_with_opted_out_caching(
         self,

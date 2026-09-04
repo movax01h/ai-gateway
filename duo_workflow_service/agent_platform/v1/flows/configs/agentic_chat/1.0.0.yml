@@ -14,13 +14,7 @@ components:
         as: "gitlab_instance_url"
       - from: "context:gitlab_instance_version"
         as: "gitlab_instance_version"
-      - from: "dummy"                 # TODO: to be replaced in AIGW prompt
-        as: "model_friendly_name"
-        literal: true
       # For dynamic system template
-      - from: "dummy"                 # TODO:
-        as: "should_show_current_time"
-        literal: true
       - from: "dummy"                 # TODO:
         as: "clarification_question_tool_enabled"
         literal: true
