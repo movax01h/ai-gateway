@@ -445,11 +445,13 @@ class Approval(_message.Message):
         APPROVAL_SOURCE_PRETOOLUSE_HOOK: _ClassVar[Approval.ApprovalSource]
         APPROVAL_SOURCE_AUTO_MODE: _ClassVar[Approval.ApprovalSource]
         APPROVAL_SOURCE_PREAPPROVED_CONFIG: _ClassVar[Approval.ApprovalSource]
+        APPROVAL_SOURCE_SESSION_APPROVAL: _ClassVar[Approval.ApprovalSource]
     APPROVAL_SOURCE_UNSPECIFIED: Approval.ApprovalSource
     APPROVAL_SOURCE_USER_EXPLICIT: Approval.ApprovalSource
     APPROVAL_SOURCE_PRETOOLUSE_HOOK: Approval.ApprovalSource
     APPROVAL_SOURCE_AUTO_MODE: Approval.ApprovalSource
     APPROVAL_SOURCE_PREAPPROVED_CONFIG: Approval.ApprovalSource
+    APPROVAL_SOURCE_SESSION_APPROVAL: Approval.ApprovalSource
     class PolicyRef(_message.Message):
         __slots__ = ("origin", "file", "hash", "version")
         ORIGIN_FIELD_NUMBER: _ClassVar[int]
