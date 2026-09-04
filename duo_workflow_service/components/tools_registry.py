@@ -1,5 +1,8 @@
 import copy
+import importlib.util
 import json
+import keyword
+from pathlib import Path
 from typing import (
     Any,
     Iterable,
@@ -240,6 +243,150 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.StartFlow,
     ],
 }
+
+
+def _features_dir() -> Path:
+    """Return the ``ai/features`` dir (repo root in dev, the WORKDIR in the image).
+
+    Walks up from this file to the nearest ancestor that contains
+    ``pyproject.toml``, so a later move of this module cannot silently point
+    discovery at the wrong directory. Without a marker it falls back to the
+    fixed-depth derivation: absence of moved features must never fail the
+    caller.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent / "ai" / "features"
+    return here.parents[2] / "ai" / "features"
+
+
+def discover_feature_tools(
+    features_dir: Optional[Path] = None,
+) -> dict[str, list[Type[BaseTool]]]:
+    """Collect ``{privilege: [tool classes]}`` declared by features under ai/features/.
+
+    A feature that owns tools exposes a ``FEATURE_TOOLS`` mapping in its
+    ``components`` package. Silent when the tree is absent.
+
+    Args:
+        features_dir: Root directory to scan instead of the real
+            ``ai/features`` tree. Intended for tests; defaults to the actual
+            features directory when omitted.
+
+    Returns:
+        A mapping of privilege name to the list of tool classes declared
+        for it.
+    """
+    root = features_dir or _features_dir()
+    discovered: dict[str, list[Type[BaseTool]]] = {}
+    if not root.is_dir():
+        return discovered
+
+    for init_file in sorted(root.glob("*/*/components/__init__.py")):
+        feature = init_file.parent.parent.name
+        domain = init_file.parent.parent.parent.name
+        # A non-identifier or keyword name (e.g. "evil.pkg", "class") cannot
+        # form an importable package name.
+        if not (
+            domain.isidentifier()
+            and feature.isidentifier()
+            and not keyword.iskeyword(domain)
+            and not keyword.iskeyword(feature)
+        ):
+            log.warning(
+                "Skipping feature with non-identifier directory name",
+                domain=domain,
+                feature=feature,
+            )
+            continue
+        if features_dir is None:
+            # Real tree: the normal import machinery binds parent packages and
+            # caches in sys.modules, keeping tool classes identity-stable for
+            # any later plain import of the components package.
+            module = importlib.import_module(
+                f"ai.features.{domain}.{feature}.components"
+            )
+        else:
+            # Synthetic tree (tests): execute a throwaway module from the file
+            # without touching sys.modules or the real package namespace.
+            spec = importlib.util.spec_from_file_location(
+                f"_feature_tools_{domain}_{feature}", init_file
+            )
+            if spec is None or spec.loader is None:
+                log.warning(
+                    "Skipping feature whose components package has no loadable spec",
+                    domain=domain,
+                    feature=feature,
+                )
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        for privilege, tool_classes in getattr(module, "FEATURE_TOOLS", {}).items():
+            discovered.setdefault(privilege, []).extend(tool_classes)
+    return discovered
+
+
+# read_write_gitlab is a superset of read_only_gitlab, so a read-only tool joins both.
+_PRIVILEGE_SUPERSETS: dict[str, list[str]] = {
+    "read_only_gitlab": ["read_only_gitlab", "read_write_gitlab"],
+    "read_only_files": ["read_only_files", "read_write_files"],
+}
+
+
+def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
+    """Registry name of a tool class; no-op tools use ``tool_title`` instead of a ``name`` field."""
+    title = getattr(tool_cls, "tool_title", None)
+    if title is not None:
+        return title
+    name = tool_cls.model_fields["name"].default
+    if not isinstance(name, str):
+        raise ValueError(
+            f"{tool_cls.__name__} declares no default for its name field, so it "
+            "cannot be checked for registry collisions"
+        )
+    return name
+
+
+def _merge_feature_tools(
+    privileges: dict[str, list[Type[BaseTool]]],
+    discovered: dict[str, list[Type[BaseTool]]],
+    reserved: Iterable[Union[Type[BaseTool], Type[BaseModel]]] = (),
+) -> None:
+    """Merge feature-declared tools into the privilege map.
+
+    A feature tool must declare a privilege that already exists in the map and a tool name no other tool uses, so a typo
+    cannot leave a tool silently ungated or shadow another tool in the registry.
+    """
+    taken = {_tool_name(tc) for tcs in privileges.values() for tc in tcs}
+    taken.update(_tool_name(tc) for tc in reserved)
+
+    for privilege, tool_classes in discovered.items():
+        if privilege == _RUN_MCP_TOOLS_PRIVILEGE:
+            raise ValueError(
+                f"Feature tools {[_tool_name(tc) for tc in tool_classes]} declare "
+                f"{privilege!r}, which the registry rebuilds at runtime; tools "
+                "declared under it would be silently dropped"
+            )
+        if privilege not in privileges:
+            raise ValueError(
+                f"Feature tools {[_tool_name(tc) for tc in tool_classes]} declare "
+                f"unknown privilege {privilege!r}; known privileges: "
+                f"{sorted(privileges)}"
+            )
+        for tool_cls in tool_classes:
+            name = _tool_name(tool_cls)
+            if name in taken:
+                raise ValueError(
+                    f"Feature tool name {name!r} is already registered; "
+                    "tool names must be unique across the registry"
+                )
+            taken.add(name)
+        for target in _PRIVILEGE_SUPERSETS.get(privilege, [privilege]):
+            # Rebind instead of extending: the privilege lists alias module-level
+            # constants, which an in-place extend would silently mutate.
+            # The taken-name guard above already rejected duplicates.
+            privileges[target] = privileges.get(target, []) + list(tool_classes)
 
 
 TOOL_CALL_APPROVED_QUERY = """
@@ -610,3 +757,15 @@ class ToolsRegistry:
             approval_policy=self,
             denied_tools=denied_tools,
         )
+
+
+# Reserve every name the registry can enable outside the privilege map, so a
+# feature tool cannot shadow a default, no-op, or capability-dependent tool.
+# Runs after every class in this module is defined: a feature components module
+# may import modules that themselves import this one (for example the flow
+# platform), which arrives here partially initialized during discovery.
+_merge_feature_tools(
+    _AGENT_PRIVILEGES,
+    discover_feature_tools(),
+    reserved=[*_DEFAULT_TOOLS, *NO_OP_TOOLS, *_CAPABILITY_DEPENDENT_TOOLS],
+)
