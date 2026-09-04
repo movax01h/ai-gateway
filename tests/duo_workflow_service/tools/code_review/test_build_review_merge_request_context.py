@@ -518,6 +518,142 @@ async def test_build_review_context_with_custom_instructions(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag_kwargs,hint_expected",
+    [
+        ({}, True),
+        ({"include_instruction_format_hint": False}, False),
+        # A flow config can only pass a string literal, so the args schema has to
+        # coerce it. Invoked through ainvoke to exercise that coercion.
+        ({"include_instruction_format_hint": "false"}, False),
+    ],
+)
+@patch(
+    "duo_workflow_service.tools.code_review.build_review_merge_request_context.yaml.safe_load"
+)
+async def test_build_review_context_instruction_format_hint(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    custom_instructions_yaml,
+    flag_kwargs,
+    hint_expected,
+):
+    """A flow that renders the attribution itself disables the format hint."""
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "1. Ensure proper error handling",
+            }
+        ]
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool.ainvoke(
+        {
+            "project_id": "test%2Fproject",
+            "merge_request_iid": 123,
+            **flag_kwargs,
+        }
+    )
+
+    assert "Ruby Code Quality" in response
+    assert "Apply these additional review instructions to matching files:" in response
+    assert ("According to custom instructions in" in response) is hint_expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag_kwargs,expected",
+    [
+        ({}, False),
+        ({"include_changed_files_list": True}, True),
+        ({"include_changed_files_list": False}, False),
+        ({"include_changed_files_list": "true"}, True),
+    ],
+)
+async def test_build_review_context_changed_files_list(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    flag_kwargs,
+    expected,
+):
+    """The checklist lists only reviewable paths, and stays out of the default output."""
+    original_file_content = {
+        "content": base64.b64encode(b"original content").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool.ainvoke(
+        {"project_id": "test%2Fproject", "merge_request_iid": 123, **flag_kwargs}
+    )
+
+    if expected:
+        assert "<changed_files>\n- calculator.rb\n</changed_files>" in response
+    else:
+        assert "<changed_files>" not in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_changed_files_list_includes_pure_renames(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data_with_renames,
+):
+    """A pure rename has no reviewable diff but is still a changed file; a rename with changes is listed once."""
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(diffs_data_with_renames)
+            ),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id="test%2Fproject",
+        merge_request_iid=123,
+        include_changed_files_list=True,
+    )
+
+    assert (
+        "<changed_files>\n- calculator.rb\n- Calculator.md\n</changed_files>"
+        in response
+    )
+
+
+@pytest.mark.asyncio
 async def test_build_review_context_with_url(
     gitlab_client_mock,
     metadata,
@@ -1471,6 +1607,45 @@ def test_baseline_sha_is_hidden_from_the_model_but_open_to_the_flow(metadata):
     # And the flow config's inputs: list still validates against that schema.
     validate_against_schema(
         tool.args_schema, {"project_id", "merge_request_iid", "baseline_sha"}
+    )
+
+
+def test_output_flags_are_hidden_from_the_model_but_open_to_the_flow(metadata):
+    # Same reason as baseline_sha: security_review and fix_pipeline expose this tool in
+    # an agent toolset, and neither prompt describes these flags, so the model must not
+    # be able to reshape the output while a flow config still can.
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    model_facing = convert_to_openai_tool(tool)["function"]["parameters"]["properties"]
+    assert "include_instruction_format_hint" not in model_facing
+    assert "include_changed_files_list" not in model_facing
+    # Flags a model may legitimately choose are still its to choose.
+    assert "lightweight" in model_facing
+    assert "only_diffs" in model_facing
+
+    # DeterministicStepComponent calls ainvoke with a plain dict, which validates
+    # against args_schema. The injected fields have to survive that.
+    parsed = tool._parse_input(
+        {
+            "project_id": 1,
+            "merge_request_iid": 123,
+            "include_instruction_format_hint": "false",
+            "include_changed_files_list": "true",
+        },
+        None,
+    )
+    assert parsed["include_instruction_format_hint"] is False
+    assert parsed["include_changed_files_list"] is True
+
+    # And the flow config's inputs: list still validates against that schema.
+    validate_against_schema(
+        tool.args_schema,
+        {
+            "project_id",
+            "merge_request_iid",
+            "include_instruction_format_hint",
+            "include_changed_files_list",
+        },
     )
 
 
