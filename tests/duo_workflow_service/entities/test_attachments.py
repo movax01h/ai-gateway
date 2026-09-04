@@ -71,6 +71,30 @@ class TestParseAttachments:
 
         assert attachment.mime_type == mime_type
 
+    def test_the_allowlist_is_the_intersection_across_providers(self):
+        """Pinned rather than derived, because the test above parametrizes over this set and so can never disagree with
+        it.
+
+        Validation happens before model selection picks a provider, so anything here must be accepted by all of them.
+        """
+        assert ALLOWED_IMAGE_MIME_TYPES == frozenset(
+            {"image/png", "image/jpeg", "image/webp"}
+        )
+
+    @pytest.mark.parametrize(
+        "mime_type",
+        [
+            # Anthropic/OpenAI/Bedrock take GIF; Gemini and Vertex do not.
+            "image/gif",
+            # Gemini and Vertex take Apple's formats; nobody else does.
+            "image/heic",
+            "image/heif",
+        ],
+    )
+    def test_rejects_formats_only_some_providers_accept(self, mime_type):
+        with pytest.raises(ValueError, match="unsupported media type"):
+            parse_attachments([valid_envelope(mime_type=mime_type)])
+
     def test_filename_is_optional(self):
         (attachment,) = parse_attachments(
             [envelope(mime_type="image/png", data=PNG_B64)]

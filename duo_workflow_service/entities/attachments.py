@@ -70,12 +70,24 @@ __all__ = [
 # engine rather than declared by a flow config.
 ATTACHMENTS_CATEGORY = "attachments"
 
-# Formats accepted by every multimodal provider we route to (Anthropic, OpenAI,
-# Gemini). Deliberately conservative: an unsupported type is far better rejected
-# here with a clear message than by the provider mid-turn.
-ALLOWED_IMAGE_MIME_TYPES = frozenset(
-    {"image/png", "image/jpeg", "image/gif", "image/webp"}
-)
+# The intersection of what every multimodal provider we route to accepts, which
+# `models.yml` makes Anthropic, Gemini, Vertex AI, OpenAI and Bedrock.
+#
+# It has to be the intersection, not the union. Validation runs here, before
+# model selection has decided who serves the turn, so a format only some
+# providers take would fail at the provider for whichever session happened to
+# pick a different one. LiteLLM does not help: it reshapes the block into each
+# provider's form but never transcodes the bytes.
+#
+# Two formats are deliberately excluded despite being widely supported:
+#
+# - GIF: taken by Anthropic, OpenAI and Bedrock, but absent from Gemini's and
+#   Vertex's documented lists.
+# - HEIC/HEIF: the mirror image, documented by Gemini and Vertex only. Adding
+#   Apple's formats would break the majority of providers, and browsers other
+#   than Safari cannot decode them for the upload preview either. Supporting
+#   them means transcoding to PNG/JPEG, which belongs with a ref-based upload.
+ALLOWED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
 
 # Caps on the decoded payload. The whole `ClientEvent` is bounded by the 4 MiB
 # gRPC receive limit (`duo_workflow_service.server.MAX_MESSAGE_SIZE`) and base64
