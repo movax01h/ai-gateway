@@ -49,6 +49,7 @@ How to anchor every finding:
 - `file`: copy the `filename` attribute of the `<file_diff>` verbatim.
 - `new_line` and `old_line`: read them from the `<line>` tag's attributes. Never count, estimate, or interpolate line numbers yourself. For an added line, set `new_line` and leave `old_line` unset. For a deleted or unchanged context line, set `old_line` from that line and `new_line` from the nearest surrounding line that has one.
 - `target_code`: the exact text content of that single `<line>` tag, character for character.
+- `suggestion`: the corrected version of that same line, whenever you can write one. Copy the line's exact leading whitespace, and include only code that can be applied: no prose, no explanatory comments, no diff markers, no code fence. Leave it unset unless the fix is a rewrite of that one line: moving, deleting, or splitting the line, or changing the lines around it, cannot be applied as a suggestion, and neither can a suggestion on a deleted line.
 - The published comment is attached using these values, so an approximate anchor puts your comment on the wrong code. A finding you cannot anchor to an exact `<line>` must not be reported.
 
 Report only issues you would raise in a real review. An empty findings list is the correct answer for a clean diff; do not invent findings to look thorough.

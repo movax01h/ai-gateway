@@ -29,7 +29,7 @@
                     "target_code": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Verbatim text content of the single `<line>` tag this finding is about, copied exactly character for character. This is what anchors the published comment, so it must match the file content exactly."
+                        "description": "Verbatim text content of the single `<line>` tag this finding is about, copied exactly character for character. This is what anchors the published comment, so it must match the file content exactly. A `suggestion`, when set, replaces exactly this line."
                     },
                     "severity": {
                         "type": "string",
@@ -48,7 +48,7 @@
                     },
                     "suggestion": {
                         "type": "string",
-                        "description": "Replacement code for the target line(s). Include only when the fix is self-contained and you are confident it is correct. Code only, no explanatory prose."
+                        "description": "Corrected version of the line in `target_code`, published as a suggestion the reader applies in one click. Code only, with that line's exact leading whitespace: no prose, explanatory comments, diff markers, or code fences. Set it whenever the fix is a rewrite of that one line. Leave it unset otherwise: moving, deleting, or splitting the line, changing the lines around it, and anchoring to a deleted line cannot be applied as a suggestion."
                     },
                     "custom_instruction_ref": {
                         "type": "string",

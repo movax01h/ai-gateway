@@ -4,10 +4,13 @@ These tests assert on the content of ``advanced_code_review/1.0.0.yml`` (the
 three-step pipeline, the reviewer's schema id, toolset,
 ``response_schema_tool_choice`` and ``max_cycles``, the fetch step's pinned
 inputs, and the publish step's schema-validated answer and ``min_confidence``
-literal) rather than on ``FlowConfig`` machinery, which is covered in
-``test_flow_config.py``.
+literal), plus the reviewer response schema those inputs read from, rather than
+on ``FlowConfig`` machinery, which is covered in ``test_flow_config.py``.
 """
 
+from typing import get_args
+
+from ai_gateway.response_schemas import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 
@@ -102,6 +105,24 @@ class TestAdvancedCodeReviewConfig:
         assert findings.get("optional") is not True
         assert summary["from"] == "context:review.final_answer.summary"
         assert summary["optional"] is True
+
+    @classmethod
+    def _finding_model(cls) -> type:
+        """The finding model the reviewer is bound to, resolved by id and version the way the runtime resolves it."""
+        review = cls._components()["review"]
+        schema = ResponseSchemaRegistry().get(
+            review["response_schema_id"], review["response_schema_version"]
+        )
+        return get_args(schema.model_fields["findings"].annotation)[0]
+
+    def test_reviewer_schema_keeps_suggestion_available_and_optional(self):
+        """A comment is applicable in one click only when its finding carries `suggestion`, so the field has to exist;
+        it has to stay optional because a finding whose fix reaches past the anchored line is still worth publishing
+        without one."""
+        fields = self._finding_model().model_fields
+
+        assert "suggestion" in fields
+        assert fields["suggestion"].is_required() is False
 
     def test_publish_confidence_gate_is_a_literal(self):
         """The reviewer never self-censors; the volume/precision operating point lives in config, where it is logged and
