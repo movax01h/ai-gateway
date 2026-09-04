@@ -287,6 +287,7 @@ _outbox = MagicMock(spec=Outbox)
                 "get_work_item_notes",
                 "get_work_item_statuses",
                 "post_duo_code_review",
+                "post_duo_code_review_findings",
                 "submit_merge_request_risk_classification",
                 "extract_lines_from_text",
                 "get_glql_schema",
@@ -552,6 +553,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "run_tests": tools.RunTests(metadata=tool_metadata),
         "build_review_merge_request_context": BuildReviewMergeRequestContext(
+            metadata=tool_metadata
+        ),
+        "post_duo_code_review_findings": tools.PostDuoCodeReviewFindings(
             metadata=tool_metadata
         ),
         "get_security_finding_details": GetSecurityFindingDetails(
