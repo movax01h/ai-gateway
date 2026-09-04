@@ -59,13 +59,11 @@ def resolved_work_item_fixture_func(work_item_data):
 @pytest.fixture(name="update_response_fixture")
 def update_response_fixture_func():
     return {
-        "data": {
-            "workItemUpdate": {
-                "workItem": {
-                    "id": "gid://gitlab/WorkItem/123",
-                    "title": "Updated Title",
-                    "state": "opened",
-                }
+        "workItemUpdate": {
+            "workItem": {
+                "id": "gid://gitlab/WorkItem/123",
+                "title": "Updated Title",
+                "state": "opened",
             }
         }
     }
@@ -220,11 +218,7 @@ async def test_update_work_item_variants(
     )
 
     expected_output = json.dumps(
-        {
-            "updated_work_item": update_response_fixture["data"]["workItemUpdate"][
-                "workItem"
-            ]
-        }
+        {"updated_work_item": update_response_fixture["workItemUpdate"]["workItem"]}
     )
     assert result == expected_output
 
@@ -363,6 +357,52 @@ async def test_update_work_item_graphql_error(
 
 
 @pytest.mark.asyncio
+async def test_update_work_item_mutation_error(
+    gitlab_client_mock, metadata, resolved_work_item_fixture
+):
+    """Mutation-level errors come back with HTTP 200, so they need their own check."""
+    gitlab_client_mock.graphql = AsyncMock(
+        return_value={
+            "workItemUpdate": {"workItem": None, "errors": ["Labels not accessible"]}
+        }
+    )
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id="namespace/project", work_item_iid=42, title="Trigger error"
+        )
+
+    assert "Failed to update work item" in str(exc_info.value)
+    assert "Labels not accessible" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"workItem": None, "errors": []}, id="null work item"),
+        pytest.param({}, id="empty payload"),
+    ],
+)
+async def test_update_work_item_empty_payload(
+    gitlab_client_mock, metadata, resolved_work_item_fixture, payload
+):
+    """Reading the payload at the wrong level is what caused this bug, so guard the shape."""
+    gitlab_client_mock.graphql = AsyncMock(return_value={"workItemUpdate": payload})
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
+
+    with pytest.raises(ToolException) as exc_info:
+        await tool._arun(
+            project_id="namespace/project", work_item_iid=42, title="New title"
+        )
+
+    assert "Failed to update work item" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_update_work_item_validation_error(gitlab_client_mock, metadata):
     # Return empty nodes list to trigger "Work item not found" error
     graphql_response = {"project": {"workItems": {"nodes": []}}}
@@ -432,11 +472,7 @@ async def test_update_work_item_with_hierarchy_widget_unique(
     )
 
     expected_output = json.dumps(
-        {
-            "updated_work_item": update_response_fixture["data"]["workItemUpdate"][
-                "workItem"
-            ]
-        }
+        {"updated_work_item": update_response_fixture["workItemUpdate"]["workItem"]}
     )
     assert result == expected_output
 
