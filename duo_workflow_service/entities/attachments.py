@@ -8,9 +8,18 @@ a JSON object::
 
     {"mime_type": "image/png", "data": "<base64>", "filename": "screenshot.png"}
 
-``attachments`` is an engine-level built-in category: it is claimed by the engine
-before the ordinary additional-context machinery runs, so it needs no
-flow-config declaration and no unit primitive.
+Legacy chat claims the ``attachments`` category before the ordinary
+additional-context machinery runs, so there it needs no flow-config declaration
+and no unit primitive.
+
+That is *not* yet true engine-wide. Agent Platform v1 has no attachment support:
+:meth:`~duo_workflow_service.agent_platform.v1.flows.base.Flow._process_additional_context`
+skips any category a flow config does not declare, with a server-side log and no
+user-visible notice, so files sent to a flow silently never reach the model. The
+name is also not reserved -- a flow config that declares an input named
+``attachments`` would take this envelope through the normal path and render the
+raw base64 straight into its Jinja prompt. Reserving the category engine-wide is
+tracked with the Agent Platform wiring, not this module.
 
 Scope
 -----
@@ -25,6 +34,11 @@ shares; assembling the user turn belongs to
 Attachments deliberately never reach a Jinja prompt template. They ride the
 model-facing ``HumanMessage`` as separate content blocks, so providers receive
 real image parts rather than base64 text.
+
+The one thing that does travel back out is a payload-free *reference* envelope
+(:func:`attachment_reference_envelopes`), which exists purely so the client can
+name what the user attached. It is transport in the same sense as the inbound
+envelope, which is why it lives here rather than with the block shape.
 """
 
 import base64
@@ -45,8 +59,11 @@ __all__ = [
     "MAX_TOTAL_ATTACHMENT_BYTES",
     "Attachment",
     "attachment_content_blocks",
+    "attachment_reference_envelopes",
     "parse_attachments",
+    "partition_attachment_envelopes",
     "split_attachment_envelopes",
+    "with_attachment_references",
 ]
 
 # Engine-level built-in category for the attachments envelope: claimed by the
@@ -215,29 +232,114 @@ def split_attachment_envelopes(
         ValueError: If an attachment envelope is malformed or the caps are
             exceeded. See :func:`parse_attachments`.
     """
+    remaining, envelopes = partition_attachment_envelopes(items)
+    return remaining, parse_attachments(envelopes) if envelopes else []
+
+
+def partition_attachment_envelopes(
+    items: Optional[Sequence[AdditionalContext]],
+) -> tuple[list[AdditionalContext], list[AdditionalContext]]:
+    """Separate the ``attachments`` envelopes from the rest of a turn's context.
+
+    The half of :func:`split_attachment_envelopes` that cannot fail. Removing the
+    envelopes has to happen on *every* turn -- leaving one in the list would render its
+    base64 into the prompt -- but validating them is only meaningful on a turn that
+    actually builds a message to carry them. Keeping the two apart lets a caller drop
+    attachments it cannot use without a malformed one taking the turn down with it.
+
+    Args:
+        items: The turn's raw ``AdditionalContext`` list, possibly ``None``.
+
+    Returns:
+        The non-attachment context and the attachment envelopes, each in their original
+        order. Neither is parsed.
+    """
     if not items:
         return [], []
 
-    envelopes = [item for item in items if item.category == ATTACHMENTS_CATEGORY]
-    if not envelopes:
-        return list(items), []
-
-    remaining = [item for item in items if item.category != ATTACHMENTS_CATEGORY]
-    return remaining, parse_attachments(envelopes)
+    remaining: list[AdditionalContext] = []
+    envelopes: list[AdditionalContext] = []
+    for item in items:
+        (envelopes if item.category == ATTACHMENTS_CATEGORY else remaining).append(item)
+    return remaining, envelopes
 
 
 def attachment_content_blocks(
     attachments: Iterable[Attachment],
 ) -> list[dict[str, Any]]:
-    """Build the image content blocks carrying *attachments*.
+    """Build the content blocks carrying *attachments*.
 
-    One block per attachment, in order, using the shared constructor so that an attached image is indistinguishable from
-    an image any other producer emits.
+    Each named attachment contributes two blocks: a short text block naming the file, then the image itself. The image
+    block uses the shared constructor, so an attached image is indistinguishable from an image any other producer emits.
+
+    The label exists for what happens *after* this turn.
+    :func:`~duo_workflow_service.entities.image_blocks.strip_image_payloads` drops the payload before the message is
+    checkpointed and leaves a deliberately provenance-neutral placeholder, so a resumed session would otherwise read as
+    a bare ``[image/png omitted from history]`` and the model could not answer even "which file did I send you?". A text
+    block is not an image block, so it survives stripping untouched and keeps the filename in the conversation. It costs
+    a handful of tokens and is not a recovery hint -- a user attachment cannot be re-fetched the way a tool-read one
+    can.
+    """
+    blocks: list[dict[str, Any]] = []
+    for attachment in attachments:
+        if attachment.filename:
+            blocks.append(
+                {"type": "text", "text": f"[attached file: {attachment.filename}]"}
+            )
+        blocks.append(
+            image_content_block(
+                base64=attachment.data,
+                mime_type=attachment.mime_type,
+            )
+        )
+    return blocks
+
+
+def attachment_reference_envelopes(
+    attachments: Sequence[Attachment],
+) -> list[AdditionalContext]:
+    """Build payload-free envelopes naming *attachments*, for the client's transcript.
+
+    The web client renders a turn's ``UiChatLog.additional_context`` as "included
+    reference" tokens. The parsed attachment is not in that list --
+    :func:`split_attachment_envelopes` claims it out -- so without these the user sees
+    no trace of what they attached, on this turn or on any reload of the thread.
+
+    ``content`` is left unset on purpose: the payload must not re-enter the checkpoint
+    by the back door, and these envelopes never reach a prompt template, so there is
+    nothing for the model to read here anyway.
+
+    ``id`` is positional rather than the filename because the client interpolates it
+    into a DOM id, and a filename carries spaces and dots.
     """
     return [
-        image_content_block(
-            base64=attachment.data,
-            mime_type=attachment.mime_type,
+        AdditionalContext(
+            category=ATTACHMENTS_CATEGORY,
+            id=f"attachment-{index}",
+            metadata={
+                # Keys read by the client's token and popover renderers. `enabled` must
+                # be a bool: its context-item validator rejects the item otherwise.
+                "title": attachment.filename or f"image {index}",
+                "enabled": True,
+                "icon": "paperclip",
+                "secondaryText": attachment.mime_type,
+            },
         )
-        for attachment in attachments
+        for index, attachment in enumerate(attachments, start=1)
     ]
+
+
+def with_attachment_references(
+    context: Optional[Sequence[AdditionalContext]],
+    attachments: Sequence[Attachment],
+) -> Optional[list[AdditionalContext]]:
+    """Append reference envelopes for *attachments* to a turn's client-facing context.
+
+    Only the ``UiChatLog`` copy of the context gets these. The copy handed to
+    :func:`~duo_workflow_service.entities.message_ingestion.assemble_user_message` must
+    stay as it was, or the references would also be rendered into the prompt.
+    """
+    if not attachments:
+        return None if context is None else list(context)
+
+    return list(context or []) + attachment_reference_envelopes(attachments)

@@ -68,6 +68,11 @@ class TikTokenCounter:
                 # Never tiktoken-encode a base64 image payload: it is not prose,
                 # and doing so over-counts by orders of magnitude, which would
                 # spuriously trigger history compaction.
+                #
+                # This counter is not the live budgeting path -- that is
+                # `conversation.token_estimator.TokenEstimator`, which charges the
+                # same constant. Kept in step so whichever counter a caller picks
+                # up prices an image the same way.
                 result += IMAGE_BLOCK_TOKEN_ESTIMATE
             elif isinstance(item, dict):
                 result += self.count_tokens_in_dict(item)

@@ -38,12 +38,18 @@ __all__ = [
     "strip_image_payloads",
 ]
 
-# Flat per-image token estimate used by `TikTokenCounter`. Real cost is
-# resolution-dependent (Anthropic bills roughly `width * height / 750`); this is
-# a deliberate over-estimate of a typical 1024x1024 screenshot so that context
-# budgeting errs towards compacting early rather than overflowing the window.
-# Anything is better than tiktoken-encoding the base64 string as prose, which
-# over-counts by two orders of magnitude.
+# Flat per-image token cost charged wherever a conversation is budgeted.
+#
+# Not a magic number: it is the ceiling of what an image can cost, derived from
+# Anthropic's published behaviour. They downscale anything larger to roughly
+# 1.15 megapixels and bill about `width * height / 750` tokens, so the most any
+# single image can cost is `1_150_000 / 750` ~= 1533; 1600 rounds that up.
+#
+# Being the ceiling is the point. A budget estimate that can only ever be too
+# high makes context management compact early, which is recoverable. One that
+# can be too low overflows the model's window mid-turn, which is not. The
+# alternative of measuring the base64 string as if it were prose over-counts by
+# two orders of magnitude and would compact away most of the conversation.
 IMAGE_BLOCK_TOKEN_ESTIMATE = 1600
 
 

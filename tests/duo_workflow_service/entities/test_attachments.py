@@ -5,14 +5,19 @@ import pytest
 
 from duo_workflow_service.entities.attachments import (
     ALLOWED_IMAGE_MIME_TYPES,
+    ATTACHMENTS_CATEGORY,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     MAX_TOTAL_ATTACHMENT_BYTES,
     Attachment,
     attachment_content_blocks,
+    attachment_reference_envelopes,
     parse_attachments,
+    partition_attachment_envelopes,
     split_attachment_envelopes,
+    with_attachment_references,
 )
+from duo_workflow_service.entities.image_blocks import strip_image_payloads
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"pixels"
@@ -173,6 +178,37 @@ class TestSplitAttachmentEnvelopes:
             split_attachment_envelopes([valid_envelope(mime_type="application/pdf")])
 
 
+class TestPartitionAttachmentEnvelopes:
+    """The half of the split that cannot fail, so a caller can drop attachments it has no message to carry without a
+    malformed one taking the turn down."""
+
+    def test_separates_envelopes_from_the_rest_in_order(self):
+        other = AdditionalContext(category="file", content="ctx")
+        envelope_ = valid_envelope()
+
+        remaining, envelopes = partition_attachment_envelopes([other, envelope_, other])
+
+        assert remaining == [other, other]
+        assert envelopes == [envelope_]
+
+    def test_does_not_validate_what_it_removes(self):
+        """`split_attachment_envelopes` would raise on each of these."""
+        bad = [
+            valid_envelope(mime_type="application/pdf"),
+            valid_envelope(data="not base64!!"),
+            AdditionalContext(category="attachments", content="not json"),
+        ]
+
+        remaining, envelopes = partition_attachment_envelopes(bad)
+
+        assert remaining == []
+        assert len(envelopes) == 3
+
+    @pytest.mark.parametrize("items", [None, []])
+    def test_empty_input(self, items):
+        assert partition_attachment_envelopes(items) == ([], [])
+
+
 class TestContentBlocks:
     def test_builds_standard_image_blocks(self):
         (block,) = attachment_content_blocks(
@@ -195,3 +231,153 @@ class TestContentBlocks:
 
     def test_no_attachments_produce_no_blocks(self):
         assert attachment_content_blocks([]) == []
+
+    def test_a_named_attachment_is_labelled_before_its_image(self):
+        blocks = attachment_content_blocks(
+            [Attachment(mime_type="image/png", data=PNG_B64, filename="diagram.png")]
+        )
+
+        assert blocks[0] == {"type": "text", "text": "[attached file: diagram.png]"}
+        assert blocks[1]["type"] == "image"
+
+    def test_the_label_survives_payload_stripping(self):
+        """The whole point: after a checkpoint the image is gone, but the model can still
+        say which file it was shown."""
+        blocks = attachment_content_blocks(
+            [Attachment(mime_type="image/png", data=PNG_B64, filename="diagram.png")]
+        )
+
+        stripped = strip_image_payloads(blocks)
+
+        assert {"type": "text", "text": "[attached file: diagram.png]"} in stripped
+        assert not [
+            block
+            for block in stripped
+            if isinstance(block, dict) and block.get("base64")
+        ]
+
+    def test_each_attachment_gets_its_own_label(self):
+        blocks = attachment_content_blocks(
+            [
+                Attachment(mime_type="image/png", data=PNG_B64, filename="a.png"),
+                Attachment(mime_type="image/webp", data=PNG_B64, filename="b.webp"),
+            ]
+        )
+
+        assert [block.get("text") for block in blocks if block["type"] == "text"] == [
+            "[attached file: a.png]",
+            "[attached file: b.webp]",
+        ]
+
+    def test_an_unnamed_attachment_gets_no_label(self):
+        """There is nothing useful to say, and an empty label would just cost tokens."""
+        blocks = attachment_content_blocks(
+            [Attachment(mime_type="image/png", data=PNG_B64)]
+        )
+
+        assert [block["type"] for block in blocks] == ["image"]
+
+
+class TestAttachmentReferenceEnvelopes:
+    def test_names_each_attachment_without_carrying_its_payload(self):
+        (envelope_,) = attachment_reference_envelopes(
+            [Attachment(mime_type="image/png", data=PNG_B64, filename="screenshot.png")]
+        )
+
+        assert envelope_.category == ATTACHMENTS_CATEGORY
+        assert envelope_.metadata["title"] == "screenshot.png"
+        # The whole point of the reference: the payload must not travel back out.
+        assert envelope_.content is None
+        assert PNG_B64 not in envelope_.model_dump_json()
+
+    def test_satisfies_the_clients_context_item_contract(self):
+        # duo-ui's `contextItemValidator` rejects an item without `id`, `category`,
+        # or a `metadata` object whose `enabled` is a real bool.
+        (envelope_,) = attachment_reference_envelopes(
+            [Attachment(mime_type="image/png", data=PNG_B64, filename="a.png")]
+        )
+
+        assert envelope_.id
+        assert envelope_.category
+        assert isinstance(envelope_.metadata, dict)
+        assert envelope_.metadata["enabled"] is True
+        assert envelope_.metadata["icon"] == "paperclip"
+
+    def test_ids_are_positional_and_unique_within_a_turn(self):
+        envelopes = attachment_reference_envelopes(
+            [
+                Attachment(mime_type="image/png", data=PNG_B64, filename="a.png"),
+                Attachment(mime_type="image/webp", data=PNG_B64, filename="b.webp"),
+            ]
+        )
+
+        ids = [envelope_.id for envelope_ in envelopes]
+        assert ids == ["attachment-1", "attachment-2"]
+        # The client interpolates the id into a DOM id, so a filename (spaces, dots)
+        # is deliberately not used.
+        assert len(set(ids)) == len(ids)
+
+    def test_preserves_order_and_reports_each_mime_type(self):
+        envelopes = attachment_reference_envelopes(
+            [
+                Attachment(mime_type="image/png", data=PNG_B64, filename="a.png"),
+                Attachment(mime_type="image/webp", data=PNG_B64, filename="b.webp"),
+            ]
+        )
+
+        assert [e.metadata["title"] for e in envelopes] == ["a.png", "b.webp"]
+        assert [e.metadata["secondaryText"] for e in envelopes] == [
+            "image/png",
+            "image/webp",
+        ]
+
+    def test_unnamed_attachment_falls_back_to_a_positional_title(self):
+        # `filename` is optional on the wire, and a token with a blank label would
+        # render as an empty chip.
+        envelopes = attachment_reference_envelopes(
+            [
+                Attachment(mime_type="image/png", data=PNG_B64),
+                Attachment(mime_type="image/png", data=PNG_B64, filename=""),
+            ]
+        )
+
+        assert [e.metadata["title"] for e in envelopes] == ["image 1", "image 2"]
+
+    def test_no_attachments_produce_no_envelopes(self):
+        assert attachment_reference_envelopes([]) == []
+
+
+class TestWithAttachmentReferences:
+    def test_appends_references_after_the_turns_own_context(self):
+        context = [AdditionalContext(category="file", content="def foo(): ...")]
+
+        result = with_attachment_references(
+            context,
+            [Attachment(mime_type="image/png", data=PNG_B64, filename="a.png")],
+        )
+
+        assert [item.category for item in result] == ["file", ATTACHMENTS_CATEGORY]
+
+    def test_does_not_mutate_the_context_handed_to_the_prompt_path(self):
+        # The same list is passed to `assemble_user_message`; appending in place
+        # would render the references into the prompt too.
+        context = [AdditionalContext(category="file", content="ctx")]
+
+        with_attachment_references(
+            context, [Attachment(mime_type="image/png", data=PNG_B64)]
+        )
+
+        assert len(context) == 1
+
+    def test_attachments_only_turn_yields_references_alone(self):
+        result = with_attachment_references(
+            None, [Attachment(mime_type="image/png", data=PNG_B64, filename="a.png")]
+        )
+
+        assert [item.category for item in result] == [ATTACHMENTS_CATEGORY]
+
+    @pytest.mark.parametrize(
+        "context", [None, [], [AdditionalContext(category="file")]]
+    )
+    def test_context_is_unchanged_when_there_are_no_attachments(self, context):
+        assert with_attachment_references(context, []) == context

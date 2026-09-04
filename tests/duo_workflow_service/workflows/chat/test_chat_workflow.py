@@ -2250,34 +2250,55 @@ class TestChatAttachments:
 
         assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
 
-    def test_attachments_are_kept_out_of_the_ui_chat_log(
+    def test_the_ui_chat_log_names_the_attachment_without_its_payload(
         self, workflow_with_attachment
     ):
-        """The UI log is echoed back to the client on every checkpoint."""
+        """The UI log is echoed back on every checkpoint and rebuilds the transcript on reload, so it carries a payload-
+        free reference rather than nothing at all."""
         _, ui_log = self._first_turn(workflow_with_attachment)
 
-        assert ui_log["additional_context"] == [FILE_CONTEXT]
+        file_ctx, reference = ui_log["additional_context"]
+        assert file_ctx == FILE_CONTEXT
+        assert reference.category == "attachments"
+        assert reference.metadata["title"] == "screenshot.png"
+        assert reference.content is None
+
+    def test_no_attachment_payload_ever_reaches_the_ui_chat_log(
+        self, workflow_with_attachment
+    ):
+        """The invariant behind the reference envelope: naming the file must not become
+        a back door for the base64 into the checkpoint."""
+        _, ui_log = self._first_turn(workflow_with_attachment)
+
+        assert PNG_B64 not in json.dumps(ui_log, default=str)
 
     @pytest.mark.asyncio
-    async def test_attachments_are_kept_out_of_both_paths_on_a_later_turn(
+    async def test_a_later_turn_names_the_attachment_but_keeps_it_out_of_the_prompt(
         self, workflow_with_attachment
     ):
         result = await self._later_turn(workflow_with_attachment)
 
         message = result.update["conversation_history"]["test_prompt"][0]
+        # The prompt path must stay exactly as it was: these references are
+        # client-facing only, and would otherwise be rendered into the prompt.
         assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
-        assert result.update["ui_chat_log"][-1]["additional_context"] == [FILE_CONTEXT]
 
-    def test_an_attachments_only_turn_reports_no_additional_context(
+        ui_context = result.update["ui_chat_log"][-1]["additional_context"]
+        assert [item.category for item in ui_context] == ["file", "attachments"]
+
+    def test_an_attachments_only_turn_reports_only_the_reference(
         self, workflow_with_project
     ):
-        """Emptying the list must look like the turn never carried context at all."""
+        """Emptying the list must look like the turn never carried context at all on the prompt path, while the client
+        still sees what was attached."""
         workflow_with_project._additional_context = [attachment_envelope()]
 
         message, ui_log = self._first_turn(workflow_with_project)
 
         assert message.additional_kwargs["additional_context"] is None
-        assert ui_log["additional_context"] is None
+        assert [item.category for item in ui_log["additional_context"]] == [
+            "attachments"
+        ]
 
     # --- turns that carry only attachments ------------------------------
 
@@ -2382,9 +2403,69 @@ class TestChatAttachments:
 
         assert result.goto == "run_tools"
         assert "conversation_history" not in result.update
-        assert "ui_chat_log" not in result.update
         mock_logger.warning.assert_called_once_with(
             "Discarding attachments sent alongside a tool approval decision",
             workflow_id="1234",
             count=1,
         )
+
+        # Loudly means to the user, not just to the logs.
+        (notice,) = result.update["ui_chat_log"]
+        assert notice["status"] == ToolStatus.FAILURE
+        assert "could not be sent" in notice["content"]
+
+    @pytest.mark.asyncio
+    async def test_the_approved_tool_still_runs_when_an_attachment_is_malformed(
+        self, workflow_with_approval
+    ):
+        """Validating a payload we are about to discard would fail an approval the user already gave."""
+        workflow_with_approval._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        result = await self._later_turn(workflow_with_approval, goal="")
+
+        assert result.goto == "run_tools"
+        assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_envelope_never_reaches_the_prompt_on_a_decision_turn(
+        self, workflow_with_approval
+    ):
+        """Skipping the parse must not mean skipping the removal: an envelope left in the
+        list would render its base64 into the prompt."""
+        workflow_with_approval._approval = MagicMock()
+        workflow_with_approval._approval.WhichOneof.return_value = "rejection"
+        workflow_with_approval._approval.rejection.message = "no"
+        workflow_with_approval._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(data="not base64!!"),
+        ]
+
+        result = await self._later_turn(workflow_with_approval, goal="")
+
+        assert PNG_B64 not in json.dumps(result.update, default=str)
+        user_entry = result.update["ui_chat_log"][0]
+        assert user_entry["additional_context"] == [FILE_CONTEXT]
+
+    @pytest.mark.asyncio
+    async def test_a_dropped_attachment_is_not_named_in_the_ui_chat_log(
+        self, workflow_with_approval
+    ):
+        """A rejection builds a user message, so it produces a UI log entry -- but the attachments were still discarded.
+
+        Naming a file the model never saw would tell the user it was delivered.
+        """
+        workflow_with_approval._approval = MagicMock()
+        workflow_with_approval._approval.WhichOneof.return_value = "rejection"
+        workflow_with_approval._approval.rejection.message = "no, use this instead"
+        workflow_with_approval._additional_context = [attachment_envelope()]
+
+        result = await self._later_turn(workflow_with_approval, goal="")
+
+        # The user message is first; the discard notice follows it.
+        ui_context = result.update["ui_chat_log"][0]["additional_context"]
+        assert not [
+            item for item in (ui_context or []) if item.category == "attachments"
+        ]
+        assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]

@@ -37,7 +37,9 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities.attachments import (
     Attachment,
     attachment_content_blocks,
+    partition_attachment_envelopes,
     split_attachment_envelopes,
+    with_attachment_references,
 )
 from duo_workflow_service.entities.message_ingestion import assemble_user_message
 from duo_workflow_service.entities.state import (
@@ -346,7 +348,9 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
-            additional_context=additional_context,
+            additional_context=with_attachment_references(
+                additional_context, attachments
+            ),
         )
 
         conversation_history: List[BaseMessage] = []
@@ -396,7 +400,24 @@ class Workflow(AbstractWorkflow):
                 return self.get_workflow_state(goal)
 
             case _:
-                additional_context, attachments = self._turn_context()
+                decision = self._approval and self._approval.WhichOneof("user_decision")
+                # A decision turn builds no user message, so there is nothing for
+                # an attachment to ride on. Drop the envelopes without parsing
+                # them: validating a payload we are about to discard would let a
+                # malformed file fail an approval the user already gave.
+                additional_context: Optional[list[AdditionalContext]]
+                attachments: list[Attachment]
+                dropped: list[AdditionalContext]
+                if decision in ("approval", "rejection"):
+                    kept, dropped = partition_attachment_envelopes(
+                        self._additional_context
+                    )
+                    additional_context = kept or None
+                    attachments = []
+                else:
+                    additional_context, attachments = self._turn_context()
+                    dropped = []
+
                 state_update: dict[str, Any] = {
                     "status": WorkflowStatusEnum.EXECUTION,
                     "preapproved_tools": self._preapproved_tools or [],
@@ -409,7 +430,7 @@ class Workflow(AbstractWorkflow):
                 # attach to, so anything sent with those is dropped.
                 sent_attachments: list[Attachment] = []
 
-                match self._approval and self._approval.WhichOneof("user_decision"):
+                match decision:
                     case "approval":
                         next_step = "run_tools"
                         self._track_tool_approval_resolved(
@@ -441,11 +462,18 @@ class Workflow(AbstractWorkflow):
                                 ]
                             }
 
-                if attachments and not sent_attachments:
+                discarded_log: list[UiChatLog] = []
+                if dropped:
                     logger.warning(
                         "Discarding attachments sent alongside a tool approval decision",
                         workflow_id=self._workflow_id,
-                        count=len(attachments),
+                        count=len(dropped),
+                    )
+                    # A server-side log alone would let "reject this, use this
+                    # screenshot instead" read as though the model had seen the
+                    # screenshot. Tell the user in the transcript instead.
+                    discarded_log.append(
+                        self._attachments_discarded_log(len(dropped), checkpoint_tuple)
                     )
 
                 if sent_attachments or (
@@ -460,12 +488,44 @@ class Workflow(AbstractWorkflow):
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
                         tool_info=None,
-                        additional_context=additional_context,
+                        # `sent_attachments`, not `attachments`: a decision turn
+                        # discards them, and a reference to a file the model never
+                        # saw would be a lie.
+                        additional_context=with_attachment_references(
+                            additional_context, sent_attachments
+                        ),
                         parent_ts=self._turn_parent_ts(checkpoint_tuple),
                     )
                     state_update["ui_chat_log"] = [new_message_chat_log]
 
+                if discarded_log:
+                    state_update["ui_chat_log"] = (
+                        state_update.get("ui_chat_log", []) + discarded_log
+                    )
+
                 return Command(goto=next_step, update=state_update)
+
+    def _attachments_discarded_log(
+        self, count: int, checkpoint_tuple: Optional[GitLabCheckpoint]
+    ) -> UiChatLog:
+        """Transcript notice that a decision turn's attachments were not delivered."""
+        noun = "file" if count == 1 else "files"
+        return UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            content=(
+                f"{count} attached {noun} could not be sent, because a tool "
+                "approval or rejection carries no message. Send the "
+                f"{noun} again with your next message."
+            ),
+            message_id=f"attachments-discarded-{uuid4()!s}",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=ToolStatus.FAILURE,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+            parent_ts=self._turn_parent_ts(checkpoint_tuple),
+        )
 
     def _turn_parent_ts(
         self, checkpoint_tuple: Optional[GitLabCheckpoint]
