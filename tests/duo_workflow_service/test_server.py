@@ -1511,6 +1511,54 @@ async def test_generate_token(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "claims_extra",
+    [{"flow_config_id": "secrets_fp_detection"}],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_binds_authorized_flow_config_id(
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_id"] == "developer"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [None, {"flow_config_id": "developer"}],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_without_flow_config_id_has_no_flow_binding(
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert "flow_config_id" not in extra_claims
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
     [
         {
             SKIP_USAGE_CUTOFF_CLAIM: True,
@@ -1672,6 +1720,46 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
         algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
     )
     assert outgoing_claims["gitlab_root_namespace_id"] == "123"
+
+
+@pytest.mark.asyncio
+@patch.dict(
+    os.environ,
+    {
+        "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
+        "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
+    },
+)
+async def test_generate_token_binds_flow_config_id_end_to_end(mock_context):
+    incoming_user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
+    )
+    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+        "user-1",
+        "saas",
+        incoming_user,
+        "1234",
+        ["duo_agent_platform"],
+        extra_claims={"iss": "gitlab-rails"},
+    )
+    provider = CompositeProvider(
+        [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
+    )
+    current_user.set(provider.authenticate(incoming_token))
+    mock_context.invocation_metadata.return_value = [
+        ("x-gitlab-global-user-id", "user-1"),
+        ("x-gitlab-realm", "saas"),
+        ("x-gitlab-instance-id", "1234"),
+    ]
+
+    response = await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+    )
+    decoded_user = provider.authenticate(response.token)
+
+    assert decoded_user.authenticated
+    assert decoded_user.claims.extra["flow_config_id"] == "developer"
 
 
 @pytest.mark.asyncio
@@ -3186,17 +3274,30 @@ async def test_send_events_sends_skips_checkpoint_if_already_sent(servicer):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scopes", [["duo_agent_platform", "duo_chat"]])
 @pytest.mark.parametrize(
-    "workflow_definition, expected_mapped_definition",
+    "workflow_definition, expected_mapped_definition, claims_extra",
     [
-        ("duo_planner/experimental", "duo_planner/v1"),
-        ("security_analyst_agent/experimental", "security_analyst_agent/v1"),
-        ("duo_planner/v1", "duo_planner/v1"),
-        ("security_analyst_agent/v1", "security_analyst_agent/v1"),
-        ("chat", "chat"),
-        ("software_development", "software_development"),
+        (
+            "duo_planner/experimental",
+            "duo_planner/v1",
+            {"flow_config_id": "duo_planner"},
+        ),
+        (
+            "security_analyst_agent/experimental",
+            "security_analyst_agent/v1",
+            {"flow_config_id": "security_analyst_agent"},
+        ),
+        ("duo_planner/v1", "duo_planner/v1", {"flow_config_id": "duo_planner"}),
+        (
+            "security_analyst_agent/v1",
+            "security_analyst_agent/v1",
+            {"flow_config_id": "security_analyst_agent"},
+        ),
+        ("chat", "chat", None),
+        ("software_development", "software_development", None),
         (
             "",
             "software_development",
+            None,
         ),  # empty defaults to software_development via normalization
     ],
 )
@@ -3208,6 +3309,7 @@ async def test_workflow_definition_mapping(
     mock_resolve_flow,
     mock_abstract_workflow_class,
     expected_mapped_definition,
+    claims_extra,
     start_request_iterator,
     mock_context,
     servicer,
@@ -3247,6 +3349,16 @@ async def test_workflow_definition_mapping(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        pytest.param(None, id="old-rails-token-without-claims"),
+        pytest.param({}, id="old-rails-token-without-flow-binding"),
+        pytest.param(
+            {"flow_config_id": "developer"}, id="new-rails-token-with-binding"
+        ),
+    ],
+)
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_with_flow_config_id_happy_path(
@@ -3254,8 +3366,9 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     mock_abstract_workflow_class,
     mock_context,
     servicer,
+    claims_extra,
 ):
-    """Server resolves flowConfigId + flowConfigSchemaVersion + flowVersion correctly."""
+    """Registry flows work with old unbound and new bound Rails tokens."""
     mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
@@ -3288,6 +3401,141 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     mock_resolve_flow.assert_called_once_with(
         RegistryFlowRequest(config_id="developer", schema_version="v1", version="1.0.0")
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request",
+    [
+        (
+            {"flow_config_id": "secrets_fp_detection"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": ""},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": 123},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": None},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": "secrets_fp_detection"},
+            contract_pb2.StartWorkflowRequest(workflowDefinition="developer/v1"),
+        ),
+        (
+            {"flow_config_id": "developer"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="software_development"
+            ),
+        ),
+        (
+            {"flow_config_id": "developer"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfig=struct_pb2.Struct(
+                    fields={"version": struct_pb2.Value(string_value="v1")}
+                ),
+                flowConfigSchemaVersion="v1",
+            ),
+        ),
+        (
+            {"flow_config_id": "developer"},
+            contract_pb2.StartWorkflowRequest(),
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_foundational_flow(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_debug_user_bypasses_flow_binding(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    user_is_debug,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once()
 
 
 @pytest.mark.asyncio

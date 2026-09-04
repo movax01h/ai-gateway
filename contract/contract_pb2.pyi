@@ -276,10 +276,12 @@ class RunGitCommand(_message.Message):
     def __init__(self, command: _Optional[str] = ..., arguments: _Optional[str] = ..., repository_url: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenRequest(_message.Message):
-    __slots__ = ("workflowDefinition",)
+    __slots__ = ("workflowDefinition", "flow_config_id")
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
+    FLOW_CONFIG_ID_FIELD_NUMBER: _ClassVar[int]
     workflowDefinition: str
-    def __init__(self, workflowDefinition: _Optional[str] = ...) -> None: ...
+    flow_config_id: str
+    def __init__(self, workflowDefinition: _Optional[str] = ..., flow_config_id: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenResponse(_message.Message):
     __slots__ = ("token", "expiresAt", "server_capabilities")
