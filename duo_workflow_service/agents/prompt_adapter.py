@@ -10,6 +10,10 @@ from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import Prompt, jinja2_formatter
 from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.model_variables import (
+    model_friendly_name,
+    should_show_current_time,
+)
 from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.message_ingestion import (
@@ -27,7 +31,6 @@ from duo_workflow_service.slash_commands.goal_parser import is_slash_command
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
-from lib.prompts.caching import prompt_caching_enabled_in_current_request
 from lib.prompts.utilities import render_security_block
 
 VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
@@ -159,11 +162,7 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
                 if gitlab_instance_info
                 else "Unknown"
             ),
-            "model_friendly_name": (
-                model_metadata.friendly_name
-                if model_metadata and model_metadata.friendly_name
-                else "Unknown"
-            ),
+            "model_friendly_name": model_friendly_name(model_metadata),
             "clarification_question_tool_enabled": is_feature_enabled(
                 FeatureFlag.DUO_CHAT_CLARIFICATION_QUESTION_TOOL
             ),
@@ -178,17 +177,11 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         namespace: Namespace | None,
         web_search: WebSearchState,
     ) -> dict[str, Any]:
-        caching_status = prompt_caching_enabled_in_current_request()
-        user_opted_out_of_caching = caching_status == "false"
-        should_show_current_time = (
-            self.model_provider == ModelClassProvider.OPENAI
-            and user_opted_out_of_caching
-        )
         return {
             "current_date": datetime.now().strftime("%Y-%m-%d"),
             "current_time": datetime.now().strftime("%H:%M:%S"),
             "current_timezone": datetime.now().astimezone().tzname(),
-            "should_show_current_time": should_show_current_time,
+            "should_show_current_time": should_show_current_time(self.model_provider),
             "web_search_supported": web_search.supported,
             "web_search_enabled": web_search.active,
             "project": project,

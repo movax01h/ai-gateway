@@ -27,6 +27,7 @@ from pydantic import (
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
+from ai_gateway.prompts.model_variables import MODEL_TEMPLATE_VARIABLES
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
@@ -85,12 +86,20 @@ from lib.context import get_model_metadata
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
+    "RUNTIME_INJECTED_VARS",
     "SUBSESSION_ID_CONTEXT_KEY",
     "AgentComponent",
     "AgentComponentBase",
     "MaxCyclesConfig",
     "RoutingError",
 ]
+
+# Injected at execution time by the node runner, or by the AIGW prompt layer for
+# the model variables — never component inputs.
+RUNTIME_INJECTED_VARS = (
+    frozenset({"history", "current_date", "current_time", "current_timezone"})
+    | MODEL_TEMPLATE_VARIABLES
+)
 
 # Default number of cycles before `max_cycles` at which the agent is warned that it
 # is approaching the soft limit. Shared by the legacy plain-int `max_cycles` form
@@ -395,16 +404,9 @@ class AgentComponentBase(BaseComponent):
         self._response_schema = response_schema
         return self
 
-    # Variables injected by the node runner at execution time — never component inputs.
-    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "history",
-            "current_date",
-            "current_time",
-            "current_timezone",
-            "web_search_supported",
-            "web_search_enabled",
-        }
+    _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = (
+        RUNTIME_INJECTED_VARS
+        | frozenset({"web_search_supported", "web_search_enabled"})
     )
 
     @model_validator(mode="after")
