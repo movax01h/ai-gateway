@@ -85,9 +85,7 @@ class ApprovalSource(StrEnum):
     AUTO_MODE = "auto_mode"
     PREAPPROVED_CONFIG = "preapproved_config"
     # Server-produced only (never client-reported): the skip was granted by a
-    # session approval persisted on the GitLab instance (a prior
-    # remember_approval replayed server-side). Python-only for now; not yet
-    # mirrored in contract.proto (a separate follow-up promotes it to the wire).
+    # session approval replayed server-side.
     SESSION_APPROVAL = "session_approval"
 
     @classmethod
@@ -105,6 +103,15 @@ class ApprovalSource(StrEnum):
         name = name.removeprefix("APPROVAL_SOURCE_")
         member = cls.__members__.get(name)
         return member.value if member is not None else name.lower()
+
+    @classmethod
+    def from_approval(
+        cls, approved: Optional[contract_pb2.Approval.Approved]
+    ) -> Optional[str]:
+        """Resolve the loggable approval source from an ``Approved`` message, or ``None`` when the source is unset."""
+        if approved is not None and approved.HasField("approval_source"):
+            return cls.from_proto(approved.approval_source)
+        return None
 
 
 def policy_ref_to_log_dict(

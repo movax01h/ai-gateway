@@ -17,15 +17,7 @@ from duo_workflow_service.entities.state import (
 
 
 class TestApprovalSourceFromProto:
-    """Documents the mapping between the proto enum and the StrEnum.
-
-    Client-reportable sources map 1:1 with the proto enum. Server-only sources are Python-only (never cross the wire)
-    and are exempted below; promoting one to the proto is a deliberate, separately-reviewable change.
-    """
-
-    # Members produced only server-side; intentionally absent from the proto
-    # enum because they are never client-reported. See ApprovalSource docs.
-    SERVER_ONLY_MEMBERS = {ApprovalSource.SESSION_APPROVAL}
+    """Documents the mapping between the proto enum and the StrEnum."""
 
     def test_every_proto_value_maps_to_a_loggable_string(self):
         for name, value in contract_pb2.Approval.ApprovalSource.items():
@@ -43,22 +35,59 @@ class TestApprovalSourceFromProto:
                 "share the enclosing message's namespace, so keep them prefixed."
             )
 
-    def test_every_client_reportable_member_has_a_proto_counterpart(self):
+    def test_every_member_has_a_proto_counterpart(self):
         proto_names = {
             name.removeprefix("APPROVAL_SOURCE_")
             for name in contract_pb2.Approval.ApprovalSource.keys()
         }
         for member in ApprovalSource:
-            if member in self.SERVER_ONLY_MEMBERS:
-                assert member.name not in proto_names, (
-                    f"{member.name} is documented as server-only but now exists "
-                    "in the proto; promote it deliberately and drop the exemption."
-                )
-                continue
-            assert member.name in proto_names
+            assert member.name in proto_names, (
+                f"{member.name} has no APPROVAL_SOURCE_{member.name} counterpart in the proto enum; "
+                "add it to contract.proto and regenerate the stubs."
+            )
 
     def test_unknown_value_does_not_raise(self):
         assert ApprovalSource.from_proto(99) == "unknown(99)"
+
+
+class TestApprovalSourceFromApproval:
+    """Documents ApprovalSource.from_approval."""
+
+    def test_uses_client_reported_source_when_present(self):
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+        )
+        assert ApprovalSource.from_approval(approved) == ApprovalSource.AUTO_MODE.value
+
+    def test_defaults_to_none_when_source_unset(self):
+        # An Approved message with no approval_source field (never sent) resolves
+        # to None, matching the call site in abstract_workflow.py.
+        assert ApprovalSource.from_approval(contract_pb2.Approval.Approved()) is None
+
+    def test_none_defaults_to_none(self):
+        assert ApprovalSource.from_approval(None) is None
+
+    def test_explicit_unspecified_is_distinct_from_never_sent(self):
+        # Proto3 optional presence: explicitly stamping APPROVAL_SOURCE_UNSPECIFIED
+        # (value 0) sets the field, so from_approval resolves it to "unspecified"
+        # rather than the None returned for the never-sent case above.
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_UNSPECIFIED
+        )
+        assert ApprovalSource.from_approval(approved) == "unspecified"
+
+    def test_client_stamped_session_approval_passes_through_unverified(self):
+        # SESSION_APPROVAL is documented as server-produced only, but there is no
+        # server-side verification today: a client that stamps
+        # APPROVAL_SOURCE_SESSION_APPROVAL has it passed through as-is. This test
+        # pins that current (unverified) behavior so a future clamp is visible.
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL
+        )
+        assert (
+            ApprovalSource.from_approval(approved)
+            == ApprovalSource.SESSION_APPROVAL.value
+        )
 
 
 class TestPolicyRefToLogDict:

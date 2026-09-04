@@ -597,6 +597,12 @@ export enum Approval_ApprovalSource {
   APPROVAL_SOURCE_AUTO_MODE = 3,
   /** APPROVAL_SOURCE_PREAPPROVED_CONFIG - APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration. */
   APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4,
+  /**
+   * APPROVAL_SOURCE_SESSION_APPROVAL - APPROVAL_SOURCE_SESSION_APPROVAL is produced server-side when a tool call is
+   * silently approved by replaying a prior session-scoped approval, rather than a
+   * fresh decision. Clients must never stamp this value themselves.
+   */
+  APPROVAL_SOURCE_SESSION_APPROVAL = 5,
   UNRECOGNIZED = -1,
 }
 
@@ -617,6 +623,9 @@ export function approval_ApprovalSourceFromJSON(object: any): Approval_ApprovalS
     case 4:
     case "APPROVAL_SOURCE_PREAPPROVED_CONFIG":
       return Approval_ApprovalSource.APPROVAL_SOURCE_PREAPPROVED_CONFIG;
+    case 5:
+    case "APPROVAL_SOURCE_SESSION_APPROVAL":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -636,6 +645,8 @@ export function approval_ApprovalSourceToJSON(object: Approval_ApprovalSource): 
       return "APPROVAL_SOURCE_AUTO_MODE";
     case Approval_ApprovalSource.APPROVAL_SOURCE_PREAPPROVED_CONFIG:
       return "APPROVAL_SOURCE_PREAPPROVED_CONFIG";
+    case Approval_ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL:
+      return "APPROVAL_SOURCE_SESSION_APPROVAL";
     case Approval_ApprovalSource.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
