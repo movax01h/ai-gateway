@@ -1,0 +1,101 @@
+# Advanced Duo Code Review: one investigative reviewer agent followed by a
+# deterministic publish step. No finding passes through a model after the
+# reviewer writes it; the confidence gate is the only (counted) drop.
+# Epic: https://gitlab.com/groups/gitlab-org/-/work_items/21524
+
+version: "v1"
+
+environment: ambient
+
+components:
+  # Step 1: Fetch title, description, custom instructions and diffs in one call.
+  - name: "fetch_mr_data"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      # The reviewer reads files on demand; preloaded contents were ~68% of the
+      # payload, re-billed every cycle, with no recall gain.
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+      # The publish step renders the custom-instruction attribution itself.
+      - from: "false"
+        as: "include_instruction_format_hint"
+        literal: true
+      # The reviewer's coverage checklist.
+      - from: "true"
+        as: "include_changed_files_list"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: The reviewer, with read-only repository tools.
+  - name: "review"
+    type: AgentComponent
+    prompt_id: "advanced_code_review_reviewer"
+    prompt_version: "^1.0.0"
+    response_schema_id: "code_review_phase_findings"
+    response_schema_version: "^1.0.0"
+    # "auto" keeps extended thinking available (a forced tool choice disables it) so
+    # the reviewer can consolidate and finish rather than loop on tool calls; the
+    # schema is still enforced on the final answer. 25 matches fix_pipeline's worker.
+    response_schema_tool_choice: "auto"
+    max_cycles: 25
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+    toolset:
+      - "gitlab_blob_search"
+      - "get_repository_file"
+      - "get_repository_files"
+      - "list_repository_tree"
+      - "list_commits"
+      - "get_commit_diff"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 3: Publish in pure code from the reviewer's schema-validated answer.
+  # `findings` is required so a missing answer fails the flow instead of posting
+  # a clean review. min_confidence 0 publishes everything; the production value
+  # comes from an offline threshold sweep.
+  - name: "publish_review"
+    type: DeterministicStepComponent
+    tool_name: "post_duo_code_review_findings"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:review.final_answer.findings"
+        as: "findings"
+      - from: "context:review.final_answer.summary"
+        as: "summary"
+        optional: true
+      - from: "0"
+        as: "min_confidence"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "fetch_mr_data"
+    to: "review"
+  - from: "review"
+    to: "publish_review"
+  - from: "publish_review"
+    to: "end"
+
+flow:
+  entry_point: "fetch_mr_data"

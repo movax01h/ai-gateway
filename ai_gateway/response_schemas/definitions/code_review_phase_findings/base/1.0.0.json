@@ -1,0 +1,73 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "code_review_phase_findings",
+    "description": "Use this tool to submit your review as structured findings. Report every candidate issue you can anchor to an exact diff line, each with a calibrated confidence score: publishing decisions happen downstream at a configured confidence threshold, never in your head. An empty findings array is a valid and expected result for a clean diff.",
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "description": "Every candidate issue you found, in the order you found them, including ones you consider minor or were unable to fully confirm — express doubt through the confidence score, never by omitting the finding. Anchor each one to an exact line of the diff: a finding you cannot anchor to a specific line, or that restates a design choice without identifying a concrete problem, does not belong here. Empty array when the diff is clean.",
+            "items": {
+                "type": "object",
+                "title": "PhaseCodeReviewFinding",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Full file path exactly as it appears in the diff."
+                    },
+                    "new_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Line number in the NEW version of the file, read from the `new_line` attribute of the `<line>` tag in the diff. Never guess, count, or interpolate: an approximate line number anchors the comment to the wrong code."
+                    },
+                    "old_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Line number in the OLD version, read from the `old_line` attribute of the `<line>` tag. Set this only for a deleted or unchanged context line."
+                    },
+                    "target_code": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Verbatim text content of the single `<line>` tag this finding is about, copied exactly character for character. This is what anchors the published comment, so it must match the file content exactly."
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "major", "minor"],
+                        "description": "critical: a correctness, safety, or security defect that should block merge. major: a likely-correctness, convention, or design problem that should be fixed. minor: optional or stylistic, informational only."
+                    },
+                    "category": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Short kebab-case slug for the issue TYPE, e.g. `sql-injection`, `layer-violation`, `missing-test`, `fail-open`. Rendered into the comment header and the summary breakdown, so prefer an established slug over inventing a near-synonym of one."
+                    },
+                    "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The finding in markdown: what the problem is and why it matters. Backtick code elements. Do NOT restate the severity or category — they render into the comment header automatically."
+                    },
+                    "suggestion": {
+                        "type": "string",
+                        "description": "Replacement code for the target line(s). Include only when the fix is self-contained and you are confident it is correct. Code only, no explanatory prose."
+                    },
+                    "custom_instruction_ref": {
+                        "type": "string",
+                        "description": "Name of the custom review instruction that drove this finding, when one did. Leave unset for findings from standard review criteria. Do not write the attribution into the message; it renders automatically from this field."
+                    },
+                    "confidence": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10,
+                        "description": "How sure you are the issue is REAL, scored on the evidence you gathered — not on how important it feels (that is severity). 9-10: you verified the defect and can point to the evidence. 6-8: likely real, but something material is unverified. 3-5: a plausible concern you could not settle either way; state the open question in the message. 0-2: a hunch supported by little. Never inflate the score to protect a finding from the publishing threshold."
+                    }
+                },
+                "required": ["file", "new_line", "target_code", "severity", "category", "message", "confidence"]
+            }
+        },
+        "summary": {
+            "type": "string",
+            "description": "First-person recap of your review, 2-4 sentences: what you focused on, the kinds of issues you raised, and a rough estimate of the work needed to address them. When `findings` is empty, instead give 3-5 brief observation bullets (each starting with `- `) about the change: quality, tests, conventions. Do NOT include finding counts or per-severity tallies; those are computed and rendered separately."
+        }
+    },
+    "required": ["findings"]
+}

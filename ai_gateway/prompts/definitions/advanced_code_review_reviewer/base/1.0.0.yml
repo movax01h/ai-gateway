@@ -1,0 +1,12 @@
+---
+name: Advanced Code Review Reviewer
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'advanced_code_review_reviewer/system/1.0.0.jinja' %}
+  user: |
+    {% include 'advanced_code_review_reviewer/user/1.0.0.jinja' %}
+  placeholder: history
+params:
+  timeout: 300
+  cache_control_injection_points: []
