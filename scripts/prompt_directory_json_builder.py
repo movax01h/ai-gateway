@@ -52,12 +52,19 @@ def process_feature_without_subfeatures(path):
 
 if __name__ == "__main__":
     BASE_PATH = "ai_gateway/prompts/definitions"
+    # Prompts moved to ai/features/<domain>/<feature>/prompts/ keep their flat
+    # feature id, so they join the same directory structure.
+    FEATURE_PROMPT_ROOTS = {
+        prompts.parent.name: prompts
+        for prompts in Path("ai/features").glob("*/*/prompts")
+        if prompts.is_dir()
+    }
     feature_models = {}
 
     target_features_with_subfeatures = ["chat", "code_suggestions"]
     all_features = [
         file for file in os.listdir(BASE_PATH) if Path(BASE_PATH, file).is_dir()
-    ]
+    ] + list(FEATURE_PROMPT_ROOTS)
     target_features_without_subfeatures = [
         f for f in all_features if f not in target_features_with_subfeatures
     ]
@@ -70,7 +77,7 @@ if __name__ == "__main__":
                 feature_models[feature] = result
 
     for feature in target_features_without_subfeatures:
-        feature_path = Path(BASE_PATH) / feature
+        feature_path = FEATURE_PROMPT_ROOTS.get(feature, Path(BASE_PATH) / feature)
         if feature_path.is_dir():
             result = process_feature_without_subfeatures(feature_path)
             if result:

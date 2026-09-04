@@ -263,6 +263,50 @@ shared across the codebase, and feature tests reuse those fixtures rather than
 duplicating them (`--import-mode=importlib` supports co-located tests, and test
 collection includes the feature directories).
 
+## Verifying a prompt move locally
+
+Use these steps when you move a prompt feature under `ai/features/` and want a
+smoke test beyond the unit tests.
+
+### The prompt serves through its old ID
+
+Run the same request twice: once on `main` (before the move), once on your
+branch (after). The responses must come from the same prompt definition.
+
+1. Start the AI Gateway with external auth bypassed:
+
+   ```shell
+   AIGW_AUTH__BYPASS_EXTERNAL=true poetry run ai_gateway
+   ```
+
+1. Invoke the prompt through its flat ID:
+
+   ```shell
+   curl -X POST "http://localhost:5052/v1/prompts/glab_ask_git_command" \
+     -H 'Content-Type: application/json' \
+     -d '{"inputs": {"prompt": "undo the last commit"}}'
+   ```
+
+   A model completion means the ID resolved; a `404` means it did not. Pass
+   `"prompt_version": "1.0.1"` in the body to pin one version, and repeat for
+   each version the feature ships.
+
+### Duplicate feature IDs fail at boot
+
+Prompt IDs are flat, so two features with the same directory name collide.
+To see the guard fire, register a second feature with an ID that already
+exists:
+
+```shell
+mkdir -p ai/features/code/glab_ask_git_command/prompts
+poetry run ai_gateway
+```
+
+Startup fails with `Duplicate prompt feature id 'glab_ask_git_command'`
+instead of serving one of the two nondeterministically. Remove the extra
+directory afterwards. CI enforces the same rule without booting the app, in
+`tests/test_feature_ids_unique.py`.
+
 ## Relationship to the Component Ownership Model
 
 This mirrors Infrastructure's

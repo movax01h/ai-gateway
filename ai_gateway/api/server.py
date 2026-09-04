@@ -45,6 +45,7 @@ from ai_gateway.instrumentators.threads import monitor_threads
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
+from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
 
 __all__ = [
@@ -81,6 +82,10 @@ async def lifespan(app: FastAPI):
     container_application = ContainerApplication()
     container_application.wire(modules=CONTAINER_APPLICATION_MODULES)
     container_application.config.from_dict(config.model_dump())
+
+    # Register moved feature prompts at boot so a duplicate feature id fails
+    # startup rather than the first prompt request.
+    discover_feature_prompts()
 
     if config.instrumentator.thread_monitoring_enabled:
         loop = asyncio.get_running_loop()

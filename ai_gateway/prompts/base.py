@@ -26,8 +26,8 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
-from jinja2 import PackageLoader, meta
-from jinja2.exceptions import SecurityError
+from jinja2 import BaseLoader, ChoiceLoader, Environment, PackageLoader, meta
+from jinja2.exceptions import SecurityError, TemplateNotFound
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
@@ -72,15 +72,13 @@ from ai_gateway.prompts.caching import (
     should_inject_default_cache_control,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
+from ai_gateway.prompts.feature_roots import feature_prompt_root
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
-from lib.prompts.utilities import (
-    prompt_template_to_messages,
-    render_security_block,
-)
+from lib.prompts.utilities import prompt_template_to_messages, render_security_block
 
 __all__ = [
     "BasePromptCallbackHandler",
@@ -378,7 +376,38 @@ def parse_json(value: Any) -> Any:
         raise SecurityError("Invalid json value") from e
 
 
-jinja_loader = PackageLoader("ai_gateway.prompts", "definitions")
+class FeatureRootLoader(BaseLoader):
+    """Resolve a self-namespaced include to a moved feature's ``prompts/`` dir.
+
+    Template name ``<feature_id>/<rest>`` maps to ``<registered_root>/<rest>``,
+    so include strings need no rewrite when a feature moves to Layout B.
+    """
+
+    def get_source(
+        self, environment: Environment, template: str
+    ) -> tuple[str, str, Callable[[], bool] | None]:
+        feature_id, _, rest = template.partition("/")
+        root = feature_prompt_root(feature_id)
+        if root is None or not rest:
+            raise TemplateNotFound(template)
+
+        path = (root / rest).resolve()
+        if not path.is_relative_to(root.resolve()) or not path.is_file():
+            raise TemplateNotFound(template)
+
+        source = path.read_text(encoding="utf-8")
+        mtime = path.stat().st_mtime
+        return (
+            source,
+            str(path),
+            lambda: path.is_file() and path.stat().st_mtime == mtime,
+        )
+
+
+# Legacy root first, then moved features; first match wins.
+jinja_loader = ChoiceLoader(
+    [PackageLoader("ai_gateway.prompts", "definitions"), FeatureRootLoader()]
+)
 jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
 jinja_env.filters["split"] = split_filter
 jinja_env.filters["parse_json"] = parse_json

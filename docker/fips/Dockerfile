@@ -43,6 +43,7 @@ RUN mkdir -p -m 777 $POETRY_CONFIG_DIR $POETRY_DATA_DIR $POETRY_CACHE_DIR
 
 COPY --chown=aigateway:aigateway poetry.lock pyproject.toml ./
 COPY --chown=aigateway:aigateway README.md README.md
+COPY --chown=aigateway:aigateway ai/ ai/
 COPY --chown=aigateway:aigateway ai_gateway/ ai_gateway/
 COPY --chown=aigateway:aigateway duo_workflow_service/ duo_workflow_service/
 COPY --chown=aigateway:aigateway lib/ lib/
