@@ -1,6 +1,7 @@
 # pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg
 import base64
 import json
+import re
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from uuid import UUID
 
@@ -2360,29 +2361,94 @@ class TestChatAttachments:
             ),
         ],
     )
-    def test_a_bad_attachment_rejects_the_turn_with_a_visible_reason(
+    def test_a_bad_attachment_is_reported_with_a_visible_reason(
         self, workflow_with_project, envelope, expected
     ):
-        """A generic failure would leave the user with no idea what to change.
-
-        `NotifiableException` is what `_handle_compile_and_run_exception` renders
-        verbatim into the chat.
-        """
+        """A generic failure would leave the user with no idea what to change."""
         workflow_with_project._additional_context = [envelope]
 
-        with pytest.raises(NotifiableException, match=expected):
-            workflow_with_project.get_workflow_state("look at this")
+        state = workflow_with_project.get_workflow_state("look at this")
+
+        notice = state["ui_chat_log"][-1]
+        assert notice["status"] == ToolStatus.FAILURE
+        assert re.search(expected, notice["content"])
+
+    def test_a_bad_attachment_does_not_fail_the_session(self, workflow_with_project):
+        """Raising here would reach `_handle_compile_and_run_exception`, which sets `ERROR` -> `FAILED` -> a `drop`
+        event, so Rails would move the whole conversation to failed and the thread could not be continued.
+
+        Losing a conversation over an oversized PNG is far too harsh.
+        """
+        workflow_with_project._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        state = workflow_with_project.get_workflow_state("look at this")
+
+        assert state["status"] != WorkflowStatusEnum.ERROR
+        # The turn still goes to the model, so the user gets an answer rather than a
+        # dead session.
+        assert state["conversation_history"]["test_prompt"]
+
+    def test_the_model_is_told_the_files_are_missing(self, workflow_with_project):
+        """Dropping the files silently would leave the model answering "what is in this screenshot?" as though nothing
+        had been sent, and it would guess."""
+        workflow_with_project._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        state = workflow_with_project.get_workflow_state("what is in this screenshot?")
+
+        message = state["conversation_history"]["test_prompt"][0]
+        text = " ".join(
+            block["text"] for block in message.content if block["type"] == "text"
+        )
+        assert "could not be included" in text
+        assert "unsupported media type" in text
+        assert not image_blocks(message)
 
     @pytest.mark.asyncio
-    async def test_a_bad_attachment_rejects_a_later_turn_too(
+    async def test_a_bad_attachment_on_a_later_turn_is_also_non_fatal(
         self, workflow_with_project
     ):
         workflow_with_project._additional_context = [
             attachment_envelope(mime_type="application/pdf")
         ]
 
-        with pytest.raises(NotifiableException, match="unsupported media type"):
-            await self._later_turn(workflow_with_project)
+        result = await self._later_turn(workflow_with_project)
+
+        assert result.update["status"] != WorkflowStatusEnum.ERROR
+        assert "could not be attached" in result.update["ui_chat_log"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_an_attachments_only_turn_that_fails_still_answers_the_user(
+        self, workflow_with_project
+    ):
+        """With no goal and no valid files there would otherwise be nothing to send, and the user would see their
+        message vanish."""
+        workflow_with_project._additional_context = [
+            attachment_envelope(data="not base64!!")
+        ]
+
+        result = await self._later_turn(workflow_with_project, goal="")
+
+        assert result.update["conversation_history"]["test_prompt"]
+        assert "could not be attached" in result.update["ui_chat_log"][-1]["content"]
+
+    def test_a_rejected_payload_never_reaches_the_prompt_or_the_ui(
+        self, workflow_with_project
+    ):
+        """Not parsing the envelope must not mean leaving it in the context list."""
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(mime_type="application/pdf"),
+        ]
+
+        state = workflow_with_project.get_workflow_state("look at this")
+
+        assert PNG_B64 not in json.dumps(state["ui_chat_log"], default=str)
+        message = state["conversation_history"]["test_prompt"][0]
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
 
     # --- approval decisions carry no user message ------------------------
 

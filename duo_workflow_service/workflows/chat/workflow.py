@@ -37,6 +37,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities.attachments import (
     Attachment,
     attachment_content_blocks,
+    attachment_rejection_block,
     partition_attachment_envelopes,
     split_attachment_envelopes,
     with_attachment_references,
@@ -303,7 +304,7 @@ class Workflow(AbstractWorkflow):
 
     def _turn_context(
         self,
-    ) -> tuple[Optional[list[AdditionalContext]], list[Attachment]]:
+    ) -> tuple[Optional[list[AdditionalContext]], list[Attachment], Optional[str]]:
         """Split this turn's additional context into prompt context and attachments.
 
         Attachments must not travel on inside the additional-context list: that
@@ -312,32 +313,40 @@ class Workflow(AbstractWorkflow):
         of which would turn a base64 payload into prose.
 
         Returns:
-            The context to keep rendering, and the turn's attachments. When the
+            The context to keep rendering, the turn's attachments, and the reason
+            the attachments were rejected (``None`` when they were fine). When the
             turn carries no attachments the context is handed back untouched
             (``None`` included), so the overwhelmingly common path is unchanged.
 
-        Raises:
-            NotifiableException: If an attachment is malformed, of an unsupported
-                media type, or over the size caps. The user is the only one who
-                can act on that, so the reason has to reach them rather than the
-                generic failure message.
+        A bad attachment rejects the *files*, never the session. Raising here
+        would reach ``_handle_compile_and_run_exception``, which sets
+        ``WorkflowStatusEnum.ERROR``; that maps to ``FAILED`` and drives a
+        ``drop`` event, so Rails would move the whole conversation to ``failed``
+        and the user could not fix the file and resend on the same session. A
+        thread is far too much to lose over picking an oversized PNG. The turn
+        goes ahead without the files instead, and both the user and the model
+        are told they are missing (see ``_attachments_rejected_log`` and
+        :func:`attachment_rejection_block`).
         """
         try:
             remaining, attachments = split_attachment_envelopes(
                 self._additional_context
             )
         except ValueError as exc:
-            raise NotifiableException(f"Could not attach your files: {exc}") from exc
+            # Still strip the envelopes: they are unusable, and leaving one in
+            # the list would render its base64 into the prompt.
+            kept, _ = partition_attachment_envelopes(self._additional_context)
+            return kept or None, [], str(exc)
 
         if not attachments:
-            return self._additional_context, []
+            return self._additional_context, [], None
 
         # Normalise an emptied list back to None so an attachments-only turn
         # looks like a turn that never carried additional context at all.
-        return remaining or None, attachments
+        return remaining or None, attachments, None
 
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
-        additional_context, attachments = self._turn_context()
+        additional_context, attachments, rejection = self._turn_context()
 
         initial_ui_chat_log = UiChatLog(
             message_sub_type=None,
@@ -357,15 +366,21 @@ class Workflow(AbstractWorkflow):
 
         conversation_history.append(
             assemble_user_message(
-                goal, additional_context, attachment_content_blocks(attachments)
+                goal,
+                additional_context,
+                self._attachment_blocks(attachments, rejection),
             ),
         )
+
+        ui_chat_log = [initial_ui_chat_log]
+        if rejection:
+            ui_chat_log.append(self._attachments_rejected_log(rejection, None))
 
         return ChatWorkflowState(
             plan={"steps": []},
             status=WorkflowStatusEnum.NOT_STARTED,
             conversation_history={self._agent.name: conversation_history},
-            ui_chat_log=[initial_ui_chat_log],
+            ui_chat_log=ui_chat_log,
             last_human_input=None,
             goal=goal,
             project=self._project,
@@ -408,14 +423,16 @@ class Workflow(AbstractWorkflow):
                 additional_context: Optional[list[AdditionalContext]]
                 attachments: list[Attachment]
                 dropped: list[AdditionalContext]
+                rejection: Optional[str]
                 if decision in ("approval", "rejection"):
                     kept, dropped = partition_attachment_envelopes(
                         self._additional_context
                     )
                     additional_context = kept or None
                     attachments = []
+                    rejection = None
                 else:
-                    additional_context, attachments = self._turn_context()
+                    additional_context, attachments, rejection = self._turn_context()
                     dropped = []
 
                 state_update: dict[str, Any] = {
@@ -450,14 +467,16 @@ class Workflow(AbstractWorkflow):
                     case _:
                         # A turn carrying only attachments still has something to
                         # say, so an empty goal is no longer reason to skip it.
-                        if goal or attachments:
+                        # A rejection counts too: the user sent files and is owed
+                        # an answer about them, even if it is only "those failed".
+                        if goal or attachments or rejection:
                             sent_attachments = attachments
                             state_update["conversation_history"] = {
                                 self._agent.name: [
                                     assemble_user_message(
                                         goal,
                                         additional_context,
-                                        attachment_content_blocks(attachments),
+                                        self._attachment_blocks(attachments, rejection),
                                     )
                                 ]
                             }
@@ -475,9 +494,15 @@ class Workflow(AbstractWorkflow):
                     discarded_log.append(
                         self._attachments_discarded_log(len(dropped), checkpoint_tuple)
                     )
+                if rejection:
+                    discarded_log.append(
+                        self._attachments_rejected_log(rejection, checkpoint_tuple)
+                    )
 
-                if sent_attachments or (
-                    new_chat_message and new_chat_message != "null"
+                if (
+                    sent_attachments
+                    or rejection
+                    or (new_chat_message and new_chat_message != "null")
                 ):
                     new_message_chat_log = UiChatLog(
                         message_type=MessageTypeEnum.USER,
@@ -504,6 +529,36 @@ class Workflow(AbstractWorkflow):
                     )
 
                 return Command(goto=next_step, update=state_update)
+
+    @staticmethod
+    def _attachment_blocks(
+        attachments: list[Attachment], rejection: Optional[str]
+    ) -> list[dict[str, Any]]:
+        """Content blocks for this turn's files, or the note that they were rejected."""
+        if rejection:
+            return [attachment_rejection_block(rejection)]
+        return attachment_content_blocks(attachments)
+
+    def _attachments_rejected_log(
+        self, reason: str, checkpoint_tuple: Optional[GitLabCheckpoint]
+    ) -> UiChatLog:
+        """Transcript notice that this turn's files failed validation.
+
+        Deliberately not an exception. Raising would fail the session rather than the files, and the user would lose the
+        thread over an oversized image.
+        """
+        return UiChatLog(
+            message_type=MessageTypeEnum.AGENT,
+            message_sub_type=None,
+            content=f"Your files could not be attached: {reason}",
+            message_id=f"attachments-rejected-{uuid4()!s}",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            status=ToolStatus.FAILURE,
+            correlation_id=None,
+            tool_info=None,
+            additional_context=None,
+            parent_ts=self._turn_parent_ts(checkpoint_tuple),
+        )
 
     def _attachments_discarded_log(
         self, count: int, checkpoint_tuple: Optional[GitLabCheckpoint]

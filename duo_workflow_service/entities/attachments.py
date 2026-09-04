@@ -60,6 +60,7 @@ __all__ = [
     "Attachment",
     "attachment_content_blocks",
     "attachment_reference_envelopes",
+    "attachment_rejection_block",
     "parse_attachments",
     "partition_attachment_envelopes",
     "split_attachment_envelopes",
@@ -305,6 +306,25 @@ def attachment_content_blocks(
             )
         )
     return blocks
+
+
+def attachment_rejection_block(reason: str) -> dict[str, Any]:
+    """Build the content block telling the *model* that this turn's files were rejected.
+
+    Dropping the files without saying so would leave the model answering "what is in this
+    screenshot?" as though the user had sent nothing, and it would guess rather than say
+    it cannot see the image. The reason is included because it is already phrased for a
+    human ("screenshot.png: unsupported media type ..."), and the model relaying it is
+    more useful than a bare refusal.
+    """
+    return {
+        "type": "text",
+        "text": (
+            f"[The user attached one or more files, but they could not be "
+            f"included: {reason} The files are not available to you. Tell the "
+            f"user what went wrong instead of guessing at their contents.]"
+        ),
+    }
 
 
 def attachment_reference_envelopes(
