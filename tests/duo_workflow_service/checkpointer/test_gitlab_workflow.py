@@ -33,6 +33,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_che
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
+    CheckpointSaveError,
     InvalidRequestException,
     UnrecoverableWorkflowException,
     WorkflowAlreadyFinishedException,
@@ -2486,6 +2487,26 @@ async def test_aexit_completed_workflow_reraises_cancellation(
 
 
 @pytest.mark.asyncio
+async def test_aexit_drops_when_answer_checkpoint_save_failed(
+    gitlab_workflow, internal_event_client, workflow_id
+):
+    """A pending FINISH must not suppress a CheckpointSaveError: with FINISH deferred, the failed save IS the answer
+    checkpoint, so the session drops instead of finishing without its answer (issue 627533)."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._pending_finish = True
+
+    error = CheckpointSaveError("Failed to save checkpoint")
+    suppressed = await gitlab_workflow.__aexit__(CheckpointSaveError, error, None)
+
+    assert suppressed is False
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.DROP in calls
+    assert WorkflowStatusEventEnum.FINISH not in calls
+
+
+@pytest.mark.asyncio
 async def test_created_status_with_no_checkpoint_succeeds(
     http_client,
     workflow_id,
@@ -4340,6 +4361,172 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
     assert messages["step_action"] == "compaction"
     # Thread must be bumped so Rails starts reconstruction from this checkpoint
     assert body["current_thread"] == 1
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_raises_on_failed_post(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A rejected checkpoint POST raises so LangGraph stops instead of building on an unsaved checkpoint."""
+    http_client.apost.return_value = GitLabHttpResponse(
+        status_code=413, body={"message": "Payload too large"}
+    )
+
+    with pytest.raises(CheckpointSaveError, match="Failed to save checkpoint"):
+        await gitlab_workflow.aput(
+            {"configurable": {"checkpoint_id": None}},
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_does_not_advance_delta_baseline(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """The delta baseline moves only for checkpoints the server accepted; a failed POST must not make later blobs deltas
+    against a checkpoint that was never saved (issue 627533)."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=500, body={})
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    with pytest.raises(CheckpointSaveError, match="Failed to save checkpoint"):
+        await gitlab_workflow.aput(
+            {"configurable": {"checkpoint_id": "ckpt-1"}},
+            checkpoint,
+            checkpoint_metadata,
+            ChannelVersions({"messages": "2.0"}),
+        )
+
+    state = _incremental_state(gitlab_workflow)
+    assert state.prev_checkpoint_id == "ckpt-1"
+    assert state.prev_channel_values["messages"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_at_group_boundary_keeps_state(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A failed POST on a compaction (group start) must not bump current_thread or reset the delta baseline; both move
+    only with checkpoints the server accepted."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    # Compaction step (messages shrinks) — the POST is rejected.
+    http_client.apost.return_value = GitLabHttpResponse(status_code=500, body={})
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    with pytest.raises(CheckpointSaveError, match="Failed to save checkpoint"):
+        await gitlab_workflow.aput(
+            {"configurable": {"checkpoint_id": "ckpt-1"}},
+            checkpoint,
+            checkpoint_metadata,
+            ChannelVersions({"messages": "2.0"}),
+        )
+
+    # The attempted group start went to the wire with the bumped thread id...
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    # ...but the cached state still matches the last accepted checkpoint.
+    state = _incremental_state(gitlab_workflow)
+    assert state.current_thread == 0
+    assert state.prev_checkpoint_id == "ckpt-1"
+    assert state.prev_channel_values["messages"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_after_failed_post_reanchors_via_stale_cache_guard(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A write parented on an unsaved checkpoint mismatches the un-advanced baseline, trips the stale-cache guard, and
+    re-anchors the chain as a full-rewrite group."""
+    import base64
+
+    checkpoint = checkpoint_data[0]["checkpoint"]
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0"}),
+    )
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=500, body={})
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c"]
+    with pytest.raises(CheckpointSaveError):
+        await gitlab_workflow.aput(
+            {"configurable": {"checkpoint_id": "ckpt-1"}},
+            checkpoint,
+            checkpoint_metadata,
+            ChannelVersions({"messages": "2.0"}),
+        )
+
+    # A later write parented on the unsaved ckpt-2 (e.g. an error-checkpoint
+    # write from the failure handler) must not delta against it.
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    checkpoint["id"] = "ckpt-3"
+    checkpoint["channel_values"]["messages"] = ["a", "b", "c", "d"]
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-2"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "3.0"}),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 1
+    messages = next(b for b in body["channel_blobs"] if b["channel"] == "messages")
+    assert messages["step_action"] == "compaction"
+    val = json.loads(zlib.decompress(base64.b64decode(messages["data"])))
+    assert val == ["a", "b", "c", "d"]
 
 
 @pytest.mark.asyncio

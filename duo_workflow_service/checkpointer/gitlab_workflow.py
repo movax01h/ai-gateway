@@ -60,6 +60,7 @@ from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
+    CheckpointSaveError,
     InvalidRequestException,
     UnrecoverableWorkflowException,
     WorkflowAlreadyFinishedException,
@@ -817,10 +818,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # to a disconnected executor. FINISH has no monolith backstop, so a
         # post-completion error must not downgrade a finished workflow to failed.
         # See gitlab-org/gitlab#605913.
+        # CheckpointSaveError means that premise is false: with a pending FINISH it
+        # is the answer checkpoint that failed to save, so drop rather than finish
+        # a session whose answer is gone (issue 627533).
         if (
             self._pending_finish
             and exc_type is not None
-            and not isinstance(exc_value, OutgoingMessageTooLargeError)
+            and not isinstance(
+                exc_value, (OutgoingMessageTooLargeError, CheckpointSaveError)
+            )
         ):
             # May be a genuine persistence failure, not just a benign disconnect,
             # and it is suppressed below -- so log it.
@@ -1659,12 +1665,13 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 and parent_checkpoint_id != state.prev_checkpoint_id
             )
             if stale_cache:
+                # No cache reset needed: force_rewrite below skips delta
+                # computation, and the baseline is only committed on success.
                 self._logger.warning(
-                    "Stale incremental checkpoint cache detected; resetting to full values",
+                    "Stale incremental checkpoint cache detected; writing all channels as a full group",
                     expected_prev_checkpoint_id=parent_checkpoint_id,
                     cached_prev_checkpoint_id=state.prev_checkpoint_id,
                 )
-                state.prev_channel_values = {}
 
             channel_blobs, is_compaction = _serialize_channel_blobs(
                 checkpoint,
@@ -1682,16 +1689,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 # as a full snapshot so this group reconstructs without a prior group or
                 # the checkpoint header. Otherwise keep the per-channel deltas above.
                 channel_blobs = _serialize_all_channels_full(checkpoint)
-            if stale_cache or is_compaction:
-                state.current_thread += 1
-            state.prev_channel_values = dict(checkpoint.get("channel_values", {}))
-            state.prev_checkpoint_id = checkpoint["id"]
+            next_current_thread = state.current_thread + (
+                1 if stale_cache or is_compaction else 0
+            )
             payload["channel_blobs"] = channel_blobs
-            payload["current_thread"] = state.current_thread
+            payload["current_thread"] = next_current_thread
             self._logger.info(
                 "Incremental checkpoint sizes",
                 thread_ts=checkpoint["id"],
-                current_thread=state.current_thread,
+                current_thread=next_current_thread,
                 compressed_checkpoint_bytes=(
                     len(payload["compressed_checkpoint"])
                     if "compressed_checkpoint" in payload
@@ -1729,6 +1735,26 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 ),
                 method="POST",
             )
+
+        if not response.is_success():
+            self._logger.error(
+                "Failed to save checkpoint",
+                workflow_id=self._workflow_id,
+                thread_ts=checkpoint["id"],
+                status_code=response.status_code,
+                response_body=response.body,
+            )
+            raise CheckpointSaveError(f"Failed to save checkpoint: {response.body}")
+
+        if incremental_enabled:
+            # Advance the delta bookkeeping only for a checkpoint the server
+            # accepted; state pointing past an unsaved checkpoint corrupts every
+            # later delta and desyncs current_thread from what the server has.
+            state = self._incremental_state
+            state.prev_channel_values = dict(checkpoint.get("channel_values", {}))
+            state.prev_checkpoint_id = checkpoint["id"]
+            state.current_thread = next_current_thread
+
         self._logger.info(
             "Checkpoint saved",
             thread_ts=checkpoint["id"],
