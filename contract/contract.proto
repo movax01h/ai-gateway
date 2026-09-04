@@ -340,6 +340,8 @@ message GenerateTokenRequest {
     optional string workflowDefinition = 1;
     // flow_config_id identifies the foundational flow authorized for this token.
     optional string flow_config_id = 2 [json_name = "flowConfigId"];
+    // flow_config is the authoritative inline catalog flow configuration to bind to the issued token.
+    optional google.protobuf.Struct flow_config = 3 [json_name = "flow_config"];
 }
 
 // GenerateTokenResponse returns the generated token and its expiry information.

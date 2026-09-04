@@ -2,6 +2,8 @@
 import ast
 import asyncio
 import functools
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -54,6 +56,7 @@ from duo_workflow_service.executor.outbox import (
     OutgoingMessageTooLargeError,
 )
 from duo_workflow_service.flow_request import (
+    InlineFlowRequest,
     RegistryFlowRequest,
     normalize_catalog_items,
     normalize_flow_request,
@@ -148,6 +151,7 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 # DWS @inject sites resolving with no per-module bookkeeping.
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
+FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -166,6 +170,14 @@ WORKFLOW_TASK_NAME_PREFIX = "workflow:"
 DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S = 3.0
 # Cloud Run sends SIGKILL 10s after SIGTERM; drain plus the gRPC grace period must finish before that.
 DEFAULT_SHUTDOWN_KILL_DEADLINE_S = 10.0
+
+
+def _flow_config_digest(flow_config: Struct) -> str:
+    canonical_json = json.dumps(
+        MessageToDict(flow_config), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(canonical_json.encode()).hexdigest()
+
 
 # Mapping as in some versions of GitLab.com these are hard-coded as `experimental`
 # even though the flows were built upon v1 architecture.
@@ -414,6 +426,25 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 await context.abort(
                     grpc.StatusCode.PERMISSION_DENIED,
                     "Workflow token is not authorized for the requested flow",
+                )
+
+        if (
+            not user.is_debug
+            and claims_extra is not None
+            and FLOW_CONFIG_DIGEST_CLAIM in claims_extra
+        ):
+            authorized_digest = claims_extra[FLOW_CONFIG_DIGEST_CLAIM]
+            if (
+                not isinstance(authorized_digest, str)
+                or not authorized_digest
+                or not isinstance(flow_request, InlineFlowRequest)
+                or not hmac.compare_digest(
+                    authorized_digest, _flow_config_digest(flow_request.config_struct)
+                )
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the supplied flow config",
                 )
 
         workflow_definition = map_workflow_definition(
@@ -1015,6 +1046,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         if request.flow_config_id:
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
+
+        if request.HasField("flow_config"):
+            extra_claims[FLOW_CONFIG_DIGEST_CLAIM] = _flow_config_digest(
+                request.flow_config
+            )
 
         scopes = []
         if user.is_debug:

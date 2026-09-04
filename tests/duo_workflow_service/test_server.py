@@ -72,6 +72,7 @@ from duo_workflow_service.server import (
     WORKFLOW_TASK_NAME_PREFIX,
     DuoWorkflowService,
     _extract_error_message,
+    _flow_config_digest,
     clean_start_request,
     drain_workflow_tasks,
     next_client_event,
@@ -795,6 +796,7 @@ async def test_list_capabilities(mock_context, servicer):
         {"name": "tool_call_approval", "metadata": ""},
         {"name": "tool_call_pattern_approval", "metadata": ""},
         {"name": "flow_semantic_versioning", "metadata": ""},
+        {"name": "inline_flow_config_binding", "metadata": ""},
     ]
 
 
@@ -1516,8 +1518,65 @@ async def test_generate_token(
             "tool_call_approval",
             "tool_call_pattern_approval",
             "flow_semantic_versioning",
+            "inline_flow_config_binding",
         ],
     )
+
+
+def test_flow_config_digest_is_independent_of_map_insertion_order():
+    first = struct_pb2.Struct()
+    first.update({"name": "catalog-flow", "config": {"enabled": True, "count": 2}})
+    second = struct_pb2.Struct()
+    second.update({"config": {"count": 2, "enabled": True}, "name": "catalog-flow"})
+
+    assert _flow_config_digest(first) == _flow_config_digest(second)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra", [{"flow_config_digest": "untrusted-incoming-digest"}]
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_binds_authoritative_inline_flow_config(
+    mock_token_authority,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    flow_config = struct_pb2.Struct()
+    flow_config.update(simple_flow_config)
+
+    await servicer.GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config=flow_config), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_digest"] == _flow_config_digest(flow_config)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra", [None, {"flow_config_digest": "untrusted-incoming-digest"}]
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_without_inline_flow_config_has_no_digest_binding(
+    mock_token_authority,
+    mock_context,
+    servicer,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert "flow_config_digest" not in extra_claims
 
 
 @pytest.mark.asyncio
@@ -1837,6 +1896,7 @@ async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
             "tool_call_approval",
             "tool_call_pattern_approval",
             "flow_semantic_versioning",
+            "inline_flow_config_binding",
         ],
     )
 
@@ -1865,6 +1925,7 @@ async def test_generate_token_returns_server_capabilities(
         "tool_call_approval",
         "tool_call_pattern_approval",
         "flow_semantic_versioning",
+        "inline_flow_config_binding",
     ]
 
 
@@ -3341,6 +3402,19 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
     mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    authorized_flow_config = struct_pb2.Struct()
+    authorized_flow_config.update(simple_flow_config)
+    current_user.set(
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                scopes=["duo_agent_platform"],
+                extra={
+                    "flow_config_digest": _flow_config_digest(authorized_flow_config)
+                },
+            ),
+        )
+    )
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -3372,6 +3446,187 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
             workflow_definition="test",
         )
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {"flow_config_digest": "wrong-digest"},
+        {"flow_config_digest": ""},
+        {"flow_config_digest": 123},
+        {"flow_config_digest": None},
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_inline_flow_config(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="catalog-flow",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the supplied flow config",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_request",
+    [
+        pytest.param(
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+            id="registry-flow",
+        ),
+        pytest.param(
+            contract_pb2.StartWorkflowRequest(workflowDefinition="developer/v1"),
+            id="legacy-definition",
+        ),
+        pytest.param(contract_pb2.StartWorkflowRequest(), id="default-workflow"),
+    ],
+)
+@pytest.mark.parametrize("claims_extra", [{"flow_config_digest": "bound-catalog-flow"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_non_inline_flow_with_bound_token(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    start_request,
+):
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the supplied flow config",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [None, {}])
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_accepts_unbound_inline_flow_config_from_old_rails(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="catalog-flow",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.abort.assert_not_called()
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_allows_debug_user_to_change_inline_flow_config(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="catalog-flow",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.abort.assert_not_called()
+    mock_resolve_flow.assert_called_once()
 
 
 @pytest.mark.asyncio
