@@ -60,6 +60,13 @@ class CheckpointFetchError(Exception):
     """
 
 
+class CheckpointSaveError(Exception):
+    """Raised when the Rails API rejects a checkpoint POST.
+
+    A distinct type lets callers tell a checkpoint-save failure apart from other runtime errors.
+    """
+
+
 class EnvelopeVersionMismatchException(Exception):
     """Raised when an additional context envelope version does not satisfy the flow's constraint.
 
