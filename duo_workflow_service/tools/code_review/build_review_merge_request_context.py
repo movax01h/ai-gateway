@@ -45,6 +45,15 @@ FULL_REVIEW_GUIDANCE = "No lines are marked. Review the whole diff at full prior
 # describes one. SHA-256 repositories push the upper bound to 64.
 SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{7,64}\Z")
 
+CUSTOM_INSTRUCTION_FORMAT_HINT = """
+
+When commenting based on custom instructions, format as:
+"According to custom instructions in '[instruction_name]' ([brief paraphrase of relevant instruction]): [your specific comment about the code]"
+
+Example: "According to custom instructions in 'Security Best Practices' (validate all API input): This endpoint should validate input parameters to prevent SQL injection."
+
+This formatting is only required for custom instruction comments. Regular review comments based on standard review criteria should NOT include this prefix."""
+
 
 class BuildReviewMergeRequestContextInput(ProjectResourceInput):
     """Input schema for building merge request review context."""
@@ -82,6 +91,24 @@ class BuildReviewMergeRequestContextInput(ProjectResourceInput):
         description=(
             "Head commit SHA at the previous review. Lines added since that commit "
             'are marked since_last_review="true". Ignored in lightweight mode.'
+        ),
+    )
+    include_instruction_format_hint: Annotated[bool, InjectedToolArg] = Field(
+        default=True,
+        description=(
+            "If True, the custom-instructions section tells the model to prefix "
+            "comments with an 'According to custom instructions...' attribution. "
+            "Set False for flows that render the attribution themselves from "
+            "structured findings, so the model is not instructed to write it too."
+        ),
+    )
+    include_changed_files_list: Annotated[bool, InjectedToolArg] = Field(
+        default=False,
+        description=(
+            "If True, add a <changed_files> list of every changed file path "
+            "immediately before <git_diffs>, as an explicit coverage checklist "
+            "the reviewer works through as it reads the diffs. No effect in "
+            "lightweight mode, whose output is the list."
         ),
     )
 
@@ -126,13 +153,24 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         lightweight = kwargs.get("lightweight", False)
         include_diff_links = kwargs.get("include_diff_links", False)
         baseline_sha = kwargs.get("baseline_sha")
+        include_instruction_format_hint = kwargs.get(
+            "include_instruction_format_hint", True
+        )
+        include_changed_files_list = kwargs.get("include_changed_files_list", False)
         context = await self._build_context(
             validation_result, only_diffs, lightweight, baseline_sha
         )
 
         if lightweight:
-            return self._format_lightweight_output(context)
-        return self._format_output(context, include_diff_links=include_diff_links)
+            return self._format_lightweight_output(
+                context, include_instruction_format_hint=include_instruction_format_hint
+            )
+        return self._format_output(
+            context,
+            include_diff_links=include_diff_links,
+            include_instruction_format_hint=include_instruction_format_hint,
+            include_changed_files_list=include_changed_files_list,
+        )
 
     async def _build_context(
         self,
@@ -612,11 +650,14 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         return matches_include and not matches_exclude
 
-    def _format_lightweight_output(self, context: dict) -> str:
+    def _format_lightweight_output(
+        self, context: dict, include_instruction_format_hint: bool = True
+    ) -> str:
         """Format lightweight output with only file paths and custom instructions."""
         file_paths = "\n".join(f"- {path}" for path in context["file_paths"])
         custom_instructions_section = self._format_custom_instructions(
-            context.get("custom_instructions", [])
+            context.get("custom_instructions", []),
+            include_format_hint=include_instruction_format_hint,
         )
 
         output = f"<changed_files>\n{file_paths}\n</changed_files>"
@@ -626,7 +667,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         return output
 
-    def _format_output(self, context: dict, include_diff_links: bool = False) -> str:
+    def _format_output(
+        self,
+        context: dict,
+        include_diff_links: bool = False,
+        include_instruction_format_hint: bool = True,
+        include_changed_files_list: bool = False,
+    ) -> str:
         """Format output with escaped user content."""
 
         # Escape user-controlled fields to prevent HTML/XML injection
@@ -634,7 +681,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         description = html.escape(context["mr_data"].get("description") or "")
 
         custom_instructions_section = self._format_custom_instructions(
-            context.get("custom_instructions", [])
+            context.get("custom_instructions", []),
+            include_format_hint=include_instruction_format_hint,
         )
 
         file_diffs_section = self._format_diffs(
@@ -655,6 +703,19 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         review_scope_section = self._format_review_scope(context.get("review_scope"))
 
+        # Pure renames have no diff, so diffs_and_paths misses them; dict.fromkeys keeps
+        # the order and dedupes a rename that also changed content.
+        changed_paths = dict.fromkeys(
+            [*context["diffs_and_paths"], *context["renamed_files"]]
+        )
+        changed_files_section = (
+            "<changed_files>\n"
+            + "\n".join(f"- {path}" for path in changed_paths)
+            + "\n</changed_files>"
+            if include_changed_files_list
+            else ""
+        )
+
         return f"""Here are the merge request details for you to review:
 
 <input>
@@ -671,6 +732,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 {diff_links_section}
 
 {custom_instructions_section}
+
+{changed_files_section}
 
 <git_diffs>
 {diff_section}
@@ -697,7 +760,9 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         return f'<review_scope state="{review_scope}">\n{guidance}\n</review_scope>'
 
     def _format_custom_instructions(
-        self, custom_instructions: List[Dict[str, Any]]
+        self,
+        custom_instructions: List[Dict[str, Any]],
+        include_format_hint: bool = True,
     ) -> str:
         """Format custom instructions section."""
         if not custom_instructions:
@@ -715,19 +780,13 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             )
 
         instructions_text = "\n".join(instruction_items)
+        format_hint = CUSTOM_INSTRUCTION_FORMAT_HINT if include_format_hint else ""
 
         return f"""<custom_instructions>
 Apply these additional review instructions to matching files:
 
 {instructions_text}
-IMPORTANT: Only apply each custom instruction to files that match its specified pattern. If a file doesn't match any custom instruction pattern, only apply the standard review criteria.
-
-When commenting based on custom instructions, format as:
-"According to custom instructions in '[instruction_name]' ([brief paraphrase of relevant instruction]): [your specific comment about the code]"
-
-Example: "According to custom instructions in 'Security Best Practices' (validate all API input): This endpoint should validate input parameters to prevent SQL injection."
-
-This formatting is only required for custom instruction comments. Regular review comments based on standard review criteria should NOT include this prefix.
+IMPORTANT: Only apply each custom instruction to files that match its specified pattern. If a file doesn't match any custom instruction pattern, only apply the standard review criteria.{format_hint}
 </custom_instructions>"""
 
     def _format_diffs(
