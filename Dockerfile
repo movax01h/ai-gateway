@@ -19,6 +19,7 @@ RUN pip install "poetry==$POETRY_VERSION"
 RUN mkdir -p -m 777 $POETRY_CONFIG_DIR $POETRY_DATA_DIR $POETRY_CACHE_DIR
 
 COPY README.md README.md
+COPY ai/ ai/
 COPY ai_gateway/ ai_gateway/
 COPY duo_workflow_service/ duo_workflow_service/
 COPY lib/ lib/

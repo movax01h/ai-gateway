@@ -64,9 +64,16 @@ if [ ! -d "$DEFINITIONS_ROOT" ]; then
   exit 1
 fi
 
-# Find all potential prompt files matching the prompt name
+# Find all potential prompt files matching the prompt name. A moved feature
+# keeps its flat id under ai/features/<domain>/<feature>/prompts/.
 echo "Searching for prompt definitions matching '$PROMPT_NAME'..."
-FOUND_FILES=$(find "$DEFINITIONS_ROOT" -type f -path "*/$PROMPT_NAME/*" -name "*.yml" | sort)
+FEATURES_ROOT="$BASE_DIR/ai/features"
+FOUND_FILES=$(
+  {
+    find "$DEFINITIONS_ROOT" -type f -path "*/$PROMPT_NAME/*" -name "*.yml"
+    [ -d "$FEATURES_ROOT" ] && find "$FEATURES_ROOT" -type f -path "*/$PROMPT_NAME/prompts/*" -name "*.yml"
+  } | sort
+)
 
 if [ -z "$FOUND_FILES" ]; then
   echo "Error: No prompt definitions found for '$PROMPT_NAME'."

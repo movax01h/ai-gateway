@@ -12,6 +12,7 @@ _CONFIG_DIRS = (
     _REPO_ROOT / "duo_workflow_service/agent_platform/v1/flows/configs",
     _REPO_ROOT / "duo_workflow_service/agent_platform/experimental/flows/configs",
     _REPO_ROOT / "ai_gateway/prompts/definitions",
+    _REPO_ROOT / "ai/features",
     _REPO_ROOT / "ai_gateway/model_selection",
 )
 

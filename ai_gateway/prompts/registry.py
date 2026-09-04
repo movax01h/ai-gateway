@@ -18,6 +18,10 @@ from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.completion import completion_prompt_template_factory
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptConfig
 from ai_gateway.prompts.embedding import embedding_prompt_template_factory
+from ai_gateway.prompts.feature_roots import (
+    discover_feature_prompts,
+    feature_prompt_root,
+)
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import current_event_context
@@ -237,8 +241,11 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_id: str,
         family: list[str],
     ) -> Path:
-        base_path = Path(__file__).parent
-        prompts_definitions_dir = base_path / "definitions" / prompt_id
+        # A moved feature owns its prompts under ai/features/<domain>/<feature>/prompts/;
+        # everything else still lives under the legacy definitions/ root.
+        prompts_definitions_dir = feature_prompt_root(prompt_id) or (
+            Path(__file__).parent / "definitions" / prompt_id
+        )
 
         # Look for the first existing prompt definition in the family, or `base` as a last option
         for prompt_folder in family + [self.key_prompt_type_base]:
@@ -535,6 +542,10 @@ class LocalPromptRegistry(BasePromptRegistry):
             "Initializing prompt registry with lazy loading",
             custom_models_enabled=custom_models_enabled,
         )
+
+        # Register moved features so both version-file and Jinja include discovery
+        # find their prompts under ai/features/.
+        discover_feature_prompts()
 
         return cls(
             prompt_template_factories,

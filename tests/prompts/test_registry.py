@@ -1831,6 +1831,7 @@ class TestDuoAgentPlatformPromptRegistration:
     _definitions_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
     )
+    _features_dir = Path(__file__).parent.parent.parent / "ai" / "features"
     _unit_primitives_path = (
         Path(__file__).parent.parent.parent
         / "ai_gateway"
@@ -1859,6 +1860,15 @@ class TestDuoAgentPlatformPromptRegistration:
                 content = yaml.safe_load(f)
             if content and content.get("unit_primitive") == "duo_agent_platform":
                 prompt_ids.append(str(prompt_id_with_family.parent))
+        # Moved features keep their flat id; scan their prompts/ roots too.
+        for base_dir in sorted(self._features_dir.glob("*/*/prompts/base")):
+            yml_files = sorted(base_dir.glob("*.yml"))
+            if not yml_files:
+                continue
+            with open(yml_files[0]) as f:
+                content = yaml.safe_load(f)
+            if content and content.get("unit_primitive") == "duo_agent_platform":
+                prompt_ids.append(base_dir.parent.parent.name)
         return prompt_ids
 
     def test_direct_http_prompts_are_registered(self) -> None:
