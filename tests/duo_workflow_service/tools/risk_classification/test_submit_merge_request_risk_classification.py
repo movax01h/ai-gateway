@@ -22,14 +22,22 @@ def metadata_fixture(gitlab_client_mock):
     return {
         "gitlab_client": gitlab_client_mock,
         "gitlab_host": "gitlab.com",
+        "workflow_id": "4242",
     }
 
+
+DIFF_SHA = "b83d6e391c22777fca1ed3012fce84f633d7fed0"
 
 INPUT_DATA = {
     "project_id": 13,
     "merge_request_iid": 9,
+    "diff_sha": DIFF_SHA,
     "claims": [
-        {"name": "touches_auth", "value": "true", "evidence": "lib/auth.rb:44"},
+        {
+            "name": "authorization",
+            "value": "true",
+            "evidence": "app/policies/project_policy.rb:44",
+        },
         {"name": "change_kind", "value": "behavioral", "evidence": None},
     ],
     "summary": "Adds a session token refresh path.",
@@ -56,6 +64,8 @@ async def test_submit_risk_classification_success(gitlab_client_mock, metadata):
             {
                 "project_id": 13,
                 "merge_request_iid": 9,
+                "diff_sha": DIFF_SHA,
+                "workflow_id": 4242,
                 "claims": INPUT_DATA["claims"],
                 "summary": INPUT_DATA["summary"],
             }
@@ -84,11 +94,32 @@ async def test_submit_risk_classification_success_with_empty_claims(
             {
                 "project_id": 13,
                 "merge_request_iid": 9,
+                "diff_sha": DIFF_SHA,
+                "workflow_id": 4242,
                 "claims": [],
                 "summary": INPUT_DATA["summary"],
             }
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_submit_risk_classification_refuses_without_a_session(gitlab_client_mock):
+    """GitLab stores the session to link claims to the run that produced them.
+
+    Submitting without one would leave that link empty, so this fails before the request rather than letting GitLab
+    reject it.
+    """
+    gitlab_client_mock.apost = AsyncMock()
+
+    tool = SubmitMergeRequestRiskClassification(
+        metadata={"gitlab_client": gitlab_client_mock, "gitlab_host": "gitlab.com"}
+    )
+
+    with pytest.raises(ValueError, match="requires a workflow_id"):
+        await tool.arun(INPUT_DATA)
+
+    gitlab_client_mock.apost.assert_not_called()
 
 
 @pytest.mark.parametrize(

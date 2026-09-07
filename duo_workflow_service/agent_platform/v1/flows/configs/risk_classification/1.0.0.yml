@@ -1,0 +1,177 @@
+version: "v1"
+
+environment: ambient
+
+components:
+  # Step 1: Fetch the MR diff only (no file content) - cheap first pass.
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.risk_classification.merge_request_iid"
+        as: "merge_request_iid"
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: Answer one claim per risk domain Rails asked about. The response
+  # schema enforces {claims: [{name, value, evidence}], summary} - there is no
+  # score or confidence field, so the model cannot emit one even if asked to.
+  - name: "classify_risk"
+    type: AgentComponent
+    prompt_id: "risk_classification_agent_prompt"
+    response_schema_id: "risk_classification_claims"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:inputs.risk_classification.merge_request_iid"
+        as: "merge_request_iid"
+      - from: "context:inputs.risk_classification.domain_vocabulary"
+        as: "domain_vocabulary"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+    toolset:
+      - "get_repository_file"
+      - "read_file"
+      - "list_repository_tree"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: Write the claims back to GitLab. Scoring happens server-side.
+  - name: "submit_risk_classification"
+    type: OneOffComponent
+    prompt_id: "submit_risk_classification_agent_prompt"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.risk_classification.merge_request_iid"
+        as: "merge_request_iid"
+      - from: "context:inputs.risk_classification.diff_sha"
+        as: "diff_sha"
+      - from: "context:classify_risk.final_answer"
+        as: "classification_result"
+    toolset:
+      - "submit_merge_request_risk_classification"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_call_input"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "fetch_mr_diffs"
+    to: "classify_risk"
+  - from: "classify_risk"
+    to: "submit_risk_classification"
+  - from: "submit_risk_classification"
+    to: "end"
+
+flow:
+  entry_point: "fetch_mr_diffs"
+  inputs:
+    - category: risk_classification
+      version_constraint: "^1.0.0"
+      input_schema:
+        merge_request_iid:
+          type: integer
+          description: IID of the merge request being classified.
+        diff_sha:
+          type: string
+          description: >
+            The full SHA of the diff revision being classified. GitLab stores it
+            with the claims so a score is always attributed to the revision it
+            was computed from, and rejects a submission that names any other.
+        domain_vocabulary:
+          type: array
+          description: >
+            The risk domains to answer a claim about, each with a name and a description.
+            The agent answers exactly one true/false claim per entry, keyed by name, and
+            Rails weights each answer by that domain's severity. This is a flow input
+            rather than a fixed list so that custom domains need no change here.
+
+prompts:
+  - name: "risk_classification_agent_prompt"
+    prompt_id: "risk_classification_agent_prompt"
+    model:
+      params:
+        max_tokens: 16384
+    unit_primitives:
+      - duo_agent_platform
+    params:
+      timeout: 90
+    prompt_template:
+      system: |
+        You classify the risk of one GitLab merge request.
+
+        Your only task is to answer one claim for each risk domain you receive. Give evidence for each claim.
+
+        Never produce a risk score, a risk rating, a probability, or a confidence value. A scoring function outside this conversation computes these from your answers. If you want to say "this change is high risk" or "I am 80% sure", stop. That judgement is not yours to make.
+
+        Do the following:
+
+        1. Read the merge request diff.
+        2. For each domain in `domain_vocabulary`, answer whether the change touches that domain. The answer is exactly `"true"` or `"false"`, as a string. No other answer is valid.
+        3. Use the domain's name exactly as given for the claim `name`. Do not invent, rename, translate, or merge domain names. Do not answer for a domain you did not receive.
+        4. Cite evidence as a `path:line` reference into the diff. Omit evidence only when the answer is `"false"` and no line in the diff supports a negative answer.
+        5. Write a short, plain-language summary of what the change does and where its risk lies. The summary is for a human reviewer. Do not use it for scoring.
+
+        Each claim asks only whether the change touches a domain. It does not ask how much. A change to a public API counts as touching the API contract, even when the change only adds something new and safe. A migration that only adds a column counts as touching database migration. Do not judge how severe a change is. The most likely mistake here is to answer `"false"` because a change looks harmless.
+
+        Read-only tools are available: `get_repository_file`, `read_file`, and `list_repository_tree`. Use these tools only when the diff does not give you enough information. For example, use them to check if a changed function is reachable from an authorization path. Use them sparingly. You can classify most merge requests from the diff alone.
+      user: |
+        Merge Request IID: {{merge_request_iid}}
+
+        Answer exactly one claim for every domain listed below. Use each domain's `name` value verbatim as the claim name.
+
+        <risk_domains>
+        {{domain_vocabulary | tojson(indent=2)}}
+        </risk_domains>
+
+        Here is the merge request diff.
+
+        <merge_request_diff>
+        {{mr_diffs}}
+        </merge_request_diff>
+
+        Answer every domain listed above. Respond with only the claims array and the summary, in the required output format.
+
+  - name: "submit_risk_classification_agent_prompt"
+    prompt_id: "submit_risk_classification_agent_prompt"
+    model:
+      params:
+        max_tokens: 4096
+    unit_primitives:
+      - duo_agent_platform
+    params:
+      timeout: 30
+    prompt_template:
+      system: |
+        You submit an already-computed risk classification result to GitLab. You do not re-analyze the
+        merge request, and you do not add, remove, or change any claim, value, or evidence.
+
+        Call the submit_merge_request_risk_classification tool exactly once, passing the given
+        project_id, merge_request_iid and diff_sha, and the claims and summary from the
+        classification result verbatim. Copy diff_sha exactly as given. GitLab refuses a
+        submission whose diff_sha is not a revision of this merge request.
+      user: |
+        project_id: {{project_id}}
+        merge_request_iid: {{merge_request_iid}}
+        diff_sha: {{diff_sha}}
+
+        <classification_result>
+        {{classification_result | tojson(indent=2)}}
+        </classification_result>
+
+        Call submit_merge_request_risk_classification with:
+        - project_id: {{project_id}}
+        - merge_request_iid: {{merge_request_iid}}
+        - diff_sha: {{diff_sha}}, copied exactly, all 40 characters
+        - claims: the "claims" array from classification_result, unchanged
+        - summary: the "summary" field from classification_result, unchanged

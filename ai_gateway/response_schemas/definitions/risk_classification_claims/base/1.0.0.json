@@ -1,0 +1,40 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "risk_classification_claims_response",
+    "description": "Categorical risk claims for a merge request, with evidence. No score or confidence value is part of this schema - those are computed by the Rails scoring function from these claims.",
+    "type": "object",
+    "properties": {
+        "claims": {
+            "type": "array",
+            "description": "Exactly one entry per domain in the risk_domains given to the agent.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The domain name, exactly as given in risk_domains, e.g. authorization."
+                    },
+                    "value": {
+                        "type": "string",
+                        "enum": ["true", "false"],
+                        "description": "Whether the change touches this domain. Either \"true\" or \"false\", as a string."
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "A path:line reference into the diff supporting this answer. Omit when the answer is \"false\" and no line supports a negative."
+                    }
+                },
+                "required": ["name", "value"],
+                "additionalProperties": false
+            }
+        },
+        "summary": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Short plain-language explanation of what the change does and where its risk lies."
+        }
+    },
+    "required": ["claims", "summary"],
+    "additionalProperties": false
+}

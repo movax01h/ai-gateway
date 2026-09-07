@@ -856,7 +856,9 @@ class TestIOKey:
         io_key = IOKey(target="context", subkeys=["test_key"], optional=optional)
 
         if should_raise_error:
-            with pytest.raises(KeyError):
+            with pytest.raises(
+                KeyError, match="Missing required input 'context:test_key'"
+            ):
                 io_key.value_from_state(state)
         else:
             result = io_key.value_from_state(state)
