@@ -44,7 +44,7 @@ envelope, which is why it lives here rather than with the block shape.
 import base64
 import binascii
 import json
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from pydantic import BaseModel
 
@@ -108,25 +108,62 @@ class Attachment(BaseModel):
     byte_size: int = 0
 
 
-def _decoded_size(data: str, filename: str) -> int:
-    """Return the decoded byte length of *data*, validating that it is base64.
+def _decode(data: str, filename: str) -> bytes:
+    """Decode *data*, validating that it is base64.
 
     Args:
         data: The base64-encoded payload.
         filename: Used only to build a useful error message.
 
     Returns:
-        The size of the decoded payload in bytes.
+        The decoded payload.
 
     Raises:
         ValueError: If *data* is not valid base64.
     """
     try:
-        return len(base64.b64decode(data, validate=True))
+        return base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError(
             f"attachment '{filename}' is not valid base64 data: {exc}"
         ) from exc
+
+
+# How to recognise each supported format from the start of its bytes. Keyed by the
+# same MIME types as `ALLOWED_IMAGE_MIME_TYPES`, and asserted to cover it, so adding
+# a format without teaching this how to spot it fails loudly rather than silently
+# waving the new type through.
+_MAGIC_NUMBERS: dict[str, Callable[[bytes], bool]] = {
+    "image/png": lambda payload: payload.startswith(b"\x89PNG\r\n\x1a\n"),
+    "image/jpeg": lambda payload: payload.startswith(b"\xff\xd8\xff"),
+    # RIFF container: "RIFF" <4-byte length> "WEBP".
+    "image/webp": lambda payload: payload[:4] == b"RIFF" and payload[8:12] == b"WEBP",
+}
+
+
+def _verify_declared_type(payload: bytes, mime_type: str, filename: str) -> None:
+    """Check *payload* actually starts like the format it claims to be.
+
+    ``mime_type`` comes from the client and is otherwise taken on trust, so a file
+    mislabelled by a buggy picker (or renamed by hand) would pass every check here and
+    fail at the provider instead, with the opaque error the vision gate work describes.
+    The payload is already decoded for the size check, so inspecting its first bytes is
+    free.
+
+    This is a sanity check on the container, not image validation: it catches a PDF or a
+    HEIC sent as ``image/png``, not a truncated or corrupt PNG.
+
+    Raises:
+        ValueError: If the payload does not match its declared media type.
+    """
+    recogniser = _MAGIC_NUMBERS.get(mime_type)
+    if recogniser is None or recogniser(payload):
+        return
+
+    raise ValueError(
+        f"attachment '{filename}' does not look like {mime_type}: its contents "
+        "do not match that format. Check the file is not renamed or corrupt."
+    )
 
 
 def _parse_one(item: AdditionalContext, index: int) -> Attachment:
@@ -172,12 +209,18 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
             f"Supported types: {', '.join(sorted(ALLOWED_IMAGE_MIME_TYPES))}."
         )
 
-    byte_size = _decoded_size(data, filename)
+    decoded = _decode(data, filename)
+
+    # Size before signature: an oversized file is worth reporting as too big even
+    # if it is also mislabelled, because that is the more actionable of the two.
+    byte_size = len(decoded)
     if byte_size > MAX_ATTACHMENT_BYTES:
         raise ValueError(
             f"attachment '{filename}' is {byte_size} bytes, which exceeds the "
             f"{MAX_ATTACHMENT_BYTES} byte per-attachment limit."
         )
+
+    _verify_declared_type(decoded, mime_type, filename)
 
     return Attachment(
         mime_type=mime_type,

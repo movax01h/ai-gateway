@@ -2149,6 +2149,9 @@ class TestWebSearchTogglePropagation:
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\npixels"
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+# `_verify_declared_type` checks the payload against its declared type, so a webp
+# envelope needs real webp bytes rather than reused PNG ones.
+WEBP_B64 = base64.b64encode(b"RIFF" + b"\x00" * 4 + b"WEBPpixels").decode()
 
 
 def attachment_envelope(**overrides) -> AdditionalContext:
@@ -2230,7 +2233,9 @@ class TestChatAttachments:
     def test_every_attachment_becomes_its_own_block(self, workflow_with_project):
         workflow_with_project._additional_context = [
             attachment_envelope(filename="a.png"),
-            attachment_envelope(filename="b.webp", mime_type="image/webp"),
+            attachment_envelope(
+                filename="b.webp", mime_type="image/webp", data=WEBP_B64
+            ),
         ]
 
         message, _ = self._first_turn(workflow_with_project)

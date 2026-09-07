@@ -4,6 +4,7 @@ import json
 import pytest
 
 from duo_workflow_service.entities.attachments import (
+    _MAGIC_NUMBERS,
     ALLOWED_IMAGE_MIME_TYPES,
     ATTACHMENTS_CATEGORY,
     MAX_ATTACHMENT_BYTES,
@@ -20,8 +21,25 @@ from duo_workflow_service.entities.attachments import (
 from duo_workflow_service.entities.image_blocks import strip_image_payloads
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
+# Real container headers, because `_verify_declared_type` checks the payload against
+# its declared MIME type. Reusing PNG bytes for a jpeg envelope is precisely the
+# mislabelling that check exists to catch.
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"pixels"
+JPEG_BYTES = b"\xff\xd8\xff" + b"pixels"
+WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"pixels"
+
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+
+BYTES_FOR_MIME = {
+    "image/png": PNG_BYTES,
+    "image/jpeg": JPEG_BYTES,
+    "image/webp": WEBP_BYTES,
+}
+
+
+def b64_for(mime_type: str, pad: int = 0) -> str:
+    """Base64 payload with the right header for *mime_type*, optionally padded to size."""
+    return base64.b64encode(BYTES_FOR_MIME[mime_type] + b"x" * pad).decode()
 
 
 def envelope(**payload) -> AdditionalContext:
@@ -67,9 +85,41 @@ class TestParseAttachments:
 
     @pytest.mark.parametrize("mime_type", sorted(ALLOWED_IMAGE_MIME_TYPES))
     def test_accepts_every_allowed_media_type(self, mime_type):
-        (attachment,) = parse_attachments([valid_envelope(mime_type=mime_type)])
+        (attachment,) = parse_attachments(
+            [valid_envelope(mime_type=mime_type, data=b64_for(mime_type))]
+        )
 
         assert attachment.mime_type == mime_type
+
+    @pytest.mark.parametrize("mime_type", sorted(ALLOWED_IMAGE_MIME_TYPES))
+    def test_rejects_a_payload_that_is_not_the_type_it_claims(self, mime_type):
+        """`mime_type` comes from the client and is otherwise trusted, so a mislabelled file would fail at the provider
+        with an opaque error instead of here."""
+        not_an_image = base64.b64encode(b"%PDF-1.7 not an image at all").decode()
+
+        with pytest.raises(ValueError, match=f"does not look like {mime_type}"):
+            parse_attachments([valid_envelope(mime_type=mime_type, data=not_an_image)])
+
+    def test_rejects_one_allowed_type_mislabelled_as_another(self):
+        with pytest.raises(ValueError, match="does not look like image/png"):
+            parse_attachments(
+                [valid_envelope(mime_type="image/png", data=b64_for("image/jpeg"))]
+            )
+
+    def test_every_allowed_type_can_be_recognised(self):
+        """A format added to the allowlist without a signature would be waved through unchecked, which is the hole this
+        pairing exists to close."""
+        assert set(_MAGIC_NUMBERS) == set(ALLOWED_IMAGE_MIME_TYPES)
+
+    def test_size_is_reported_before_a_bad_signature(self):
+        """An oversized file is worth reporting as too big even when it is also
+        mislabelled: that is the more actionable of the two."""
+        oversized_and_wrong = base64.b64encode(
+            b"not an image" * MAX_ATTACHMENT_BYTES
+        ).decode()
+
+        with pytest.raises(ValueError, match="exceeds the .* per-attachment limit"):
+            parse_attachments([valid_envelope(data=oversized_and_wrong)])
 
     def test_the_allowlist_is_the_intersection_across_providers(self):
         """Pinned rather than derived, because the test above parametrizes over this set and so can never disagree with
@@ -160,7 +210,7 @@ class TestParseAttachments:
 
     def test_rejects_total_over_combined_limit(self):
         # Two attachments each under the per-file cap but over the total cap.
-        half = base64.b64encode(b"x" * (MAX_TOTAL_ATTACHMENT_BYTES // 2 + 1)).decode()
+        half = b64_for("image/png", pad=MAX_TOTAL_ATTACHMENT_BYTES // 2 + 1)
 
         with pytest.raises(ValueError, match="exceeds the .* byte limit"):
             parse_attachments([valid_envelope(data=half), valid_envelope(data=half)])
