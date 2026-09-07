@@ -13,10 +13,10 @@ RESULTS_PATH = "/api/v4/ai/duo_workflows/tools/risk_classification/results"
 
 
 class RiskClassificationClaimInput(BaseModel):
-    name: str = Field(description="Claim name, exactly as given in required_claims.")
-    value: str = Field(
-        description="The categorical answer, e.g. true, false, or behavioral."
+    name: str = Field(
+        description="Claim name, exactly as given in the risk domains the agent was asked about."
     )
+    value: str = Field(description="The categorical answer, e.g. true or false.")
     evidence: Optional[str] = Field(
         default=None,
         description="A path:line reference into the diff supporting this answer, or null.",
@@ -29,6 +29,12 @@ class SubmitMergeRequestRiskClassificationInput(BaseModel):
     )
     merge_request_iid: int = Field(
         description="IID of the merge request being classified."
+    )
+    diff_sha: str = Field(
+        description=(
+            "The full 40-character SHA of the diff revision the claims describe, "
+            "copied exactly from the value given to you."
+        )
     )
     claims: List[RiskClassificationClaimInput] = Field(
         description="The answered claims, unchanged from the classification result."
@@ -48,7 +54,8 @@ class SubmitMergeRequestRiskClassification(DuoBaseTool):
         submit_merge_request_risk_classification(
             project_id=13,
             merge_request_iid=9,
-            claims=[{"name": "touches_auth", "value": "true", "evidence": "lib/auth.rb:44"}],
+            diff_sha="b83d6e391c22777fca1ed3012fce84f633d7fed0",
+            claims=[{"name": "authorization", "value": "true", "evidence": "app/policies/project_policy.rb:44"}],
             summary="Adds a session token refresh path.",
         )
     """
@@ -59,12 +66,23 @@ class SubmitMergeRequestRiskClassification(DuoBaseTool):
         self,
         project_id: int,
         merge_request_iid: int,
+        diff_sha: str,
         claims: List[RiskClassificationClaimInput],
         summary: str,
     ) -> str:
+        # Taken from the session rather than from the model: GitLab stores it to
+        # link these claims to the run that produced them, so an answer the model
+        # invented or omitted would attach them to the wrong session, or to none.
+        if not self.workflow_id:
+            raise ValueError(
+                "submit_merge_request_risk_classification requires a workflow_id in its metadata"
+            )
+
         request_body = {
             "project_id": project_id,
             "merge_request_iid": merge_request_iid,
+            "diff_sha": diff_sha,
+            "workflow_id": int(self.workflow_id),
             "claims": [claim.model_dump() for claim in claims],
             "summary": summary,
         }

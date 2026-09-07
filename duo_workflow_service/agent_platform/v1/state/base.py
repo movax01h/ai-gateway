@@ -328,7 +328,19 @@ class IOKey(BaseIOKey):
                         return None
                     current = current.get(key)
                 else:
-                    current = current[key]
+                    # A missing key here usually means a required additional_context
+                    # category was never supplied by the caller, not a code bug - say so
+                    # instead of surfacing a bare `KeyError: 'foo'` deep in prompt building.
+                    try:
+                        current = current[key]
+                    except KeyError as e:
+                        raise KeyError(
+                            f"Missing required input '{self.target}:"
+                            f"{'.'.join(self.subkeys)}': '{key}' not found in state. "
+                            "If this is populated from a flow's additional_context, confirm "
+                            "the caller supplied that category, or mark this input "
+                            "'optional: true' if it may legitimately be absent."
+                        ) from e
         return current
 
     def to_nested_dict(self, value: Any) -> dict[str, Any]:

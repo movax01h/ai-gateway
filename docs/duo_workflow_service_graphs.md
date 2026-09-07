@@ -1191,6 +1191,29 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `risk_classification 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_mr_diffs;
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    classify_risk(classify_risk<br>#91;AgentComponent#93;);
+    submit_risk_classification(submit_risk_classification<br>#91;OneOffComponent#93;);
+    fetch_mr_diffs --> classify_risk;
+    classify_risk --> submit_risk_classification;
+    submit_risk_classification --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `sast_fp_detection 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
