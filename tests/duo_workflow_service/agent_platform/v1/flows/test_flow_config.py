@@ -1152,3 +1152,70 @@ class TestShippedConfigOptionalStateLookups:
             "Component input(s) may raise KeyError when the merge_request "
             "context is absent:\n" + "\n".join(offenders)
         )
+
+
+class TestSastFixValidationIsDeterministic:
+    """Regression guard for https://gitlab.com/gitlab-com/request-for-help/-/work_items/5216.
+
+    ``validate_fix_has_changes`` is the only thing standing between an agent that did not
+    write a fix and a merge request with an empty diff. It used to be an AgentComponent
+    whose prompt read the agent's self-reported ``files_modified`` before consulting git,
+    so an agent that claimed success without calling ``edit_file`` was waved through. The
+    question it answers has one exact answer, so it must stay a deterministic step whose
+    only input is the literal git command, never anything the agent produced.
+    """
+
+    FLOW = "resolve_sast_vulnerability"
+    COMPONENT = "validate_fix_has_changes"
+    PROCEED_ROUTE = "Exit code: 0\nproceed"
+
+    def _shipped_versions(self):
+        config_dir = FlowConfig.DIRECTORY_PATH / self.FLOW
+        return sorted(path.stem for path in config_dir.glob("*.yml"))
+
+    def _component(self, version):
+        config = FlowConfig.from_yaml_config(self.FLOW, version)
+        return next(c for c in config.components if c["name"] == self.COMPONENT)
+
+    def test_every_shipped_version_validates_deterministically(self):
+        assert self._shipped_versions(), "no shipped configs found for the flow"
+
+        for version in self._shipped_versions():
+            component = self._component(version)
+
+            assert component["type"] == "DeterministicStepComponent", version
+            assert component["tool_name"] == "run_command", version
+
+            for step_input in component.get("inputs", []):
+                assert step_input.get("literal"), (
+                    f"{version}: the check must read git and nothing else; "
+                    "an agent self-report is not evidence that a fix reached disk"
+                )
+
+    def test_every_shipped_version_checks_the_working_tree(self):
+        for version in self._shipped_versions():
+            command = next(
+                step_input["from"]
+                for step_input in self._component(version)["inputs"]
+                if step_input["as"] == "command"
+            )
+
+            assert "git status --porcelain" in command, version
+            # printf, not echo: a trailing newline would not match the route key below.
+            assert "printf proceed" in command, version
+            assert "printf no_changes" in command, version
+
+    def test_every_shipped_version_routes_anything_but_proceed_to_end(self):
+        for version in self._shipped_versions():
+            config = FlowConfig.from_yaml_config(self.FLOW, version)
+            router = next(r for r in config.routers if r["from"] == self.COMPONENT)
+            routes = router["condition"]["routes"]
+
+            assert router["condition"]["input"] == (
+                f"context:{self.COMPONENT}.tool_responses"
+            ), version
+            assert routes[self.PROCEED_ROUTE] == "commit_changes", version
+            assert routes[BaseRouter.DEFAULT_ROUTE] == "end", version
+            assert set(routes) == {self.PROCEED_ROUTE, BaseRouter.DEFAULT_ROUTE}, (
+                f"{version}: only an exact clean-exit 'proceed' may reach commit_changes"
+            )
