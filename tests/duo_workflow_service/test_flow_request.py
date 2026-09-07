@@ -6,11 +6,13 @@ from pydantic import ValidationError
 
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.flow import VALID_SCHEMA_VERSIONS
+from duo_workflow_service.agent_platform.v1.catalog import CatalogItemsError
 from duo_workflow_service.flow_request import (
     _LEGACY_WORKFLOW_NAMES,
     InlineFlowRequest,
     LegacyWorkflowRequest,
     RegistryFlowRequest,
+    normalize_catalog_items,
     normalize_flow_request,
     workflow_definition_key_from_proto,
 )
@@ -418,6 +420,116 @@ class TestBillingContextFromProto:
         assert ctx.feature_qualified_name != "/v1"
         assert ctx.feature_qualified_name == "software_development"
         assert ctx.feature_ai_catalog_item is True
+
+
+def _agent(**overrides) -> contract_pb2.WorkspaceAgent:
+    return contract_pb2.WorkspaceAgent(
+        **{
+            "name": "tester",
+            "description": "Runs tests.",
+            "prompt": "Be terse.",
+            **overrides,
+        }
+    )
+
+
+def _start_request(
+    *agents: contract_pb2.WorkspaceAgent,
+) -> contract_pb2.StartWorkflowRequest:
+    """A registry start request carrying a catalog_items envelope."""
+    return contract_pb2.StartWorkflowRequest(
+        flowConfigId="developer",
+        flowConfigSchemaVersion="v1",
+        flowVersion="2.0.0",
+        catalog_items=contract_pb2.CatalogItems(
+            catalog_items_v1=contract_pb2.CatalogItemsV1(workspace_agents=list(agents))
+        ),
+    )
+
+
+def _normalize(req: contract_pb2.StartWorkflowRequest):
+    """Normalize through the same pair of calls the servicer makes."""
+    return normalize_catalog_items(req, normalize_flow_request(req, Mock()))
+
+
+class TestNormalizeCatalogItems:
+    def test_an_absent_envelope_yields_no_items(self):
+        """The common case: a client that knows nothing about the catalog sends nothing."""
+        req = contract_pb2.StartWorkflowRequest(
+            flowConfigId="developer", flowConfigSchemaVersion="v1", flowVersion="2.0.0"
+        )
+
+        assert _normalize(req).workspace_agents == []
+
+    def test_agent_names_are_namespaced(self):
+        req = _start_request(_agent(), _agent(name="reviewer"))
+
+        assert [agent.name for agent in _normalize(req).workspace_agents] == [
+            "workspace/agents/tester",
+            "workspace/agents/reviewer",
+        ]
+
+    def test_a_declared_toolset_survives(self):
+        req = _start_request(_agent(toolset=["read_file"]))
+
+        assert _normalize(req).workspace_agents[0].toolset == ["read_file"]
+
+    def test_an_omitted_toolset_defaults_to_empty(self):
+        """An agent that only reasons is a valid delegation target."""
+        assert _normalize(_start_request(_agent())).workspace_agents[0].toolset == []
+
+    def test_an_omitted_prompt_is_rejected(self):
+        """Proto3 sends no key for an empty scalar, so a blank prompt arrives as a missing one."""
+        req = _start_request(_agent(prompt=""))
+
+        with pytest.raises(CatalogItemsError, match=r"workspace_agents\.0\.prompt"):
+            _normalize(req)
+
+    def test_an_envelope_without_a_known_version_is_rejected(self):
+        """A client built against a schema this server lacks meant to send something."""
+        req = _start_request()
+        req.catalog_items.ClearField("catalog_items_v1")
+
+        with pytest.raises(CatalogItemsError, match="no schema version"):
+            _normalize(req)
+
+    def test_an_invalid_agent_raises_an_items_error(self):
+        """The model's own failure reaches the caller with its field location intact."""
+        req = _start_request(contract_pb2.WorkspaceAgent(name="tester"))
+
+        with pytest.raises(
+            CatalogItemsError, match=r"workspace_agents\.0\.description"
+        ):
+            _normalize(req)
+
+    def test_items_are_rejected_for_an_inline_config(self):
+        """Inline configs cannot declare an `include` section, so items could never bind."""
+        flow_config = Struct()
+        flow_config.update({"version": "v1", "environment": "test"})
+        req = _start_request(_agent())
+        req.ClearField("flowConfigId")
+        req.flowConfig.CopyFrom(flow_config)
+
+        with pytest.raises(CatalogItemsError, match="shipped as foundational flows"):
+            _normalize(req)
+
+    def test_items_are_rejected_for_an_experimental_flow(self):
+        """Only the v1 flow config declares an `include` section."""
+        req = _start_request(_agent())
+        req.flowConfigSchemaVersion = "experimental"
+
+        with pytest.raises(CatalogItemsError, match="only supported for 'v1' flows"):
+            _normalize(req)
+
+    def test_items_are_rejected_for_a_legacy_workflow(self):
+        """Legacy workflows predate the flow registry, so they have no section either."""
+        req = _start_request(_agent())
+        req.ClearField("flowConfigId")
+        req.ClearField("flowVersion")
+        req.workflowDefinition = "software_development"
+
+        with pytest.raises(CatalogItemsError, match="shipped as foundational flows"):
+            _normalize(req)
 
 
 def test_legacy_workflow_names_match_workflows_lookup():

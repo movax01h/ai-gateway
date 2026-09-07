@@ -99,7 +99,50 @@ export interface StartWorkflowRequest {
    * tip of an existing branch to continue that branch. When unset, execution continues from the latest
    * checkpoint.
    */
-  resume_checkpoint_ts?: string | undefined;
+  resume_checkpoint_ts?:
+    | string
+    | undefined;
+  /**
+   * catalog_items carries the catalog items to attach to the flow. Supported only for flows
+   * shipped with the service on schema version "v1"; sending items with any other request is an
+   * error. A supported flow that declares no `include` section ignores them.
+   */
+  catalog_items?: CatalogItems | undefined;
+}
+
+/**
+ * CatalogItems is a versioned envelope for the catalog items carried by one workflow run.
+ * The version is a oneof so a new schema can be added without breaking existing clients. Exactly
+ * one version is set; a server that does not recognise it rejects the request.
+ */
+export interface CatalogItems {
+  /** catalog_items_v1 is the v1 schema for catalog item declarations. */
+  catalog_items_v1?: CatalogItemsV1 | undefined;
+}
+
+/** CatalogItemsV1 is the v1 schema for catalog item declarations, keyed by item kind. */
+export interface CatalogItemsV1 {
+  /**
+   * workspace_agents lists the agent templates authored in the customer's workspace, attached to
+   * the flow as subagents.
+   */
+  workspace_agents: WorkspaceAgent[];
+}
+
+/**
+ * WorkspaceAgent is an agent template a customer authored in their workspace, attached to a flow as
+ * a subagent. The server namespaces the name it receives, so the name inside the running flow is
+ * not the one sent here.
+ */
+export interface WorkspaceAgent {
+  /** name identifies the agent, and must be unique among the items sent. Required. */
+  name: string;
+  /** description is what the coordinating agent sees when choosing whom to delegate to. Required. */
+  description: string;
+  /** toolset lists the tools this agent may use. Optional; an empty list is valid. */
+  toolset: string[];
+  /** prompt is the system prompt defining the agent's behaviour. Required. */
+  prompt: string;
 }
 
 /** ActionResponse carries the executor's result for a previously requested action. */
@@ -940,6 +983,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     flowVersion: undefined,
     streaming: undefined,
     resume_checkpoint_ts: undefined,
+    catalog_items: undefined,
   };
 }
 
@@ -992,6 +1036,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.resume_checkpoint_ts !== undefined) {
       writer.uint32(138).string(message.resume_checkpoint_ts);
+    }
+    if (message.catalog_items !== undefined) {
+      CatalogItems.encode(message.catalog_items, writer.uint32(146).fork()).join();
     }
     return writer;
   },
@@ -1131,6 +1178,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.resume_checkpoint_ts = reader.string();
           continue;
         }
+        case 18: {
+          if (tag !== 146) {
+            break;
+          }
+
+          message.catalog_items = CatalogItems.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1168,6 +1223,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       resume_checkpoint_ts: isSet(object.resume_checkpoint_ts)
         ? globalThis.String(object.resume_checkpoint_ts)
         : undefined,
+      catalog_items: isSet(object.catalog_items) ? CatalogItems.fromJSON(object.catalog_items) : undefined,
     };
   },
 
@@ -1221,6 +1277,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.resume_checkpoint_ts !== undefined) {
       obj.resume_checkpoint_ts = message.resume_checkpoint_ts;
     }
+    if (message.catalog_items !== undefined) {
+      obj.catalog_items = CatalogItems.toJSON(message.catalog_items);
+    }
     return obj;
   },
 
@@ -1247,6 +1306,241 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.flowVersion = object.flowVersion ?? undefined;
     message.streaming = object.streaming ?? undefined;
     message.resume_checkpoint_ts = object.resume_checkpoint_ts ?? undefined;
+    message.catalog_items = (object.catalog_items !== undefined && object.catalog_items !== null)
+      ? CatalogItems.fromPartial(object.catalog_items)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCatalogItems(): CatalogItems {
+  return { catalog_items_v1: undefined };
+}
+
+export const CatalogItems: MessageFns<CatalogItems> = {
+  encode(message: CatalogItems, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.catalog_items_v1 !== undefined) {
+      CatalogItemsV1.encode(message.catalog_items_v1, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CatalogItems {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCatalogItems();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.catalog_items_v1 = CatalogItemsV1.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CatalogItems {
+    return {
+      catalog_items_v1: isSet(object.catalog_items_v1) ? CatalogItemsV1.fromJSON(object.catalog_items_v1) : undefined,
+    };
+  },
+
+  toJSON(message: CatalogItems): unknown {
+    const obj: any = {};
+    if (message.catalog_items_v1 !== undefined) {
+      obj.catalog_items_v1 = CatalogItemsV1.toJSON(message.catalog_items_v1);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CatalogItems>, I>>(base?: I): CatalogItems {
+    return CatalogItems.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CatalogItems>, I>>(object: I): CatalogItems {
+    const message = createBaseCatalogItems();
+    message.catalog_items_v1 = (object.catalog_items_v1 !== undefined && object.catalog_items_v1 !== null)
+      ? CatalogItemsV1.fromPartial(object.catalog_items_v1)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCatalogItemsV1(): CatalogItemsV1 {
+  return { workspace_agents: [] };
+}
+
+export const CatalogItemsV1: MessageFns<CatalogItemsV1> = {
+  encode(message: CatalogItemsV1, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.workspace_agents) {
+      WorkspaceAgent.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CatalogItemsV1 {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCatalogItemsV1();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspace_agents.push(WorkspaceAgent.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CatalogItemsV1 {
+    return {
+      workspace_agents: globalThis.Array.isArray(object?.workspace_agents)
+        ? object.workspace_agents.map((e: any) => WorkspaceAgent.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: CatalogItemsV1): unknown {
+    const obj: any = {};
+    if (message.workspace_agents?.length) {
+      obj.workspace_agents = message.workspace_agents.map((e) => WorkspaceAgent.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CatalogItemsV1>, I>>(base?: I): CatalogItemsV1 {
+    return CatalogItemsV1.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CatalogItemsV1>, I>>(object: I): CatalogItemsV1 {
+    const message = createBaseCatalogItemsV1();
+    message.workspace_agents = object.workspace_agents?.map((e) => WorkspaceAgent.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseWorkspaceAgent(): WorkspaceAgent {
+  return { name: "", description: "", toolset: [], prompt: "" };
+}
+
+export const WorkspaceAgent: MessageFns<WorkspaceAgent> = {
+  encode(message: WorkspaceAgent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.description !== "") {
+      writer.uint32(18).string(message.description);
+    }
+    for (const v of message.toolset) {
+      writer.uint32(26).string(v!);
+    }
+    if (message.prompt !== "") {
+      writer.uint32(34).string(message.prompt);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WorkspaceAgent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWorkspaceAgent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.toolset.push(reader.string());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.prompt = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WorkspaceAgent {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      description: isSet(object.description) ? globalThis.String(object.description) : "",
+      toolset: globalThis.Array.isArray(object?.toolset) ? object.toolset.map((e: any) => globalThis.String(e)) : [],
+      prompt: isSet(object.prompt) ? globalThis.String(object.prompt) : "",
+    };
+  },
+
+  toJSON(message: WorkspaceAgent): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.description !== "") {
+      obj.description = message.description;
+    }
+    if (message.toolset?.length) {
+      obj.toolset = message.toolset;
+    }
+    if (message.prompt !== "") {
+      obj.prompt = message.prompt;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WorkspaceAgent>, I>>(base?: I): WorkspaceAgent {
+    return WorkspaceAgent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WorkspaceAgent>, I>>(object: I): WorkspaceAgent {
+    const message = createBaseWorkspaceAgent();
+    message.name = object.name ?? "";
+    message.description = object.description ?? "";
+    message.toolset = object.toolset?.map((e) => e) || [];
+    message.prompt = object.prompt ?? "";
     return message;
   },
 };

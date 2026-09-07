@@ -86,6 +86,42 @@ message StartWorkflowRequest {
     // tip of an existing branch to continue that branch. When unset, execution continues from the latest
     // checkpoint.
     optional string resume_checkpoint_ts = 17 [json_name = "resume_checkpoint_ts"];
+    // catalog_items carries the catalog items to attach to the flow. Supported only for flows
+    // shipped with the service on schema version "v1"; sending items with any other request is an
+    // error. A supported flow that declares no `include` section ignores them.
+    optional CatalogItems catalog_items = 18 [json_name = "catalog_items"];
+}
+
+// CatalogItems is a versioned envelope for the catalog items carried by one workflow run.
+// The version is a oneof so a new schema can be added without breaking existing clients. Exactly
+// one version is set; a server that does not recognise it rejects the request.
+message CatalogItems {
+    // items carries the item declarations for one schema version.
+    oneof items {
+        // catalog_items_v1 is the v1 schema for catalog item declarations.
+        CatalogItemsV1 catalog_items_v1 = 1 [json_name = "catalog_items_v1"];
+    }
+}
+
+// CatalogItemsV1 is the v1 schema for catalog item declarations, keyed by item kind.
+message CatalogItemsV1 {
+    // workspace_agents lists the agent templates authored in the customer's workspace, attached to
+    // the flow as subagents.
+    repeated WorkspaceAgent workspace_agents = 1 [json_name = "workspace_agents"];
+}
+
+// WorkspaceAgent is an agent template a customer authored in their workspace, attached to a flow as
+// a subagent. The server namespaces the name it receives, so the name inside the running flow is
+// not the one sent here.
+message WorkspaceAgent {
+    // name identifies the agent, and must be unique among the items sent. Required.
+    string name = 1;
+    // description is what the coordinating agent sees when choosing whom to delegate to. Required.
+    string description = 2;
+    // toolset lists the tools this agent may use. Optional; an empty list is valid.
+    repeated string toolset = 3;
+    // prompt is the system prompt defining the agent's behaviour. Required.
+    string prompt = 4;
 }
 
 // ActionResponse carries the executor's result for a previously requested action.

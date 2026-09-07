@@ -21,7 +21,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ..., stopWorkflow: _Optional[_Union[StopWorkflowRequest, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming", "resume_checkpoint_ts")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming", "resume_checkpoint_ts", "catalog_items")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -38,6 +38,7 @@ class StartWorkflowRequest(_message.Message):
     FLOWVERSION_FIELD_NUMBER: _ClassVar[int]
     STREAMING_FIELD_NUMBER: _ClassVar[int]
     RESUME_CHECKPOINT_TS_FIELD_NUMBER: _ClassVar[int]
+    CATALOG_ITEMS_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -54,7 +55,32 @@ class StartWorkflowRequest(_message.Message):
     flowVersion: str
     streaming: bool
     resume_checkpoint_ts: str
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ...) -> None: ...
+    catalog_items: CatalogItems
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ..., catalog_items: _Optional[_Union[CatalogItems, _Mapping]] = ...) -> None: ...
+
+class CatalogItems(_message.Message):
+    __slots__ = ("catalog_items_v1",)
+    CATALOG_ITEMS_V1_FIELD_NUMBER: _ClassVar[int]
+    catalog_items_v1: CatalogItemsV1
+    def __init__(self, catalog_items_v1: _Optional[_Union[CatalogItemsV1, _Mapping]] = ...) -> None: ...
+
+class CatalogItemsV1(_message.Message):
+    __slots__ = ("workspace_agents",)
+    WORKSPACE_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    workspace_agents: _containers.RepeatedCompositeFieldContainer[WorkspaceAgent]
+    def __init__(self, workspace_agents: _Optional[_Iterable[_Union[WorkspaceAgent, _Mapping]]] = ...) -> None: ...
+
+class WorkspaceAgent(_message.Message):
+    __slots__ = ("name", "description", "toolset", "prompt")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    TOOLSET_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    description: str
+    toolset: _containers.RepeatedScalarFieldContainer[str]
+    prompt: str
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., toolset: _Optional[_Iterable[str]] = ..., prompt: _Optional[str] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
     __slots__ = ("requestID", "plainTextResponse", "httpResponse", "scheduleNotificationResponse")
