@@ -1,13 +1,13 @@
 version: "experimental"
 environment: ambient
-name: "Vulnerability Context Agent"
+name: "ASCP Business Context and Security Guidelines"
 description: |
   Analyzes a GitLab project to discover business components and generate
   ASCP security guidelines. Runs autonomously against a project's codebase.
 components:
-  - name: "vulnerability_context_agent"
+  - name: "business_context_security_guidelines_agent"
     type: AgentComponent
-    prompt_id: "vulnerability_context_agent_prompt"
+    prompt_id: "business_context_security_guidelines_prompt"
     inputs:
       - from: "context:goal"
         as: "project_id"
@@ -26,13 +26,13 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 routers:
-  - from: "vulnerability_context_agent"
+  - from: "business_context_security_guidelines_agent"
     to: "end"
 flow:
-  entry_point: "vulnerability_context_agent"
+  entry_point: "business_context_security_guidelines_agent"
 prompts:
-  - name: "vulnerability_context_agent_prompt"
-    prompt_id: "vulnerability_context_agent_prompt"
+  - name: "business_context_security_guidelines_prompt"
+    prompt_id: "business_context_security_guidelines_prompt"
     model:
       params:
         max_tokens: 8192

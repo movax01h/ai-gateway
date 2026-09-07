@@ -1,7 +1,7 @@
 # pylint: disable=file-naming-for-tests,unsubscriptable-object
-"""Tests for the ASCP vulnerability context agent system prompt.
+"""Tests for the ASCP business context and security guidelines system prompt.
 
-These assert on the content of ``vulnerability_context_agent/1.0.0.yml`` to lock
+These assert on the content of ``business_context_security_guidelines/1.0.0.yml`` to lock
 in the structured field contract (boolean / enum) and the removals introduced
 alongside it.
 """
@@ -12,7 +12,7 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
 
-FLOW_NAME = "vulnerability_context_agent"
+FLOW_NAME = "business_context_security_guidelines"
 
 
 @pytest.fixture(scope="module", name="system_prompt")
