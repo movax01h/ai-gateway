@@ -11,6 +11,8 @@ INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 PYTEST_SLOWEST_TESTS_COUNT ?= 10
 
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
+	ai \
+	conftest.py \
 	${DUO_WORKFLOW_SERVICE_DIR} \
 	${LIB_DIR} \
 	${LINTS_DIR} \

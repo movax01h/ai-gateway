@@ -20,7 +20,6 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.tracking.monitoring_context import (
     MonitoringContext,
@@ -44,24 +43,6 @@ def plan_fixture(plan_steps: list[Task]) -> Plan:
 @pytest.fixture(name="mock_now")
 def mock_now_fixture() -> datetime:
     return datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture(name="gl_http_client", scope="function")
-def gl_http_client_fixture():
-    return AsyncMock(spec=GitlabHttpClient)
-
-
-@pytest.fixture(name="project_mock", scope="function")
-def project_mock_fixture():
-    return Project(
-        id=1,
-        name="test-project",
-        description="Test project",
-        http_url_to_repo="http://example.com/repo.git",
-        web_url="http://example.com/repo",
-        languages=[],
-        exclusion_rules=None,
-    )
 
 
 @pytest.fixture(name="tool_metadata", scope="function")
