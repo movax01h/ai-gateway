@@ -2,7 +2,6 @@
 name: Feature discovery search
 model:
   params:
-    temperature: 0.0
     max_tokens: 1024
 unit_primitive: feature_discovery_search
 prompt_template:
