@@ -49,6 +49,10 @@ SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES = [
 ]
 
 
+class CheckpointSourceEnum(StrEnum):
+    INPUT = "input"
+
+
 def compress_checkpoint(data: Checkpoint) -> str:
     """Compress checkpoint using zlib compression and base64 encode.
 

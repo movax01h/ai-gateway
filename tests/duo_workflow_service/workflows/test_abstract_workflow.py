@@ -1924,6 +1924,12 @@ def _boundary_checkpoint_tuple(checkpoint_id):
     )
 
 
+def _resume_checkpoint_tuple(metadata):
+    """The pinned resume checkpoint, distinguished only by the metadata LangGraph stamps on it."""
+    tuple_ = _boundary_checkpoint_tuple("requested-checkpoint-id")
+    return tuple_._replace(metadata=metadata)
+
+
 def _checkpointer(mock_gitlab_workflow, pinned_checkpoint_found=True):
     """Checkpointer stub whose aget_tuple answers the pre-flight resume checkpoint check."""
     mock_checkpointer = AsyncMock()
@@ -2292,3 +2298,73 @@ async def test_compile_and_run_graph_skips_the_resume_checkpoint_check_without_a
     await workflow._compile_and_run_graph("goal")
 
     mock_checkpointer.aget_tuple.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "metadata,expected_status_event",
+    [
+        ({"source": "input", "step": -1}, WorkflowStatusEventEnum.START),
+        ({"source": "input", "step": 0}, WorkflowStatusEventEnum.START),
+        ({"source": "loop", "step": 2}, WorkflowStatusEventEnum.RESUME),
+        ({"source": "fork", "step": 2}, WorkflowStatusEventEnum.RESUME),
+    ],
+    ids=[
+        "first_runs_input_checkpoint",
+        "retried_turns_own_input_checkpoint",
+        "loop_checkpoint",
+        "fork_checkpoint",
+    ],
+)
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.get_event",
+    new_callable=AsyncMock,
+    return_value=None,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_get_event,
+    user,
+    metadata,
+    expected_status_event,
+):
+    """Retrying a turn can pin a checkpoint that holds the run's input rather than any state.
+
+    Such a checkpoint carries the input as a still-unapplied `__start__` write, so forking it with a Command update
+    leaves that write pending and the replayed `__start__` task collides with the resumed node on every LastValue
+    channel. Starting fresh applies the input exactly once.
+
+    `source` decides this, never `step`: `step` counts from whatever checkpoint the run resumed at, so only the very
+    first input checkpoint sits at -1. Starting fresh at it writes another input checkpoint one step further on, and
+    retrying that attempt in turn must be recognised just the same. Checkpoints holding real state are resumed as
+    requested.
+    """
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = _checkpointer(mock_gitlab_workflow)
+    mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+    mock_checkpointer.aget_tuple.return_value = _resume_checkpoint_tuple(metadata)
+
+    workflow = ResumingMockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        user,
+        resume_checkpoint_ts="requested-checkpoint-id",
+    )
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+    workflow.get_graph_input = AsyncMock(return_value=None)
+
+    await workflow._compile_and_run_graph("goal")
+
+    assert workflow.get_graph_input.await_args.args[1] == expected_status_event
+    # Pinned either way: a fresh start still has to fork the branch rather than append
+    # to the latest checkpoint.
+    assert (
+        graph.captured_config["configurable"]["checkpoint_id"]
+        == "requested-checkpoint-id"
+    )
