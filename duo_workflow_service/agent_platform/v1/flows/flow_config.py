@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
+from duo_workflow_service.agent_platform.v1.catalog import CatalogItemRef
 from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     ComponentRegistry,
@@ -256,6 +257,9 @@ class FlowConfig(BaseFlowConfig):
     version: Literal["v1"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
+    # What this flow can pull in from outside. A component claims an entry by
+    # repeating it in its `subagents` list; both sides resolve in `bind_catalog_items`.
+    include: Optional[list[CatalogItemRef]] = None
 
 
 class PartialFlowConfig(FlowConfig):

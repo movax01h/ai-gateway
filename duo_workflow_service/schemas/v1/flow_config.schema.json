@@ -95,6 +95,59 @@
       "title": "BaseModelParams",
       "type": "object"
     },
+    "CatalogItemRef": {
+      "additionalProperties": false,
+      "description": "One ``include`` entry: a reference to items a flow accepts.\n\nA component claims one by repeating it exactly, so equality is what links a claim to a declaration. Field-wise,\nwhich is pydantic's default.\n\nAttributes:\n    source: Where the items come from.\n    item_type: What kind of item is referenced.\n    item_id: Which items, in whatever form the source addresses them.\n    version: Which version to use. Only meaningful for a source that versions its items.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/CatalogItemSource"
+        },
+        "item_type": {
+          "$ref": "#/$defs/CatalogItemType"
+        },
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "source",
+        "item_type",
+        "item_id"
+      ],
+      "title": "CatalogItemRef",
+      "type": "object"
+    },
+    "CatalogItemSource": {
+      "description": "Where an included item comes from.\n\nA member here is a source this platform knows of, not one it can serve: that depends on whether a\n:class:`~.base.CatalogSource` is registered for it.",
+      "enum": [
+        "workspace",
+        "ai-catalog"
+      ],
+      "title": "CatalogItemSource",
+      "type": "string"
+    },
+    "CatalogItemType": {
+      "description": "What kind of item is included.\n\nThere is no bare ``agent``: what a customer authors in their workspace is an agent *template*, which its source\nbuilds into a component.",
+      "enum": [
+        "agent_template",
+        "flow"
+      ],
+      "title": "CatalogItemType",
+      "type": "string"
+    },
     "FlowConfigInput": {
       "properties": {
         "category": {
@@ -696,6 +749,21 @@
       ],
       "default": null,
       "title": "Product Group"
+    },
+    "include": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/CatalogItemRef"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Include"
     }
   },
   "required": [

@@ -66,6 +66,20 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
+    # Claims the include entry below. With zero items this stays a plain agent;
+    # with one or more it is promoted to a supervisor managing them.
+    subagents:
+      - source: workspace
+        item_type: agent_template
+        item_id: "*"
+
+# What this flow can pull in from outside. One AgentComponent is synthesized per item,
+# built against a prompt the service ships, so nothing is declared here for them.
+include:
+  - source: workspace
+    item_type: agent_template
+    item_id: "*"
+
 routers:
   - from: "git_unshallow"
     to: "developer_agent"
@@ -92,6 +106,9 @@ flow:
           description: Name of the service account that runs the flow
           optional: true
 prompts:
+  # Delegation guidance appears only when `has_workspace_agents` is truthy, a literal
+  # input injected by catalog binding. With zero items it is empty and this is
+  # byte-for-byte the original Duo Developer prompt.
   - name: "developer_agent_prompt"
     prompt_id: "developer_agent_prompt"
     params:
@@ -103,6 +120,15 @@ prompts:
         {% extends 'common/developer/system/1.0.0.jinja' %}
         {% block tool_instructions %}
         - Use `glab` for GitLab operations (it's authenticated for this instance).
+        {%- if has_workspace_agents %}
+
+        # Delegating to specialist subagents
+        You coordinate specialist subagents. Use `delegate_task` to hand off work, giving
+        each one complete, self-contained instructions: a subagent does NOT see this
+        conversation.
+
+        Delegate substantial work only when a subagent covers it. Do anything else yourself.
+        {%- endif %}
         {%- endblock %}
       user: |
         {{ goal }}

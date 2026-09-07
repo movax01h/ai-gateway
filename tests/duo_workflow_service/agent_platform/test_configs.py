@@ -11,9 +11,24 @@ from duo_workflow_service.agent_platform.utils.validation import (
     FlowValidator,
     MissingInputVariablesError,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    CatalogItems,
+    WorkspaceAgent,
+    bind_catalog_items,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.validation import DryRunFlowValidator
+from duo_workflow_service.components.tools_registry import ToolsRegistry
 
 V1_CONFIGS = sorted(FlowConfig.DIRECTORY_PATH.glob("**/*.yml"))
+
+# Configs that accept catalog items. Derived from the configs themselves so a
+# flow that adds an `include` section is covered without touching this file.
+V1_CATALOG_ITEM_CONFIGS = [
+    path
+    for path in V1_CONFIGS
+    if (yaml.safe_load(path.read_text()) or {}).get("include")
+]
 
 TOOL_NAME_PATTERN = re.compile(r"[a-z0-9_]+")
 
@@ -92,6 +107,85 @@ class TestValidateFlowConfigs:
             f"spaces usually means the toolset was written as a comma-less YAML flow sequence "
             f"(`toolset: [a\\n b]`), which folds into one string — use a block sequence instead."
         )
+
+    def test_at_least_one_config_declares_include(self):
+        """Guard the parametrisation below: an empty list would silently cover nothing."""
+        assert V1_CATALOG_ITEM_CONFIGS
+
+    @pytest.mark.parametrize(
+        "config_path",
+        V1_CATALOG_ITEM_CONFIGS,
+        ids=lambda p: f"{p.parent.name}/{p.stem}",
+    )
+    def test_v1_configs_bind_catalog_items(self, config_path: Path):
+        """Items reach the graph: one component per item, claimed by one coordinator.
+
+        Compiling proves the components build, not that they were attached. A config
+        that lost its wildcard `subagents` entry drops the items and still compiles
+        unless its prompt happens to read `has_workspace_agents`.
+        """
+        config = FlowConfig(**yaml.safe_load(config_path.read_text()))
+        items = CatalogItems(
+            workspace_agents=[
+                WorkspaceAgent(
+                    name="tester", description="Runs tests.", prompt="Be terse."
+                )
+            ]
+        )
+        authored = {component["name"] for component in config.components}
+
+        bound = bind_catalog_items(
+            config.components, config.include, items, Mock(spec=ToolsRegistry)
+        )
+
+        synthesized = [c["name"] for c in bound if c["name"] not in authored]
+        assert len(synthesized) == 1
+
+        coordinators = [
+            c["name"]
+            for c in bound
+            if {"name": synthesized[0]} in (c.get("subagents") or [])
+        ]
+        assert len(coordinators) == 1
+
+    @pytest.mark.parametrize(
+        "config_path",
+        V1_CATALOG_ITEM_CONFIGS,
+        ids=lambda p: f"{p.parent.name}/{p.stem}",
+    )
+    def test_v1_configs_compile_with_catalog_items(self, config_path: Path):
+        """A config declaring `include` must also compile with items attached.
+
+        ``test_v1_configs`` only ever builds the authored components. The synthesized
+        subagents and the promoted supervisor exist only once a request carries items,
+        so a flow whose prompt cannot build them would otherwise reach production
+        unbuilt.
+        """
+        # Tools the config already declares, so resolution is exercised against names
+        # this flow is known to allow.
+        toolset = _declared_toolset_names(config_path)[:1]
+        items = CatalogItems(
+            workspace_agents=[
+                WorkspaceAgent(
+                    name="tester",
+                    description="Runs tests.",
+                    toolset=toolset,
+                    prompt="Be terse.",
+                ),
+                WorkspaceAgent(
+                    name="reviewer",
+                    description="Reviews changes.",
+                    prompt="Be picky.",
+                ),
+            ]
+        )
+
+        DryRunFlowValidator(
+            config=FlowConfig(**yaml.safe_load(config_path.read_text())),
+            prompt_registry=_make_local_prompt_registry(),
+            internal_event_client=Mock(),
+            catalog_items=items,
+        ).validate()
 
     @staticmethod
     def _test_flow_config(config_path: Path):

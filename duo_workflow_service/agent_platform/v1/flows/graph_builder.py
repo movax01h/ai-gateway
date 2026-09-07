@@ -10,6 +10,10 @@ from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from duo_workflow_service.agent_platform.utils.flow import (
     strip_ask_listed_pre_approvals,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    CatalogItems,
+    bind_catalog_items,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     AbortComponent,
     BaseComponent,
@@ -63,6 +67,7 @@ class FlowGraphBuilder:
         workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
         internal_event_client: InternalEventsClient,
+        catalog_items: CatalogItems,
     ):
         self._tools_registry = tools_registry
         self._flow_prompt_registry = prompt_registry
@@ -71,6 +76,9 @@ class FlowGraphBuilder:
         self._workflow_type = workflow_type
         self._user = user
         self._internal_event_client = internal_event_client
+        # Per-run, like the tools registry: the items belong to the request, not the
+        # config. `Flow.__init__` normalizes a request without items to `CatalogItems()`.
+        self._catalog_items = catalog_items
 
     def build(self, flow_config: FlowConfig) -> StateGraph:
         """Build the graph for ``flow_config``, entry point set, ready to compile."""
@@ -112,11 +120,19 @@ class FlowGraphBuilder:
             "abort": abort_component,
         }
 
+        # Returns the authored configs unchanged when no component claims an entry.
+        components_config = bind_catalog_items(
+            flow_config.components,
+            flow_config.include,
+            self._catalog_items,
+            self._tools_registry,
+        )
+
         # Single-pass construction with deferred queue for components
         # that depend on other components (e.g. supervisors need subagents).
         deferred: list[dict] = []
 
-        for comp_config in flow_config.components:
+        for comp_config in components_config:
             comp_params = self._prepare_component_params(comp_config, flow_config)
 
             if self._has_unresolved_dependencies(comp_config, components):

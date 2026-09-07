@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph
 
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.v1.catalog import CatalogItems
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -137,6 +138,7 @@ class TestFlowGraphBuilder:
             workflow_type=flow_type,
             user=user,
             internal_event_client=mock_internal_event_client,
+            catalog_items=CatalogItems(),
         )
 
     @pytest.fixture(name="mock_state_graph_class")
