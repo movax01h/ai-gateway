@@ -40,6 +40,7 @@ from duo_workflow_service.audit_events.event_types import SessionStartedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
+    CheckpointSourceEnum,
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.checkpointer.node_lifecycle import (
@@ -529,10 +530,12 @@ class AbstractWorkflow(ABC):
 
                 # A missing pinned checkpoint makes LangGraph silently discard the thread.
                 # This duplicates its fetch, but it is best to keep the error logic here.
-                if (
-                    resume_checkpoint_ts
-                    and await checkpointer.aget_tuple(graph_config) is None
-                ):
+                resume_tuple = (
+                    await checkpointer.aget_tuple(graph_config)
+                    if resume_checkpoint_ts
+                    else None
+                )
+                if resume_checkpoint_ts and resume_tuple is None:
                     self.log.warning(
                         "Requested resume checkpoint was not found",
                         workflow_id=self._workflow_id,
@@ -563,6 +566,24 @@ class AbstractWorkflow(ABC):
                             graph_config["configurable"]["checkpoint_id"] = (
                                 boundary.config["configurable"]["checkpoint_id"]
                             )
+
+                # Retrying the session's first turn pins the pre-run input checkpoint,
+                # which holds the run's input as a still-unapplied `__start__` write
+                # rather than as state. Forking it with a `Command` update leaves that
+                # write pending, so the replayed `__start__` task and the resumed node
+                # both write `status` in the same step and LangGraph raises
+                # InvalidUpdateError. Starting fresh applies the input exactly once, and
+                # is what retrying the first turn means anyway. `checkpoint_id` stays
+                # pinned, so the run still forks a branch instead of appending.
+                if resume_tuple is not None and self._is_pre_run_input_checkpoint(
+                    resume_tuple
+                ):
+                    self.log.info(
+                        "Resume checkpoint holds only the pending graph input; starting fresh",
+                        workflow_id=self._workflow_id,
+                        resume_checkpoint_ts=resume_checkpoint_ts,
+                    )
+                    status_event = WorkflowStatusEventEnum.START
 
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
@@ -759,6 +780,16 @@ class AbstractWorkflow(ABC):
             )
 
         return None
+
+    @staticmethod
+    def _is_pre_run_input_checkpoint(checkpoint_tuple: CheckpointTuple) -> bool:
+        """Whether the checkpoint is LangGraph's step -1 input checkpoint.
+
+        LangGraph writes it before any node runs, so it carries no channel state: only the run's input, queued as a
+        pending `__start__` write.
+        """
+        metadata = checkpoint_tuple.metadata or {}
+        return metadata.get("source") == CheckpointSourceEnum.INPUT
 
     async def _resolve_stop_recovery(
         self,
