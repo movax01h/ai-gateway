@@ -1100,6 +1100,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "workflow_type": flow_type,
             "user": user,
             "internal_event_client": flow._internal_event_client,
+            "catalog_items": flow._catalog_items,
         }
 
     def test_process_additional_context_empty_list(self, flow_instance):

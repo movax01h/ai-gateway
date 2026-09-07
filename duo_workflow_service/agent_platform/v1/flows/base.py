@@ -19,6 +19,10 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    CatalogItems,
+    default_prompts,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
 from duo_workflow_service.agent_platform.v1.flows.inputs import (
@@ -172,6 +176,7 @@ class Flow(AbstractWorkflow):
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
+        catalog_items: Optional[CatalogItems] = None,
         **kwargs,
     ):
         super().__init__(
@@ -188,6 +193,7 @@ class Flow(AbstractWorkflow):
         )
         self._config = config
         self._stream = streaming
+        self._catalog_items = catalog_items or CatalogItems()
 
         self._flow_prompt_registry = InMemoryPromptRegistry(prompt_registry)
         if self._config.prompts:
@@ -197,6 +203,16 @@ class Flow(AbstractWorkflow):
                     prompt_id=prompt_id,
                     prompt_data=prompt_config.to_prompt_data(),
                 )
+
+        # Prompts the platform ships for catalog items, registered for every flow so a
+        # flow includes items without declaring anything for them. Registered after the
+        # flow's own, so one of these cannot be shadowed; overriding them is a later
+        # phase.
+        for catalog_prompt in default_prompts():
+            self._flow_prompt_registry.register_prompt(
+                prompt_id=catalog_prompt.prompt_id,
+                prompt_data=catalog_prompt.to_prompt_data(),
+            )
 
         self._flow_schema_registry = InlineResponseSchemaRegistry(schema_registry)
         if self._config.response_schemas:
@@ -613,6 +629,7 @@ class Flow(AbstractWorkflow):
             workflow_type=self._workflow_type,
             user=self._user,
             internal_event_client=self._internal_event_client,
+            catalog_items=self._catalog_items,
         )
 
     @override
