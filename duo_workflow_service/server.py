@@ -50,7 +50,10 @@ from duo_workflow_service.executor.outbox import (
     OutboxSignal,
     OutgoingMessageTooLargeError,
 )
-from duo_workflow_service.flow_request import normalize_flow_request
+from duo_workflow_service.flow_request import (
+    normalize_catalog_items,
+    normalize_flow_request,
+)
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
 from duo_workflow_service.interceptors.authentication_interceptor import (
@@ -371,6 +374,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             flow_request = normalize_flow_request(
                 start_req, language_server_version.get()
             )
+            # Normalized here so that unusable items abort the call before any workflow
+            # setup happens.
+            catalog_items = normalize_catalog_items(start_req, flow_request)
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
@@ -477,6 +483,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         monitoring_context.set_flow_identity(**resolved_flow.tracking_fields())
 
+        # Only some request shapes can carry items; the workflow classes behind the rest
+        # do not accept the argument.
+        catalog_kwargs = (
+            {"catalog_items": catalog_items}
+            if flow_request.supports_catalog_items()
+            else {}
+        )
+
         workflow: AbstractWorkflow = resolved_flow.factory(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
@@ -494,6 +508,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             # the workflow only pins a checkpoint when one was actually requested.
             resume_checkpoint_ts=start_workflow_request.startRequest.resume_checkpoint_ts
             or None,
+            **catalog_kwargs,
         )
 
         workflow_task = asyncio.create_task(workflow.run(goal))

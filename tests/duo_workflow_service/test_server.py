@@ -2353,6 +2353,121 @@ async def test_execute_workflow_forwards_resume_checkpoint_ts(
     assert kwargs["resume_checkpoint_ts"] == expected_resume_checkpoint_ts
 
 
+def _catalog_start_request(
+    *agents: contract_pb2.WorkspaceAgent,
+) -> contract_pb2.StartWorkflowRequest:
+    """A registry start request carrying a catalog_items envelope."""
+    return contract_pb2.StartWorkflowRequest(
+        workflowID="123",
+        flowConfigId="developer",
+        flowConfigSchemaVersion="v1",
+        flowVersion="2.0.0",
+        catalog_items=contract_pb2.CatalogItems(
+            catalog_items_v1=contract_pb2.CatalogItemsV1(workspace_agents=list(agents))
+        ),
+    )
+
+
+async def _execute_workflow(
+    servicer: DuoWorkflowService,
+    mock_context: grpc.ServicerContext,
+    start_request: contract_pb2.StartWorkflowRequest,
+) -> None:
+    """Drive ExecuteWorkflow to completion with a single start request."""
+
+    async def request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+
+@pytest.fixture(name="mock_flow_factory")
+def mock_flow_factory_fixture():
+    """A resolved flow whose factory records its call and whose workflow finishes at once."""
+    with (
+        patch("duo_workflow_service.server.AbstractWorkflow") as workflow_class,
+        patch("duo_workflow_service.server.resolve_flow") as resolve_flow,
+    ):
+        workflow = workflow_class.return_value
+        workflow.is_done = True
+        workflow.last_error = None
+        workflow.run = AsyncMock()
+        workflow.cleanup = AsyncMock()
+        workflow.get_from_outbox = AsyncMock(
+            return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+        )
+        resolve_flow.return_value = ResolvedFlow(factory=workflow_class)
+
+        yield workflow_class
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_request,expected_agent_names",
+    [
+        (
+            _catalog_start_request(
+                contract_pb2.WorkspaceAgent(
+                    name="tester", description="Runs tests.", prompt="Be terse."
+                )
+            ),
+            ["workspace/agents/tester"],
+        ),
+        (_catalog_start_request(), []),
+        (contract_pb2.StartWorkflowRequest(workflowID="123"), None),
+    ],
+    ids=["items_reach_the_flow", "empty_envelope_still_passed", "no_envelope_omitted"],
+)
+async def test_execute_workflow_forwards_catalog_items(
+    mock_flow_factory,
+    mock_context,
+    servicer,
+    start_request,
+    expected_agent_names,
+):
+    """Whether the argument is passed follows the request shape, not the payload.
+
+    ``None`` means the argument must be absent: the workflow classes behind unsupported request shapes do not accept
+    it. An empty envelope is still passed, so that a future item kind leaving ``workspace_agents`` empty is not
+    dropped.
+    """
+    await _execute_workflow(servicer, mock_context, start_request)
+
+    kwargs = mock_flow_factory.call_args.kwargs
+    if expected_agent_names is None:
+        assert "catalog_items" not in kwargs
+    else:
+        assert [
+            agent.name for agent in kwargs["catalog_items"].workspace_agents
+        ] == expected_agent_names
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_invalid_catalog_items(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """A bad payload aborts before resolution, so no workflow is ever created."""
+    await _execute_workflow(
+        servicer,
+        mock_context,
+        _catalog_start_request(contract_pb2.WorkspaceAgent(name="tester")),
+    )
+
+    mock_resolve_flow.assert_not_called()
+    mock_context.abort.assert_called_once()
+    assert mock_context.abort.call_args[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    assert "Invalid catalog items" in mock_context.abort.call_args[0][1]
+
+
 @pytest.mark.parametrize(
     "has_flow_config",
     [True, False],
