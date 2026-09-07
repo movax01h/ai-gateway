@@ -188,3 +188,40 @@ def test_string_content_messages_are_unaffected():
     encoded = encoder.default(HumanMessage(content="plain text"))
 
     assert encoded["content"] == "plain text"
+
+
+def test_an_interrupt_mid_turn_loses_the_image_but_keeps_its_label():
+    """Pins a known v1 limitation so that changing it is a deliberate act.
+
+    Stripping happens on every checkpoint write, and a resume rebuilds history from the
+    written checkpoint, so an image does not survive its own turn: one tool-call approval
+    is enough to lose it. The filename block is what keeps the turn intelligible -- it is
+    not an image block, so it survives, and the model can say which file it can no longer
+    see instead of guessing.
+
+    If this test starts failing because the payload survives, the durable fix has landed
+    and the docstrings in `image_blocks` and `encoder` need updating with it.
+    """
+    message = HumanMessage(
+        content=[
+            {"type": "text", "text": "[attached file: screenshot.png]"},
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+            {"type": "text", "text": "fix the bug it shows"},
+        ]
+    )
+
+    # The write half of an interrupt: the graph checkpoints before waiting for the
+    # approval.
+    persisted = json.dumps(
+        {"conversation_history": {"agent": [message]}}, cls=CustomEncoder
+    )
+
+    # The read half: a resume reloads history from exactly those bytes.
+    reloaded = json.loads(persisted)
+    content = reloaded["conversation_history"]["agent"][0]["content"]
+
+    assert PNG_B64 not in persisted
+    assert not [block for block in content if block.get("base64")]
+    assert {"type": "text", "text": "[attached file: screenshot.png]"} in content
+    assert {"type": "text", "text": "fix the bug it shows"} in content
+    assert any("omitted from history" in block.get("text", "") for block in content)
