@@ -131,7 +131,7 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
         description=(
             "The reviewer's `findings` array. Each item has file, new_line, "
             "target_code, severity, category, message, confidence, and optional "
-            "old_line, suggestion, and custom_instruction_ref."
+            "old_line, end_line, suggestion, and custom_instruction_ref."
         ),
     )
     summary: Optional[str] = Field(
@@ -203,8 +203,9 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
     ) -> Dict[str, Any]:
         """Shape the selected findings into the JSON document the review endpoint parses.
 
-        Only the fields the endpoint anchors and renders with are sent. The message is rendered here so the severity
-        header and custom-instruction attribution are decided in one place; code travels verbatim.
+        Only the fields the endpoint anchors, renders or counts with are sent. The message is rendered here so the
+        severity header and custom-instruction attribution are decided in one place; code travels verbatim. Severity
+        travels as a field so the endpoint can count posted comments by severity.
         """
         return {
             "findings": [self._render_finding(f) for f in findings],
@@ -217,6 +218,8 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
             "new_line": finding.get("new_line"),
             "message": self._render_message(finding),
             "target_code": finding.get("target_code", ""),
+            "severity": finding.get("severity"),
+            "confidence": finding.get("confidence"),
         }
         if finding.get("old_line"):
             rendered["old_line"] = finding["old_line"]
@@ -224,6 +227,14 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         # reviewer is told to omit the field rather than empty it, so treat it as a slip.
         if finding.get("suggestion"):
             rendered["suggestion"] = finding["suggestion"]
+            end_line = finding.get("end_line")
+            new_line = finding.get("new_line")
+            if (
+                isinstance(end_line, int)
+                and isinstance(new_line, int)
+                and end_line > new_line
+            ):
+                rendered["end_line"] = end_line
         return rendered
 
     def _render_message(self, finding: Dict[str, Any]) -> str:

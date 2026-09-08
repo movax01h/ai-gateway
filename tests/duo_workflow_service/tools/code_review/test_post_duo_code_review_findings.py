@@ -198,6 +198,8 @@ class TestBuildPayload:
                 "new_line": 42,
                 "target_code": "  return true",
                 "message": "**[Critical] fail-open**\n\nFails open when the check errors.",
+                "severity": "critical",
+                "confidence": 9,
             }
         ]
 
@@ -208,6 +210,27 @@ class TestBuildPayload:
 
         assert rendered["old_line"] == 40
         assert rendered["suggestion"] == "  return false"
+
+    def test_end_line_is_sent_with_a_suggestion_that_spans_lines(self, tool):
+        [rendered] = tool._build_payload(
+            [finding(suggestion="  return false", end_line=44)], "s"
+        )["findings"]
+
+        assert rendered["end_line"] == 44
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"end_line": 44},  # no suggestion, so nothing to span
+            {"suggestion": "  x", "end_line": 42},  # single line, the default
+            {"suggestion": "  x", "end_line": 41},  # behind the anchor
+            {"suggestion": "  x", "end_line": "44"},  # schema slip
+        ],
+    )
+    def test_end_line_is_withheld_unless_it_widens_a_suggestion(self, tool, overrides):
+        [rendered] = tool._build_payload([finding(**overrides)], "s")["findings"]
+
+        assert "end_line" not in rendered
 
     def test_an_empty_suggestion_is_withheld(self, tool):
         """The monolith turns an empty replacement into a suggestion that deletes the line."""
