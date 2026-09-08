@@ -98,6 +98,14 @@ MAX_ATTACHMENTS = 5
 MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_ATTACHMENT_BYTES = 2_500_000
 
+# The caps above measure the decoded image, so the filename is not covered by any
+# of them: a tiny image with a megabyte-long name passes all three. That name is
+# also the part with the longest life, because the `[attached file: ...]` label
+# survives payload stripping and stays in the conversation for the rest of the
+# thread. 255 is the limit essentially every filesystem imposes, so a longer name
+# did not come from a file picker.
+MAX_FILENAME_CHARS = 255
+
 
 class Attachment(BaseModel):
     """A single validated user-supplied file attachment."""
@@ -139,6 +147,58 @@ _MAGIC_NUMBERS: dict[str, Callable[[bytes], bool]] = {
     # RIFF container: "RIFF" <4-byte length> "WEBP".
     "image/webp": lambda payload: payload[:4] == b"RIFF" and payload[8:12] == b"WEBP",
 }
+
+
+def _clean_filename(raw: Any, index: int) -> Optional[str]:
+    """Return *raw* reduced to something safe to put in a prompt, a log and the transcript.
+
+    The filename is client-supplied and, unlike the payload, is subject to no cap and
+    no validation. It reaches three places that all outlive the request: the
+    ``[attached file: ...]`` label, which survives payload stripping and so stays in
+    the conversation for the rest of the thread; the rejection messages, which are read
+    by both the user and the model; and the reference envelopes the client renders.
+
+    Two things are worth removing before it gets there. Unprintable characters (NUL,
+    newlines, terminal escapes) corrupt structured logs and let a name span lines,
+    which is what turns a label into something that reads like a separate instruction.
+    Unbounded length costs prompt tokens and checkpoint space on every later turn, for
+    a string no file picker could have produced.
+
+    Truncating rather than rejecting is deliberate: an awkward name is not a reason to
+    refuse an otherwise valid image, and the cap is already far beyond any real one.
+
+    This does not make the name trustworthy. It is user text quoted into a prompt, and
+    a name like ``ignore previous instructions.png`` still says what it says -- no
+    amount of escaping fixes that, and here the user is quoting it to themselves.
+    Path traversal is not a concern: the filename is never used as a path.
+
+    Args:
+        raw: The ``filename`` field as it arrived, of any type.
+        index: Position of the envelope, used in the error message.
+
+    Returns:
+        The cleaned filename, or ``None`` when absent or left empty by cleaning.
+
+    Raises:
+        ValueError: If *raw* is present but not a string.
+    """
+    if raw is None:
+        return None
+
+    if not isinstance(raw, str):
+        # Pydantic would catch this when `Attachment` is built, but its message is a
+        # multi-line dump, and this one is read by the user and relayed by the model.
+        raise ValueError(
+            f"attachment #{index} has a 'filename' that is not text "
+            f"(got {type(raw).__name__})."
+        )
+
+    cleaned = "".join(char for char in raw if char.isprintable()).strip()
+
+    if len(cleaned) > MAX_FILENAME_CHARS:
+        cleaned = cleaned[: MAX_FILENAME_CHARS - 1] + "…"
+
+    return cleaned or None
 
 
 def _verify_declared_type(payload: bytes, mime_type: str, filename: str) -> None:
@@ -194,38 +254,41 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
     if not isinstance(payload, dict):
         raise ValueError(f"attachment #{index} content must be a JSON object.")
 
-    filename = payload.get("filename") or f"#{index}"
+    # Cleaned first: every message below quotes it, and those are read by the user
+    # and relayed to the model.
+    filename = _clean_filename(payload.get("filename"), index)
+    label = filename or f"#{index}"
     mime_type = payload.get("mime_type")
     data = payload.get("data")
 
     if not isinstance(mime_type, str) or not mime_type:
-        raise ValueError(f"attachment '{filename}' is missing 'mime_type'.")
+        raise ValueError(f"attachment '{label}' is missing 'mime_type'.")
     if not isinstance(data, str) or not data:
-        raise ValueError(f"attachment '{filename}' is missing 'data'.")
+        raise ValueError(f"attachment '{label}' is missing 'data'.")
 
     if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
         raise ValueError(
-            f"attachment '{filename}' has unsupported media type '{mime_type}'. "
+            f"attachment '{label}' has unsupported media type '{mime_type}'. "
             f"Supported types: {', '.join(sorted(ALLOWED_IMAGE_MIME_TYPES))}."
         )
 
-    decoded = _decode(data, filename)
+    decoded = _decode(data, label)
 
     # Size before signature: an oversized file is worth reporting as too big even
     # if it is also mislabelled, because that is the more actionable of the two.
     byte_size = len(decoded)
     if byte_size > MAX_ATTACHMENT_BYTES:
         raise ValueError(
-            f"attachment '{filename}' is {byte_size} bytes, which exceeds the "
+            f"attachment '{label}' is {byte_size} bytes, which exceeds the "
             f"{MAX_ATTACHMENT_BYTES} byte per-attachment limit."
         )
 
-    _verify_declared_type(decoded, mime_type, filename)
+    _verify_declared_type(decoded, mime_type, label)
 
     return Attachment(
         mime_type=mime_type,
         data=data,
-        filename=payload.get("filename"),
+        filename=filename,
         byte_size=byte_size,
     )
 
