@@ -2286,7 +2286,7 @@ class TestChatAttachments:
         assert file_ctx == FILE_CONTEXT
         assert reference.category == "attachments"
         assert reference.metadata["title"] == "screenshot.png"
-        assert reference.content is None
+        assert reference.content == ""
 
     def test_no_attachment_payload_ever_reaches_the_ui_chat_log(
         self, workflow_with_attachment

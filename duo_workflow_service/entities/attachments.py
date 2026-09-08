@@ -443,9 +443,11 @@ def attachment_reference_envelopes(
     :func:`split_attachment_envelopes` claims it out -- so without these the user sees
     no trace of what they attached, on this turn or on any reload of the thread.
 
-    ``content`` is left unset on purpose: the payload must not re-enter the checkpoint
+    ``content`` is empty rather than unset: the payload must not re-enter the checkpoint
     by the back door, and these envelopes never reach a prompt template, so there is
-    nothing for the model to read here anyway.
+    nothing for the model to read here anyway. It cannot be ``None``, because GitLab
+    declares ``AiAdditionalContext.content`` non-nullable and fails the whole transcript
+    query when it reads null there.
 
     ``id`` is positional rather than the filename because the client interpolates it
     into a DOM id, and a filename carries spaces and dots.
@@ -454,6 +456,7 @@ def attachment_reference_envelopes(
         AdditionalContext(
             category=ATTACHMENTS_CATEGORY,
             id=f"attachment-{index}",
+            content="",
             metadata={
                 # Keys read by the client's token and popover renderers. `enabled` must
                 # be a bool: its context-item validator rejects the item otherwise.

@@ -451,7 +451,9 @@ class TestAttachmentReferenceEnvelopes:
         assert envelope_.category == ATTACHMENTS_CATEGORY
         assert envelope_.metadata["title"] == "screenshot.png"
         # The whole point of the reference: the payload must not travel back out.
-        assert envelope_.content is None
+        # Empty rather than None: GitLab declares AiAdditionalContext.content
+        # non-nullable and fails the whole transcript query when it reads null.
+        assert envelope_.content == ""
         assert PNG_B64 not in envelope_.model_dump_json()
 
     def test_satisfies_the_clients_context_item_contract(self):
