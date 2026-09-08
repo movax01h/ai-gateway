@@ -7,6 +7,7 @@ from lib.context.request_metadata import (
     LLMFinishReason,
     build_metadata_labels,
     client_type,
+    extract_finish_reason,
     gitlab_realm,
     gitlab_version,
     is_gitlab_team_member,
@@ -124,6 +125,7 @@ class TestLLMFinishReason(unittest.TestCase):
             "tool_use",
             "content_filter",
             "guardrail_intervened",
+            "refusal",
             "model_context_window_exceeded",
         ]
         self.assertEqual(LLMFinishReason.values(), expected_values)
@@ -144,7 +146,8 @@ class TestLLMFinishReason(unittest.TestCase):
         self.assertIn("guardrail_intervened", abnormal)
         self.assertIn("max_tokens", abnormal)
         self.assertIn("model_context_window_exceeded", abnormal)
-        self.assertEqual(len(abnormal), 5)
+        self.assertIn("refusal", abnormal)
+        self.assertEqual(len(abnormal), 6)
 
     def test_finish_reason_stop(self):
         self.assertEqual(LLMFinishReason.STOP.value, "stop")
@@ -159,6 +162,15 @@ class TestLLMFinishReason(unittest.TestCase):
         self.assertEqual(
             LLMFinishReason.MODEL_CONTEXT_WINDOW_EXCEEDED.value,
             "model_context_window_exceeded",
+        )
+
+    def test_finish_reason_refusal(self):
+        self.assertEqual(LLMFinishReason.REFUSAL.value, "refusal")
+
+    def test_extract_finish_reason_anthropic_refusal(self):
+        self.assertEqual(
+            extract_finish_reason({"stop_reason": "refusal"}),
+            LLMFinishReason.REFUSAL,
         )
 
     def test_finish_reason_is_string_enum(self):
