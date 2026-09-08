@@ -373,7 +373,7 @@ class Workflow(AbstractWorkflow):
         )
 
         ui_chat_log: list[UiChatLog] = []
-        if not self._user_entry_would_be_blank(goal, references, rejection):
+        if not self._user_entry_would_be_blank(goal, attachments, rejection):
             ui_chat_log.append(initial_ui_chat_log)
         if rejection:
             ui_chat_log.append(self._attachments_rejected_log(rejection, None))
@@ -511,7 +511,7 @@ class Workflow(AbstractWorkflow):
                 if (
                     sent_attachments or rejection or has_message
                 ) and not self._user_entry_would_be_blank(
-                    new_chat_message, references, rejection
+                    new_chat_message, sent_attachments, rejection
                 ):
                     new_message_chat_log = UiChatLog(
                         message_type=MessageTypeEnum.USER,
@@ -546,20 +546,25 @@ class Workflow(AbstractWorkflow):
     @staticmethod
     def _user_entry_would_be_blank(
         goal: str,
-        references: Optional[list[AdditionalContext]],
+        attachments: list[Attachment],
         rejection: Optional[str],
     ) -> bool:
         """Whether a user entry for this turn would render as an empty bubble.
 
-        A turn whose files were all rejected carries no text and has nothing left to name -- the references are built
-        from the attachments that survived, and none did. The client renders that as a blank user bubble, which is the
-        gap review found on the success path and which the rejection path reintroduces. The notice that follows says
+        A turn whose files were all rejected has no text and nothing left to name, so the entry renders as a blank
+        bubble -- the gap review found on the success path, arriving by another route. The notice that follows says
         what failed, so it can carry the turn on its own.
+
+        Only what the *user* contributed counts: the message and the files that survived. Deliberately not the rest of
+        ``additional_context``, which is where an earlier version of this went wrong. Ambient context rides along on
+        every turn -- the CLI sends ``os_information``, ``agent_user_environment`` and ``user_rule`` each time, the web
+        client sends the current page -- so treating any of it as "something worth showing" means the entry is never
+        suppressed in practice and the blank bubble comes straight back. None of it is something the user sent.
 
         Only applies when there is a rejection to explain: an empty turn with no attachments at all is a different
         question and keeps its existing entry.
         """
-        return bool(rejection) and not goal and not references
+        return bool(rejection) and not goal and not attachments
 
     def _attachments_rejected_log(
         self, reason: str, checkpoint_tuple: Optional[GitLabCheckpoint]

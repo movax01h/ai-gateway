@@ -2171,6 +2171,25 @@ FILE_CONTEXT = AdditionalContext(
     metadata={"path": "/test/file.py"},
 )
 
+# What the Duo CLI puts on every request, whether or not the user typed anything.
+EXECUTOR_CONTEXT = [
+    AdditionalContext(
+        category="user_rule",
+        id="agent-skills-instructions",
+        content="No agent skills were discovered.",
+    ),
+    AdditionalContext(
+        category="os_information",
+        id="os_information",
+        content="<os><platform>darwin</platform></os>",
+    ),
+    AdditionalContext(
+        category="agent_user_environment",
+        id="agent_user_environment_shell_info",
+        content='{"shell_name":"zsh"}',
+    ),
+]
+
 
 def image_blocks(message) -> list:
     return [
@@ -2488,16 +2507,42 @@ class TestChatAttachments:
         assert logs[0]["content"] == "look at this"
         assert "could not be attached" in logs[-1]["content"]
 
-    def test_a_rejected_turn_keeps_its_user_entry_for_other_context(
+    @pytest.mark.parametrize("later_turn", [False, True])
+    @pytest.mark.asyncio
+    async def test_ambient_context_does_not_resurrect_the_user_entry(
+        self, workflow_with_project, later_turn
+    ):
+        """Ambient context rides along on every turn and is not something the user sent.
+
+        The CLI attaches `os_information`, `agent_user_environment` and `user_rule` to each request, and the web client
+        attaches the current page. Counting any of it as "worth showing" means the entry is never suppressed in real
+        traffic, which is exactly how the first version of this fix passed its tests and still produced a blank bubble
+        against the CLI.
+        """
+        workflow_with_project._additional_context = [
+            *EXECUTOR_CONTEXT,
+            attachment_envelope(data="not base64!!"),
+        ]
+
+        if later_turn:
+            logs = (await self._later_turn(workflow_with_project, goal="")).update[
+                "ui_chat_log"
+            ]
+        else:
+            logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert [entry["message_type"] for entry in logs] == [MessageTypeEnum.AGENT]
+
+    def test_ambient_context_still_reaches_a_turn_that_is_shown(
         self, workflow_with_project
     ):
-        """Context the turn still carries is worth showing even with no text, so this is not a blank bubble."""
+        """Suppression is about the empty entry, not about dropping context from a turn that has one."""
         workflow_with_project._additional_context = [
             FILE_CONTEXT,
             attachment_envelope(data="not base64!!"),
         ]
 
-        logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+        logs = workflow_with_project.get_workflow_state("look at this")["ui_chat_log"]
 
         assert logs[0]["message_type"] == MessageTypeEnum.USER
         assert logs[0]["additional_context"] == [FILE_CONTEXT]
