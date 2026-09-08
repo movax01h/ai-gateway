@@ -11,6 +11,11 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from duo_workflow_service.entities.image_blocks import (
+    IMAGE_BLOCK_TOKEN_ESTIMATE,
+    is_image_content_block,
+)
+
 
 class TikTokenCounter:
     AGENT_TOKEN_MAP: Dict[str, int] = {
@@ -59,7 +64,17 @@ class TikTokenCounter:
     def count_tokens_in_list(self, content_list: list) -> int:
         result = 0
         for item in content_list:
-            if isinstance(item, dict):
+            if is_image_content_block(item):
+                # Never tiktoken-encode a base64 image payload: it is not prose,
+                # and doing so over-counts by orders of magnitude, which would
+                # spuriously trigger history compaction.
+                #
+                # This counter is not the live budgeting path -- that is
+                # `conversation.token_estimator.TokenEstimator`, which charges the
+                # same constant. Kept in step so whichever counter a caller picks
+                # up prices an image the same way.
+                result += IMAGE_BLOCK_TOKEN_ESTIMATE
+            elif isinstance(item, dict):
                 result += self.count_tokens_in_dict(item)
             elif isinstance(item, str):
                 result += self.count_string_content(item)

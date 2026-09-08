@@ -1,6 +1,8 @@
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.messages.utils import count_tokens_approximately
 
+from duo_workflow_service.entities.image_blocks import IMAGE_BLOCK_TOKEN_ESTIMATE
+
 
 class TokenEstimator:
     """Estimate token counts for LangChain messages."""
@@ -20,7 +22,15 @@ class TokenEstimator:
             else:
                 messages_to_estimate.append(msg)
 
-        return true_tokens + count_tokens_approximately(messages=messages_to_estimate)
+        # This is the live budgeting path: compaction, trimming and the
+        # checkpoint notifier all size history through here. The default
+        # `tokens_per_image` is 85 (OpenAI's low-detail cost), which badly
+        # under-charges a full-resolution attachment and would let history
+        # overflow the model's window rather than compact in time.
+        return true_tokens + count_tokens_approximately(
+            messages=messages_to_estimate,
+            tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE,
+        )
 
     def _estimate_complete_history(self, messages: list[BaseMessage]) -> int:
         """Use the latest ``AIMessage.total_tokens`` as a base and estimate trailing messages.

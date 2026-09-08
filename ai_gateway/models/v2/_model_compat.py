@@ -56,3 +56,61 @@ def _extract_text(content: Any) -> str:
         parts = [block.get("text", "") for block in content if isinstance(block, dict)]
         return "".join(parts)
     return ""
+
+
+def normalize_image_blocks(messages: list[dict]) -> list[dict]:
+    """Rewrite LangChain standard image blocks into the OpenAI/LiteLLM shape.
+
+    ``langchain-anthropic`` translates standard content blocks
+    (``{"type": "image", "base64": ..., "mime_type": ...}``) natively, but the
+    LiteLLM adapter passes ``message.content`` through verbatim, so the blocks
+    have to be converted to OpenAI's ``image_url`` data-URL form here.
+
+    Blocks that are already in OpenAI form, carry a plain ``url``, or are not
+    images are left untouched, so this is safe to run over every payload.
+
+    Args:
+        messages: Message dicts as produced by the LiteLLM message converter.
+
+    Returns:
+        A new list of message dicts with image blocks normalized. Messages
+        without inline image data are returned unchanged (same object).
+    """
+    normalized = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list) or not any(
+            _is_standard_image_block(block) for block in content
+        ):
+            normalized.append(message)
+            continue
+
+        normalized.append(
+            {
+                **message,
+                "content": [_to_openai_image_block(block) for block in content],
+            }
+        )
+    return normalized
+
+
+def _is_standard_image_block(block: Any) -> bool:
+    return (
+        isinstance(block, dict)
+        and block.get("type") == "image"
+        and bool(block.get("base64") or block.get("url"))
+    )
+
+
+def _to_openai_image_block(block: Any) -> Any:
+    if not _is_standard_image_block(block):
+        return block
+
+    if url := block.get("url"):
+        return {"type": "image_url", "image_url": {"url": url}}
+
+    mime_type = block.get("mime_type", "image/png")
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime_type};base64,{block['base64']}"},
+    }

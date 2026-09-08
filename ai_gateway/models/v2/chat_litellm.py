@@ -16,6 +16,7 @@ from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
 )
 from ai_gateway.models.v2._model_compat import (
+    normalize_image_blocks,
     remove_trailing_assistant_message,
     supports_assistant_prefill,
 )
@@ -211,6 +212,10 @@ class ChatLiteLLM(_LChatLiteLLM):
         self, messages: List[BaseMessage], stop: Optional[List[str]]
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         message_dicts, params = super()._create_message_dicts(messages, stop)
+        # The LiteLLM converter copies `message.content` verbatim, so LangChain
+        # standard image blocks have to be rewritten into OpenAI's `image_url`
+        # form before they reach the provider.
+        message_dicts = normalize_image_blocks(message_dicts)
         model_name = self.model_name or self.model
         if not supports_assistant_prefill(model_name):
             payload = remove_trailing_assistant_message({"messages": message_dicts})
