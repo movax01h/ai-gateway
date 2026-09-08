@@ -942,9 +942,32 @@ class ChatLiteLLM(BaseChatModel):
         return "litellm-chat"
 
 
+def _get_attr_or_key(obj: Any, key: str) -> Any:
+    """Retrieve *key* from *obj* whether it is a mapping or an attribute-bearing object.
+
+    LiteLLM returns ``prompt_tokens_details`` as a ``PromptTokensDetailsWrapper``
+    pydantic object in the non-streaming path, but as a plain ``dict`` after
+    ``model_dump()`` is called in the streaming paths (``_stream`` /
+    ``_astream``).  This helper handles both shapes without an ``isinstance``
+    check so callers stay concise.
+
+    Args:
+        obj: A mapping (e.g. ``dict``) or an object with attributes.
+        key: The key / attribute name to look up.
+
+    Returns:
+        The value associated with *key*, or ``None`` if absent.
+    """
+    getter = getattr(obj, "get", None)
+    if getter is not None:
+        return getter(key)
+    return getattr(obj, key, None)
+
+
 def _create_usage_metadata(token_usage: Mapping[str, Any]) -> UsageMetadata:
     input_tokens = token_usage.get("prompt_tokens", 0)
     output_tokens = token_usage.get("completion_tokens", 0)
+    prompt_tokens_details = token_usage.get("prompt_tokens_details")
     extra_kwargs = {}
 
     if (
@@ -958,6 +981,30 @@ def _create_usage_metadata(token_usage: Mapping[str, Any]) -> UsageMetadata:
             cache_creation=cache_creation_input_tokens,
             cache_read=cache_read_input_tokens,
         )
+
+    elif prompt_tokens_details:
+        # OpenAI-style usage: litellm surfaces OpenAI's
+        # ``usage.prompt_tokens_details`` as ``prompt_tokens_details``.
+        # Per the OpenAI prompt-caching docs:
+        #   - ``cached_tokens``       → tokens read from the cache  (cache_read)
+        #   - ``cache_write_tokens``  → tokens written to the cache (cache_write)
+        # See https://platform.openai.com/docs/guides/prompt-caching
+        #
+        # ``prompt_tokens_details`` may be a ``PromptTokensDetailsWrapper``
+        # pydantic object (non-streaming) or a plain ``dict`` (streaming, after
+        # ``model_dump()``).  ``_get_attr_or_key`` handles both shapes.
+        cache_read = _get_attr_or_key(prompt_tokens_details, "cached_tokens") or 0
+        cache_write = (
+            _get_attr_or_key(prompt_tokens_details, "cache_write_tokens") or 0
+        )
+
+        if cache_read or cache_write:
+            input_token_details = InputTokenDetails()
+            if cache_read:
+                input_token_details["cache_read"] = cache_read
+            if cache_write:
+                input_token_details["cache_creation"] = cache_write
+            extra_kwargs["input_token_details"] = input_token_details
 
     return UsageMetadata(
         input_tokens=input_tokens,

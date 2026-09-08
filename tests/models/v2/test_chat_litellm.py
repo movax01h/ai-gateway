@@ -13,6 +13,7 @@ from langchain_core.messages import (
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.runnables import Runnable
+from litellm.types.utils import PromptTokensDetailsWrapper
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
@@ -28,6 +29,7 @@ from ai_gateway.vendor.langchain_litellm.litellm import (
     _convert_dict_to_message,
     _convert_message_to_dict,
     _create_usage_metadata,
+    _get_attr_or_key,
 )
 
 
@@ -219,17 +221,15 @@ async def test_fireworks_prompt_caching_disabled(mock_acompletion_with_retry):
     assert call_kwargs["prompt_cache_max_len"] == 0
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("token_usage", "expected_usage_metadata"),
     [
+        # No cache fields at all.
         (
-            {
-                "prompt_tokens": 1,
-                "completion_tokens": 2,
-            },
+            {"prompt_tokens": 1, "completion_tokens": 2},
             UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3),
         ),
+        # Anthropic-style: cache_creation_input_tokens + cache_read_input_tokens.
         (
             {
                 "prompt_tokens": 1,
@@ -244,10 +244,110 @@ async def test_fireworks_prompt_caching_disabled(mock_acompletion_with_retry):
                 input_token_details=InputTokenDetails(cache_creation=3, cache_read=4),
             ),
         ),
+        # OpenAI-style — object form (PromptTokensDetailsWrapper): cache_read only.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": PromptTokensDetailsWrapper(cached_tokens=5),
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5),
+            ),
+        ),
+        # OpenAI-style — object form: both cache_read and cache_write.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": PromptTokensDetailsWrapper(
+                    cached_tokens=5, cache_write_tokens=3
+                ),
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5, cache_creation=3),
+            ),
+        ),
+        # OpenAI-style — dict form (streaming path after model_dump()): cache_read only.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 5},
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5),
+            ),
+        ),
+        # OpenAI-style — dict form: both cache_read and cache_write.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 5, "cache_write_tokens": 3},
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5, cache_creation=3),
+            ),
+        ),
+        # OpenAI-style — object form with cached_tokens=None and cache_write_tokens=None:
+        # no input_token_details emitted (treat missing/None as 0).
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": PromptTokensDetailsWrapper(
+                    cached_tokens=None, cache_write_tokens=None
+                ),
+            },
+            UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3),
+        ),
+        # OpenAI-style — dict form with all-zero values: no input_token_details emitted.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            },
+            UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3),
+        ),
     ],
 )
-async def test_create_usage_metadata(token_usage, expected_usage_metadata):
+def test_create_usage_metadata(token_usage, expected_usage_metadata):
     assert _create_usage_metadata(token_usage) == expected_usage_metadata
+
+
+@pytest.mark.parametrize(
+    ("obj", "key", "expected"),
+    [
+        # dict form (streaming path after model_dump())
+        ({"cached_tokens": 5}, "cached_tokens", 5),
+        ({"cached_tokens": 5}, "cache_write_tokens", None),
+        ({}, "cached_tokens", None),
+        # object form (non-streaming PromptTokensDetailsWrapper)
+        (PromptTokensDetailsWrapper(cached_tokens=7), "cached_tokens", 7),
+        (PromptTokensDetailsWrapper(cached_tokens=7), "cache_write_tokens", None),
+        (
+            PromptTokensDetailsWrapper(cached_tokens=7, cache_write_tokens=3),
+            "cache_write_tokens",
+            3,
+        ),
+    ],
+)
+def test_get_attr_or_key(obj, key, expected):
+    assert _get_attr_or_key(obj, key) == expected
 
 
 @pytest.mark.parametrize(
