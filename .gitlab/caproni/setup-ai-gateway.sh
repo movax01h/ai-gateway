@@ -57,7 +57,23 @@ override_env() {
   awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} $1==k {$0=k"="v} 1' .env > .env.tmp && mv .env.tmp .env
 }
 
-gitlab_base_url="http://${CAPRONI_PRIMARY_HOSTNAME:-"gitlab.caproni.test"}"
+# GitLab answers on port 80 unless the k3d loadbalancer is published elsewhere
+# (rootless podman cannot bind <1024, so those rigs remap to e.g. 8080:80).
+# Discover the host port from the resolved caproni config so these URLs follow
+# cluster.k3d.port_mappings; CAPRONI_GITLAB_HTTP_PORT overrides it. Empty
+# means portless, which keeps the default (Colima, port 80) path unchanged.
+# yq is pinned in gitlab-caproni's .tool-versions, so its absence is a broken
+# rig rather than a reason to guess.
+gitlab_host="${CAPRONI_PRIMARY_HOSTNAME:-gitlab.caproni.test}"
+gitlab_port="${CAPRONI_GITLAB_HTTP_PORT:-}"
+if [[ -z "$gitlab_port" ]]; then
+  command -v yq >/dev/null 2>&1 || { error "yq not found; it is pinned in gitlab-caproni's .tool-versions (mise install)"; exit 1; }
+  gitlab_port="$(caproni config print 2>/dev/null | yq -r '
+    .cluster.k3d.port_mappings[]?
+    | select(test("^([0-9.]+:)?[0-9]+:80(/tcp)?@loadbalancer$"))
+    | sub("^([0-9.]+:)?([0-9]+):.*$"; "${2}")' | head -1)"
+fi
+gitlab_base_url="http://${gitlab_host}${gitlab_port:+:$gitlab_port}"
 
 override_env AIGW_GITLAB_URL                    "$gitlab_base_url/"
 override_env AIGW_GITLAB_API_URL                "${gitlab_base_url}/api/v4/"
@@ -155,6 +171,20 @@ success "  ✓ Found pod: $TOOLBOX_POD"
 GITLAB_DIR="$(cd "$REPOS_DIR/gitlab" && pwd)"
 
 # ---------------------------------------------------------------------------
+# Run one of gitlab's caproni scripts with gitlab's own toolchain on PATH.
+#
+# Those scripts assume an activated mise shell: db_migrate.sh parses
+# config/database.yml with bare `ruby`. Caproni's hook environment has mise on
+# PATH but not activated, so `ruby` resolves to nothing. Resolving through the
+# monolith's .tool-versions also covers any other host-side tool those scripts
+# reach for later.
+# ---------------------------------------------------------------------------
+
+gitlab_script() {
+  (cd "$GITLAB_DIR" && mise trust --quiet && RAILS_ENV=development mise exec -- "./.gitlab/caproni/$1")
+}
+
+# ---------------------------------------------------------------------------
 # Ensure the GitLab repo's cluster-config sync has run first.
 #
 # caproni processes repository hooks in alphabetical order, so this
@@ -168,7 +198,7 @@ GITLAB_DIR="$(cd "$REPOS_DIR/gitlab" && pwd)"
 if [[ ! -f "$GITLAB_DIR/config/database.yml" ]]; then
   echo ""
   echo "==> GitLab config not synced yet – running gitlab's .gitlab/caproni/setup.sh first..."
-  "$GITLAB_DIR/.gitlab/caproni/setup.sh"
+  gitlab_script setup.sh
 fi
 
 # The Rails steps below also need the local checkout's migrations applied:
@@ -179,7 +209,7 @@ fi
 
 echo ""
 echo "==> Ensuring database migrations are up to date..."
-"$GITLAB_DIR/.gitlab/caproni/db_migrate.sh"
+gitlab_script db_migrate.sh
 
 run_rake() {
   (cd "$GITLAB_DIR" && mise trust --quiet && RAILS_ENV=development AI_GATEWAY_URL="$AI_GATEWAY_URL" mise exec -- \
