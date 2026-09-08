@@ -34,6 +34,11 @@ def success_response():
     )
 
 
+def posted_review(gitlab_client_mock):
+    body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    return body, json.loads(body["review_output"])
+
+
 class TestSelectFindings:
     def test_zero_threshold_publishes_everything(self):
         published, suppressed = select_findings(
@@ -96,12 +101,11 @@ class TestSelectFindings:
         assert published[0] is original
 
     @pytest.mark.parametrize("path", ['we"ird.rb', "we>ird.rb", "we\nird.rb"])
-    def test_finding_with_an_unrenderable_file_path_is_dropped_alone(self, path):
-        published, suppressed = select_findings(
-            [finding(file=path), finding(file="fine.rb")]
-        )
+    def test_any_file_path_is_publishable(self, path):
+        """JSON carries any path, so nothing is dropped for the sake of the transport."""
+        published, suppressed = select_findings([finding(file=path)])
 
-        assert [f["file"] for f in published] == ["fine.rb"]
+        assert [f["file"] for f in published] == [path]
         assert suppressed == 0
 
 
@@ -173,144 +177,77 @@ class TestInputCoercion:
         assert args.summary is None
 
 
-class TestRenderReviewOutput:
+class TestBuildPayload:
     @pytest.fixture(name="tool")
     def tool_fixture(self, metadata):
         return PostDuoCodeReviewFindings(metadata=metadata)
 
-    def test_no_findings_renders_summary_only(self, tool):
-        output = tool._render_review_output([], "All clean.")
+    def test_no_findings_sends_an_empty_list_with_the_summary(self, tool):
+        assert tool._build_payload([], "All clean.") == {
+            "findings": [],
+            "summary": "All clean.",
+        }
 
-        assert output == "<summary>\nAll clean.\n</summary>"
-        assert "<review>" not in output
+    def test_finding_carries_only_what_the_endpoint_anchors_and_renders(self, tool):
+        payload = tool._build_payload([FINDING], "1 finding.")
 
-    def test_finding_renders_comment_with_severity_header(self, tool):
-        output = tool._render_review_output([FINDING], "1 finding.")
+        assert payload["summary"] == "1 finding."
+        assert payload["findings"] == [
+            {
+                "file": "app/models/user.rb",
+                "new_line": 42,
+                "target_code": "  return true",
+                "message": "**[Critical] fail-open**\n\nFails open when the check errors.",
+            }
+        ]
 
-        assert '<comment file="app/models/user.rb" new_line="42">' in output
-        assert "**[Critical] fail-open**" in output
-        assert "Fails open when the check errors." in output
-        assert output.endswith("<comments_summary>\n1 finding.\n</comments_summary>")
+    def test_old_line_and_suggestion_are_sent_only_when_present(self, tool):
+        [rendered] = tool._build_payload(
+            [finding(old_line=40, suggestion="  return false")], "s"
+        )["findings"]
 
-    def test_old_line_attribute_is_rendered_only_when_present(self, tool):
-        output = tool._render_review_output([finding(old_line=40)], "s")
+        assert rendered["old_line"] == 40
+        assert rendered["suggestion"] == "  return false"
 
-        assert 'old_line="40" new_line="42"' in output
+    def test_an_empty_suggestion_is_withheld(self, tool):
+        """The monolith turns an empty replacement into a suggestion that deletes the line."""
+        [rendered] = tool._build_payload([finding(suggestion="")], "s")["findings"]
 
-    def test_suggestion_needs_both_suggestion_and_target_code(self, tool):
-        with_both = tool._render_review_output(
-            [finding(suggestion="  return false")], "s"
-        )
-        without_target = tool._render_review_output(
-            [finding(target_code="", suggestion="  return false")], "s"
-        )
-
-        assert "<from>\n  return true\n</from>" in with_both
-        assert "<to>\n  return false\n</to>" in with_both
-        assert "<from>" not in without_target
+        assert "suggestion" not in rendered
 
     def test_custom_instruction_ref_is_attributed(self, tool):
-        output = tool._render_review_output(
+        [rendered] = tool._build_payload(
             [finding(custom_instruction_ref="No fail-open guards")], "s"
-        )
+        )["findings"]
 
         assert (
             "According to custom instructions in 'No fail-open guards': "
-            f"{FINDING['message']}" in output
+            f"{FINDING['message']}" in rendered["message"]
         )
         # The monolith counts attributed comments with this regex, anchored per line.
         assert re.search(
-            r"^According to custom instructions in .+?:", output, re.MULTILINE
+            r"^According to custom instructions in .+?:",
+            rendered["message"],
+            re.MULTILINE,
         )
 
-    def test_comment_tags_anchor_at_line_boundaries(self, tool):
-        """The monolith parses comments with ^<comment ...>...</comment>$ regexes, so tags must own their lines."""
-        output = tool._render_review_output([FINDING, FINDING], "s")
-
-        for line in output.splitlines():
-            if "<comment " in line:
-                assert line.startswith("<comment ")
-            if "</comment>" in line:
-                assert line == "</comment>"
-
-    def test_structural_tags_in_a_message_cannot_end_the_comment(self, tool):
-        """A message quoting the review format must not truncate its own comment or open a code suggestion."""
-        output = tool._render_review_output(
-            [finding(message="Do not write </comment> or <from> here.")],
-            "1 finding.",
-        )
-
-        assert "</comment>\nor" not in output
-        assert "< /comment>" in output
-        assert "< from>" in output
-        assert output.count("</comment>") == 1
-
-    def test_attributed_comment_opener_in_a_message_is_defused(self, tool):
-        """A fake <comment file=...> opener in free text must not be able to impersonate a comment anchor."""
-        output = tool._render_review_output(
-            [finding(message='Beware <comment file="x.rb" new_line="1"> here.')],
-            "1 finding.",
-        )
-
-        assert '< comment file="x.rb" new_line="1">' in output
-        assert output.count("<comment ") == 1
-
-    def test_review_and_summary_tags_in_free_text_are_defused(self, tool):
-        """The monolith scans <review>...</review> and the summary blocks lazily, so a quoted closer would truncate
-        them."""
-        output = tool._render_review_output(
-            [finding(message="Do not emit </review> or <comments_summary>.")],
-            "Narrative quoting </comments_summary> and <review>.",
-        )
-
-        assert output.count("<review>") == 1
-        assert output.count("</review>") == 1
-        assert output.count("</comments_summary>") == 1
-        assert "< /review>" in output
-        assert "< review>" in output
-
-    def test_summary_only_output_defuses_its_own_closer(self, tool):
-        output = tool._render_review_output([], "Clean, but never write </summary>.")
-
-        assert output.count("</summary>") == 1
-        assert "< /summary>" in output
-
-    @pytest.mark.parametrize(
-        ("target_code", "suggestion"),
-        [
-            ("  x = 1", "  y = '</to>'"),
-            ("  <summary>Old</summary>", "  <summary>New</summary>"),
-            ("  <summary>Old</summary>", "  x = 1"),
-        ],
-    )
-    def test_suggestion_whose_code_carries_a_structural_tag_is_withheld(
-        self, tool, target_code, suggestion
-    ):
-        """Defusing code would publish a one-click patch containing the inserted space, so the message ships alone."""
-        output = tool._render_review_output(
+    def test_markup_in_messages_and_code_travels_verbatim(self, tool):
+        """Nothing is escaped or defused: JSON has no structural tags to protect."""
+        message = 'Do not write </comment> or <comment file="x.rb" new_line="1">.'
+        [rendered] = tool._build_payload(
             [
                 finding(
-                    message="Fix this.", target_code=target_code, suggestion=suggestion
+                    message=message,
+                    target_code="  <summary>Old</summary>",
+                    suggestion="  y = '</to>'",
                 )
             ],
-            "1 finding.",
-        )
+            "Quoting </comments_summary> and <review>.",
+        )["findings"]
 
-        assert "<from>" not in output
-        assert "<to>" not in output
-        assert "< " not in output
-        assert "Fix this." in output
-
-    def test_suggestion_without_a_structural_tag_is_published_byte_identical(
-        self, tool
-    ):
-        output = tool._render_review_output(
-            [finding(target_code="  x = 1", suggestion="  y = a < b")],
-            "1 finding.",
-        )
-
-        assert "<from>\n  x = 1\n</from>" in output
-        assert "<to>\n  y = a < b\n</to>" in output
+        assert rendered["message"].endswith(message)
+        assert rendered["target_code"] == "  <summary>Old</summary>"
+        assert rendered["suggestion"] == "  y = '</to>'"
 
 
 @pytest.mark.asyncio
@@ -336,15 +273,14 @@ async def test_post_duo_code_review_findings_success(gitlab_client_mock, metadat
         "published": 2,
         "suppressed_below_threshold": 0,
     }
-    body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    body, review = posted_review(gitlab_client_mock)
     assert body["project_id"] == 123
     assert body["merge_request_iid"] == 45
     assert body["workflow_id"] == "test-workflow-123"
-    review_output = body["review_output"]
-    # Critical renders before minor, and the summary carries narrative plus computed counts.
-    assert review_output.index('new_line="2"') < review_output.index('new_line="1"')
-    assert "I focused on the auth changes." in review_output
-    assert "2 findings (1 critical, 1 minor) across 1 file:" in review_output
+    # Critical publishes before minor, and the summary carries narrative plus computed counts.
+    assert [f["new_line"] for f in review["findings"]] == [2, 1]
+    assert review["summary"].startswith("I focused on the auth changes.")
+    assert "2 findings (1 critical, 1 minor) across 1 file:" in review["summary"]
 
 
 @pytest.mark.asyncio
@@ -369,12 +305,9 @@ async def test_post_duo_code_review_findings_applies_the_confidence_gate(
 
     assert json.loads(response)["published"] == 1
     assert json.loads(response)["suppressed_below_threshold"] == 1
-    review_output = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])[
-        "review_output"
-    ]
-    assert 'new_line="2"' in review_output
-    assert 'new_line="1"' not in review_output
-    assert "1 finding (1 critical) across 1 file:" in review_output
+    _, review = posted_review(gitlab_client_mock)
+    assert [f["new_line"] for f in review["findings"]] == [2]
+    assert "1 finding (1 critical) across 1 file:" in review["summary"]
 
 
 @pytest.mark.asyncio
@@ -388,8 +321,8 @@ async def test_post_duo_code_review_findings_clean_review_posts_summary_only(
         project_id=123, merge_request_iid=45, findings=[], summary="- Well tested"
     )
 
-    body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
-    assert body["review_output"] == "<summary>\n- Well tested\n</summary>"
+    _, review = posted_review(gitlab_client_mock)
+    assert review == {"findings": [], "summary": "- Well tested"}
 
 
 @pytest.mark.asyncio

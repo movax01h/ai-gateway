@@ -1,13 +1,12 @@
 """Deterministic publish step for the advanced code review flow.
 
 Takes the reviewer's structured findings straight from its schema-validated final answer, applies the confidence gate,
-orders and counts, composes the summary, renders the review XML, and posts it. No finding passes through a model after
-the reviewer writes it, so a line number cannot be recomputed and a finding cannot be reworded on the way to the reader.
+orders and counts, composes the summary, and posts the findings as JSON. No finding passes through a model after the
+reviewer writes it, so a line number cannot be recomputed and a finding cannot be reworded on the way to the reader.
 The confidence gate is the one deliberate drop: logged and counted, never silent.
 """
 
 import json
-import re
 from collections import Counter
 from typing import Any, Dict, List, Optional, Type
 
@@ -28,26 +27,8 @@ __all__ = [
     "select_findings",
 ]
 
-# Also the render order: the most serious comment is posted first.
+# Also the publish order: the most serious comment is posted first.
 SEVERITY_ORDER: tuple[str, ...] = ("critical", "major", "minor")
-
-# The review endpoint parses this XML with regexes and never unescapes entities, so
-# XML-escaping would reach the reader verbatim. Neutralise only what breaks the parse:
-# a quote or a closing bracket inside an attribute, or a structural tag inside free text.
-_UNSAFE_IN_ATTRIBUTE = re.compile(r'[">\n\r]')
-_STRUCTURAL_TAG = re.compile(
-    r"</?(?:comment\b[^>\n]*|from|to|review|summary|comments_summary)>",
-    re.IGNORECASE,
-)
-
-
-def _defuse(text: str) -> str:
-    """Break structural tags in free text so they cannot be parsed as markup.
-
-    The space keeps the text readable and leaves every other character byte-identical, unlike XML escaping, which the
-    endpoint would render literally.
-    """
-    return _STRUCTURAL_TAG.sub(lambda match: match.group(0).replace("<", "< ", 1), text)
 
 
 def _severity_rank(severity: Any) -> int:
@@ -63,8 +44,8 @@ def select_findings(
     """Choose and order the findings that will be published.
 
     Drops a finding below ``min_confidence`` (only when it carries a score, so a schema slip degrades to publishing)
-    and a finding whose file path cannot be rendered as an XML attribute. Both drops are logged. The survivors are
-    ordered by severity, reviewer order within a severity, so the same input always publishes in the same order.
+    and logs the drop. The survivors are ordered by severity, reviewer order within a severity, so the same input
+    always publishes in the same order.
 
     Returns:
         The publishable findings and the number suppressed by the confidence gate.
@@ -72,14 +53,6 @@ def select_findings(
     kept: List[Dict[str, Any]] = []
     suppressed = 0
     for finding in findings:
-        file = str(finding.get("file", ""))
-        if _UNSAFE_IN_ATTRIBUTE.search(file):
-            # A bad attribute would corrupt the whole review; drop the one finding.
-            logger.warning(
-                "Dropping finding whose file path cannot be rendered as an attribute",
-                file=file,
-            )
-            continue
         confidence = finding.get("confidence")
         if (
             min_confidence > 0
@@ -89,7 +62,7 @@ def select_findings(
             suppressed += 1
             logger.info(
                 "Suppressing finding below confidence threshold",
-                file=file,
+                file=finding.get("file"),
                 new_line=finding.get("new_line"),
                 severity=finding.get("severity"),
                 category=finding.get("category"),
@@ -219,63 +192,39 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
             minor=counts["minor"],
         )
 
-        review_output = self._render_review_output(published, summary_text)
-        response = await self._post_review(project_id, merge_request_iid, review_output)
+        payload = self._build_payload(published, summary_text)
+        response = await self._post_review(project_id, merge_request_iid, payload)
         return self._format_response(
             response, merge_request_iid, len(published), suppressed
         )
 
-    def _render_review_output(
+    def _build_payload(
         self, findings: List[Dict[str, Any]], summary: str
-    ) -> str:
-        """Render the selected findings into the review XML the endpoint expects.
+    ) -> Dict[str, Any]:
+        """Shape the selected findings into the JSON document the review endpoint parses.
 
-        No message is reworded. A suggestion whose code carries a structural tag is withheld and logged, because
-        defusing it would publish a one-click patch containing the inserted space.
+        Only the fields the endpoint anchors and renders with are sent. The message is rendered here so the severity
+        header and custom-instruction attribution are decided in one place; code travels verbatim.
         """
-        summary = _defuse(summary)
-        if not findings:
-            return f"<summary>\n{summary}\n</summary>"
+        return {
+            "findings": [self._render_finding(f) for f in findings],
+            "summary": summary,
+        }
 
-        comments = []
-        for f in findings:
-            old_line = f.get("old_line")
-            old_attr = f' old_line="{old_line}"' if old_line else ""
-            parts = [
-                f'<comment file="{f.get("file", "")}"{old_attr} new_line="{f.get("new_line", "")}">',
-                _defuse(self._render_message(f)),
-            ]
-            target_code = str(f.get("target_code") or "")
-            suggestion = str(f.get("suggestion") or "")
-            if suggestion and target_code:
-                if _STRUCTURAL_TAG.search(target_code) or _STRUCTURAL_TAG.search(
-                    suggestion
-                ):
-                    # The endpoint renders <to> as a one-click suggestion, so a defused
-                    # tag here would commit the inserted space. Keep the message, drop
-                    # the patch.
-                    logger.warning(
-                        "Withholding suggestion whose code contains a structural tag",
-                        file=f.get("file", ""),
-                    )
-                else:
-                    parts += [
-                        "<from>",
-                        target_code,
-                        "</from>",
-                        "<to>",
-                        suggestion,
-                        "</to>",
-                    ]
-            parts.append("</comment>")
-            comments.append("\n".join(parts))
-
-        return (
-            "<review>\n"
-            + "\n".join(comments)
-            + "\n</review>\n"
-            + f"<comments_summary>\n{summary}\n</comments_summary>"
-        )
+    def _render_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+        rendered: Dict[str, Any] = {
+            "file": finding.get("file", ""),
+            "new_line": finding.get("new_line"),
+            "message": self._render_message(finding),
+            "target_code": finding.get("target_code", ""),
+        }
+        if finding.get("old_line"):
+            rendered["old_line"] = finding["old_line"]
+        # An empty suggestion renders as a one-click patch that deletes the line, and the
+        # reviewer is told to omit the field rather than empty it, so treat it as a slip.
+        if finding.get("suggestion"):
+            rendered["suggestion"] = finding["suggestion"]
+        return rendered
 
     def _render_message(self, finding: Dict[str, Any]) -> str:
         """Render one finding's comment body.
@@ -303,13 +252,17 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         return "\n".join(lines)
 
     async def _post_review(
-        self, project_id: int, merge_request_iid: int, review_output: str
+        self, project_id: int, merge_request_iid: int, payload: Dict[str, Any]
     ) -> dict:
-        """Post review to GitLab API."""
+        """Post review to GitLab API.
+
+        The endpoint's `review_output` carries either the legacy review XML or, for this flow, the findings document
+        as a JSON string; it picks the parser from the payload.
+        """
         request_body = {
             "project_id": project_id,
             "merge_request_iid": merge_request_iid,
-            "review_output": review_output,
+            "review_output": json.dumps(payload),
             "workflow_id": self.workflow_id,
         }
         response = await self.gitlab_client.apost(
