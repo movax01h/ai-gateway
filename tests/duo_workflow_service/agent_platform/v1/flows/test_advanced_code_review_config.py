@@ -124,6 +124,16 @@ class TestAdvancedCodeReviewConfig:
         assert "suggestion" in fields
         assert fields["suggestion"].is_required() is False
 
+    def test_reviewer_schema_requires_end_line(self):
+        """`end_line` is required so the reviewer decides the span on every finding.
+
+        Left optional, the model skipped it on about half of the multi-line rewrites in E2E runs, publishing one-line
+        patches that broke on Apply.
+        """
+        fields = self._finding_model().model_fields
+
+        assert fields["end_line"].is_required() is True
+
     def test_publish_confidence_gate_is_a_literal(self):
         """The reviewer never self-censors; the volume/precision operating point lives in config, where it is logged and
         counted."""
