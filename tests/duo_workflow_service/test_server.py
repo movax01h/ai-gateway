@@ -327,6 +327,8 @@ def test_setup_container_wires_and_validates():
 def test_run(custom_models_enabled, vertex_project, should_validate_llm):
     with (
         patch("duo_workflow_service.server.setup_container"),
+        # Keep the module-global flow-config root registry out of run() tests.
+        patch("duo_workflow_service.server.discover_feature_flow_configs"),
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
             "duo_workflow_service.server.setup_error_tracking"
@@ -374,6 +376,8 @@ class TestRunMockUsageQuotaServer:
     def mock_run_dependencies_fixture(self):
         with (
             patch("duo_workflow_service.server.setup_container"),
+            # Keep the module-global flow-config root registry out of run() tests.
+            patch("duo_workflow_service.server.discover_feature_flow_configs"),
             patch("duo_workflow_service.server.setup_profiling"),
             patch("duo_workflow_service.server.setup_error_tracking"),
             patch("duo_workflow_service.server.setup_monitoring"),
