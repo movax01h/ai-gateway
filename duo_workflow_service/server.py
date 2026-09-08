@@ -37,6 +37,9 @@ from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    discover_feature_flow_configs,
+)
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
@@ -1317,6 +1320,8 @@ def run(config: Config):
     setup_error_tracking()
     setup_monitoring()
     setup_logging()
+    # After observability setup, so a duplicate feature id is reported, not lost.
+    discover_feature_flow_configs()
     setup_profiling()
     if not self_hosted_mode:
         validate_llm_access()

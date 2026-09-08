@@ -16,11 +16,29 @@ from duo_workflow_service.agent_platform.v1.catalog import (
     WorkspaceAgent,
     bind_catalog_items,
 )
-from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    FlowConfig,
+    _default_features_dir,
+)
 from duo_workflow_service.agent_platform.v1.flows.validation import DryRunFlowValidator
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 
-V1_CONFIGS = sorted(FlowConfig.DIRECTORY_PATH.glob("**/*.yml"))
+# Legacy root plus moved features' config/ dirs, so a moved flow keeps validation.
+# Reuse the loader's own root derivation so this sweep cannot silently diverge.
+_FEATURES_DIR = _default_features_dir()
+V1_CONFIGS = sorted(FlowConfig.DIRECTORY_PATH.glob("**/*.yml")) + sorted(
+    _FEATURES_DIR.glob("*/*/config/*.yml")
+)
+
+
+def _config_id(config_path: Path) -> str:
+    flow = (
+        config_path.parent.parent.name
+        if config_path.parent.name == "config"
+        else config_path.parent.name
+    )
+    return f"{flow}/{config_path.stem}"
+
 
 # Configs that accept catalog items. Derived from the configs themselves so a
 # flow that adds an `include` section is covered without touching this file.
@@ -66,7 +84,7 @@ class TestValidateFlowConfigs:
     @pytest.mark.parametrize(
         "config_path",
         V1_CONFIGS,
-        ids=lambda p: f"{p.parent.name}/{p.stem}",
+        ids=_config_id,
     )
     def test_v1_configs(self, config_path: Path):
         self._test_flow_config(config_path)
@@ -74,7 +92,7 @@ class TestValidateFlowConfigs:
     @pytest.mark.parametrize(
         "config_path",
         V1_CONFIGS,
-        ids=lambda p: f"{p.parent.name}/{p.stem}",
+        ids=_config_id,
     )
     def test_v1_config_toolset_entries_are_well_formed(self, config_path: Path):
         """Every ``toolset`` entry must be a syntactically valid tool identifier.
