@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
-from typing import Any, ClassVar, Optional, Sequence, Type, cast
+from typing import Any, ClassVar, Literal, Optional, Sequence, Type, cast
 
 import structlog
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -176,6 +176,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         cycle_budget: How many reasoning cycles this agent may spend before it
             must wrap up. See :class:`CycleBudget`. Defaults to an unlimited
             budget (no soft limit, no counter, no warning).
+        response_schema_tool_choice: The tool choice the enclosing component bound
+            the response schema with. Only ``"auto"`` can produce a text-only turn
+            in schema mode, so it decides whether such a turn is a wrap-up retry or
+            a routing error. Defaults to ``"any"``, today's behaviour.
     """
 
     name: str
@@ -195,6 +199,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _max_context_tokens: Optional[int]
     _invoke_config: RunnableConfig
     _cycle_budget: CycleBudget
+    _response_schema_tool_choice: Literal["any", "auto"]
 
     def __init__(
         self,
@@ -212,6 +217,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         max_context_tokens: Optional[int] = None,
         cycle_budget: CycleBudget = CycleBudget(),
         prompt_template_inputs: Optional[dict[str, Any]] = None,
+        response_schema_tool_choice: Literal["any", "auto"] = "any",
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -227,6 +233,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._max_context_tokens = max_context_tokens
         self._invoke_config = invoke_config
         self._cycle_budget = cycle_budget
+        self._response_schema_tool_choice = response_schema_tool_choice
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
@@ -392,10 +399,16 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         When a response schema is configured, only the schema's tool call counts as a final answer. Without a schema,
         any text-only response (no tool calls) is a final answer.
+
+        A text-only turn in schema mode is only reachable under ``tool_choice="auto"``, where it means the agent is
+        still deliberating, so it counts against the wrap-up retries. Under ``"any"`` the provider guarantees a tool
+        call, so a text-only turn there stays a routing error rather than silently becoming three more LLM calls.
         """
         if self._response_schema is None and not completion.tool_calls:
             return False
         if self._response_schema is not None:
+            if not completion.tool_calls:
+                return self._response_schema_tool_choice == "auto"
             return not all(
                 tc["name"] == self._response_schema.tool_title
                 for tc in completion.tool_calls
@@ -522,8 +535,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     )
                     continue
 
-                # Only emit reasoning if there are tool calls (i.e. omit for text-only messages)
-                if completion.tool_calls:
+                # Without a schema a text-only message is itself the final answer, so
+                # emitting it would duplicate. In schema mode it is deliberation.
+                if completion.tool_calls or (
+                    self._response_schema is not None
+                    and self._response_schema_tool_choice == "auto"
+                ):
                     self._emit_reasoning(completion)
 
                 # Append new completion to existing history for replace-based reducer.
