@@ -6,10 +6,20 @@ options) rather than on ``FlowConfig`` machinery — generic ``FlowConfig``
 behavior is covered in ``test_flow_config.py``.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 
+from ai_gateway import response_schemas
+from ai_gateway.prompts.base import jinja2_formatter
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.tools.work_item import CreateWorkItemNoteInput
+from lib.version import resolve_version
+
+# The flow's two AgentComponents. Shared by the classes below so a rename or a
+# third stage can't leave one list behind.
+AGENT_COMPONENT_NAMES = ["research", "planner"]
 
 
 class TestWorkplanToolOptions:
@@ -24,7 +34,6 @@ class TestWorkplanToolOptions:
     """
 
     EXPECTED_OPTIONS = {"internal": False}
-    AGENT_COMPONENT_NAMES = ["research", "planner"]
 
     @staticmethod
     def _create_work_item_note_options(config: FlowConfig, component_name: str) -> dict:
@@ -107,3 +116,102 @@ class TestWorkplanRouterWiring:
         config = FlowConfig.from_yaml_config("workplan", "1.0.0")
 
         assert config.flow.entry_point == "research"
+
+
+class TestWorkplanQuestionToolingIsAvailable:
+    """Guard the tools both stages' prompts depend on to ask a question well.
+
+    The prompts require two things of every question comment: that it isn't a
+    duplicate of one already on the work item (checked by reading the notes,
+    since a run can resume days later or restart with no memory), and that it
+    @mentions someone who can answer it (looked up at runtime, not templated).
+    Both are prompt-only behaviors - dropping either tool from a toolset
+    wouldn't fail schema validation, it would just turn the instruction into a
+    hallucinated no-op, so the coupling is pinned here.
+    """
+
+    REQUIRED_TOOLS = {"get_work_item_notes", "get_current_user"}
+
+    @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
+    def test_component_can_read_notes_and_identify_the_current_user(
+        self, component_name
+    ):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        component = next(
+            c for c in config.components if c.get("name") == component_name
+        )
+
+        # Entries are either plain strings or single-key {tool: options} maps,
+        # matching FlowGraphBuilder._parse_toolset.
+        declared = {
+            next(iter(entry)) if isinstance(entry, dict) else entry
+            for entry in component["toolset"]
+        }
+
+        assert self.REQUIRED_TOOLS <= declared
+
+
+class TestDuplicateQuestionStopDecision:
+    """Guard the stage-conditional decision literal in the duplicate-question stop.
+
+    ``asking_a_question`` is one partial rendered twice, and the keyword it
+    tells the agent to stop with differs per stage. Nothing else fails if the
+    two branches are swapped or a keyword is renamed: the agent would emit a
+    value its response schema doesn't accept, the router would fall through to
+    ``default_route``, and the flow would keep working - just always gated on a
+    human. So both halves are pinned here, against the schema rather than a
+    hardcoded string.
+    """
+
+    SCHEMA_DEFINITIONS = Path(response_schemas.__file__).parent / "definitions"
+
+    EXPECTED_DECISION = {"research": "needs_input", "planner": "ask_question"}
+
+    @staticmethod
+    def _component(config: FlowConfig, component_name: str) -> dict:
+        return next(c for c in config.components if c.get("name") == component_name)
+
+    def _declared_decisions(self, component: dict) -> list[str]:
+        """Read the ``decision`` enum straight out of the component's schema."""
+        schema_dir = self.SCHEMA_DEFINITIONS / component["response_schema_id"] / "base"
+        version = resolve_version(
+            [f.stem for f in schema_dir.glob("*.json")],
+            component["response_schema_version"],
+        )
+        schema = json.loads((schema_dir / f"{version}.json").read_text())
+
+        return schema["properties"]["decision"]["enum"]
+
+    @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
+    def test_stop_names_this_stage_decision_and_the_schema_accepts_it(
+        self, component_name
+    ):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        component = self._component(config, component_name)
+        expected = self.EXPECTED_DECISION[component_name]
+
+        # The stage literal the flow actually passes, not the component name -
+        # a config declaring the wrong one renders the other stage's branch.
+        stage = next(
+            inp["from"]
+            for inp in component["inputs"]
+            if inp.get("as") == "stage" and inp.get("literal")
+        )
+        assert config.prompts is not None
+        prompt = next(
+            p for p in config.prompts if p.prompt_id == component["prompt_id"]
+        )
+        rendered = jinja2_formatter(
+            prompt.prompt_template["system"],
+            stage=stage,
+            goal="",
+            research_findings="",
+        )
+
+        assert f"`decision: {expected}`" in rendered
+        assert expected in self._declared_decisions(component)
+
+        # And the other stage's keyword must not leak in: both branches of the
+        # conditional rendering would look fine in isolation.
+        (other,) = set(self.EXPECTED_DECISION.values()) - {expected}
+        assert other not in rendered

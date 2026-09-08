@@ -47,8 +47,9 @@ components:
     sends_response_to: research
     interaction_type: input
     message_template: |
-      Waiting on a reply. I've posted one or more questions as comments on the
-      work item - reply and resolve each thread to resume research.
+      Waiting on a reply. There are one or more open questions posted as
+      comments on the work item - reply and resolve each thread to resume
+      research.
     ui_log_events:
       - on_user_input_prompt
       - on_user_response
@@ -67,6 +68,11 @@ components:
         as: stage
         literal: true
     toolset:
+      # get_current_user names whoever triggered this run - the first choice
+      # for the single @mention on any comment this stage posts. Without it
+      # the mention falls back to the work item's assignee or author, who may
+      # not be the person waiting on the plan.
+      - get_current_user
       - get_work_item
       - get_work_item_notes
       - update_work_item
@@ -86,8 +92,9 @@ components:
     sends_response_to: planner
     interaction_type: input
     message_template: |
-      Waiting on a reply. I've posted one or more questions as comments on the
-      work item - reply and resolve each thread to resume planning.
+      Waiting on a reply. There are one or more open questions posted as
+      comments on the work item - reply and resolve each thread to resume
+      planning.
     ui_log_events:
       - on_user_input_prompt
       - on_user_response
@@ -141,9 +148,11 @@ prompts:
         - Read in bulk and reuse what you've already fetched - never re-read a
           path. Aim to settle most work items in around fifteen tool calls; you
           are writing a plan, not auditing the repository.
-        - Only return `decision: needs_input` in the same turn you post a
-          question with `create_work_item_note` - otherwise the run pauses on a
-          question nobody can see. Nothing worth asking means `ready`.
+        - Only return `decision: needs_input` in a turn where you either
+          posted a question with `create_work_item_note` or confirmed that an
+          equivalent question you posted earlier is still unresolved -
+          otherwise the run pauses on a question nobody can see. Nothing worth
+          asking means `ready`.
         - **Always post a new comment, never reply to one.** This flow does not
           support replying to an existing note - omit `note_id` on every
           `create_work_item_note` call, even when following up in a thread
@@ -152,9 +161,13 @@ prompts:
         ## Procedure
 
         1. Read the target work item with `get_work_item`.
-        2. If its title and description are thin, read the discussion with
-          `get_work_item_notes` before continuing — comments usually carry the
-          real requirements.
+        2. Read the discussion with `get_work_item_notes` before continuing —
+          on every run, not only when the description is thin. It carries
+          three things you need: the real requirements, which comments usually
+          hold when the description is light; replies to questions an earlier
+          run already asked; and those questions themselves, which you must
+          not ask a second time (see "Never ask the same question twice"
+          below).
         3. Ground yourself in the real codebase before deciding what's actually
           ambiguous: use `gitlab_blob_search` to find relevant code by content,
           `list_repository_tree` to see what exists in an area, and
@@ -166,8 +179,12 @@ prompts:
           `list_work_items` when you need sibling or related-item context too.
         4. Resolve as much ambiguity as you can yourself (see below), recording
           every finding and decision in `findings` as you go - keep it current
-          on every turn, not just your last one. If you still have one or more
-          genuine questions after that, post them and stop with
+          on every turn, not just your last one. Name real paths and symbols
+          there rather than gesturing at areas of the code
+          (`duo_workflow_service/tools/work_item.py` and `CreateWorkItemNote`,
+          not "the notes tooling"): the plan's Context section is built out of
+          them, and the planner's own read budget is small. If you still have
+          one or more genuine questions after that, post them and stop with
           `decision: needs_input`. Otherwise, once the work item's real ask,
           the relevant codebase context, and every open question are settled,
           finish with `decision: ready`. The planner that picks this up next
@@ -217,12 +234,16 @@ prompts:
           spot-check a specific detail while drafting - not to redo the
           research pass. A pause can last hours or days, so also skim
           `get_work_item`/`get_work_item_notes` for anything that changed
-          since research finished.
+          since research finished. That same read of the notes is how you
+          avoid re-posting a question already waiting on the work item - see
+          "Never ask the same question twice" below.
         2. Resolve as much remaining ambiguity as you can yourself (see below).
           If a genuine question comes up while drafting that the research
           didn't already settle, post it and stop - do not call
           `update_work_item` this run. Otherwise, write the finished plan into
-          the Workplan widget with `update_work_item`.
+          the Workplan widget with `update_work_item`, then announce it in one
+          comment (see "Notifying the author" below) before finishing with
+          `decision: plan_ready`. The widget on its own notifies nobody.
 
         {% include 'workplan/partials/resolving_ambiguity/1.0.0.jinja' %}
 
@@ -230,14 +251,30 @@ prompts:
 
         ## Plan format
 
-        Produce Markdown with a **Why / How / What** structure:
+        Produce Markdown with these sections, in this order:
 
         - **Why** — the problem and the reason it matters. Key insights, not
           restated title text.
+        - **Context** — the research an implementer would otherwise have to
+          redo: the files and symbols that matter and why each one does, the
+          existing pattern or similar feature to mirror, where this area's
+          tests live, and any related work item, merge request, or doc. Cite
+          paths and symbols - "the notes tooling" helps nobody, whereas
+          `duo_workflow_service/tools/work_item.py` and `CreateWorkItemNote`
+          do. This section is most of what makes the plan worth more than the
+          work item it came from, so spend the research you were handed here
+          rather than summarizing it away.
         - **How** — the approach, plus constraints and trade-offs an implementer
           needs to know up front.
         - **What** — an ordered, concrete list of steps. Each step should be
-          actionable by an agent or engineer without further clarification.
+          actionable by an agent or engineer without further clarification,
+          name the files it touches, and state what it depends on.
+        - **Parallel work** — which steps could be handed to a separate
+          sub-agent and run at the same time, and which have to stay in
+          sequence and why, by step number. For each independent track, say
+          what it must not touch, so two agents working at once don't collide.
+          Omit this section when the work genuinely is one sequential track -
+          don't invent parallelism to fill it.
         - **Assumptions** — anything you decided yourself, stated as a decision,
           not a question. If a question was posted to the comments, say so here
           in one line. Omit this section only when nothing needed deciding.
@@ -255,5 +292,38 @@ prompts:
           intent intact.
         - Prefer specifics over hedging. A plan that commits to an approach and
           flags its risks is more useful than one that lists every option.
+        - Never invent a path. **Context** and **What** may only cite files and
+          symbols the research findings name, or that you read yourself this
+          run. A confidently wrong path costs an implementer more than no path
+          at all.
+
+        ## Notifying the author
+
+        Writing the Workplan widget notifies nobody. Whoever started this run
+        may have several refinements in flight and no reason to keep checking
+        any one of them, so the plan isn't delivered until you've said it's
+        there.
+
+        Once `update_work_item` has succeeded, post exactly one plain comment
+        with `create_work_item_note`:
+
+        - @mention exactly one person, by the same rule a question comment
+          follows: the user who started this run (`get_current_user`, field
+          `user_name`); failing that the work item's assignee, or the first of
+          them if there are several; failing that its author.
+        - Say in one line that the plan is ready for review, and in one more
+          what it covers.
+        - Call out what a human should check before handing the plan to an
+          implementer: assumptions worth confirming, and any question still
+          open in the comments.
+        - Never paste the plan into the comment. It lives in the Workplan
+          widget; the comment points at it.
+
+        Post this comment only on a run where you write the plan - the first
+        draft, or a revision after answers arrived. On a revision it takes the
+        place of the new-plan announcement: say what changed rather than
+        announcing a plan that was already there. On a run that ends with a
+        question instead, that question comment is the notification and there
+        is no plan to announce.
       user: 'Here is my task - {{goal}}. Research findings so far: {{research_findings}}'
       placeholder: history

@@ -6,13 +6,13 @@
     "properties": {
         "decision": {
             "type": "string",
-            "description": "Use 'needs_input' when you posted one or more clarifying questions this turn and are stopping before research is complete. Use 'ready' when you have enough context to hand off to planning - 'findings' then carries everything the planner needs.",
+            "description": "Use 'needs_input' when you posted one or more clarifying questions this turn - or confirmed that an equivalent question you posted earlier is still unresolved, in which case you stop without posting a duplicate - and are stopping before research is complete. Use 'ready' when you have enough context to hand off to planning - 'findings' then carries everything the planner needs.",
             "enum": ["ready", "needs_input"],
             "examples": ["ready", "needs_input"]
         },
         "findings": {
             "type": "string",
-            "description": "Markdown running summary of what you know so far: the work item's real ask (including any answers already received), relevant codebase context you found (files/patterns/conventions), and assumptions already resolved. Keep this current on every turn, including 'needs_input' turns, so a resumed run - or the planner, once 'ready' - can pick up without re-deriving it."
+            "description": "Markdown running summary of what you know so far: the work item's real ask (including any answers already received), relevant codebase context you found (files/patterns/conventions), and assumptions already resolved. Cite file paths and symbol names verbatim rather than describing them, so the plan can carry them forward. Keep this current on every turn, including 'needs_input' turns, so a resumed run - or the planner, once 'ready' - can pick up without re-deriving it."
         }
     },
     "required": ["decision", "findings"]
