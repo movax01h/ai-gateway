@@ -109,7 +109,10 @@ from duo_workflow_service.tools.duo_base_tool import (
 )
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.tracking.errors import log_exception
-from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
+from duo_workflow_service.tracking.sentry_error_tracking import (
+    setup_async_error_tracking,
+    setup_error_tracking,
+)
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import ResolvedFlow, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
@@ -1149,6 +1152,10 @@ async def serve(config: Config, port: int) -> None:
     check:
     https://github.com/grpc/grpc/blob/master/doc/keepalive.md
     """
+    # Has to run here rather than in `setup_error_tracking`: the asyncio
+    # instrumentation patches the event loop, which is only running by now.
+    setup_async_error_tracking()
+
     connection_pool.set_options(
         pool_size=100,
         timeout=aiohttp.ClientTimeout(total=30),

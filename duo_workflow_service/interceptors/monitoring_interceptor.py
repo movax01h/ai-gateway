@@ -2,9 +2,10 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Awaitable, Callable, Optional, override
+from typing import Awaitable, Callable, Iterator, Optional, override
 
 import grpc
+import sentry_sdk
 import structlog
 from gitlab_cloud_connector.auth import (
     AUTH_TYPE_HEADER,
@@ -15,6 +16,8 @@ from gitlab_cloud_connector.auth import (
 )
 from grpc.aio import ServerInterceptor
 from prometheus_client import REGISTRY, Counter
+from sentry_sdk.consts import OP
+from sentry_sdk.tracing import TransactionSource
 
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
@@ -119,12 +122,23 @@ class MonitoringInterceptor(ServerInterceptor):
             grpc_type: GRPCMethodType,
         ) -> Callable:
             async def unary_behavior(request_or_iterator, servicer_context):
-                with self.monitoring(
-                    grpc_type=grpc_type,
-                    grpc_service_name=grpc_service_name,
-                    grpc_method_name=grpc_method_name,
-                    servicer_context=servicer_context,
-                    invocation_metadata=invocation_metadata,
+                # `sentry_root_span` wraps `monitoring` so the transaction is still
+                # open when `monitoring` logs the exception, which is what links the
+                # error event to the transaction.
+                with (
+                    self.sentry_root_span(
+                        grpc_type=grpc_type,
+                        grpc_service_name=grpc_service_name,
+                        grpc_method_name=grpc_method_name,
+                        invocation_metadata=invocation_metadata,
+                    ),
+                    self.monitoring(
+                        grpc_type=grpc_type,
+                        grpc_service_name=grpc_service_name,
+                        grpc_method_name=grpc_method_name,
+                        servicer_context=servicer_context,
+                        invocation_metadata=invocation_metadata,
+                    ),
                 ):
                     response_or_iterator = await behavior(
                         request_or_iterator, servicer_context
@@ -138,12 +152,23 @@ class MonitoringInterceptor(ServerInterceptor):
             grpc_type: GRPCMethodType,
         ) -> Callable:
             async def stream_behavior(request_or_iterator, servicer_context):
-                with self.monitoring(
-                    grpc_type=grpc_type,
-                    grpc_service_name=grpc_service_name,
-                    grpc_method_name=grpc_method_name,
-                    servicer_context=servicer_context,
-                    invocation_metadata=invocation_metadata,
+                # `sentry_root_span` wraps `monitoring` so the transaction is still
+                # open when `monitoring` logs the exception, which is what links the
+                # error event to the transaction.
+                with (
+                    self.sentry_root_span(
+                        grpc_type=grpc_type,
+                        grpc_service_name=grpc_service_name,
+                        grpc_method_name=grpc_method_name,
+                        invocation_metadata=invocation_metadata,
+                    ),
+                    self.monitoring(
+                        grpc_type=grpc_type,
+                        grpc_service_name=grpc_service_name,
+                        grpc_method_name=grpc_method_name,
+                        servicer_context=servicer_context,
+                        invocation_metadata=invocation_metadata,
+                    ),
                 ):
                     async for behavior_response in behavior(
                         request_or_iterator, servicer_context
@@ -153,6 +178,63 @@ class MonitoringInterceptor(ServerInterceptor):
             return stream_behavior
 
         return handle_response_stream_behavior, handle_response_unary_behavior
+
+    @contextmanager
+    def sentry_root_span(
+        self,
+        *,
+        grpc_type: GRPCMethodType,
+        grpc_service_name: str,
+        grpc_method_name: str,
+        invocation_metadata: dict,
+    ) -> Iterator[None]:
+        """Open the root Sentry transaction for streaming RPCs.
+
+        Sentry's own gRPC interceptor only covers unary-unary, so without this the `gen_ai.*` spans on streaming calls
+        are parentless and dropped.
+        """
+        if grpc_type is GRPCMethodType.UNARY or not sentry_sdk.is_initialized():
+            yield
+            return
+
+        # `start_transaction` assigns to `scope.span` on the current scope, and
+        # concurrent RPCs inherit the same scope object. Forking gives each call its
+        # own scope so their child spans cannot overwrite each other. Sentry's own
+        # unary-unary wrapper does the same.
+        with sentry_sdk.isolation_scope():
+            transaction = sentry_sdk.continue_trace(
+                invocation_metadata,
+                op=OP.GRPC_SERVER,
+                name=f"/{grpc_service_name}/{grpc_method_name}",
+                source=TransactionSource.CUSTOM,
+            )
+
+            with sentry_sdk.start_transaction(transaction=transaction):
+                try:
+                    yield
+                finally:
+                    context: MonitoringContext = current_monitoring_context.get()
+
+                    for key, value in (
+                        ("flow_type", context.workflow_definition),
+                        ("flow_version", context.flow_version),
+                        ("schema_version", context.schema_version),
+                        ("workflow_stop_reason", context.workflow_stop_reason),
+                        (
+                            "workflow_last_gitlab_status",
+                            context.workflow_last_gitlab_status,
+                        ),
+                    ):
+                        if value:
+                            transaction.set_tag(key, value)
+
+                    # Unbounded values; tagging them would degrade tag search.
+                    for key, value in (
+                        ("workflow_id", context.workflow_id),
+                        ("flow_id", context.flow_id),
+                    ):
+                        if value:
+                            transaction.set_data(key, value)
 
     @contextmanager
     def monitoring(

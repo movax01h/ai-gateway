@@ -1,12 +1,16 @@
 # pylint: disable=pointless-statement
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import grpc
 import pytest
+import sentry_sdk
 from prometheus_client import CollectorRegistry
+from sentry_sdk.transport import Transport
 from structlog.testing import capture_logs
 
 from duo_workflow_service.interceptors.monitoring_interceptor import (
+    GRPCMethodType,
     MonitoringInterceptor,
 )
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
@@ -384,3 +388,193 @@ async def test_interceptor_logs_info_and_skips_finished_log_when_workflow_never_
     assert total_calls is None, (
         "Expected no Prometheus counter increment when workflow never started"
     )
+
+
+class _CaptureTransport(Transport):
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def capture_envelope(self, envelope):
+        for item in envelope.items:
+            if payload := item.payload.json:
+                self.events.append(payload)
+
+    def flush(self, *args, **kwargs):
+        pass
+
+    def kill(self):
+        pass
+
+
+@pytest.fixture(name="sentry_events")
+def sentry_events_fixture():
+    # Restoring the previous client rather than re-initialising: `sentry_sdk.init`
+    # installs the default integrations process-wide and they are never unpatched,
+    # which would leak into every later test in this xdist worker.
+    old_client = sentry_sdk.get_global_scope().client
+    transport = _CaptureTransport()
+    sentry_sdk.init(
+        dsn="https://public@example.ingest.sentry.io/1",
+        traces_sample_rate=1.0,
+        default_integrations=False,
+        transport=transport,
+    )
+    current_monitoring_context.set(MonitoringContext())
+
+    try:
+        yield transport.events
+    finally:
+        sentry_sdk.get_global_scope().set_client(old_client)
+
+
+def _root_span(grpc_type, grpc_method_name="ExecuteWorkflow"):
+    return MonitoringInterceptor(registry=CollectorRegistry()).sentry_root_span(
+        grpc_type=grpc_type,
+        grpc_service_name="DuoWorkflow",
+        grpc_method_name=grpc_method_name,
+        invocation_metadata={},
+    )
+
+
+def test_sentry_root_span_skips_unary_rpcs(sentry_events):
+    with _root_span(GRPCMethodType.UNARY):
+        pass
+
+    sentry_sdk.flush()
+
+    assert sentry_events == []
+
+
+def test_sentry_root_span_skips_streaming_rpcs_when_sentry_is_not_initialized():
+    body_ran = False
+
+    with (
+        patch("sentry_sdk.is_initialized", return_value=False),
+        patch("sentry_sdk.start_transaction") as start_transaction,
+    ):
+        with _root_span(GRPCMethodType.BIDI_STREAMING):
+            body_ran = True
+
+    assert body_ran
+    start_transaction.assert_not_called()
+
+
+def test_sentry_root_span_opens_transaction_for_streaming_rpcs(sentry_events):
+    with _root_span(GRPCMethodType.BIDI_STREAMING):
+        pass
+
+    sentry_sdk.flush()
+
+    assert [e["transaction"] for e in sentry_events] == ["/DuoWorkflow/ExecuteWorkflow"]
+
+
+def test_sentry_root_span_tags_bounded_fields_and_stores_ids_as_data(sentry_events):
+    with _root_span(GRPCMethodType.BIDI_STREAMING):
+        context = current_monitoring_context.get()
+        context.workflow_definition = "software_development"
+        context.workflow_id = "run-1"
+        context.flow_id = "catalog/42"
+
+    sentry_sdk.flush()
+    event = sentry_events[0]
+
+    assert event["tags"]["flow_type"] == "software_development"
+    assert "workflow_id" not in event["tags"]
+    assert event["contexts"]["trace"]["data"]["workflow_id"] == "run-1"
+    assert event["contexts"]["trace"]["data"]["flow_id"] == "catalog/42"
+
+
+def test_sentry_root_span_tags_when_the_rpc_raises(sentry_events):
+    with pytest.raises(RuntimeError):
+        with _root_span(GRPCMethodType.BIDI_STREAMING):
+            current_monitoring_context.get().workflow_stop_reason = "cancelled"
+            raise RuntimeError("boom")
+
+    sentry_sdk.flush()
+
+    assert sentry_events[0]["tags"]["workflow_stop_reason"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_sentry_root_span_keeps_concurrent_rpcs_isolated(sentry_events):
+    # Mirrors the server: the task that accepts the RPCs already has a current scope,
+    # so every RPC task inherits the same scope object unless the span forks it.
+    sentry_sdk.get_current_scope()
+
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+    first_child_done = asyncio.Event()
+
+    async def first_rpc():
+        with _root_span(GRPCMethodType.BIDI_STREAMING, "FirstFlow"):
+            first_entered.set()
+            await second_entered.wait()
+
+            with sentry_sdk.start_span(op="gen_ai.chat", name="child-of-first"):
+                pass
+
+            first_child_done.set()
+
+    async def second_rpc():
+        await first_entered.wait()
+
+        with _root_span(GRPCMethodType.BIDI_STREAMING, "SecondFlow"):
+            second_entered.set()
+            await first_child_done.wait()
+
+            with sentry_sdk.start_span(op="gen_ai.chat", name="child-of-second"):
+                pass
+
+    await asyncio.gather(first_rpc(), second_rpc())
+    sentry_sdk.flush()
+
+    spans_by_transaction = {
+        event["transaction"]: [span["description"] for span in event["spans"]]
+        for event in sentry_events
+    }
+
+    assert spans_by_transaction == {
+        "/DuoWorkflow/FirstFlow": ["child-of-first"],
+        "/DuoWorkflow/SecondFlow": ["child-of-second"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_exceptions_are_logged_while_the_transaction_is_open(sentry_events):
+    interceptor = MonitoringInterceptor(registry=CollectorRegistry())
+    handler_call_details = Mock()
+    handler_call_details.method = "/DuoWorkflow/ExecuteWorkflow"
+    handler_call_details.invocation_metadata = {}
+
+    async def failing_behavior(_request_iterator, _servicer_context):
+        raise RuntimeError("boom")
+        yield  # pylint: disable=unreachable
+
+    upstream_handler = Mock()
+    upstream_handler.stream_stream = failing_behavior
+    upstream_handler.request_streaming = True
+    upstream_handler.response_streaming = True
+
+    continuation = AsyncMock(return_value=upstream_handler)
+    servicer_context = Mock()
+    servicer_context.code.return_value = grpc.StatusCode.UNKNOWN
+
+    handler = await interceptor.intercept_service(continuation, handler_call_details)
+
+    spans_when_logged = []
+
+    def record_span(_exception, *_args, **_kwargs):
+        spans_when_logged.append(sentry_sdk.get_current_scope().span)
+
+    with patch(
+        "duo_workflow_service.interceptors.monitoring_interceptor.log_exception",
+        side_effect=record_span,
+    ):
+        with pytest.raises(RuntimeError):
+            async for _response in handler.stream_stream(None, servicer_context):
+                pass
+
+    assert len(spans_when_logged) == 1
+    # An error captured after the transaction closes loses its link to it.
+    assert getattr(spans_when_logged[0], "name", None) == "/DuoWorkflow/ExecuteWorkflow"

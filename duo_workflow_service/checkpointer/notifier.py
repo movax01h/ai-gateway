@@ -148,6 +148,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         # checkpoint is actually composed for sending (see _pop_recent_node_events).
         self._last_sent_event_count = 0
         self._checkpoint_deferred = False
+        self._status_before_defer: Optional[WorkflowStatusEnum] = None
 
     async def send_event(
         self,
@@ -162,6 +163,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         self.checkpoint_number += 1
 
         if type == "values" and isinstance(state, dict):
+            previous_status = self.status
             self.status = state["status"]
             self.steps = state.get("plan", {}).get("steps", [])
             self.ui_chat_log = self._merge_ui_chat_log(deepcopy(state["ui_chat_log"]))
@@ -185,6 +187,8 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
             if allow_defer and self._should_defer(state):
                 await self._cancel_trailing_task()
+                if not self._checkpoint_deferred:
+                    self._status_before_defer = previous_status
                 self._checkpoint_deferred = True
                 return None
 
@@ -263,6 +267,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
     async def _enqueue_checkpoint(self):
         self._checkpoint_deferred = False
+        self._status_before_defer = None
 
         # This is a placeholder empty message. The message will be replaced
         # with most_recent_new_checkpoint in send_events.
@@ -302,7 +307,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         checkpoint = contract_pb2.NewCheckpoint(
             goal=self.goal,
-            status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self.status],
+            status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self._reportable_status()],
             checkpoint=dumps({"channel_values": channel_values}, cls=CustomEncoder),
         )
 
@@ -316,6 +321,17 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 )
 
         return checkpoint
+
+    def _reportable_status(self) -> WorkflowStatusEnum:
+        """The status to report, treating a deferred pause as not yet reached.
+
+        Checkpoints are composed when the send loop drains them, not when they are enqueued, so one queued before the
+        pause would otherwise be filled in with the deferred status and the client would hear about the pause twice.
+        """
+        if self._checkpoint_deferred and self._status_before_defer is not None:
+            return self._status_before_defer
+
+        return self.status
 
     def _merge_ui_chat_log(self, new_log: list[UiChatLog]) -> list[UiChatLog]:
         """Merge the authoritative graph-state log with in-flight PENDING entries.

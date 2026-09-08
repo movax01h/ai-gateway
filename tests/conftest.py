@@ -576,7 +576,19 @@ def additional_context_fixture() -> list[AdditionalContext] | None:
 
 @pytest.fixture(autouse=True)
 def disable_cached_logger():
-    structlog.configure(cache_logger_on_first_use=False)
+    # structlog's default console renderer prints every logged exception as a rich
+    # traceback with locals. A failing flow logs LangGraph state and protobuf
+    # payloads as locals, which takes over 15s per exception under coverage on a
+    # loaded CI worker and pushes the integration tests past their budget.
+    structlog.configure(
+        cache_logger_on_first_use=False,
+        processors=[
+            *structlog.get_config()["processors"][:-1],
+            structlog.dev.ConsoleRenderer(
+                exception_formatter=structlog.dev.plain_traceback
+            ),
+        ],
+    )
 
 
 def reset_context_vars():

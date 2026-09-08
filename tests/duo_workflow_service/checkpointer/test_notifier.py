@@ -2149,6 +2149,29 @@ async def test_any_enqueue_releases_the_deferred_checkpoint(
 
 
 @pytest.mark.asyncio
+async def test_a_checkpoint_queued_before_the_pause_does_not_announce_it(
+    checkpoint_notifier, outbox
+):
+    """Payloads are composed when the send loop drains them, which can be after the pause."""
+    await checkpoint_notifier.send_event(
+        "values", _values_state(WorkflowStatusEnum.EXECUTION), False, allow_defer=True
+    )
+    assert outbox.put_action.call_count == 1
+
+    await checkpoint_notifier.send_event(
+        "values", _values_state(), False, allow_defer=True
+    )
+
+    # The queued checkpoint predates the pause, so it must not carry it.
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == "RUNNING"
+
+    await checkpoint_notifier.flush_deferred_checkpoint()
+
+    assert outbox.put_action.call_count == 2
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == "INPUT_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_flush_sends_a_pause_that_nothing_superseded(checkpoint_notifier, outbox):
     """Agentic chat and legacy tool approval end the graph on a pause status, with no interrupt event behind it."""
     await checkpoint_notifier.send_event(
