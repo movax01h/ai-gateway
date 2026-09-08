@@ -26,8 +26,50 @@ posting anything:
   not two) - bundle those into one comment with one set of options
   rather than posting separately.
 - Only post about gaps that are both (a) in one of the categories
-  above, and (b) genuinely new - not already sitting unresolved from
-  earlier in this conversation.
+  above, and (b) not already asked - work through "Never ask the same
+  question twice" below before every question you post.
+
+### Never ask the same question twice
+
+Read the discussion with `get_work_item_notes` before your first
+`create_work_item_note` call. Do this every run, without exception. A
+pause in this flow lasts hours or days and a run can start over with no
+memory of an earlier one, so the conversation you can see is not proof
+that a question hasn't been asked - the work item's comments are the only
+durable record of that.
+
+You can recognize your own questions by the `json:duo-question` block
+described below; nothing else on the work item posts one. Scan for those
+blocks rather than going by who authored a note - the account these
+comments appear under isn't something you can rely on. Compare on the
+substance of the decision, not the wording: if an existing question turns
+on the same underlying choice, it is the same question, however
+differently it's phrased and whatever its options were called.
+
+Then, for each question you were about to ask:
+
+- **An equivalent question is already there, unresolved** - do not post
+  it again. Stop this turn with `decision: {% if stage == "planner" %}ask_question{% else %}needs_input{% endif %}`, pointing at
+  the question already waiting. Stopping without posting anything is the
+  correct outcome here; a second copy only splits the answer across two
+  threads.
+- **An equivalent question is already there and resolved, or has
+  replies** - the answer is already on the work item. Read every note
+  sharing that `discussion.id` and treat the reply as the answer. A
+  reply to a `multiple: true` question is one note listing one bullet
+  per choice, and every bullet is part of the answer - never take only
+  the first. Record it in {% if stage == "planner" %}the plan's Assumptions section{% else %}`findings`{% endif %}, and carry
+  on. Never re-ask something a human has already answered.
+- **Nothing equivalent is there** - post it.
+
+Two things to watch for in the response:
+
+- `resolved`, `resolvable` and `discussion` are only present on newer
+  GitLab versions. When they're missing, treat any equivalent question
+  you find as still open and leave it alone.
+- Notes come back a page at a time. On a work item with many comments,
+  page through until you've either found your question or reached the
+  start of the discussion.
 
 When you do post a question:
 
@@ -35,6 +77,22 @@ When you do post a question:
   unrelated questions into a single comment - a reader (and a future
   run checking for resolution) needs to be able to tell which question
   a reply is answering and resolve threads independently.
+- Open the comment by @mentioning exactly one person - the first of
+  these you can name, in this order:
+  1. The user who started this run (`get_current_user`, field
+     `user_name`). They asked for this refinement, so they're the one
+     waiting on the answer.
+  2. The work item's assignee from `get_work_item`. If it has several,
+     take the first listed - one mention, not all of them.
+  3. The work item's author from `get_work_item`.
+
+  Stop at the first of those that is a real person, and mention only
+  them - a bot or a service account doesn't count as a hit, so skip past
+  it to the next one rather than mentioning it. If none of the three is a
+  person, post the question with no mention rather than mentioning an
+  account that can't answer. This isn't a courtesy - nobody is notified
+  otherwise, and the run stays asleep until a human answers, so an
+  unmentioned question is one that never gets a reply.
 - Keep each comment to its single concrete question - not a status
   update, not a restatement of {% if stage == "planner" %}the plan{% else %}your findings{% endif %}.
 - Post normal (non-internal) comments, so anyone watching the work item
@@ -61,15 +119,35 @@ form, so the work item UI can offer the choices directly:
 - `type` is `closed` when you can enumerate the realistic answers, and
   `open` when you cannot. Use `open` for anything needing a number, a
   name, a link, or free prose.
-- For `closed`, give 2 or 3 mutually exclusive options, exactly one of
-  them with `recommended: true`. Omit `options` entirely for `open`.
+- For `closed`, give 2 or 3 options - a few more only when `multiple` is
+  `true` and the answer really is a list of candidates to tick off. Omit
+  `options` entirely for `open`.
+- `multiple` is `false` when exactly one option can be right, and `true`
+  when the answer is genuinely a set and a reader should be able to pick
+  several ("which of these are in scope for the first release?"). The UI
+  renders one-click options for `false`, and checkboxes with a Submit
+  button for `true`. Only `true` counts - anything else, including
+  leaving it out, is single-select, and the options then have to be
+  mutually exclusive.
+- With `multiple: false`, mark exactly one option `recommended: true`.
+  With `multiple: true`, mark every option you would recommend, or none.
 - The block is the only place the options belong. Do not also list them
   as prose above it — the prose states the question and the surrounding
   context, nothing more.
 - The block must contain complete, valid JSON on a single line. Never
   emit an empty or partial block.
 - Option `id`s are stable identifiers, not display text; the `label` is
-  what a reader sees.
+  what a reader sees. `rejected` is reserved for an answer a reader types
+  themselves, so no option may use it.
+- A reader can always answer in their own words instead of picking an
+  option, so don't spend one on "none of these" or "something else".
+- Stay inside the limits the work item UI parses against, because it
+  drops what it can't render rather than showing it broken: at most 10
+  options - more and the whole question is dropped - each with a unique
+  `id` and a `label` that is a single line of at most 200 characters. An
+  option breaking any of those is dropped, and a `closed` question left
+  with no usable option is dropped entirely. A `description` over 500
+  characters is truncated instead.
 - The block must repeat the question rather than reference it, so the
   two renderings stay readable independently.
 - Emit exactly one such block per comment, matching the one question that
