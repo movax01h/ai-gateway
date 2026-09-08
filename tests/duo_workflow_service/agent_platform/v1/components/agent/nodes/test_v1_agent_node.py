@@ -1431,6 +1431,55 @@ class TestAgentNodeReasoning:
         ]
         assert len(reasoning_logs) == 0
 
+    @pytest.mark.asyncio
+    async def test_reasoning_emitted_for_text_only_message_under_auto_tool_choice(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        optimizer_pipeline,
+        ui_history_with_reasoning,
+        base_flow_state,
+        _mock_get_vars_from_state,
+    ):
+        """In schema mode the final answer is the schema tool call, so a text-only turn is deliberation.
+
+        Unlike ``test_no_reasoning_for_text_only_message``, there is no FinalResponseNode entry to duplicate.
+        """
+        schema = Mock()
+        schema.tool_title = "structured_response"
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
+            ui_history=ui_history_with_reasoning,
+            response_schema=schema,
+            response_schema_tool_choice="auto",
+        )
+        mock_prompt.ainvoke = AsyncMock(
+            return_value=AIMessage(content="Let me consolidate what I found so far.")
+        )
+
+        result = await node.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result[FlowStateKeys.UI_CHAT_LOG]
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 1
+        assert reasoning_logs[0]["content"] == "Let me consolidate what I found so far."
+
     def test_non_str_non_list_content_returns_empty(self):
         """Content that is neither str nor list returns an empty string."""
         message = AIMessage(content="placeholder")
@@ -1949,6 +1998,14 @@ class TestAgentNodeIterationWarning:
             assert "cycles_remaining" in str(call_kwargs)
 
 
+def _text_only_completion() -> AIMessage:
+    """A completion with prose and no tool calls, as an "auto"-mode agent produces while deliberating."""
+    message = AIMessage(content="Let me consolidate what I found so far.")
+    message.response_metadata = {}
+    message.tool_calls = []
+    return message
+
+
 class TestAgentNodeWrapUpRetries:
     """Test suite for AgentNode wrap-up retry behavior after max_cycles is reached."""
 
@@ -2031,6 +2088,65 @@ class TestAgentNodeWrapUpRetries:
             assert "2" in str(exc_info.value)  # max_wrap_up_retries
             # Should have been called exactly max_wrap_up_retries times
             assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_auto_tool_choice_text_only_completions_exhaust_wrap_up_retries(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        prompt_variables,
+        _mock_predefined_runtime_variables,
+    ):
+        """An "auto"-mode agent that keeps deliberating in text instead of answering must still be bounded."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            schema = Mock()
+            schema.tool_title = "structured_response"
+            mock_prompt.ainvoke = AsyncMock(
+                side_effect=[_text_only_completion() for _ in range(3)]
+            )
+
+            node = make_agent_node(
+                response_schema=schema, response_schema_tool_choice="auto"
+            )
+
+            with pytest.raises(
+                AgentStuckError, match="ignored the wrap-up instruction"
+            ):
+                await node.run(state_at_limit)
+
+            assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_any_tool_choice_text_only_completion_returns_without_retrying(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        prompt_variables,
+        _mock_predefined_runtime_variables,
+    ):
+        """Default "any" mode keeps its previous behaviour: the turn is returned so the router can raise, rather than
+        being retried into a generic AgentStuckError."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            schema = Mock()
+            schema.tool_title = "structured_response"
+            completion = _text_only_completion()
+            mock_prompt.ainvoke = AsyncMock(side_effect=[completion])
+
+            result = await make_agent_node(response_schema=schema).run(state_at_limit)
+
+            assert mock_prompt.ainvoke.call_count == 1
+            assert result["conversation_history"][component_name][-1] == completion
 
     @pytest.mark.asyncio
     async def test_no_wrap_up_retry_when_agent_complies_immediately(

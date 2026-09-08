@@ -83,6 +83,7 @@ from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
@@ -873,6 +874,21 @@ class AgentComponent(AgentComponentBase):
         graph.set_entry_point(self.__entry_hook__())
         return graph.compile()
 
+    @staticmethod
+    def _auto_tool_choice_enabled() -> bool:
+        """Whether a response schema is bound with ``tool_choice="auto"`` instead of ``"any"``.
+
+        ``"any"`` forces a tool call every turn, which disables extended thinking on Anthropic models, so an agent
+        never consolidates and loops until ``max_cycles``. ``"auto"`` lets it deliberate in text between tool calls;
+        the final answer stays schema-enforced, since only the schema tool call ends the loop.
+
+        Flagged rather than exposed as a component field: the choice is an implementation detail of how the schema is
+        bound, not something a flow author should have to get right, and a flag keeps the rollout controllable per
+        instance/group without shipping a new flow config revision. Read in both ``attach`` and the router, which run
+        under the same request context, so the two always agree.
+        """
+        return is_feature_enabled(FeatureFlag.DAP_SCHEMA_AUTO_TOOL_CHOICE)
+
     def _agent_node_router(self, state: FlowState) -> str:
         history_iokey = self._conversation_history_key.to_iokey(state)
         history: list[BaseMessage] = history_iokey.value_from_state(state) or []
@@ -895,6 +911,9 @@ class AgentComponent(AgentComponentBase):
 
         if not last_message.tool_calls:
             if self._response_schema is not None:
+                if self._auto_tool_choice_enabled():
+                    # Text-only deliberation turn; loop back, bounded by max_cycles.
+                    return self.__entry_hook__()
                 raise NotifiableAgentException(
                     "An internal error occurred: the agent did not produce the expected tool call.",
                     internal_detail=(
@@ -969,9 +988,10 @@ class AgentComponent(AgentComponentBase):
 
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         # Response schema is already resolved in validate_and_resolve_response_schema()
+        tool_choice: Literal["any", "auto"]
         if self._response_schema is not None:
             tools = self.toolset.bindable + [self._response_schema]
-            tool_choice = "any"
+            tool_choice = "auto" if self._auto_tool_choice_enabled() else "any"
         else:
             tools = self.toolset.bindable
             tool_choice = "auto"
@@ -997,6 +1017,7 @@ class AgentComponent(AgentComponentBase):
                 ),
             ),
             cycle_budget=self._cycle_budget,
+            response_schema_tool_choice=tool_choice,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

@@ -41,6 +41,17 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities import MessageTypeEnum
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from lib.feature_flags import FeatureFlag, current_feature_flag_context
+
+
+@pytest.fixture(name="auto_tool_choice_flag")
+def auto_tool_choice_flag_fixture():
+    """Enable ``dap_schema_auto_tool_choice`` for one test, then restore the previous context."""
+    token = current_feature_flag_context.set(
+        {FeatureFlag.DAP_SCHEMA_AUTO_TOOL_CHOICE.value}
+    )
+    yield
+    current_feature_flag_context.reset(token)
 
 
 @pytest.fixture(name="prompt_id")
@@ -1018,6 +1029,61 @@ class TestAgentComponentAttachEdges:
         with pytest.raises(NotifiableAgentException) as exc_info:
             router_function(state_with_no_tools)
         assert "Schema mode requires a tool call" in exc_info.value.internal_detail
+
+    def test_routing_with_schema_mode_auto_tool_choice_loops_text_only_back_to_agent(
+        self,
+        agent_component_with_custom_schema,
+        mock_state_graph,
+        mock_router,
+        base_flow_state,
+        component_name,
+        auto_tool_choice_flag,
+    ):
+        """With tool_choice "auto" a text-only turn is deliberation, not an error: it loops back to the agent."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = []
+
+        state_with_no_tools = base_flow_state.copy()
+        state_with_no_tools[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_message]
+        }
+
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        router_calls = mock_state_graph.add_conditional_edges.call_args_list
+        agent_router_call = next(
+            call for call in router_calls if call[0][0] == f"{component_name}#agent"
+        )
+        router_function = agent_router_call[0][1]
+
+        assert router_function(state_with_no_tools) == f"{component_name}#agent"
+
+    def test_schema_mode_binds_any_tool_choice_by_default(
+        self,
+        agent_component_with_custom_schema,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+    ):
+        """Without the flag the schema tool is still forced, so every existing flow keeps today's behaviour."""
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        _, kwargs = mock_prompt_registry.get_on_behalf.call_args
+        assert kwargs["tool_choice"] == "any"
+
+    def test_schema_mode_binds_auto_tool_choice_under_flag(
+        self,
+        agent_component_with_custom_schema,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+        auto_tool_choice_flag,
+    ):
+        """The flag is the only thing switching the schema binding to "auto"."""
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        _, kwargs = mock_prompt_registry.get_on_behalf.call_args
+        assert kwargs["tool_choice"] == "auto"
 
     def test_routing_with_non_ai_message_raises_error(
         self,
