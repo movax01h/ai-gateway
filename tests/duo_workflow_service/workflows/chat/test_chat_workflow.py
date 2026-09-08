@@ -2440,6 +2440,78 @@ class TestChatAttachments:
         assert result.update["conversation_history"]["test_prompt"]
         assert "could not be attached" in result.update["ui_chat_log"][-1]["content"]
 
+    @pytest.mark.parametrize("later_turn", [False, True])
+    @pytest.mark.asyncio
+    async def test_a_wholly_rejected_turn_leaves_no_empty_user_bubble(
+        self, workflow_with_project, later_turn
+    ):
+        """The references name the attachments that survived, and on a rejection none did.
+
+        With no text either, a user entry has nothing to render and the client draws an empty bubble -- the gap review
+        found on the success path, arriving by another route. The notice that follows says what failed, so it carries
+        the turn alone.
+        """
+        workflow_with_project._additional_context = [
+            attachment_envelope(data="not base64!!")
+        ]
+
+        if later_turn:
+            logs = (await self._later_turn(workflow_with_project, goal="")).update[
+                "ui_chat_log"
+            ]
+        else:
+            logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert [entry["message_type"] for entry in logs] == [MessageTypeEnum.AGENT]
+        assert "could not be attached" in logs[0]["content"]
+
+    @pytest.mark.parametrize("later_turn", [False, True])
+    @pytest.mark.asyncio
+    async def test_a_rejected_turn_that_has_text_keeps_its_user_entry(
+        self, workflow_with_project, later_turn
+    ):
+        """Only a turn with nothing to show is suppressed; the message itself is still the user's."""
+        workflow_with_project._additional_context = [
+            attachment_envelope(data="not base64!!")
+        ]
+
+        if later_turn:
+            logs = (
+                await self._later_turn(workflow_with_project, goal="look at this")
+            ).update["ui_chat_log"]
+        else:
+            logs = workflow_with_project.get_workflow_state("look at this")[
+                "ui_chat_log"
+            ]
+
+        assert logs[0]["message_type"] == MessageTypeEnum.USER
+        assert logs[0]["content"] == "look at this"
+        assert "could not be attached" in logs[-1]["content"]
+
+    def test_a_rejected_turn_keeps_its_user_entry_for_other_context(
+        self, workflow_with_project
+    ):
+        """Context the turn still carries is worth showing even with no text, so this is not a blank bubble."""
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(data="not base64!!"),
+        ]
+
+        logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert logs[0]["message_type"] == MessageTypeEnum.USER
+        assert logs[0]["additional_context"] == [FILE_CONTEXT]
+
+    def test_an_empty_turn_without_attachments_is_untouched(
+        self, workflow_with_project
+    ):
+        """The suppression is scoped to rejections; an empty turn that never carried a file is a separate question."""
+        workflow_with_project._additional_context = None
+
+        logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert [entry["message_type"] for entry in logs] == [MessageTypeEnum.USER]
+
     def test_a_rejected_payload_never_reaches_the_prompt_or_the_ui(
         self, workflow_with_project
     ):

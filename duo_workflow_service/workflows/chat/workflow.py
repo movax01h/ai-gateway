@@ -348,6 +348,8 @@ class Workflow(AbstractWorkflow):
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
         additional_context, attachments, rejection = self._turn_context()
 
+        references = with_attachment_references(additional_context, attachments)
+
         initial_ui_chat_log = UiChatLog(
             message_sub_type=None,
             message_type=MessageTypeEnum.USER,
@@ -357,9 +359,7 @@ class Workflow(AbstractWorkflow):
             status=ToolStatus.SUCCESS,
             correlation_id=None,
             tool_info=None,
-            additional_context=with_attachment_references(
-                additional_context, attachments
-            ),
+            additional_context=references,
         )
 
         conversation_history: List[BaseMessage] = []
@@ -372,7 +372,9 @@ class Workflow(AbstractWorkflow):
             ),
         )
 
-        ui_chat_log = [initial_ui_chat_log]
+        ui_chat_log: list[UiChatLog] = []
+        if not self._user_entry_would_be_blank(goal, references, rejection):
+            ui_chat_log.append(initial_ui_chat_log)
         if rejection:
             ui_chat_log.append(self._attachments_rejected_log(rejection, None))
 
@@ -499,10 +501,17 @@ class Workflow(AbstractWorkflow):
                         self._attachments_rejected_log(rejection, checkpoint_tuple)
                     )
 
+                # `sent_attachments`, not `attachments`: a decision turn discards
+                # them, and a reference to a file the model never saw would be a lie.
+                references = with_attachment_references(
+                    additional_context, sent_attachments
+                )
+                has_message = bool(new_chat_message and new_chat_message != "null")
+
                 if (
-                    sent_attachments
-                    or rejection
-                    or (new_chat_message and new_chat_message != "null")
+                    sent_attachments or rejection or has_message
+                ) and not self._user_entry_would_be_blank(
+                    new_chat_message, references, rejection
                 ):
                     new_message_chat_log = UiChatLog(
                         message_type=MessageTypeEnum.USER,
@@ -513,12 +522,7 @@ class Workflow(AbstractWorkflow):
                         status=ToolStatus.SUCCESS,
                         correlation_id=None,
                         tool_info=None,
-                        # `sent_attachments`, not `attachments`: a decision turn
-                        # discards them, and a reference to a file the model never
-                        # saw would be a lie.
-                        additional_context=with_attachment_references(
-                            additional_context, sent_attachments
-                        ),
+                        additional_context=references,
                         parent_ts=self._turn_parent_ts(checkpoint_tuple),
                     )
                     state_update["ui_chat_log"] = [new_message_chat_log]
@@ -538,6 +542,24 @@ class Workflow(AbstractWorkflow):
         if rejection:
             return [attachment_rejection_block(rejection)]
         return attachment_content_blocks(attachments)
+
+    @staticmethod
+    def _user_entry_would_be_blank(
+        goal: str,
+        references: Optional[list[AdditionalContext]],
+        rejection: Optional[str],
+    ) -> bool:
+        """Whether a user entry for this turn would render as an empty bubble.
+
+        A turn whose files were all rejected carries no text and has nothing left to name -- the references are built
+        from the attachments that survived, and none did. The client renders that as a blank user bubble, which is the
+        gap review found on the success path and which the rejection path reintroduces. The notice that follows says
+        what failed, so it can carry the turn on its own.
+
+        Only applies when there is a rejection to explain: an empty turn with no attachments at all is a different
+        question and keeps its existing entry.
+        """
+        return bool(rejection) and not goal and not references
 
     def _attachments_rejected_log(
         self, reason: str, checkpoint_tuple: Optional[GitLabCheckpoint]
