@@ -47,6 +47,7 @@ from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
+from lib.container_wiring import wire_and_validate
 
 __all__ = [
     "create_fast_api_server",
@@ -80,7 +81,7 @@ ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
 async def lifespan(app: FastAPI):
     config = app.extra["extra"]["config"]
     container_application = ContainerApplication()
-    container_application.wire(modules=CONTAINER_APPLICATION_MODULES)
+    wire_and_validate(container_application, modules=CONTAINER_APPLICATION_MODULES)
     container_application.config.from_dict(config.model_dump())
 
     # Register moved feature prompts at boot so a duplicate feature id fails

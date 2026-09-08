@@ -124,6 +124,7 @@ from lib.billing_events import (
     ExecutionEnvironment,
     SelfHostedLLMOperations,
 )
+from lib.container_wiring import wire_and_validate
 from lib.context import client_capabilities, language_server_version
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
@@ -134,7 +135,9 @@ from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPrope
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
-CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
+# "ai" is wired recursively so a feature moved under ai/features/ keeps its
+# DWS @inject sites resolving with no per-module bookkeeping.
+CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -1297,7 +1300,7 @@ def choose_legacy_unit_primitive(
 
 def setup_container(config: Config):
     container_application = ContainerApplication()
-    container_application.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+    wire_and_validate(container_application, packages=CONTAINER_APPLICATION_PACKAGES)
     container_application.config.from_dict(config.model_dump())
 
 
