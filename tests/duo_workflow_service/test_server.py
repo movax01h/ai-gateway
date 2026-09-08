@@ -73,6 +73,7 @@ from duo_workflow_service.server import (
     next_client_event,
     run,
     serve,
+    setup_container,
     setup_signal_handlers,
     validate_llm_access,
 )
@@ -302,6 +303,18 @@ def use_real_model_path_fixture(mock_duo_workflow_service_container):
     )
     yield
     mock_duo_workflow_service_container.pkg_models_v2.container._mock_selector.reset_override()
+
+
+def test_setup_container_wires_and_validates():
+    with (
+        patch("duo_workflow_service.server.ContainerApplication") as mock_container,
+        patch("duo_workflow_service.server.wire_and_validate") as mock_wire,
+    ):
+        setup_container(MagicMock())
+
+    mock_wire.assert_called_once_with(
+        mock_container.return_value, packages=CONTAINER_APPLICATION_PACKAGES
+    )
 
 
 @pytest.mark.parametrize(

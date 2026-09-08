@@ -555,3 +555,30 @@ def test_validation_exception_handler_with_log_request_data(
     mock_context.__setitem__.assert_called_once()
     error_message = mock_context.__setitem__.call_args[0][1]
     assert "required_field" in error_message
+
+
+@pytest.mark.asyncio
+async def test_lifespan_wires_and_validates():
+    # Pin that AIGW boots through wire_and_validate with the explicit module
+    # list; a revert to bare wire() would silently drop the unresolved-marker
+    # escalation.
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.extra = {"extra": {"config": config}}
+
+    with (
+        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
+        patch("ai_gateway.api.server.wire_and_validate") as mock_wire,
+        patch("ai_gateway.api.server.discover_feature_prompts"),
+        patch("ai_gateway.api.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        async with server.lifespan(app):
+            pass
+
+    mock_wire.assert_called_once_with(
+        mock_container.return_value, modules=server.CONTAINER_APPLICATION_MODULES
+    )
