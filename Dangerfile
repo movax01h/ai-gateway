@@ -17,6 +17,12 @@ Gitlab::Dangerfiles.for_project(self, 'ai-gateway') do |dangerfiles|
     %r{.*} => :ai_gateway
   }.freeze
 
+  # No teammate carries a `utilization` role in the roulette data, so that row
+  # can only ever render as blank. Fulfillment approval on `models.yml` comes
+  # from `.gitlab/CODEOWNERS`, not from this category, so dropping the row
+  # costs nothing.
+  dangerfiles.config.disabled_roulette_categories = [:utilization]
+
   # Import a defined set of danger rules
   dangerfiles.import_dangerfiles(only: %w[roulette type_label subtype_label z_retry_link large_diff])
 end
