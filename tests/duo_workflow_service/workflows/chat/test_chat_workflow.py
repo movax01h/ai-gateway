@@ -17,6 +17,10 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    CatalogItems,
+    WorkspaceAgent,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
@@ -1896,6 +1900,42 @@ class TestWorkflowSystemTemplatePreRender:
         )
 
         assert workflow.system_template_override == "orbit on goal={{ goal }}"
+
+
+class TestWorkflowAcceptsCatalogItems:
+    """The server offers ``catalog_items`` to every ``v1`` request.
+
+    A chat-partial config is ``v1`` by schema version but is built by this class, not the
+    v1 Flow, and ``AbstractWorkflow.__init__`` takes no ``**kwargs`` to absorb the
+    argument. Every chat-partial flow therefore failed to construct.
+    """
+
+    @pytest.mark.parametrize(
+        "catalog_items",
+        [
+            CatalogItems(),
+            CatalogItems(
+                workspace_agents=[
+                    WorkspaceAgent(
+                        name="workspace/agents/tester",
+                        description="Runs tests.",
+                        toolset=["run_command"],
+                        prompt="Be terse.",
+                    )
+                ]
+            ),
+        ],
+        ids=["empty", "populated"],
+    )
+    def test_catalog_items_do_not_break_construction(self, flow_type, catalog_items):
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            catalog_items=catalog_items,
+        )
+
+        assert workflow._workflow_id == "test-id"
 
 
 class TestResumeCheckpointTs:

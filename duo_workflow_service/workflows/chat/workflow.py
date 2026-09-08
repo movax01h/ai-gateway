@@ -242,6 +242,7 @@ class Workflow(AbstractWorkflow):
         self._tools_override = kwargs.pop("tools_override", None)
         self._agent_name_override = kwargs.pop("agent_name_override", None)
         component_inputs_config = kwargs.pop("component_inputs_config", None)
+        kwargs.pop("catalog_items", None)
         self._workflow_id = workflow_id
         self._workflow_type = workflow_type
 
