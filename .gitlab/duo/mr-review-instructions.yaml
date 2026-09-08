@@ -88,6 +88,29 @@ instructions:
       either matured to a current stable relase, or removed.
       1. This module should import common code from a current stable release module.
 
+  - name: Flow config shape
+    fileFilters:
+      - "duo_workflow_service/agent_platform/*/flows/configs/**/*.yml"
+    instructions: |
+      These files are flow definitions, not framework code. Review the shape, not only the syntax.
+      Complexity has to be justified here; a single agent node is the baseline.
+      1. Reuse: could an existing flow do this with a different goal? `developer` is a general-purpose
+        coding agent and absorbs many requests. If a new flow is right, the MR should say why.
+      1. Structure: for every component past the first, ask what the split buys. Valid reasons are a
+        context-compression boundary, a genuinely different toolset per stage, a human decision point,
+        a durable pause and resume, or a hard cost or determinism target. "Cleaner separation" and
+        "each node does one thing" are not reasons.
+      1. Agency: flag an `AgentComponent` whose work is a fixed action that must always happen — a
+        `DeterministicStepComponent` running the known tool call is cheaper and cannot decline. Flag
+        arithmetic or fixed rules encoded in a prompt for the same reason. A component that only
+        reasons and returns a structured answer is correctly an `AgentComponent` with `toolset: []`.
+      1. Prompts: flag step-by-step scripts, enumerated edge cases and incident post-mortems baked
+        into a prompt. Persona, priorities and what good looks like age better and cost fewer tokens
+        every turn. Flag instructions that teach the model things it already knows, or that restate
+        which tools exist.
+      1. Reusability: prefer the design that stays useful with a different goal. Specifics belong in
+        the goal and the inputs rather than baked into the persona.
+
   - name: Dependency Injection
     fileFilters:
       - "**/*.py"
