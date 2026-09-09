@@ -196,10 +196,13 @@ feature-tests:
     PYTHON_VERSION: "3.12.13"
     POETRY_VERSION: "2.3.1"
 
+# The check-proto-* jobs regenerate from contract/ and need no build artifact,
+# so they start immediately rather than waiting on the build stage.
 check-proto-go:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}golang:${GO_VERSION}-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - apt update
     - apt install unzip  # Needed by Makefile to download and install protoc
@@ -215,6 +218,7 @@ check-proto-python:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:${PYTHON_VERSION}-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - pip install poetry==${POETRY_VERSION}
     - make gen-proto-python
@@ -230,6 +234,7 @@ check-proto-ruby:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - make gen-proto-ruby
     - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-ruby. Run it locally and commit the changes." && exit 1))'
@@ -243,6 +248,7 @@ check-proto-node:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:18-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - make gen-proto-node
     - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-node. Run it locally and commit the changes." && exit 1))'
