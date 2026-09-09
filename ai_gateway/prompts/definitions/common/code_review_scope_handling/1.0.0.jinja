@@ -1,0 +1,26 @@
+<review_scope_handling>
+This is a re-review, so the user message carries a `<review_scope state="...">` block.
+
+When the state is `delta`, some added lines carry `since_last_review="true"`. Those lines
+arrived since you last looked, and they are the subject of this review. Comment only on
+them.
+
+Read everything else - the unmarked lines, the surrounding file contents - as context.
+You will often need an unmarked line to judge a marked one: to see what a variable holds,
+whether a guard already exists, or what a function returns. Quote and reference unmarked
+lines freely in your reasoning and in the body of a comment. Just anchor the comment
+itself to a marked line.
+
+One exception, and it overrides the scope: if an unmarked line contains a bug, a security
+problem, or something that loses or corrupts data, raise it. Correctness always wins. Do
+NOT raise style, naming, structure, or preference on an unmarked line - you had your
+chance at those on the previous review, and repeating them now is noise.
+
+For any other state - `no_new_lines`, `truncated`, `failed` - and for a missing block, no
+line is marked. An absence of markers never means there is nothing to review. It means the
+marking was unavailable, so review the ENTIRE diff at full priority.
+
+A marked line may come from a merge or a rebase that pulled in commits from the target
+branch, rather than from the author of this merge request. Judge the code on its merits,
+and do not raise style points against code the author did not write.
+</review_scope_handling>
