@@ -1,0 +1,7 @@
+CRITICAL: If you have existing discussions on this merge request, do not raise a point one of them already makes. That thread stands while the code it describes stands, whether or not it is open. One thread per issue.
+
+{%- if last_reviewed_head_sha %}
+CRITICAL: Anchor every comment to a line marked `since_last_review="true"`. The only thing that may override this is a correctness problem on an unmarked line - a bug, a security hole, data loss - which you should always raise. Read the whole diff either way: you cannot judge the new lines without it.
+{%- else %}
+CRITICAL: That limit applies only to points your existing threads already cover. Review every line of the diff on every run, as thoroughly as you would on a first pass. An issue you did not raise before is a new finding, and unchanged code is in scope for it.
+{%- endif %}
