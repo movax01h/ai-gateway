@@ -7,7 +7,7 @@ reference and whether the flow declared it.
 """
 
 from abc import ABC, abstractmethod
-from typing import ClassVar, NamedTuple
+from typing import ClassVar, NamedTuple, Optional
 
 from duo_workflow_service.agent_platform.v1.catalog.items import CatalogItems
 from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemType,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 __all__ = ["BindRequest", "CatalogSource"]
 
@@ -50,10 +51,26 @@ class CatalogSource(ABC):
     Attributes:
         SOURCE: The source this serves.
         ITEM_TYPE: The kind it builds.
+        EXPERIMENT_FLAG: The feature flag an experimental kind rolls out behind, or ``None`` once it is generally
+            available.
     """
 
     SOURCE: ClassVar[CatalogItemSource]
     ITEM_TYPE: ClassVar[CatalogItemType]
+    EXPERIMENT_FLAG: ClassVar[Optional[FeatureFlag]] = None
+
+    @property
+    def is_enabled(self) -> bool:
+        """Whether this kind binds for the current request.
+
+        Always ``True`` for a generally available kind. An experimental kind is on only while the request enabled
+        its flag. Binding checks this before :meth:`bind`, so no strategy has to; a kind that is off binds as though
+        the request carried no items, which lets the flag double as a kill switch that needs no flow config change.
+        """
+        if self.EXPERIMENT_FLAG is None:
+            return True
+
+        return is_feature_enabled(self.EXPERIMENT_FLAG)
 
     @abstractmethod
     def validate_ref(self, ref: CatalogItemRef) -> None:

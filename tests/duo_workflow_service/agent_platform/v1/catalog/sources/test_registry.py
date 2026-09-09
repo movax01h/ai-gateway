@@ -70,6 +70,10 @@ class TestAddingAKind:
     def test_the_new_pair_resolves(self, with_flow_source, ref):
         assert registry.source_for(ref(item_type="flow")) is with_flow_source
 
+    def test_a_kind_without_a_flag_is_always_enabled(self, with_flow_source):
+        """Nothing in the request context can switch a generally available kind off."""
+        assert with_flow_source.is_enabled
+
     def test_errors_offer_it_without_being_told_to(self, with_flow_source, ref):
         """The message is derived from what is registered, so it cannot drift from it."""
         with pytest.raises(

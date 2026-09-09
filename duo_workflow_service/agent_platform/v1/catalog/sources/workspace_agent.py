@@ -37,6 +37,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
 from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
     UILogEventsSupervisor,
 )
+from lib.feature_flags import FeatureFlag
 
 __all__ = [
     "WILDCARD_ITEM_ID",
@@ -264,10 +265,15 @@ def agent_template_prompt() -> InMemoryPromptConfig:
 
 
 class WorkspaceAgentSource(CatalogSource):
-    """Builds workspace agent templates into subagents of the claiming component."""
+    """Builds workspace agent templates into subagents of the claiming component.
+
+    Experimental: gated by ``dap_workspace_agents``, pushed by GitLab per request. While it is off, the claimant
+    builds as authored and any items the request carried are dropped.
+    """
 
     SOURCE = CatalogItemSource.WORKSPACE
     ITEM_TYPE = CatalogItemType.AGENT_TEMPLATE
+    EXPERIMENT_FLAG = FeatureFlag.DAP_WORKSPACE_AGENTS
 
     @override
     def validate_ref(self, ref: CatalogItemRef) -> None:

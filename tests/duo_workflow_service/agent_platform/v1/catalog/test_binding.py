@@ -51,10 +51,12 @@ def _items(*agents: dict) -> CatalogItems:
 
 
 @pytest.fixture(name="expand")
-def expand_fixture(mock_tools_registry):
-    """Bind catalog items against the shared tools-registry mock.
+def expand_fixture(mock_tools_registry, workspace_agents_flag):
+    """Bind catalog items with the feature on, against the shared tools-registry mock.
 
-    The registry is a required argument so no caller can skip tool validation.
+    The registry is a required argument so no caller can skip tool validation. The flag
+    is on because these tests are about what binding produces; what the flag withholds
+    is ``TestFeatureFlagGate``'s subject.
     """
     mock_tools_registry.toolset.return_value = Mock(name="toolset")
 
@@ -258,6 +260,12 @@ def _unusable_items() -> tuple:
         {"name": _catalog_name("tester"), "type": "DeterministicStepComponent"}
     ]
     return components, _include(), _items({"name": "tester"})
+
+
+def _misdeclared_flow() -> tuple:
+    """The flow declares a reference its source refuses: the flow is wrong."""
+    include = [CatalogItemRef.model_validate({**REFERENCE, "item_id": "tester"})]
+    return _components(), include, CatalogItems()
 
 
 class TestErrorsSeparateConfigFromItems:
@@ -643,3 +651,74 @@ class TestCatalogItemValidation:
                 _include(),
                 _items({"name": "tester", "toolset": ["nope"]}),
             )
+
+
+class TestFeatureFlagGate:
+    """``dap_workspace_agents`` switches workspace agents on per request.
+
+    Off, which is the test-wide default, a claiming flow builds exactly as it does for a request that sent no items. The
+    flag is the kill switch, so nothing about the items may fail the run while it is off.
+    """
+
+    @pytest.fixture(name="bind")
+    def bind_fixture(self, mock_tools_registry):
+        """Bind against the shared tools-registry mock, with the flag left off."""
+
+        def bind(components_config, include, items):
+            return bind_catalog_items(
+                components_config, include, items, mock_tools_registry
+            )
+
+        return bind
+
+    def test_the_flow_builds_as_for_a_request_that_sent_no_items(self, bind):
+        components, include = _components(), _include()
+
+        assert bind(components, include, _items({"name": "tester"})) == bind(
+            components, include, CatalogItems()
+        )
+
+    def test_no_component_is_synthesized(self, bind):
+        expanded = bind(_components(), _include(), _items({"name": "tester"}))
+
+        assert {c["name"] for c in expanded} == {"git_unshallow", "developer_agent"}
+
+    @pytest.mark.parametrize(
+        "items",
+        [CatalogItems(), _items({"name": "tester"})],
+        ids=["no_items", "items"],
+    )
+    def test_the_disabled_kind_is_logged(self, items, bind):
+        """One line per run, whether or not the request carried items."""
+        with capture_logs() as logs:
+            bind(_components(), _include(), items)
+
+        [entry] = [log for log in logs if "disabled by feature flag" in log["event"]]
+        # Expected during a rollout, so not a warning.
+        assert entry["log_level"] == "info"
+        assert entry["feature_flag"] == "dap_workspace_agents"
+
+    def test_unusable_items_do_not_fail_the_run(self, bind, mock_tools_registry):
+        """Item validation is part of what the flag withholds."""
+        bind(*_unusable_items())
+
+        mock_tools_registry.toolset.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [_broken_flow, _misdeclared_flow],
+        ids=["undeclared_claim", "refused_include_entry"],
+    )
+    def test_config_errors_are_reported_regardless(self, scenario, bind):
+        """The flag gates items, not the flow: a broken config fails on every run."""
+        with pytest.raises(CatalogItemConfigError):
+            bind(*scenario())
+
+    def test_the_flag_turns_binding_on(
+        self, bind, workspace_agents_flag, mock_tools_registry
+    ):
+        mock_tools_registry.toolset.return_value = Mock(name="toolset")
+
+        expanded = bind(_components(), _include(), _items({"name": "tester"}))
+
+        assert _catalog_name("tester") in _by_name(expanded)
