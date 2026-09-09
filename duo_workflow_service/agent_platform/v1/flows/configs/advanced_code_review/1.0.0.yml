@@ -41,10 +41,6 @@ components:
     prompt_version: "^1.0.0"
     response_schema_id: "code_review_phase_findings"
     response_schema_version: "^1.0.0"
-    # "auto" keeps extended thinking available (a forced tool choice disables it) so
-    # the reviewer can consolidate and finish rather than loop on tool calls; the
-    # schema is still enforced on the final answer. 25 matches fix_pipeline's worker.
-    response_schema_tool_choice: "auto"
     max_cycles: 25
     inputs:
       - from: "context:project_id"
