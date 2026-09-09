@@ -51,6 +51,7 @@ from lib.context import (
     StarletteUser,
     current_model_metadata_context,
     current_model_metadata_with_size_context,
+    gitlab_user_id,
     llm_operations,
     token_usage,
 )
@@ -796,3 +797,20 @@ def mock_track_billing_event_fixture():
         "lib.billing_events.client.BillingEventsClient.track_billing_event"
     ) as mock:
         yield mock
+
+
+@pytest.fixture(name="gitlab_user_id_in_context")
+def gitlab_user_id_in_context_fixture():
+    """Set the instance-local user ID for the current request, as RequestMetadataMiddleware does."""
+    user_id = "42"
+    token = gitlab_user_id.set(user_id)
+    yield user_id
+    gitlab_user_id.reset(token)
+
+
+@pytest.fixture(name="no_gitlab_user_id_in_context")
+def no_gitlab_user_id_in_context_fixture():
+    """Clear the instance-local user ID for the current request (e.g. non-user traffic)."""
+    token = gitlab_user_id.set(None)
+    yield
+    gitlab_user_id.reset(token)

@@ -20,6 +20,7 @@ from ai_gateway.models.base_text import (
     TextGenModelChunk,
     TextGenModelOutput,
 )
+from ai_gateway.models.user_identity_header import inject_user_identity_header
 from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.safety_attributes import SafetyAttributes
 from ai_gateway.tracking import SnowplowEventContext
@@ -177,6 +178,7 @@ class LiteLlmChatModel(ChatModelBase):
         disable_streaming: bool = False,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
         bedrock_guardrail_config: Optional[ConfigBedrockGuardrail] = None,
+        user_id_header: Optional[str] = None,
     ):
         self._metadata = _init_litellm_model_metadata(metadata, model_name, provider)
         self.provider = provider
@@ -185,6 +187,7 @@ class LiteLlmChatModel(ChatModelBase):
         self.disable_streaming = disable_streaming
         self.async_fireworks_client = async_fireworks_client
         self.bedrock_guardrail_config = bedrock_guardrail_config
+        self.user_id_header = user_id_header
 
     @property
     @override
@@ -235,6 +238,8 @@ class LiteLlmChatModel(ChatModelBase):
             completion_args["client"] = self.async_fireworks_client
             # disable prompt caching
             completion_args["prompt_cache_max_len"] = 0
+
+        inject_user_identity_header(completion_args, self.user_id_header)
 
         with self.instrumentator.watch(stream=stream) as watcher:
             suggestion = await acompletion(**completion_args)
@@ -290,6 +295,7 @@ class LiteLlmChatModel(ChatModelBase):
         async_fireworks_client: Optional[AsyncOpenAI] = None,
         fireworks_api_base_url: str = "",
         bedrock_guardrail_config: Optional[ConfigBedrockGuardrail] = None,
+        user_id_header: Optional[str] = None,
     ):
         validate_custom_endpoint(
             custom_models_enabled, api_base=endpoint, api_key=api_key
@@ -324,6 +330,7 @@ class LiteLlmChatModel(ChatModelBase):
             disable_streaming,
             async_fireworks_client=async_fireworks_client,
             bedrock_guardrail_config=bedrock_guardrail_config,
+            user_id_header=user_id_header,
         )
 
 
@@ -343,10 +350,12 @@ class LiteLlmTextGenModel(TextGenModelBase):
         disable_streaming: bool = False,
         async_fireworks_client: Optional[AsyncOpenAI] = None,
         bedrock_guardrail_config: Optional[ConfigBedrockGuardrail] = None,
+        user_id_header: Optional[str] = None,
     ):
         self.provider = provider
         self.model_name = model_name
         self._metadata = _init_litellm_model_metadata(metadata, model_name, provider)
+        self.user_id_header = user_id_header
         self.disable_streaming = disable_streaming
         self.vertex_model_location = vertex_model_location
 
@@ -489,6 +498,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
                 completion_args["prompt_cache_max_len"] = 0
             completion_args["logprobs"] = 1
 
+        inject_user_identity_header(completion_args, self.user_id_header)
+
         return await acompletion(**completion_args)
 
     def _completion_type(self):
@@ -542,6 +553,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
         using_cache: bool = True,
         fireworks_api_base_url: str = "",
         bedrock_guardrail_config: Optional[ConfigBedrockGuardrail] = None,
+        user_id_header: Optional[str] = None,
     ):
         validate_custom_endpoint(
             custom_models_enabled, api_base=endpoint, api_key=api_key
@@ -584,6 +596,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
             vertex_model_location=vertex_model_location,
             using_cache=using_cache,
             bedrock_guardrail_config=bedrock_guardrail_config,
+            user_id_header=user_id_header,
         )
 
 

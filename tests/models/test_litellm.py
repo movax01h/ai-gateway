@@ -1379,3 +1379,65 @@ class TestBedrockGuardrailConfig:
 
             call_kwargs = mock_acompletion.call_args[1]
             assert "guardrailConfig" not in call_kwargs
+
+
+class TestUserIdentityHeader:
+    @pytest.fixture(name="chat_model")
+    def chat_model_fixture(self):
+        return LiteLlmChatModel.from_model_name(
+            name="mistral",
+            endpoint="http://127.0.0.1:1111/v1",
+            api_key="specified-api-key",
+            identifier="provider/some-cool-model",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+    @pytest.fixture(name="text_model")
+    def text_model_fixture(self):
+        return LiteLlmTextGenModel.from_model_name(
+            name="codegemma",
+            endpoint="http://127.0.0.1:4000",
+            api_key="specified-api-key",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_model_forwards_user_id(
+        self, chat_model, mock_litellm_acompletion, gitlab_user_id_in_context
+    ):
+        await chat_model.generate([Message(content="hi", role=Role.USER)])
+
+        call_kwargs = mock_litellm_acompletion.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-gitlab-user-id": gitlab_user_id_in_context
+        }
+
+    @pytest.mark.asyncio
+    async def test_text_model_forwards_user_id(
+        self, text_model, mock_litellm_acompletion, gitlab_user_id_in_context
+    ):
+        await text_model.generate(prefix="def hello():", suffix="")
+
+        call_kwargs = mock_litellm_acompletion.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-gitlab-user-id": gitlab_user_id_in_context
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("gitlab_user_id_in_context")
+    async def test_text_model_omits_header_when_not_configured(
+        self, mock_litellm_acompletion
+    ):
+        text_model = LiteLlmTextGenModel.from_model_name(
+            name="codegemma",
+            endpoint="http://127.0.0.1:4000",
+            api_key="specified-api-key",
+            custom_models_enabled=True,
+        )
+
+        await text_model.generate(prefix="def hello():", suffix="")
+
+        call_kwargs = mock_litellm_acompletion.call_args[1]
+        assert "extra_headers" not in call_kwargs

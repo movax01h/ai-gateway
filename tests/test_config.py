@@ -381,6 +381,87 @@ def test_custom_models(values: dict, expected: ConfigCustomModels):
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("x-gitlab-user-id", "x-gitlab-user-id"),
+        ("X-Gitlab-User-Id", "X-Gitlab-User-Id"),
+        ("  x-user  ", "x-user"),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_custom_models_user_id_header(value: str, expected: str | None):
+    env = {
+        "AIGW_CUSTOM_MODELS__ENABLED": "true",
+        "AIGW_CUSTOM_MODELS__USER_ID_HEADER": value,
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.custom_models.user_id_header == expected
+
+
+def test_custom_models_user_id_header_cleared_when_custom_models_disabled():
+    with mock.patch.dict(
+        os.environ,
+        {"AIGW_CUSTOM_MODELS__USER_ID_HEADER": "x-gitlab-user-id"},
+        clear=True,
+    ):
+        config = Config(_env_file=None)
+
+        assert config.custom_models.enabled is False
+        assert config.custom_models.user_id_header is None
+
+
+@pytest.mark.parametrize(
+    ("value", "match"),
+    [
+        ("Authorization", "reserved"),
+        ("HOST", "reserved"),
+        ("api-key", "reserved"),
+        ("content-length", "reserved"),
+        ("x-session-affinity", "reserved"),
+        ("anthropic-version", "reserved"),
+        ("x gitlab user id", "not a valid HTTP header field name"),
+        ("x-user:id", "not a valid HTTP header field name"),
+        ("x-user\r\nInjected", "not a valid HTTP header field name"),
+    ],
+)
+def test_custom_models_user_id_header_rejects_invalid_names(value: str, match: str):
+    env = {
+        "AIGW_CUSTOM_MODELS__ENABLED": "true",
+        "AIGW_CUSTOM_MODELS__USER_ID_HEADER": value,
+    }
+    with mock.patch.dict(os.environ, env, clear=True):
+        with pytest.raises(ValidationError, match=match):
+            Config(_env_file=None)
+
+
+@pytest.mark.parametrize("value", ["Authorization", "x gitlab user id"])
+def test_custom_models_user_id_header_invalid_name_ignored_when_disabled(value: str):
+    # Custom models are off, so an invalid/reserved leftover value is cleared
+    # rather than validated -- it must never block gateway startup.
+    with mock.patch.dict(
+        os.environ, {"AIGW_CUSTOM_MODELS__USER_ID_HEADER": value}, clear=True
+    ):
+        config = Config(_env_file=None)
+
+        assert config.custom_models.enabled is False
+        assert config.custom_models.user_id_header is None
+
+
+def test_custom_models_user_id_header_rejects_non_string():
+    with pytest.raises(ValidationError, match="must be a string"):
+        ConfigCustomModels(enabled=True, user_id_header=123)
+
+
+def test_custom_models_user_id_header_accepts_explicit_none():
+    config = ConfigCustomModels(enabled=True, user_id_header=None)
+
+    assert config.user_id_header is None
+
+
+@pytest.mark.parametrize(
     ("values", "expected"),
     [
         ({}, ConfigVertexTextModel()),

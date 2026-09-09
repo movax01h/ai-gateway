@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableSerializable
 
 from ai_gateway.models.base import validate_custom_endpoint
+from ai_gateway.models.user_identity_header import inject_user_identity_header
 
 __all__ = ["EmbeddingBadRequestError", "EmbeddingLiteLLM", "EmbeddingRateLimitError"]
 
@@ -45,6 +46,7 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     request_timeout: Optional[float] = 60.0
     max_retries: int = 1
     custom_models_enabled: bool = False
+    user_id_header: Optional[str] = None
 
     # define unused attribute to satisfy the LLMModelProtocol interface
     disable_streaming: bool = False
@@ -107,6 +109,8 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
 
         if vertex_location := kwargs.pop("vertex_location", None):
             embedding_args["vertex_ai_location"] = vertex_location
+
+        inject_user_identity_header(embedding_args, self.user_id_header)
 
         return embedding_args
 

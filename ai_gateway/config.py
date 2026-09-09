@@ -1,4 +1,5 @@
 import os
+import re
 import ssl
 from typing import Annotated, Literal, Optional, Set, Tuple, TypedDict, Union
 from urllib.parse import urlparse
@@ -6,7 +7,15 @@ from urllib.parse import urlparse
 import httpx
 import litellm
 from dotenv import find_dotenv
-from pydantic import BaseModel, Field, Json, RootModel, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    Json,
+    RootModel,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = [
@@ -205,10 +214,83 @@ class ConfigSnowplow(ConfigInternalEvent):
     thread_count: Optional[int] = 1
 
 
+# Header names that must never be repurposed to carry the user identity: they
+# control transport or authentication on the upstream request, or are already
+# set per call by the gateway itself and would be silently overwritten.
+_RESERVED_USER_ID_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "api-key",
+        "x-api-key",
+        "host",
+        "accept",
+        "accept-encoding",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+        "user-agent",
+        "x-session-affinity",
+        "anthropic-version",
+        "anthropic-beta",
+    }
+)
+
+# RFC 9110 token characters permitted in an HTTP field name.
+_HTTP_FIELD_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+
 class ConfigCustomModels(BaseModel):
     enabled: bool = False
     disable_streaming: bool = False
     extra_headers: dict[str, str] | None = None
+    user_id_header: str | None = Field(
+        default=None,
+        description=(
+            "Name of the header carrying the instance-local GitLab user ID on "
+            "every upstream model request this gateway makes (OpenAI-compatible "
+            "endpoints, Bedrock, Vertex). Unset disables the feature. Cleared "
+            "and never validated unless `enabled` is true, so it only ever "
+            "applies to a self-hosted AIGW."
+        ),
+    )
+
+    @field_validator("user_id_header", mode="before")
+    @classmethod
+    def _normalize_user_id_header(cls, value: object) -> str | None:
+        if value is None:
+            return None
+
+        if not isinstance(value, str):
+            raise ValueError("user_id_header must be a string")
+
+        name = value.strip()
+        return name or None
+
+    @model_validator(mode="after")
+    def _user_id_header_requires_custom_models(self) -> "ConfigCustomModels":
+        if not self.enabled:
+            # Custom models are off, so this header is never sent. Clear it
+            # rather than validate it, so a stale/invalid value left over from
+            # a previous configuration does not block startup.
+            self.user_id_header = None
+            return self
+
+        if self.user_id_header is None:
+            return self
+
+        if not _HTTP_FIELD_NAME_RE.match(self.user_id_header):
+            raise ValueError(
+                f"user_id_header '{self.user_id_header}' is not a valid HTTP header field name"
+            )
+
+        if self.user_id_header.lower() in _RESERVED_USER_ID_HEADER_NAMES:
+            raise ValueError(
+                f"user_id_header '{self.user_id_header}' is reserved and cannot carry the user ID"
+            )
+
+        return self
 
 
 class ConfigDuoChat(BaseModel):

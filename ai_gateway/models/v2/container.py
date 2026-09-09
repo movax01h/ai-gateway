@@ -141,6 +141,7 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             ChatLiteLLM,
             custom_models_enabled=config.custom_models.enabled,
+            user_id_header=config.custom_models.user_id_header,
             bedrock_guardrail_config=config.bedrock_guardrail_config,
             allowed_api_bases=_fireworks_allowed_api_bases,
             # Without this, litellm falls back to its default (~600s) timeout instead
@@ -165,6 +166,7 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             CompletionLiteLLM,
             custom_models_enabled=config.custom_models.enabled,
+            user_id_header=config.custom_models.user_id_header,
             allowed_api_bases=_fireworks_allowed_api_bases,
             bedrock_guardrail_config=config.bedrock_guardrail_config,
             vertex_location=providers.Callable(
@@ -182,6 +184,7 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             EmbeddingLiteLLM,
             custom_models_enabled=config.custom_models.enabled,
+            user_id_header=config.custom_models.user_id_header,
         ),
         mocked=providers.Factory(mock.FakeEmbeddingModel),
     )

@@ -36,6 +36,7 @@ from ai_gateway.models.fireworks_retry import (
     create_fireworks_retry_decorator,
 )
 from ai_gateway.models.guardrails import bedrock_guardrail_params
+from ai_gateway.models.user_identity_header import inject_user_identity_header
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 
 __all__ = ["CompletionLiteLLM", "resolve_vertex_completion_location"]
@@ -118,6 +119,7 @@ class CompletionLiteLLM(BaseChatModel):
     disable_streaming: bool = False
     custom_models_enabled: bool = False
     allowed_api_bases: frozenset[str] = frozenset()
+    user_id_header: Optional[str] = None
     bedrock_guardrail_config: Optional[ConfigBedrockGuardrail] = None
     vertex_location: str = "us-central1"
 
@@ -234,6 +236,8 @@ class CompletionLiteLLM(BaseChatModel):
         )
         if guardrail_params:
             completion_args["guardrailConfig"] = guardrail_params["guardrailConfig"]
+
+        inject_user_identity_header(completion_args, self.user_id_header)
 
         return completion_args
 
