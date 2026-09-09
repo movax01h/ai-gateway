@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import validate_custom_endpoint
+from ai_gateway.models.user_identity_header import inject_user_identity_header
 from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
 )
@@ -177,6 +178,7 @@ register_external_models()
 class ChatLiteLLM(_LChatLiteLLM):
     custom_models_enabled: bool = False
     allowed_api_bases: frozenset[str] = frozenset()
+    user_id_header: Optional[str] = None
 
     def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:
         validate_custom_endpoint(
@@ -232,6 +234,7 @@ class ChatLiteLLM(_LChatLiteLLM):
         _force_gpt_5_max_completion_tokens(kwargs)
         _remove_deprecated_temperature_parameters(kwargs)
         _rewrite_trailing_assistant_prefill(kwargs)
+        inject_user_identity_header(kwargs, self.user_id_header)
         return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
 
     @property

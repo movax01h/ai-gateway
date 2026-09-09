@@ -1290,3 +1290,101 @@ class TestReasoningContentRoundTrip:
             assistant_dicts[0]["reasoning_content"] == "I should read the file first."
         )
         assert assistant_dicts[0]["tool_calls"][0]["id"] == "call_1"
+
+
+class TestUserIdentityHeader:
+    @pytest.fixture(name="chat")
+    def chat_fixture(self):
+        return ChatLiteLLM(
+            model="test-model",
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+            extra_headers={"X-Api-Subscription": "sub"},
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_forwards_user_id_alongside_static_headers(
+        self, chat, mock_acompletion_with_retry, gitlab_user_id_in_context
+    ):
+        await chat._agenerate(messages=[HumanMessage(content="hi")])
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "X-Api-Subscription": "sub",
+            "x-gitlab-user-id": gitlab_user_id_in_context,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_stream_response"]
+    )
+    async def test_forwards_user_id_when_streaming(
+        self, chat, mock_acompletion_with_retry, gitlab_user_id_in_context
+    ):
+        await chat._agenerate(messages=[HumanMessage(content="hi")], stream=True)
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert (
+            call_kwargs["extra_headers"]["x-gitlab-user-id"]
+            == gitlab_user_id_in_context
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_keeps_session_affinity_header(
+        self, mock_acompletion_with_retry, gitlab_user_id_in_context
+    ):
+        chat = ChatLiteLLM(
+            model="test-model",
+            custom_llm_provider="fireworks_ai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+        await chat._agenerate(
+            messages=[HumanMessage(content="hi")], session_id="test-session-123"
+        )
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-session-affinity": "test-session-123",
+            "x-gitlab-user-id": gitlab_user_id_in_context,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("no_gitlab_user_id_in_context")
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_sends_only_static_headers_without_user_id(
+        self, chat, mock_acompletion_with_retry
+    ):
+        await chat._agenerate(messages=[HumanMessage(content="hi")])
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert call_kwargs["extra_headers"] == {"X-Api-Subscription": "sub"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("gitlab_user_id_in_context")
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_does_not_forward_user_id_when_not_configured(
+        self, mock_acompletion_with_retry
+    ):
+        chat = ChatLiteLLM(
+            model="test-model",
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=True,
+        )
+
+        await chat._agenerate(messages=[HumanMessage(content="hi")])
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert "extra_headers" not in call_kwargs

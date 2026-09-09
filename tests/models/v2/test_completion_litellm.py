@@ -1110,3 +1110,67 @@ class TestBedrockGuardrailConfig:
         args = model._build_completion_args("prompt", None, None, False)
 
         assert "guardrailConfig" not in args
+
+
+class TestBuildCompletionArgsUserIdentityHeader:
+    @pytest.fixture(name="model")
+    def model_fixture(self):
+        return CompletionLiteLLM(
+            model="codestral-2501",
+            completion_type=CompletionType.TEXT,
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+    def test_forwards_user_id(self, model, gitlab_user_id_in_context):
+        args = model._build_completion_args(
+            prompt="test", suffix=None, stop=None, stream=False
+        )
+
+        assert args["extra_headers"] == {"x-gitlab-user-id": gitlab_user_id_in_context}
+
+    def test_keeps_session_affinity_header(self, gitlab_user_id_in_context):
+        model = CompletionLiteLLM(
+            model="codestral-2501",
+            completion_type=CompletionType.TEXT,
+            custom_llm_provider="fireworks_ai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+        args = model._build_completion_args(
+            prompt="test",
+            suffix=None,
+            stop=None,
+            stream=False,
+            session_id="test-session-123",
+        )
+
+        assert args["extra_headers"] == {
+            "x-session-affinity": "test-session-123",
+            "x-gitlab-user-id": gitlab_user_id_in_context,
+        }
+
+    @pytest.mark.usefixtures("no_gitlab_user_id_in_context")
+    def test_omits_header_without_user_id(self, model):
+        args = model._build_completion_args(
+            prompt="test", suffix=None, stop=None, stream=False
+        )
+
+        assert "extra_headers" not in args
+
+    @pytest.mark.usefixtures("gitlab_user_id_in_context")
+    def test_omits_header_when_not_configured(self):
+        model = CompletionLiteLLM(
+            model="codestral-2501",
+            completion_type=CompletionType.TEXT,
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=True,
+        )
+
+        args = model._build_completion_args(
+            prompt="test", suffix=None, stop=None, stream=False
+        )
+
+        assert "extra_headers" not in args

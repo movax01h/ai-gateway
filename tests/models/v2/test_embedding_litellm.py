@@ -337,3 +337,47 @@ class TestEmbeddingLiteLLMBind:
             match=f"specifying custom models endpoint is disabled: {unexpected_field} is not allowed",
         ):
             model.bind(api_base=override_api_base, api_key=override_api_key)
+
+
+class TestEmbeddingLiteLLMUserIdentityHeader:
+    @pytest.fixture(name="model")
+    def model_fixture(self):
+        return EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="openai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+    @pytest.mark.asyncio
+    async def test_forwards_user_id(
+        self, model, mock_litellm_aembedding, gitlab_user_id_in_context
+    ):
+        await model.ainvoke(input={"contents": ["test text"]})
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-gitlab-user-id": gitlab_user_id_in_context
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("no_gitlab_user_id_in_context")
+    async def test_omits_header_without_user_id(self, model, mock_litellm_aembedding):
+        await model.ainvoke(input={"contents": ["test text"]})
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert "extra_headers" not in call_kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("gitlab_user_id_in_context")
+    async def test_omits_header_when_not_configured(self, mock_litellm_aembedding):
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="openai",
+            custom_models_enabled=True,
+        )
+
+        await model.ainvoke(input={"contents": ["test text"]})
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert "extra_headers" not in call_kwargs

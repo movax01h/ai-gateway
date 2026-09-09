@@ -96,7 +96,7 @@ def test_lite_llm_chat_uses_configured_request_timeout():
     container = ContainerModels()
     container.config.from_dict(
         {
-            "custom_models": {"enabled": False},
+            "custom_models": {"enabled": False, "user_id_header": None},
             "bedrock_guardrail_config": None,
             "fireworks_api_base_url": "",
             "duo_chat": {"model_request_timeout": 45.0},
@@ -124,7 +124,7 @@ def test_lite_llm_completion_resolves_vertex_location(
     container = ContainerModels()
     container.config.from_dict(
         {
-            "custom_models": {"enabled": False},
+            "custom_models": {"enabled": False, "user_id_header": None},
             "bedrock_guardrail_config": None,
             "fireworks_api_base_url": "",
             "vertex_text_model": {"location": runway_region},

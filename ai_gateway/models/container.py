@@ -109,6 +109,7 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             LiteLlmTextGenModel.from_model_name,
             custom_models_enabled=config.custom_models.enabled,
+            user_id_header=config.custom_models.user_id_header,
             disable_streaming=config.custom_models.disable_streaming,
             provider_keys=config.model_keys,
             async_fireworks_client=async_fireworks_client,
@@ -124,6 +125,7 @@ class ContainerModels(containers.DeclarativeContainer):
         original=providers.Factory(
             LiteLlmChatModel.from_model_name,
             custom_models_enabled=config.custom_models.enabled,
+            user_id_header=config.custom_models.user_id_header,
             disable_streaming=config.custom_models.disable_streaming,
             provider_keys=config.model_keys,
             async_fireworks_client=async_fireworks_client,

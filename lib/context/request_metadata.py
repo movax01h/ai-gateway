@@ -20,6 +20,8 @@ gitlab_instance_id: ContextVar[Optional[str]] = ContextVar(
 )
 gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
 gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
+# Instance-local GitLab user ID of the requesting user (``x-gitlab-user-id``).
+gitlab_user_id: ContextVar[Optional[str]] = ContextVar("gitlab_user_id", default=None)
 language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
     "language_server_version", default=None
 )
