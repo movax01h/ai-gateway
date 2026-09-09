@@ -208,10 +208,21 @@ Internal event definitions validation:
 # files are not re-analyzed on every scan.
 # https://docs.gitlab.com/user/application_security/sast/gitlab_advanced_sast/#incremental-scanning
 gitlab-advanced-sast:
+  needs: []
   tags:
     - saas-linux-large-amd64
   variables:
     GITLAB_ADV_SAST_INCR_SCAN: "true"
+
+# secret_detection only needs the source, not the build.
+secret_detection:
+  needs: []
+
+gemnasium-dependency_scanning:
+  needs: []
+
+gemnasium-python-dependency_scanning:
+  needs: []
 
 .poetry:
   cache:
