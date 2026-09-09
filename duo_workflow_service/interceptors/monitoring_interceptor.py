@@ -1,3 +1,4 @@
+import asyncio
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -31,6 +32,9 @@ from lib.context import (
 from lib.feature_flags import current_feature_flag_context
 
 log = structlog.stdlib.get_logger("grpc")
+
+CANCELLED_BEFORE_START = "CANCELLED_BEFORE_START"
+EXECUTE_WORKFLOW_METHOD_NAME = "ExecuteWorkflow"
 
 
 class GRPCMethodType(StrEnum):
@@ -263,15 +267,19 @@ class MonitoringInterceptor(ServerInterceptor):
                     servicer_context.code(),
                 )
         except BaseException as e:  # We handle all BaseException to ensure we include asyncio.CancelledError
-            self._handle_error(
-                e,
-                grpc_type,
-                grpc_service_name,
-                grpc_method_name,
-                servicer_context,
-            )
+            context = current_monitoring_context.get()
+            if self._is_cancelled_before_workflow_start(e, grpc_method_name, context):
+                context.workflow_no_start_reason = CANCELLED_BEFORE_START
+            else:
+                self._handle_error(
+                    e,
+                    grpc_type,
+                    grpc_service_name,
+                    grpc_method_name,
+                    servicer_context,
+                )
 
-            log_exception(e)
+                log_exception(e)
 
             raise e
         finally:
@@ -352,6 +360,18 @@ class MonitoringInterceptor(ServerInterceptor):
                     f"""Finished {grpc_method_name} RPC""",
                     **fields,
                 )
+
+    @staticmethod
+    def _is_cancelled_before_workflow_start(
+        error: BaseException, grpc_method_name: str, context: MonitoringContext
+    ) -> bool:
+        # Only ExecuteWorkflow has a StartRequest; a stream cancelled before reading it never executed a flow.
+        return (
+            isinstance(error, asyncio.CancelledError)
+            and grpc_method_name == EXECUTE_WORKFLOW_METHOD_NAME
+            and not context.workflow_id
+            and not context.workflow_no_start_reason
+        )
 
     def _handle_error(
         self,

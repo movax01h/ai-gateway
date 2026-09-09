@@ -67,9 +67,13 @@ from duo_workflow_service.interceptors.metadata_context_interceptor import (
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
     CONTAINER_APPLICATION_PACKAGES,
+    DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S,
+    DEFAULT_SHUTDOWN_KILL_DEADLINE_S,
+    WORKFLOW_TASK_NAME_PREFIX,
     DuoWorkflowService,
     _extract_error_message,
     clean_start_request,
+    drain_workflow_tasks,
     next_client_event,
     run,
     serve,
@@ -84,11 +88,12 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.session_context import GetSessionContext
-from duo_workflow_service.tracking import MonitoringContext
+from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.workflows.registry import ResolvedFlow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    DWS_SERVER_SHUTDOWN_STOP_REASON,
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
@@ -1168,6 +1173,13 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
         (
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             False,
+            DWS_SERVER_SHUTDOWN_STOP_REASON,
+            grpc.StatusCode.UNAVAILABLE,
+            "workflow execution interrupted:",
+        ),
+        (
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+            False,
             "WORKHORSE_WEBSOCKET_PING_FAILED",
             grpc.StatusCode.OK,
             "workflow execution stopped",
@@ -2010,6 +2022,226 @@ async def test_signal_handler_sets_not_serving_on_shutdown(signal_type):
         health_servicer._server_status["DuoWorkflow"]
         == health_pb2.HealthCheckResponse.NOT_SERVING
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "grace_period_env,drain_timeout_env,kill_deadline_env,expect_warning",
+    [
+        ("5", "3", None, False),
+        ("5", "5", None, True),
+        (None, "12", None, True),
+        ("5", "5", "30", False),
+    ],
+)
+async def test_signal_handler_warns_when_shutdown_budget_reaches_kill_deadline(
+    grace_period_env, drain_timeout_env, kill_deadline_env, expect_warning
+):
+    env = {"DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": drain_timeout_env}
+    if grace_period_env is not None:
+        env["DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S"] = grace_period_env
+    if kill_deadline_env is not None:
+        env["DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S"] = kill_deadline_env
+
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("duo_workflow_service.server.log") as mock_log,
+    ):
+        setup_signal_handlers(AsyncMock(), asyncio.get_running_loop(), AsyncMock())
+
+    budget_warnings = [
+        call
+        for call in mock_log.warning.call_args_list
+        if "SIGKILL deadline" in call.args[0]
+    ]
+    assert len(budget_warnings) == (1 if expect_warning else 0)
+    if expect_warning:
+        assert budget_warnings[0].kwargs["drain_timeout_s"] == float(drain_timeout_env)
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_falls_back_to_default_drain_timeout_when_env_is_invalid():
+    drain_calls = []
+
+    async def fake_drain(timeout):
+        drain_calls.append(timeout)
+
+    with (
+        patch.dict(
+            os.environ, {"DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": "soon"}, clear=True
+        ),
+        patch("duo_workflow_service.server.log") as mock_log,
+        patch(
+            "duo_workflow_service.server.drain_workflow_tasks", side_effect=fake_drain
+        ),
+    ):
+        setup_signal_handlers(AsyncMock(), asyncio.get_running_loop(), AsyncMock())
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.1)
+
+    assert drain_calls == [DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S]
+    invalid_warnings = [
+        call
+        for call in mock_log.warning.call_args_list
+        if "Invalid DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S" in call.args[0]
+    ]
+    assert len(invalid_warnings) == 1
+    assert invalid_warnings[0].kwargs["value"] == "soon"
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_falls_back_to_default_kill_deadline_when_env_is_invalid():
+    env = {
+        "DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": "5",
+        "DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S": "5",
+        "DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S": "later",
+    }
+
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("duo_workflow_service.server.log") as mock_log,
+    ):
+        setup_signal_handlers(AsyncMock(), asyncio.get_running_loop(), AsyncMock())
+
+    warnings = [call.args[0] for call in mock_log.warning.call_args_list]
+    assert "Invalid DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S, using default" in warnings
+    budget_warning = next(
+        call
+        for call in mock_log.warning.call_args_list
+        if "SIGKILL deadline" in call.args[0]
+    )
+    assert budget_warning.kwargs["kill_deadline_s"] == DEFAULT_SHUTDOWN_KILL_DEADLINE_S
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_drains_workflows_before_server_stop():
+    calls = []
+    mock_server = AsyncMock()
+    mock_server.stop = AsyncMock(side_effect=lambda **_: calls.append("stop"))
+
+    async def fake_drain(timeout):
+        calls.append(("drain", timeout))
+
+    loop = asyncio.get_running_loop()
+
+    with (
+        patch.dict(
+            os.environ, {"DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": "2.5"}, clear=True
+        ),
+        patch(
+            "duo_workflow_service.server.drain_workflow_tasks", side_effect=fake_drain
+        ),
+    ):
+        setup_signal_handlers(mock_server, loop, AsyncMock())
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.1)
+
+    assert calls == [("drain", 2.5), "stop"]
+
+
+@pytest.mark.asyncio
+async def test_drain_workflow_tasks_cancels_workflow_tasks_with_infra_stop():
+    cancel_messages = []
+
+    async def workflow_run():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as e:
+            cancel_messages.append(str(e))
+
+    monitoring_context = MonitoringContext(workflow_id="wf-1")
+    token = current_monitoring_context.set(monitoring_context)
+    try:
+        workflow_task = asyncio.create_task(
+            workflow_run(), name=f"{WORKFLOW_TASK_NAME_PREFIX}wf-1"
+        )
+    finally:
+        current_monitoring_context.reset(token)
+    unrelated_task = asyncio.create_task(asyncio.Event().wait(), name="unrelated")
+    await asyncio.sleep(0)
+
+    with patch("duo_workflow_service.server.log") as mock_log:
+        await drain_workflow_tasks(timeout=1.0)
+
+    assert workflow_task.done()
+    assert cancel_messages == [AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST]
+    assert monitoring_context.workflow_stop_reason == DWS_SERVER_SHUTDOWN_STOP_REASON
+    assert not unrelated_task.done()
+    mock_log.warning.assert_not_called()
+
+    unrelated_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_drain_workflow_tasks_logs_tasks_still_running_after_timeout():
+    release = asyncio.Event()
+
+    async def stubborn_run():
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                pass
+
+    task = asyncio.create_task(
+        stubborn_run(), name=f"{WORKFLOW_TASK_NAME_PREFIX}wf-stuck"
+    )
+    await asyncio.sleep(0)
+
+    with patch("duo_workflow_service.server.log") as mock_log:
+        await drain_workflow_tasks(timeout=0.05)
+
+    mock_log.warning.assert_called_once()
+    assert mock_log.warning.call_args.kwargs["workflow_tasks"] == [
+        f"{WORKFLOW_TASK_NAME_PREFIX}wf-stuck"
+    ]
+
+    release.set()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_drain_workflow_tasks_without_workflows_is_noop():
+    with patch("duo_workflow_service.server.log") as mock_log:
+        await drain_workflow_tasks(timeout=1.0)
+
+    mock_log.info.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_names_task_after_workflow_id(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.successful_execution = MagicMock(return_value=True)
+    mock_workflow.last_error = None
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    with patch(
+        "duo_workflow_service.server.asyncio.create_task", wraps=asyncio.create_task
+    ) as mock_create_task:
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+
+    task_names = [call.kwargs.get("name") for call in mock_create_task.call_args_list]
+    assert f"{WORKFLOW_TASK_NAME_PREFIX}123" in task_names
 
 
 class TestServeTLS:

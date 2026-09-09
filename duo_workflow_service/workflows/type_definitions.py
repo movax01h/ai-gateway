@@ -5,9 +5,11 @@ from pydantic import BaseModel
 __all__ = [
     "AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST",
     "AIO_CANCEL_STOP_WORKFLOW_REQUEST",
+    "DWS_SERVER_SHUTDOWN_STOP_REASON",
     "INFRA_STOP_REASONS",
     "MAX_MESSAGE_SIZE",
     "OUTGOING_MESSAGE_TOO_LARGE",
+    "SERVER_SHUTDOWN_STOP_REASONS",
     "AdditionalContext",
     "OsInformationContext",
     "ShellInformationContext",
@@ -40,6 +42,17 @@ INFRA_STOP_REASONS = frozenset(
     {
         "WORKHORSE_SERVER_SHUTDOWN",
         "WORKHORSE_WEBSOCKET_PING_FAILED",
+    }
+)
+
+# Recorded by DWS itself when SIGTERM drains in-flight workflows, so it never arrives in a stopWorkflow request.
+DWS_SERVER_SHUTDOWN_STOP_REASON = "DWS_SERVER_SHUTDOWN"
+
+# Stop reasons for which the RPC returns UNAVAILABLE so Workhorse retries the session on another instance.
+SERVER_SHUTDOWN_STOP_REASONS = frozenset(
+    {
+        "WORKHORSE_SERVER_SHUTDOWN",
+        DWS_SERVER_SHUTDOWN_STOP_REASON,
     }
 )
 

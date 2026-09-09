@@ -10,6 +10,7 @@ from sentry_sdk.transport import Transport
 from structlog.testing import capture_logs
 
 from duo_workflow_service.interceptors.monitoring_interceptor import (
+    CANCELLED_BEFORE_START,
     GRPCMethodType,
     MonitoringInterceptor,
 )
@@ -578,3 +579,122 @@ async def test_exceptions_are_logged_while_the_transaction_is_open(sentry_events
     assert len(spans_when_logged) == 1
     # An error captured after the transaction closes loses its link to it.
     assert getattr(spans_when_logged[0], "name", None) == "/DuoWorkflow/ExecuteWorkflow"
+
+
+def _execute_workflow_stream_handler(handler_fn, method_name="ExecuteWorkflow"):
+    continuation = AsyncMock()
+    handler_call_details = Mock()
+    handler_call_details.method = f"/test.Service/{method_name}"
+    handler_call_details.invocation_metadata = {}
+
+    mock_handler = Mock()
+    mock_handler.stream_stream = MagicMock(side_effect=handler_fn)
+    mock_handler.request_streaming = True
+    mock_handler.response_streaming = True
+    continuation.return_value = mock_handler
+    return continuation, handler_call_details
+
+
+def _handled_total(registry, grpc_code, flow_type, method_name="ExecuteWorkflow"):
+    return registry.get_sample_value(
+        "grpc_server_handled_total",
+        {
+            "grpc_type": "BIDI_STREAM",
+            "grpc_service": "test.Service",
+            "grpc_method": method_name,
+            "grpc_code": grpc_code,
+            "gitlab_version": "unknown",
+            "client_type": "unknown",
+            "lsp_version": "unknown",
+            "gitlab_realm": "unknown",
+            "flow_type": flow_type,
+            "is_gitlab_team_member": "unknown",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_interceptor_skips_counter_when_stream_cancelled_before_workflow_started():
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+
+    async def _cancelled_before_start(_req, _ctx):
+        raise asyncio.CancelledError()
+        yield  # make it an async generator
+
+    continuation, handler_call_details = _execute_workflow_stream_handler(
+        _cancelled_before_start
+    )
+    mock_context = Mock()
+    mock_context.code.return_value = grpc.StatusCode.CANCELLED
+
+    result = await interceptor.intercept_service(continuation, handler_call_details)
+
+    with pytest.raises(asyncio.CancelledError), capture_logs() as cap_logs:
+        async for _ in result.stream_stream(None, mock_context):
+            pass
+
+    assert len(cap_logs) == 1
+    assert cap_logs[0]["log_level"] == "info"
+    assert cap_logs[0]["event"] == "connection closed before workflow started"
+    assert cap_logs[0]["no_start_reason"] == CANCELLED_BEFORE_START
+    assert _handled_total(registry, "CANCELLED", "unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_interceptor_counts_cancellation_after_workflow_started():
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+
+    async def _cancelled_mid_run(_req, _ctx):
+        context = current_monitoring_context.get()
+        context.workflow_id = "wf-1"
+        context.workflow_definition = "chat"
+        raise asyncio.CancelledError()
+        yield  # make it an async generator
+
+    continuation, handler_call_details = _execute_workflow_stream_handler(
+        _cancelled_mid_run
+    )
+    mock_context = Mock()
+    mock_context.code.return_value = grpc.StatusCode.CANCELLED
+
+    result = await interceptor.intercept_service(continuation, handler_call_details)
+
+    with pytest.raises(asyncio.CancelledError), capture_logs() as cap_logs:
+        async for _ in result.stream_stream(None, mock_context):
+            pass
+
+    assert cap_logs[-1]["event"] == "Finished ExecuteWorkflow RPC"
+    assert _handled_total(registry, "CANCELLED", "chat") == 1.0
+
+
+@pytest.mark.asyncio
+async def test_interceptor_counts_cancellation_of_other_bidi_streams_without_workflow_id():
+    """TrackSelfHostedExecuteWorkflow never sets workflow_id, so its cancellations must still be counted."""
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+
+    async def _cancelled_tracking_stream(_req, _ctx):
+        raise asyncio.CancelledError()
+        yield  # make it an async generator
+
+    continuation, handler_call_details = _execute_workflow_stream_handler(
+        _cancelled_tracking_stream, method_name="TrackSelfHostedExecuteWorkflow"
+    )
+    mock_context = Mock()
+    mock_context.code.return_value = grpc.StatusCode.CANCELLED
+
+    result = await interceptor.intercept_service(continuation, handler_call_details)
+
+    with pytest.raises(asyncio.CancelledError), capture_logs() as cap_logs:
+        async for _ in result.stream_stream(None, mock_context):
+            pass
+
+    assert cap_logs[-1]["event"] == "Finished TrackSelfHostedExecuteWorkflow RPC"
+    assert (
+        _handled_total(
+            registry, "CANCELLED", "unknown", "TrackSelfHostedExecuteWorkflow"
+        )
+        == 1.0
+    )
