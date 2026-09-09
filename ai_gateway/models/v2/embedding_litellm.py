@@ -9,7 +9,7 @@ import logging
 from typing import Any, AsyncIterator, Dict, Iterator, Mapping, Optional, override
 
 import litellm
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, UsageMetadata
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableSerializable
 
 from ai_gateway.models.base import validate_custom_endpoint
@@ -169,8 +169,9 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             raise EmbeddingAuthenticationError(str(e)) from e
 
         predictions = self._extract_predictions(response)
+        usage_metadata = self._extract_usage_metadata(response)
 
-        return AIMessage(content=predictions)
+        return AIMessage(content=predictions, usage_metadata=usage_metadata)
 
     @override
     def bind(self, **kwargs: Any) -> "Runnable[Dict[str, Any], AIMessage]":
@@ -204,3 +205,41 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             }
             for data in response.data
         ]
+
+    def _extract_usage_metadata(self, response: Any) -> UsageMetadata:
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return UsageMetadata(input_tokens=0, output_tokens=0, total_tokens=0)
+
+        # completion_tokens_details->output_token_details is not mapped because the
+        # field is always None for embeddings responses
+        usage_metadata = UsageMetadata(
+            input_tokens=usage.prompt_tokens,
+            output_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+        )
+
+        if input_token_details := self._extract_input_token_details(usage):
+            usage_metadata["input_token_details"] = input_token_details  # type: ignore[typeddict-item]
+
+        return usage_metadata
+
+    def _extract_input_token_details(self, usage: Any) -> dict[str, int]:
+        details = getattr(usage, "prompt_tokens_details", None)
+        if not details:
+            return {}
+
+        cache_creation_details = getattr(details, "cache_creation_token_details", None)
+        mapping = {
+            "cache_read": getattr(details, "cached_tokens", None),
+            "cache_creation": getattr(details, "cache_creation_tokens", None),
+            "ephemeral_5m_input_tokens": getattr(
+                cache_creation_details, "ephemeral_5m_input_tokens", None
+            ),
+            "ephemeral_1h_input_tokens": getattr(
+                cache_creation_details, "ephemeral_1h_input_tokens", None
+            ),
+        }
+
+        # The keys are NotRequired, so omit unset ones rather than report them as None
+        return {key: value for key, value in mapping.items() if value is not None}

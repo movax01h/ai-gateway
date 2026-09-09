@@ -3,6 +3,11 @@ from unittest.mock import AsyncMock
 import litellm
 import pytest
 from langchain_core.messages import AIMessage
+from litellm.types.utils import (
+    CacheCreationTokenDetails,
+    PromptTokensDetailsWrapper,
+    Usage,
+)
 
 from ai_gateway.models.v2.embedding_litellm import (
     EmbeddingAuthenticationError,
@@ -71,11 +76,99 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert isinstance(result, AIMessage)
         assert result.content == mock_litellm_aembedding_response.data
 
+        llm_response_usage = mock_litellm_aembedding_response.usage
+        assert result.usage_metadata == {
+            "input_tokens": llm_response_usage.prompt_tokens,
+            "output_tokens": llm_response_usage.completion_tokens,
+            "total_tokens": llm_response_usage.total_tokens,
+            "input_token_details": {"cache_read": 4},
+        }
+
         call_kwargs = mock_litellm_aembedding.call_args[1]
         assert call_kwargs["input"] == ["test text 1", "test text 2"]
         assert call_kwargs["model"] == "test-embedding-model"
         assert call_kwargs["custom_llm_provider"] == "openai"
         assert "dimensions" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_with_cache_creation_details(
+        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        mock_litellm_aembedding_response.usage = Usage(
+            prompt_tokens=12,
+            completion_tokens=0,
+            total_tokens=12,
+            prompt_tokens_details=PromptTokensDetailsWrapper(
+                cached_tokens=4,
+                text_tokens=8,
+                cache_creation_tokens=6,
+                cache_creation_token_details=CacheCreationTokenDetails(
+                    ephemeral_5m_input_tokens=2,
+                    ephemeral_1h_input_tokens=4,
+                ),
+            ),
+        )
+
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        result = await model.ainvoke(input={"contents": ["test text 1"]})
+
+        assert result.usage_metadata == {
+            "input_tokens": 12,
+            "output_tokens": 0,
+            "total_tokens": 12,
+            "input_token_details": {
+                "cache_read": 4,
+                "cache_creation": 6,
+                "ephemeral_5m_input_tokens": 2,
+                "ephemeral_1h_input_tokens": 4,
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_no_prompt_tokens_details(
+        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        mock_litellm_aembedding_response.usage = Usage(
+            prompt_tokens=12,
+            completion_tokens=0,
+            total_tokens=12,
+        )
+
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        result = await model.ainvoke(input={"contents": ["test text 1"]})
+
+        assert result.usage_metadata == {
+            "input_tokens": 12,
+            "output_tokens": 0,
+            "total_tokens": 12,
+        }
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_no_usage_data(
+        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+    ):
+        mock_litellm_aembedding_response.usage = None
+
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        result = await model.ainvoke(input={"contents": ["test text 1", "test text 2"]})
+
+        assert isinstance(result, AIMessage)
+        assert result.content == mock_litellm_aembedding_response.data
+
+        assert result.usage_metadata == {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
     @pytest.mark.asyncio
     async def test_async_invoke_with_dimensions(
