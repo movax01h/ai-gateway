@@ -189,7 +189,19 @@ routers:
   - from: "fetch_mr_metadata"
     to: "analyze_prescan_results"
   - from: "analyze_prescan_results"
-    to: "fetch_existing_discussions"
+    condition:
+      # last_reviewed_head_sha is read from the head_sha of the first diff note on the
+      # newest review that the bot authored. GitLab only creates that review record when
+      # a review publishes at least one comment, so the value is absent exactly when the
+      # merge request holds no resolvable thread from the bot. On those runs
+      # fetch_existing_discussions returns nothing, so skip the call.
+      input:
+        from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        optional: true
+      routes:
+        "None": "perform_code_review_and_publish"
+        "": "perform_code_review_and_publish"
+        "default_route": "fetch_existing_discussions"
   - from: "fetch_existing_discussions"
     to: "perform_code_review_and_publish"
   - from: "perform_code_review_and_publish"
