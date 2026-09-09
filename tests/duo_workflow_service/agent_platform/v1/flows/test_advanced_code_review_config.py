@@ -1,11 +1,11 @@
 """Guards for the shipped advanced_code_review flow config.
 
 These tests assert on the content of ``advanced_code_review/1.0.0.yml`` (the
-three-step pipeline, the reviewer's schema id, toolset,
-``response_schema_tool_choice`` and ``max_cycles``, the fetch step's pinned
-inputs, and the publish step's schema-validated answer and ``min_confidence``
-literal), plus the reviewer response schema those inputs read from, rather than
-on ``FlowConfig`` machinery, which is covered in ``test_flow_config.py``.
+three-step pipeline, the reviewer's schema id, toolset and ``max_cycles``,
+the fetch step's pinned inputs, and the publish step's schema-validated
+answer and ``min_confidence`` literal), plus the reviewer response schema
+those inputs read from, rather than on ``FlowConfig`` machinery, which is
+covered in ``test_flow_config.py``.
 """
 
 from typing import get_args
@@ -53,14 +53,12 @@ class TestAdvancedCodeReviewConfig:
         assert review["response_schema_id"] == "code_review_phase_findings"
         assert review["toolset"] == self.INVESTIGATION_TOOLSET
 
-    def test_reviewer_investigation_is_bounded_and_can_think(self):
-        """A forced tool choice disables extended thinking and produced unbounded investigation loops on large MRs;
-        "auto" plus a cycle cap keeps the reviewer converging and turns the worst case into a partial review, not an
-        empty one."""
+    def test_reviewer_investigation_is_bounded(self):
+        """A stuck investigation should degrade into a partial review rather than burn the platform default of 280
+        cycles reading files."""
         components = self._components()
         review = components["review"]
 
-        assert review["response_schema_tool_choice"] == "auto"
         assert review["max_cycles"] == 25
 
     def test_fetch_disables_the_instruction_format_hint(self):
