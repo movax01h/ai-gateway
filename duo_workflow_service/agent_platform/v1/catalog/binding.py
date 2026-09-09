@@ -158,7 +158,8 @@ def bind_catalog_items(
 
     Returns:
         The expanded configs, or *components_config* unchanged when no component claims
-        a reference — the items are then dropped rather than failing the run.
+        a reference — the items are then dropped rather than failing the run. An
+        experimental kind whose flag is off binds as though the request carried no items.
 
     Raises:
         CatalogItemConfigError: If the flow declares a reference no source can serve, if
@@ -177,7 +178,20 @@ def bind_catalog_items(
 
     # The claim equals a declared entry, so it needs no second validate_ref.
     claimant_config, ref = resolved
-    return source_for(ref).bind(
+    source = source_for(ref)
+
+    # An experimental kind is off while its flag is. Bind as though the request carried
+    # no items: dropped rather than rejected, so the kill switch never fails a run.
+    if not source.is_enabled:
+        logger.info(
+            "Experimental catalog item kind is disabled by feature flag, binding "
+            "without items",
+            ref=str(ref),
+            feature_flag=source.EXPERIMENT_FLAG,
+        )
+        items = CatalogItems()
+
+    return source.bind(
         BindRequest(
             ref=ref,
             claimant_config=claimant_config,

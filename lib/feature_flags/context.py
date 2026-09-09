@@ -25,6 +25,10 @@ class FeatureFlag(StrEnum):
     # Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/experiment/dap_schema_auto_tool_choice.yml
     DAP_SCHEMA_AUTO_TOOL_CHOICE = "dap_schema_auto_tool_choice"
+    # Gates attaching customer-defined workspace agents to foundational flows as
+    # subagents, see duo_workflow_service/agent_platform/v1/catalog. Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dap_workspace_agents.yml
+    DAP_WORKSPACE_AGENTS = "dap_workspace_agents"
     DEPENDENCY_BUMP_WEB_SEARCH = "dependency_bump_web_search"
     AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"

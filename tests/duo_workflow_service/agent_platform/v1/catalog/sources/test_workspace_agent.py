@@ -11,6 +11,7 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.workspace_agent impo
     AgentComponentTemplate,
     WorkspaceAgentSource,
 )
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 class TestTheDefaultTemplate:
@@ -57,6 +58,20 @@ class TestWhatTheSourceOffers:
 
     def test_it_builds_agent_templates(self):
         assert WorkspaceAgentSource.ITEM_TYPE is CatalogItemType.AGENT_TEMPLATE
+
+    def test_it_is_experimental_behind_the_workspace_agents_flag(self):
+        assert WorkspaceAgentSource.EXPERIMENT_FLAG is FeatureFlag.DAP_WORKSPACE_AGENTS
+
+    @pytest.mark.parametrize(
+        "enabled_flags, expected",
+        [(set(), False), ({"dap_workspace_agents"}, True)],
+        ids=["off", "on"],
+    )
+    def test_it_is_enabled_only_while_the_flag_is(self, enabled_flags, expected):
+        """Spelled as the raw flag name: it is what GitLab pushes in the header."""
+        current_feature_flag_context.set(enabled_flags)
+
+        assert WorkspaceAgentSource().is_enabled is expected
 
 
 class TestValidateRef:

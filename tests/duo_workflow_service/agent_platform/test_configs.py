@@ -135,7 +135,9 @@ class TestValidateFlowConfigs:
         V1_CATALOG_ITEM_CONFIGS,
         ids=lambda p: f"{p.parent.name}/{p.stem}",
     )
-    def test_v1_configs_bind_catalog_items(self, config_path: Path):
+    def test_v1_configs_bind_catalog_items(
+        self, config_path: Path, workspace_agents_flag
+    ):
         """Items reach the graph: one component per item, claimed by one coordinator.
 
         Compiling proves the components build, not that they were attached. A config
@@ -171,7 +173,9 @@ class TestValidateFlowConfigs:
         V1_CATALOG_ITEM_CONFIGS,
         ids=lambda p: f"{p.parent.name}/{p.stem}",
     )
-    def test_v1_configs_compile_with_catalog_items(self, config_path: Path):
+    def test_v1_configs_compile_with_catalog_items(
+        self, config_path: Path, workspace_agents_flag
+    ):
         """A config declaring `include` must also compile with items attached.
 
         ``test_v1_configs`` only ever builds the authored components. The synthesized
