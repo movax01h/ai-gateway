@@ -52,13 +52,15 @@ class TestReadinessScoreAbortsOnFailedFetch:
         assert routes["success"] == success_target
         assert routes["default_route"] == "abort"
 
-    def test_unconditional_routers_wire_rubric_to_coverage_to_end(self):
+    def test_unconditional_routers_wire_rubric_to_coverage_to_falsifier_to_end(self):
         config = FlowConfig.from_yaml_config("readiness_score", "1.0.0")
         rubric_router = self._router_for(config, "rubric")
         coverage_router = self._router_for(config, "coverage")
+        falsifier_router = self._router_for(config, "falsifier")
 
         assert rubric_router.get("to") == "coverage"
-        assert coverage_router.get("to") == "end"
+        assert coverage_router.get("to") == "falsifier"
+        assert falsifier_router.get("to") == "end"
 
     def test_config_loads_successfully(self):
         """Smoke-test: the YAML is valid and parses without error."""

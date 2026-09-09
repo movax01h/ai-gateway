@@ -57,6 +57,20 @@ components:
     toolset: []
     ui_log_events:
       - on_agent_final_answer
+
+  - name: falsifier
+    type: AgentComponent
+    prompt_id: rs_falsifier_prompt
+    response_schema_id: rs_falsifier_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:fetch.tool_responses
+        as: work_item
+      - from: context:fetch_notes.tool_responses
+        as: notes
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
 routers:
   # context:goal is an unvalidated work item URL; a failed fetch means no SPEC
   # and no PLAN, so scoring would emit a misleading number instead of an error.
@@ -77,6 +91,8 @@ routers:
   - from: rubric
     to: coverage
   - from: coverage
+    to: falsifier
+  - from: falsifier
     to: end
 flow:
   entry_point: fetch
@@ -171,6 +187,57 @@ prompts:
         material cons exist, fill remaining slots with genuine nitpicks prefixed
         '(minor)'. Put the precision/recall counts inside the rationale. Set
         evaluator = "coverage".
+      user: |
+        Here is the work item JSON:
+        {{work_item}}
+
+        Here are the work item notes (comments) as JSON:
+        {{notes}}
+      placeholder: history
+  - prompt_id: rs_falsifier_prompt
+    name: rs_falsifier
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        You are the FALSIFIER (red team) in a plan-readiness scoring flow. Assume the
+        plan fixes the WRONG thing; your job is to find the single most damaging defect
+        and the cheapest experiment that settles it. You do NOT score plan quality —
+        other evaluators do that. You have no tools; reason only over what you are
+        given, then submit the rs_falsifier_result structured output.
+
+        You are given one GitLab work item as JSON plus its notes (comments) as JSON.
+        Extract:
+        - SPEC = the work item description.
+        - PLAN = the agentPlan widget content (the drafted work plan).
+        - NOTES = the comment thread. Decisions and root-cause discussion often live in
+          comments; a note can confirm a premise, redefine the target, or record a
+          decision. Treat notes as authoritative context (recent notes over the
+          description) when judging the plan's causal chain and target.
+
+        1. Hunt specifically for gating-class defects:
+          - an unverified causal premise (plan asserts "X causes Y" without
+            establishing it),
+          - wrong target: the fix addresses a symptom while the spec's user-visible
+            goal can remain unmet,
+          - wrong or unconfirmed root cause,
+          - success criteria that can ALL pass while the reported bug persists.
+        2. Judge whether the plan's causal chain is even mechanically possible from the
+          spec and plan text alone — can the cited change really produce the intended
+          outcome, or does it merely co-occur?
+        3. Design the cheapest falsification experiment — minutes, not hours — that
+          settles your defect.
+
+        If you genuinely find no gating defect, set defect_class = "none" — do not
+        invent one. When defect_class is "none", leave defect and falsification as
+        empty strings and set confidence = 0. Otherwise confidence is your 0-100
+        confidence that the defect is real.
+
+        pros = at least 3 items covering what survived your attack; when there is no
+        gating defect these are the nearest misses. cons = genuine weaknesses, most
+        damaging first, and only ones you actually found — never pad to a count.
+        Each pro/con <=140 chars. Set evaluator = "falsifier".
       user: |
         Here is the work item JSON:
         {{work_item}}
