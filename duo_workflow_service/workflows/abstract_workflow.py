@@ -48,6 +48,9 @@ from duo_workflow_service.checkpointer.node_lifecycle import (
     NodeLifecycleCallbackHandler,
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
+from duo_workflow_service.checkpointer.write_mode import (
+    incremental_checkpoints_enabled,
+)
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
@@ -474,6 +477,10 @@ class AbstractWorkflow(ABC):
             )
 
             self._merge_jwt_governance_claims()
+
+            incremental_checkpoints_enabled.set(
+                self._workflow_config.get("incremental_checkpoints_enabled", False)
+            )
 
             # Update monitoring context with prompt injection protection level
             monitoring_context = current_monitoring_context.get()

@@ -18,6 +18,9 @@ from duo_workflow_service.agents.tool_call_validator import (
     validate_tool_calls,
 )
 from duo_workflow_service.agents.web_search import WebSearchState
+from duo_workflow_service.checkpointer.write_mode import (
+    compaction_ui_chat_log_update,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     CompactionOptimizer,
@@ -550,7 +553,7 @@ class ChatAgent:
             "conversation_history": self._replace_history_update(
                 state, result.messages
             ),
-            "ui_chat_log": list(result.ui_chat_logs),
+            "ui_chat_log": compaction_ui_chat_log_update(list(result.ui_chat_logs)),
         }
 
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
@@ -620,7 +623,8 @@ class ChatAgent:
             optimized_history,
             optimization_results,
         ) = await self._optimizer_pipeline.optimize(history)
-        history_modified |= any(result.was_modified for result in optimization_results)
+        history_optimized = any(result.was_modified for result in optimization_results)
+        history_modified |= history_optimized
         history = optimized_history
         # The LLM call reads the state, so rebind the working history on a copy.
         state = cast(
@@ -683,8 +687,13 @@ class ChatAgent:
                 response["conversation_history"] = self._replace_history_update(
                     state, [*history, agent_response]
                 )
-            response["ui_chat_log"] = self._append_optimizer_ui_logs(
+            ui_chat_logs = self._append_optimizer_ui_logs(
                 response["ui_chat_log"], optimizer_ui_logs
+            )
+            response["ui_chat_log"] = (
+                compaction_ui_chat_log_update(ui_chat_logs)
+                if history_optimized
+                else ui_chat_logs
             )
             return response
 
@@ -716,7 +725,11 @@ class ChatAgent:
             return {
                 "conversation_history": history_update,
                 "status": WorkflowStatusEnum.INPUT_REQUIRED,
-                "ui_chat_log": ui_chat_logs,
+                "ui_chat_log": (
+                    compaction_ui_chat_log_update(ui_chat_logs)
+                    if history_optimized
+                    else ui_chat_logs
+                ),
             }
         except Exception as error:
             log_exception(error, extra={"context": "Error processing chat agent"})

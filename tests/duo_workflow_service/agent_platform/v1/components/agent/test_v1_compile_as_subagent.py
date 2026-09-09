@@ -3,7 +3,7 @@
 # pylint: disable=file-naming-for-tests
 """Test suite for AgentComponent.compile_as_subagent (the SupervisorAgentComponentV2 dispatch path)."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from langgraph.graph import END
@@ -13,6 +13,9 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
     SUBSESSION_ID_CONTEXT_KEY,
     AgentComponent,
     _TerminalRouter,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
+    AgentNode,
 )
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 
@@ -50,6 +53,19 @@ def make_agent_component_fixture(
 def subagent_component_fixture(make_agent_component):
     """Fixture for an AgentComponent with a description, ready to compile_as_subagent."""
     return make_agent_component(description="A test subagent.")
+
+
+class TestCompileAsSubagentUiChatLog:
+    def test_agent_node_keeps_appending_ui_chat_log(self, subagent_component):
+        """The dispatch node appends the subagent's final ui_chat_log to the parent's, so a trim inside the subagent
+        would drop entries (gitlab-org/gitlab#628017)."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.component.AgentNode",
+            wraps=AgentNode,
+        ) as agent_node_cls:
+            subagent_component.compile_as_subagent()
+
+        assert agent_node_cls.call_args.kwargs["trim_ui_chat_log"] is False
 
 
 class TestCompileAsSubagentValidation:

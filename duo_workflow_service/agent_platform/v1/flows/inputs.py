@@ -69,8 +69,8 @@ def _compute_cancelled_turn_delta(
     Args:
         tip: The ``ui_chat_log`` from the newest (pre-rollback) checkpoint.
         boundary: The ``ui_chat_log`` from the boundary checkpoint.
-        log: A structlog logger used to emit a warning when the prefix
-            assumption is violated.
+        log: A structlog logger used to report when the prefix assumption is
+            violated.
 
     Returns:
         A (possibly empty) list of ``UiChatLog`` entries representing the
@@ -79,7 +79,8 @@ def _compute_cancelled_turn_delta(
     """
     boundary_len = len(boundary)
     if boundary_len > len(tip) or tip[:boundary_len] != boundary:
-        log.warning(
+        # Expected after a mid-turn compaction: the tip holds the trimmed list.
+        log.info(
             "cancelled_turn delta: prefix assumption violated; degrading to empty delta",
             tip_len=len(tip),
             boundary_len=boundary_len,

@@ -8,6 +8,9 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain.messages import AIMessage
 
 from ai_gateway.container import ContainerApplication
+from duo_workflow_service.checkpointer.write_mode import (
+    incremental_checkpoints_enabled,
+)
 from duo_workflow_service.components.tools_registry import ToolMetadata, ToolsRegistry
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.state import (
@@ -26,7 +29,7 @@ from duo_workflow_service.tracking.monitoring_context import (
     current_monitoring_context,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.context import gitlab_version
+from lib.context import client_capabilities, gitlab_version
 from lib.events import GLReportingEventContext
 
 
@@ -113,6 +116,19 @@ def mock_gitlab_version_fixture(gl_version: str):
     gitlab_version.set(gl_version)
     yield
     gitlab_version.set(None)
+
+
+@pytest.fixture(name="incremental_checkpoints_only")
+def incremental_checkpoints_only_fixture():
+    """The run writes incremental-only checkpoints: the workflow flag is on and the instance advertises the
+    ``incremental_checkpoints_only`` server capability on a GitLab version that forwards capabilities."""
+    enabled_token = incremental_checkpoints_enabled.set(True)
+    capabilities_token = client_capabilities.set({"incremental_checkpoints_only"})
+    version_token = gitlab_version.set("19.4.0")
+    yield
+    incremental_checkpoints_enabled.reset(enabled_token)
+    client_capabilities.reset(capabilities_token)
+    gitlab_version.reset(version_token)
 
 
 @pytest.fixture(name="workflow_id")
