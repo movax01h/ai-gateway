@@ -17,6 +17,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import AIMessage, UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+from litellm.types.utils import PromptTokensDetailsWrapper, Usage
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 from transformers import PreTrainedTokenizerFast
@@ -262,6 +263,15 @@ def mock_litellm_aembedding_response_fixture():
             {"embedding": [0.1, 0.2, 0.3], "index": 0},
             {"embedding": [0.4, 0.5, 0.6], "index": 1},
         ],
+        # Embeddings providers report prompt tokens only, completion tokens are always 0
+        usage=Usage(
+            prompt_tokens=12,
+            completion_tokens=0,
+            total_tokens=12,
+            prompt_tokens_details=PromptTokensDetailsWrapper(
+                cached_tokens=4, text_tokens=8
+            ),
+        ),
     )
 
 
