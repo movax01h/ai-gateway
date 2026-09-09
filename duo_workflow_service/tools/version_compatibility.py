@@ -21,6 +21,7 @@ AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
 SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
 GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
+LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -137,6 +138,16 @@ def _padded_release(version: Version) -> tuple[int, ...]:
     """The release tuple padded to three components, so "19.3" == "19.3.0"."""
     release = version.release[:3]
     return release + (0,) * (3 - len(release))
+
+
+def supports_labels_by_name() -> bool:
+    """Check if labels are readable with an ai_workflows-scoped token (GitLab 19.4)."""
+    if not gitlab_version.get():
+        return True
+
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        LABELS_AI_WORKFLOWS_SCOPE_VERSION
+    )
 
 
 def supports_glql_schema_endpoint() -> bool:
