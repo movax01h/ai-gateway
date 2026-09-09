@@ -118,9 +118,11 @@ from duo_workflow_service.workflows.registry import ResolvedFlow, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    DWS_SERVER_SHUTDOWN_STOP_REASON,
     INFRA_STOP_REASONS,
     MAX_MESSAGE_SIZE,
     OUTGOING_MESSAGE_TOO_LARGE,
+    SERVER_SHUTDOWN_STOP_REASONS,
     AdditionalContext,
 )
 from lib.billing_events import (
@@ -157,6 +159,11 @@ _PROPAGATED_EXTRA_CLAIMS = {
 # Also used to increase the max header size of the HTTP client:
 # https://docs.aiohttp.org/en/stable/client_reference.html
 MAX_METADATA_SIZE = 24 * 1024
+
+WORKFLOW_TASK_NAME_PREFIX = "workflow:"
+DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S = 3.0
+# Cloud Run sends SIGKILL 10s after SIGTERM; drain plus the gRPC grace period must finish before that.
+DEFAULT_SHUTDOWN_KILL_DEADLINE_S = 10.0
 
 # Mapping as in some versions of GitLab.com these are hard-coded as `experimental`
 # even though the flows were built upon v1 architecture.
@@ -520,7 +527,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             **catalog_kwargs,
         )
 
-        workflow_task = asyncio.create_task(workflow.run(goal))
+        workflow_task = asyncio.create_task(
+            workflow.run(goal), name=f"{WORKFLOW_TASK_NAME_PREFIX}{workflow_id}"
+        )
 
         async def receive_events():
             while True:
@@ -598,13 +607,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow already finished")
             elif AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
-                # Infrastructure-initiated stop (e.g. Workhorse pod rotation).
-                # WORKHORSE_SERVER_SHUTDOWN signals a graceful pod drain — return
-                # UNAVAILABLE so Workhorse knows to retry on another pod.
-                # Other infra stops (e.g. WebSocket ping failure) return OK.
+                # Infrastructure-initiated stop. UNAVAILABLE is the code Workhorse
+                # treats as "the session is resumable": for its own pod drain it is
+                # the ack its stop handshake waits for, and for a DWS drain it makes
+                # Workhorse send CloseGoingAway (1001) so the client reconnects and
+                # resumes from the last checkpoint. Workhorse never retries the gRPC
+                # call itself. Other infra stops (e.g. WebSocket ping failure) return OK.
                 if (
                     monitoring_context.workflow_stop_reason
-                    == "WORKHORSE_SERVER_SHUTDOWN"
+                    in SERVER_SHUTDOWN_STOP_REASONS
                 ):
                     context.set_code(grpc.StatusCode.UNAVAILABLE)
                     context.set_details(
@@ -1240,6 +1251,56 @@ async def serve(config: Config, port: int) -> None:
         log.info("Server shutdown complete")
 
 
+def _running_workflow_tasks() -> list[asyncio.Task]:
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if task.get_name().startswith(WORKFLOW_TASK_NAME_PREFIX) and not task.done()
+    ]
+
+
+async def drain_workflow_tasks(timeout: float) -> None:
+    """Cancel every in-flight workflow task so each RPC ends through the resumable infra-stop path.
+
+    Each task is cancelled with `AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST` after its MonitoringContext stop reason is
+    set to `DWS_SERVER_SHUTDOWN_STOP_REASON`, which makes the handler return UNAVAILABLE. Waits at most `timeout`
+    seconds for the tasks to finish and never raises: stragglers are logged as a warning and left to `server.stop`.
+
+    Args:
+        timeout: Seconds to wait for cancelled workflow tasks to finish.
+    """
+    tasks = _running_workflow_tasks()
+    if not tasks:
+        return
+
+    log.info("Draining in-flight workflows before shutdown", workflow_count=len(tasks))
+    for task in tasks:
+        # The task's context shares the MonitoringContext object with its RPC handler, which reads the stop reason.
+        monitoring_context = task.get_context().get(current_monitoring_context)
+        if monitoring_context:
+            monitoring_context.workflow_stop_reason = DWS_SERVER_SHUTDOWN_STOP_REASON
+        task.cancel(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST)
+
+    _, pending = await asyncio.wait(tasks, timeout=timeout)
+    if pending:
+        log.warning(
+            "Workflows still running after shutdown drain timeout",
+            workflow_count=len(pending),
+            workflow_tasks=[task.get_name() for task in pending],
+        )
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning(f"Invalid {name}, using default", value=raw, default=default)
+        return default
+
+
 def setup_signal_handlers(
     server: grpc.aio.Server,
     loop: asyncio.AbstractEventLoop,
@@ -1249,15 +1310,31 @@ def setup_signal_handlers(
 
     grace_period_env = os.environ.get("DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S")
     grace_period = int(grace_period_env) if grace_period_env else None
+    drain_timeout = _float_env(
+        "DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S", DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S
+    )
+    kill_deadline = _float_env(
+        "DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S", DEFAULT_SHUTDOWN_KILL_DEADLINE_S
+    )
+    if drain_timeout + (grace_period or 0) >= kill_deadline:
+        log.warning(
+            "Shutdown drain plus gRPC grace period reaches the SIGKILL deadline; "
+            "workflows still draining at that point will be killed mid-flight",
+            drain_timeout_s=drain_timeout,
+            grace_period_s=grace_period,
+            kill_deadline_s=kill_deadline,
+        )
+
+    async def shutdown():
+        await set_health_status(
+            health_servicer, health_pb2.HealthCheckResponse.NOT_SERVING
+        )
+        await drain_workflow_tasks(drain_timeout)
+        await server.stop(grace=grace_period)
 
     def handle_shutdown(sig):
         log.info(f"Received signal {sig}, initiating graceful shutdown")
-        asyncio.create_task(
-            set_health_status(
-                health_servicer, health_pb2.HealthCheckResponse.NOT_SERVING
-            )
-        )
-        asyncio.create_task(server.stop(grace=grace_period))
+        asyncio.create_task(shutdown())
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, functools.partial(handle_shutdown, sig))
