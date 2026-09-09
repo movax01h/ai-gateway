@@ -56,7 +56,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     uncompress_checkpoint,
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
-from duo_workflow_service.client_capabilities import is_client_capable
+from duo_workflow_service.checkpointer.write_mode import write_incremental_only
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
@@ -1617,10 +1617,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # The instance advertises that it keeps only the slim header and the blobs,
         # so channel_values in the payload are waste. Instances that don't advertise
         # it (older, or still shadow-writing) keep the full payload.
-        write_incremental_only = incremental_enabled and is_client_capable(
-            "incremental_checkpoints_only"
-        )
-        if write_incremental_only:
+        incremental_only = write_incremental_only(incremental_enabled)
+        if incremental_only:
             checkpoint_strategy = "incremental_only"
         elif incremental_enabled:
             checkpoint_strategy = "incremental"
@@ -1642,7 +1640,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "metadata": metadata,
         }
 
-        if write_incremental_only:
+        if incremental_only:
             # The skeleton (id, ts, v, channel_versions, versions_seen,
             # updated_channels) is what Rails stores as the header and what LangGraph
             # needs to rebuild a CheckpointTuple; the blobs carry the state itself.
@@ -1705,7 +1703,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 ),
                 channel_blobs_total_bytes=sum(len(b["data"]) for b in channel_blobs),
                 channel_blob_count=len(channel_blobs),
-                write_incremental_only=write_incremental_only,
+                write_incremental_only=incremental_only,
             )
 
         if (model_metadata := current_model_metadata_context.get()) is not None:

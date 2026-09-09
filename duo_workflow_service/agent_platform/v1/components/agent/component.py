@@ -704,6 +704,7 @@ class AgentComponent(AgentComponentBase):
     # Private attributes for key instances with default values.
     # Overridden by bind_to_supervisor when used as a subagent.
     _conversation_history_key: RuntimeIOKey = PrivateAttr()
+    _trim_ui_chat_log: bool = PrivateAttr(default=True)
     _output_key: RuntimeIOKey = PrivateAttr()
     _session_id_key: BaseIOKey = PrivateAttr()
     _tool_approval_decision_key: RuntimeIOKey = PrivateAttr()
@@ -869,6 +870,9 @@ class AgentComponent(AgentComponentBase):
             ),
         )
 
+        # The dispatch node appends this graph's final ui_chat_log to the
+        # parent's, so a trim here would drop the entries before it.
+        self._trim_ui_chat_log = False
         graph = StateGraph(FlowState)
         self.attach(graph, _TerminalRouter())
         graph.set_entry_point(self.__entry_hook__())
@@ -1018,6 +1022,7 @@ class AgentComponent(AgentComponentBase):
             ),
             cycle_budget=self._cycle_budget,
             response_schema_tool_choice=tool_choice,
+            trim_ui_chat_log=self._trim_ui_chat_log,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

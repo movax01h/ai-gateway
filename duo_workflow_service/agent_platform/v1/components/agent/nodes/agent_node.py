@@ -28,6 +28,9 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.checkpointer.write_mode import (
+    compaction_ui_chat_log_update,
+)
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
@@ -218,6 +221,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         cycle_budget: CycleBudget = CycleBudget(),
         prompt_template_inputs: Optional[dict[str, Any]] = None,
         response_schema_tool_choice: Literal["any", "auto"] = "any",
+        trim_ui_chat_log: bool = True,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -234,6 +238,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._invoke_config = invoke_config
         self._cycle_budget = cycle_budget
         self._response_schema_tool_choice = response_schema_tool_choice
+        self._trim_ui_chat_log = trim_ui_chat_log
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
@@ -566,6 +571,15 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     ui_updates = {
                         **ui_updates,
                         FlowStateKeys.UI_CHAT_LOG: [*base_logs, *optimizer_ui_logs],
+                    }
+                if self._trim_ui_chat_log and any(
+                    result.was_modified for result in optimization_results
+                ):
+                    ui_updates = {
+                        **ui_updates,
+                        FlowStateKeys.UI_CHAT_LOG: compaction_ui_chat_log_update(
+                            ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
+                        ),
                     }
                 state_update = merge_nested_dict(
                     ui_updates,

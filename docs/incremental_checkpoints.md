@@ -172,6 +172,10 @@ To make each group reconstruct on its own, the **start of every group** re-seeds
 
 `_serialize_all_channels_full` mirrors `_serialize_channel_blobs`'s JSON encoding and also covers every channel, but takes versions from the checkpoint's `channel_versions` rather than `new_versions`, since unchanged channels must be re-seeded too. Reconstruction of a group is then: group-start full snapshots + the group's later `conversation` deltas.
 
+`ui_chat_log` is trimmed at each compaction group start, keeping only the step's new entries and, when compaction ran, the summary card. This keeps the group-start snapshot under the size cap on long sessions. The trim runs behind the `write_incremental_only()` gate in `write_mode.py`, so instances without incremental-only checkpoints are unaffected. Checkpoint state reconstruction stays group-bounded as described above; the Rails `duoMessages` history read is the one reader that folds the write-path deltas and trimmed snapshots across groups, deduplicating by `message_id`.
+
+Because the trim shrinks the channel in state, every other group start (first checkpoint, stale-cache reset, or a non-append history splice such as the cancelled-tool reorder in `ChatAgent`) snapshots at most the entries since the last compaction, about one context window.
+
 The group boundary is keyed on `_prev_checkpoint_id`, **not** on `current_thread_started_at`. The started-at marker is `None` for checkpoint IDs that aren't time-based, which would otherwise re-seed every step. Outside a group boundary, behavior is the per-channel deltas described above.
 
 ## State across `aput` calls

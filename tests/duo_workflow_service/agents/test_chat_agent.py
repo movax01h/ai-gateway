@@ -40,6 +40,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     _conversation_history_reducer,
+    _ui_chat_log_reducer,
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -1405,6 +1406,76 @@ class TestChatAgentOptimizerPipeline:
         assert blobs[0]["step_action"] == "compaction"
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_trimmed_ui_chat_log_shares_the_compaction_group_start(
+        self, system_template_override, mock_toolset
+    ):
+        """The trim and the history rewrite land in one aput as two non-append deltas, so the checkpointer sees a single
+        compaction and both channels get a full snapshot (gitlab-org/gitlab#628017)."""
+        original = [HumanMessage(content=f"m{i}") for i in range(6)]
+        replaced = [AIMessage(content="summary"), HumanMessage(content="m5")]
+        result = _successful_compaction_result()
+        result.messages = replaced
+        result.ui_chat_logs = [
+            build_compaction_tool_card(
+                trigger="auto", result=result, status=ToolStatus.SUCCESS
+            )
+        ]
+        pipeline = _make_optimizer_pipeline_with_result(
+            result, optimized_history=replaced
+        )
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+
+        history_channel = BinaryOperatorAggregate(dict, _conversation_history_reducer)
+        history_channel.update([{"Chat Agent": original}])
+        ui_channel = BinaryOperatorAggregate(list, _ui_chat_log_reducer)
+        earlier_entries = [
+            UiChatLog(
+                message_type=MessageTypeEnum.USER,
+                message_sub_type=None,
+                content=f"m{i}",
+                timestamp="2026-01-01T00:00:00+00:00",
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id=f"m{i}",
+            )
+            for i in range(6)
+        ]
+        ui_channel.update([earlier_entries])
+        baseline = {
+            "conversation_history": history_channel.get(),
+            "ui_chat_log": ui_channel.get(),
+        }
+
+        state = {
+            **self._input_state(),
+            "conversation_history": history_channel.get(),
+            "ui_chat_log": ui_channel.get(),
+        }
+        response = await chat_agent.run(state)
+        history_channel.update([response["conversation_history"]])
+        ui_channel.update([response["ui_chat_log"]])
+
+        checkpoint = {
+            "channel_values": {
+                "conversation_history": history_channel.checkpoint(),
+                "ui_chat_log": ui_channel.checkpoint(),
+            }
+        }
+        blobs, is_compaction = _serialize_channel_blobs(
+            checkpoint, {"conversation_history": "2", "ui_chat_log": "2"}, baseline
+        )
+
+        assert is_compaction
+        assert {b["step_action"] for b in blobs} == {"compaction"}
+        assert len(ui_channel.get()) == 2
+        assert ui_channel.get()[-1]["message_sub_type"] == "compaction"
+
+    @pytest.mark.asyncio
     async def test_retry_correction_trace_persists_as_overwrite(
         self, system_template_override, mock_toolset
     ):
@@ -1521,6 +1592,65 @@ class TestChatAgentOptimizerPipeline:
         assert compaction_entry["tool_info"]["args"]["messages_summarized"] == 3
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_auto_compaction_trims_ui_chat_log_when_blobs_hold_history(
+        self, system_template_override, mock_toolset
+    ):
+        """Under incremental-only writes the step replaces ``ui_chat_log`` with its own entries and the summary card.
+
+        The blobs already hold every earlier entry, so state stops carrying the full log (gitlab-org/gitlab#628017).
+        """
+        result = _successful_compaction_result()
+        result.ui_chat_logs = [
+            build_compaction_tool_card(
+                trigger="auto", result=result, status=ToolStatus.SUCCESS
+            )
+        ]
+        pipeline = _make_optimizer_pipeline_with_result(result)
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+        state = self._input_state()
+        state["ui_chat_log"] = [
+            UiChatLog(
+                message_type=MessageTypeEnum.USER,
+                message_sub_type=None,
+                content="earlier",
+                timestamp="2026-01-01T00:00:00+00:00",
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id="earlier-id",
+            )
+        ]
+
+        response = await chat_agent.run(state)
+
+        update = response["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assistant_entry, compaction_entry = update.value
+        assert assistant_entry["content"] == "Assistant reply"
+        assert compaction_entry["message_sub_type"] == "compaction"
+        assert state["ui_chat_log"][0]["message_id"] == "earlier-id"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_ui_chat_log_still_appends_when_optimizer_left_history_alone(
+        self, system_template_override, mock_toolset
+    ):
+        result = OptimizationResult(messages=[HumanMessage(content="hi")])
+        pipeline = _make_optimizer_pipeline_with_result(result)
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+
+        response = await chat_agent.run(self._input_state())
+
+        assert isinstance(response["ui_chat_log"], list)
+        assert len(response["ui_chat_log"]) == 1
+
+    @pytest.mark.asyncio
     async def test_no_ui_logs_when_optimizer_produces_none(
         self, system_template_override, mock_toolset
     ):
@@ -1577,6 +1707,46 @@ class TestChatAgentOptimizerPipeline:
         assert len(ui_logs) == 2
         assert ui_logs[0]["message_id"].startswith("error-")
         assert ui_logs[1]["message_sub_type"] == "compaction"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    @patch("duo_workflow_service.agents.chat_agent.log_exception")
+    async def test_slash_command_validation_error_trims_ui_chat_log_after_compaction(
+        self,
+        _mock_log_exception,
+        system_template_override,
+        mock_toolset,
+    ):
+        result = _successful_compaction_result()
+        result.ui_chat_logs = [
+            build_compaction_tool_card(
+                trigger="auto", result=result, status=ToolStatus.SUCCESS
+            )
+        ]
+        pipeline = _make_optimizer_pipeline_with_result(result)
+
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_response = AsyncMock(
+            side_effect=SlashCommandValidationError(
+                "The command '/invalid' does not exist."
+            )
+        )
+        mock_prompt_adapter.get_model.return_value = Mock()
+        chat_agent = ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=Mock(spec=ToolsRegistry),
+            system_template_override=system_template_override,
+            toolset=mock_toolset,
+            optimizer_pipeline=pipeline,
+        )
+
+        response = await chat_agent.run(self._input_state())
+
+        update = response["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assert update.value[0]["message_id"].startswith("error-")
+        assert update.value[1]["message_sub_type"] == "compaction"
 
 
 def _manual_success_result() -> CompactionResult:
@@ -1741,6 +1911,43 @@ class TestChatAgentManualCompaction:
         assert isinstance(history_update, Overwrite)
         assert history_update.value["Chat Agent"] == compactor_result.messages
         assert state["conversation_history"]["Chat Agent"] == full_history
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_success_trims_ui_chat_log_when_blobs_hold_history(
+        self, chat_agent, mock_manual_compactor, input
+    ):
+        """Under incremental-only writes ``/compact`` replaces ``ui_chat_log`` with the summary card alone."""
+        history = [
+            HumanMessage(content="task"),
+            AIMessage(content="working on it"),
+            HumanMessage(content="/compact"),
+        ]
+        state = self._state_with_history(input, history)
+        compactor_result = mock_manual_compactor.optimize_manual.return_value
+
+        result = await chat_agent.run(state)
+
+        update = result["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assert update.value == list(compactor_result.ui_chat_logs)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_failure_keeps_appending_ui_chat_log(
+        self, chat_agent, mock_manual_compactor, input
+    ):
+        """A failed ``/compact`` leaves history alone, so the status entries append as before."""
+        mock_manual_compactor.optimize_manual.return_value = _manual_failure_result()
+        history = [
+            HumanMessage(content="task"),
+            AIMessage(content="working on it"),
+            HumanMessage(content="/compact"),
+        ]
+
+        result = await chat_agent.run(self._state_with_history(input, history))
+
+        assert isinstance(result["ui_chat_log"], list)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

@@ -10,6 +10,7 @@ import pytest
 from anthropic import APIStatusError
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.types import Overwrite
 
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
@@ -835,6 +836,65 @@ class TestAgentNodeHistoryOptimization:
             assert compaction_logs[0]["message_id"] == "compaction-test-id"
         else:
             assert len(compaction_logs) == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    @pytest.mark.parametrize("was_modified", [True, False])
+    async def test_run_trims_ui_chat_log_only_when_history_was_rewritten(
+        self,
+        was_modified,
+        agent_node,
+        base_flow_state,
+        optimizer_pipeline,
+        compaction_ui_log,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Under incremental-only writes a rewrite replaces ``ui_chat_log`` with this step's entries; an untouched
+        history keeps appending (gitlab-org/gitlab#628017)."""
+        result_obj = CompactionResult(messages=[], was_modified=was_modified)
+        result_obj.ui_chat_logs = [compaction_ui_log] if was_modified else []
+
+        async def optimize(history):
+            return history, [result_obj]
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        result = await agent_node.run(base_flow_state)
+
+        update = result.get(FlowStateKeys.UI_CHAT_LOG, [])
+        if was_modified:
+            assert isinstance(update, Overwrite)
+            assert update.value[-1]["message_id"] == "compaction-test-id"
+        else:
+            assert not isinstance(update, Overwrite)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_run_keeps_appending_when_trim_is_disabled(
+        self,
+        agent_node,
+        base_flow_state,
+        optimizer_pipeline,
+        compaction_ui_log,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Subagent graphs opt out: their final ui_chat_log is appended to the parent's by the dispatch node."""
+        agent_node._trim_ui_chat_log = False
+        result_obj = CompactionResult(messages=[], was_modified=True)
+        result_obj.ui_chat_logs = [compaction_ui_log]
+
+        async def optimize(history):
+            return history, [result_obj]
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        result = await agent_node.run(base_flow_state)
+
+        update = result[FlowStateKeys.UI_CHAT_LOG]
+        assert not isinstance(update, Overwrite)
+        assert update[-1]["message_id"] == "compaction-test-id"
 
     @pytest.mark.asyncio
     async def test_run_optimizer_logs_appended_after_base_ui_logs(
