@@ -38,7 +38,9 @@ from ai_gateway.model_metadata import (
 from ai_gateway.models import KindModelProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
-from ai_gateway.tracking import SnowplowEventContext
+from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
+from ai_gateway.tracking.errors import log_exception
+from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.feature_flags.context import current_feature_flag_context
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
@@ -104,6 +106,19 @@ class StreamHandler(Protocol):
         metadata: ResponseMetadataBase,
     ) -> Union[StreamSuggestionsResponse, EventSourceResponse]:
         pass
+
+
+@inject
+def _watch_code_suggestion_event(
+    context: SnowplowEventContext,
+    snowplow_instrumentator: SnowplowInstrumentator = Provide[
+        ContainerApplication.snowplow.instrumentator
+    ],
+) -> None:
+    try:
+        snowplow_instrumentator.watch(SnowplowEvent(context=context))
+    except Exception as e:
+        log_exception(e)
 
 
 async def code_suggestions(
@@ -252,6 +267,8 @@ async def code_completion(
         )
         if context_max_percent is not None:
             kwargs["context_max_percent"] = context_max_percent
+
+    _watch_code_suggestion_event(snowplow_event_context)
 
     suggestions = await engine.execute(
         prefix=payload.content_above_cursor,
@@ -402,6 +419,8 @@ async def code_generation(
             prompt_model_class=prompt.model.__class__.__name__,
             prompt_model_name=prompt.model_name,
         )
+
+    _watch_code_suggestion_event(snowplow_event_context)
 
     suggestion = await engine.execute(
         prefix=payload.content_above_cursor,
