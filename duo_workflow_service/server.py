@@ -54,6 +54,7 @@ from duo_workflow_service.executor.outbox import (
     OutgoingMessageTooLargeError,
 )
 from duo_workflow_service.flow_request import (
+    RegistryFlowRequest,
     normalize_catalog_items,
     normalize_flow_request,
 )
@@ -146,6 +147,7 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 # "ai" is wired recursively so a feature moved under ai/features/ keeps its
 # DWS @inject sites resolving with no per-module bookkeeping.
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
+FLOW_CONFIG_ID_CLAIM = "flow_config_id"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -395,6 +397,24 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             catalog_items = normalize_catalog_items(start_req, flow_request)
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+
+        claims_extra = user.claims.extra if user.claims else None
+        if (
+            not user.is_debug
+            and claims_extra is not None
+            and FLOW_CONFIG_ID_CLAIM in claims_extra
+        ):
+            authorized_flow_config_id = claims_extra[FLOW_CONFIG_ID_CLAIM]
+            if (
+                not isinstance(authorized_flow_config_id, str)
+                or not authorized_flow_config_id
+                or not isinstance(flow_request, RegistryFlowRequest)
+                or authorized_flow_config_id != flow_request.config_id
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the requested flow",
+                )
 
         workflow_definition = map_workflow_definition(
             flow_request.to_legacy_identifier()
@@ -992,6 +1012,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 for claim in _PROPAGATED_EXTRA_CLAIMS:
                     if claim in incoming_extra:
                         extra_claims[claim] = incoming_extra[claim]
+
+        if request.flow_config_id:
+            extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
 
         scopes = []
         if user.is_debug:

@@ -407,7 +407,11 @@ export interface RunGitCommand {
 /** GenerateTokenRequest initiates a token generation request for a workflow session. */
 export interface GenerateTokenRequest {
   /** workflowDefinition optionally specifies the workflow definition for which the token is issued. */
-  workflowDefinition?: string | undefined;
+  workflowDefinition?:
+    | string
+    | undefined;
+  /** flow_config_id identifies the foundational flow authorized for this token. */
+  flow_config_id?: string | undefined;
 }
 
 /** GenerateTokenResponse returns the generated token and its expiry information. */
@@ -3402,13 +3406,16 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
 };
 
 function createBaseGenerateTokenRequest(): GenerateTokenRequest {
-  return { workflowDefinition: undefined };
+  return { workflowDefinition: undefined, flow_config_id: undefined };
 }
 
 export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
   encode(message: GenerateTokenRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.workflowDefinition !== undefined) {
       writer.uint32(10).string(message.workflowDefinition);
+    }
+    if (message.flow_config_id !== undefined) {
+      writer.uint32(18).string(message.flow_config_id);
     }
     return writer;
   },
@@ -3428,6 +3435,14 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
           message.workflowDefinition = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.flow_config_id = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3440,6 +3455,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
   fromJSON(object: any): GenerateTokenRequest {
     return {
       workflowDefinition: isSet(object.workflowDefinition) ? globalThis.String(object.workflowDefinition) : undefined,
+      flow_config_id: isSet(object.flow_config_id) ? globalThis.String(object.flow_config_id) : undefined,
     };
   },
 
@@ -3447,6 +3463,9 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     const obj: any = {};
     if (message.workflowDefinition !== undefined) {
       obj.workflowDefinition = message.workflowDefinition;
+    }
+    if (message.flow_config_id !== undefined) {
+      obj.flow_config_id = message.flow_config_id;
     }
     return obj;
   },
@@ -3457,6 +3476,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
   fromPartial<I extends Exact<DeepPartial<GenerateTokenRequest>, I>>(object: I): GenerateTokenRequest {
     const message = createBaseGenerateTokenRequest();
     message.workflowDefinition = object.workflowDefinition ?? undefined;
+    message.flow_config_id = object.flow_config_id ?? undefined;
     return message;
   },
 };
