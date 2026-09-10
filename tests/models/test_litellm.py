@@ -7,7 +7,7 @@ from litellm.exceptions import APIConnectionError, InternalServerError
 
 from ai_gateway.config import ConfigBedrockGuardrail, get_config
 from ai_gateway.models import KindLiteLlmModel, LiteLlmChatModel
-from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.base import KindModelProvider, ModelMetadata
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
@@ -15,6 +15,8 @@ from ai_gateway.models.litellm import (
     LiteLlmAPIConnectionError,
     LiteLlmInternalServerError,
     LiteLlmTextGenModel,
+    ModelCompletionType,
+    _init_litellm_model_metadata,
 )
 from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.tracking import SnowplowEventContext
@@ -254,6 +256,15 @@ class TestLiteLlmChatModel:
         # A model without an entry in MODEL_SPECIFICATIONS exposes an empty
         # specifications mapping.
         assert lite_llm_chat_model.specifications == {}
+
+    def test_specifications_returns_empty_when_provider_is_none(self):
+        model = LiteLlmChatModel(
+            model_name=KindLiteLlmModel.MISTRAL,
+            provider=None,
+            metadata=ModelMetadata(name="mistral", engine="litellm"),
+        )
+
+        assert model.specifications == {}
 
     def test_request_timeout_uses_global_config(self, lite_llm_chat_model):
         # A global AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT applies to every chat
@@ -503,6 +514,57 @@ class TestLiteLlmTextGenModel:
     def test_max_model_len(self, model_name: str, expected_limit: int):
         model = LiteLlmTextGenModel.from_model_name(name=model_name)
         assert model.input_token_limit == expected_limit
+
+    def test_specifications_returns_empty_when_provider_is_none(self):
+        model = LiteLlmTextGenModel(
+            using_cache=True,
+            model_name=KindLiteLlmModel.CODEGEMMA,
+            provider=None,
+            metadata=ModelMetadata(name="codegemma", engine="litellm"),
+        )
+
+        assert model.specifications == {}
+
+    def test_from_model_name_raises_when_provider_is_none(self):
+        with pytest.raises(ValueError, match="Provider is required"):
+            LiteLlmTextGenModel.from_model_name(name="codegemma", provider=None)
+
+    @pytest.mark.parametrize(
+        ("provider", "name", "match"),
+        [
+            (
+                KindModelProvider.MISTRALAI,
+                "codestral",
+                "provider_keys is required for MistralAI provider",
+            ),
+            (
+                KindModelProvider.FIREWORKS,
+                "codestral-2501",
+                "provider_keys is required for Fireworks provider",
+            ),
+        ],
+    )
+    def test_from_model_name_raises_when_provider_keys_missing(
+        self, provider, name, match
+    ):
+        with pytest.raises(ValueError, match=match):
+            LiteLlmTextGenModel.from_model_name(name=name, provider=provider)
+
+    @pytest.mark.asyncio
+    async def test_generate_raises_when_fim_format_missing(
+        self, lite_llm_text_model, mock_litellm_acompletion
+    ):
+        with (
+            patch(
+                "ai_gateway.models.litellm.LiteLlmTextGenModel.specifications",
+                new_callable=PropertyMock,
+                return_value={"completion_type": ModelCompletionType.FIM},
+            ),
+            pytest.raises(
+                ValueError, match="fim_format is missing from specifications"
+            ),
+        ):
+            await lite_llm_text_model.generate(prefix="def hello():")
 
     def test_request_timeout_uses_global_config(self, lite_llm_text_model):
         # A global AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT applies to every text-gen
@@ -1251,6 +1313,11 @@ class TestLiteLlmTextGenModel:
             assert isinstance(passed_exception, OverloadedError)
             assert "Overloaded" in str(passed_exception)
             watcher.finish.assert_called_once()
+
+
+def test_init_litellm_model_metadata_raises_when_provider_is_none():
+    with pytest.raises(ValueError, match="Provider is required"):
+        _init_litellm_model_metadata(metadata=None, provider=None)
 
 
 class TestBedrockGuardrailConfig:
