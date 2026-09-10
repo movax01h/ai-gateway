@@ -1219,3 +1219,57 @@ class TestSastFixValidationIsDeterministic:
             assert set(routes) == {self.PROCEED_ROUTE, BaseRouter.DEFAULT_ROUTE}, (
                 f"{version}: only an exact clean-exit 'proceed' may reach commit_changes"
             )
+
+
+class TestCodeReviewFlowConfigs:
+    """Regression guard for the code_review flow config publish-step settings.
+
+    Ensures that both shipped code_review flow versions configure the
+    ``perform_code_review_and_publish`` component with ``tool_choice: any`` so
+    the model is forced to call the publish tool rather than silently emitting
+    prose. ``LocalPromptRegistry`` translates that semantic value into each
+    client's wire format.
+    """
+
+    @pytest.mark.parametrize(
+        "config_file",
+        sorted((FlowConfig.DIRECTORY_PATH / "code_review").glob("*.yml")),
+        ids=lambda p: p.stem,
+    )
+    def test_code_review_configs_load_successfully(self, config_file):
+        """Each code_review config file must parse without errors."""
+        config_data = yaml.safe_load(config_file.read_text())
+        config = FlowConfig(**config_data)
+        assert config is not None
+
+    @pytest.mark.parametrize(
+        "config_file",
+        sorted((FlowConfig.DIRECTORY_PATH / "code_review").glob("*.yml")),
+        ids=lambda p: p.stem,
+    )
+    def test_perform_code_review_and_publish_forces_a_tool_call(self, config_file):
+        """perform_code_review_and_publish must declare tool_choice: any.
+
+        Without this the model may emit prose instead of calling the publish
+        tool, causing the workflow to terminate as a silent success with no
+        comments posted.
+
+        "any" is the semantic value meaning "call one of your tools". Flow configs
+        never encode a provider wire format: LocalPromptRegistry translates it per
+        client, because direct ChatAnthropic needs "any" while everything routed
+        through LiteLLM needs "required".
+        """
+        config_data = yaml.safe_load(config_file.read_text())
+        publish_components = [
+            c
+            for c in config_data.get("components", [])
+            if c.get("name") == "perform_code_review_and_publish"
+        ]
+        assert publish_components, (
+            f"{config_file.stem}: no 'perform_code_review_and_publish' component found"
+        )
+        component = publish_components[0]
+        assert component.get("tool_choice") == "any", (
+            f"{config_file.stem}: perform_code_review_and_publish must set "
+            f"tool_choice: any (got {component.get('tool_choice')!r})"
+        )

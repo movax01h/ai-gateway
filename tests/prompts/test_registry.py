@@ -708,12 +708,22 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
             assert call_dict["gitlab_feature_enabled_by_namespace_ids"] is None
 
     @pytest.mark.usefixtures("mock_fs")
-    @pytest.mark.parametrize("tool_choice", ["auto", "any", None])
+    @pytest.mark.parametrize(
+        ("tool_choice", "expected_tool_choice"),
+        [
+            ("auto", "auto"),
+            # The fixture model resolves to a LiteLLM provider, so the semantic "any"
+            # is translated to the wire value LiteLLM accepts.
+            ("any", "required"),
+            (None, None),
+        ],
+    )
     def test_get_with_tool_choice(
         self,
         registry: LocalPromptRegistry,
         tools: list[BaseTool],
         tool_choice: str | None,
+        expected_tool_choice: str | None,
     ):
         """Test that tool_choice parameter is correctly passed from get method to Prompt constructor."""
         with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
@@ -725,7 +735,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
             )
 
         kwargs = prompt_class.call_args.kwargs
-        assert kwargs.get("tool_choice") == tool_choice
+        assert kwargs.get("tool_choice") == expected_tool_choice
         assert kwargs.get("tools") == tools
 
     @pytest.mark.usefixtures("mock_fs")
@@ -1185,85 +1195,95 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
         )
 
     @pytest.mark.parametrize(
-        ("tool_choice", "model_identifier", "expected_tool_choice"),
+        ("tool_choice", "model_class_provider", "expected_tool_choice"),
         [
-            # Bedrock models: 'any' should be converted to 'required'
-            ("any", "bedrock/anthropic.claude-v2", "required"),
-            ("any", "bedrock/anthropic.claude-3-sonnet-20240229-v1:0", "required"),
-            ("any", "bedrock/meta.llama3-70b-instruct-v1:0", "required"),
-            # Bedrock Mantle models: 'any' should be converted to 'required'
-            ("any", "bedrock_mantle/openai.gpt-5.5", "required"),
-            ("any", "bedrock_mantle/anthropic.claude-mythos-preview", "required"),
-            # Azure models: 'any' should be converted to 'required'
-            ("any", "azure/gpt-4", "required"),
-            ("any", "azure/gpt-35-turbo", "required"),
-            ("any", "azure/claude-3-opus", "required"),
-            # Non-bedrock/azure models: 'any' should remain 'any'
-            ("any", "anthropic/claude-3-opus-20240229", "any"),
-            ("any", "openai/gpt-4", "any"),
-            ("any", "vertex_ai/claude-3-sonnet", "any"),
-            # Other tool_choice values should remain unchanged
-            ("auto", "bedrock/anthropic.claude-v2", "auto"),
-            ("required", "bedrock/anthropic.claude-v2", "required"),
-            ("none", "bedrock/anthropic.claude-v2", "none"),
-            (None, "bedrock/anthropic.claude-v2", None),
-            ("auto", "azure/gpt-4", "auto"),
-            # Edge cases
-            ("any", None, "any"),  # No model identifier
-            (
-                "any",
-                "vertex_ai/bedrock-model",
-                "any",
-            ),  # "bedrock" not in provider position
-            (
-                "any",
-                "vertex_ai/azure-model",
-                "any",
-            ),  # "azure" not in provider position
+            # Direct ChatAnthropic is the only client that takes a bare "any": it maps
+            # any other string to {"type": "tool", "name": <string>}, so "required"
+            # would be read as a tool name.
+            ("any", ModelClassProvider.ANTHROPIC, "any"),
+            # Everything routed through LiteLLM (self-hosted OpenAI-compatible,
+            # Bedrock, Azure, Vertex) drops or rejects a bare "any".
+            ("any", ModelClassProvider.LITE_LLM, "required"),
+            ("any", ModelClassProvider.LITE_LLM_COMPLETION, "required"),
+            ("any", ModelClassProvider.LITE_LLM_EMBEDDING, "required"),
+            # These accept both; "required" is the safe common value.
+            ("any", ModelClassProvider.OPENAI, "required"),
+            ("any", ModelClassProvider.GOOGLE_GENAI, "required"),
+            # `ChatAmazonQ` does not override `bind_tools`, so `BaseChatModel.bind_tools`
+            # raises `NotImplementedError` before `tool_choice` is ever read. The value is
+            # inert here; the case only pins the non-Anthropic fallback.
+            ("any", ModelClassProvider.AMAZON_Q, "required"),
+            # Any other tool_choice is passed through untouched.
+            ("auto", ModelClassProvider.LITE_LLM, "auto"),
+            ("auto", ModelClassProvider.ANTHROPIC, "auto"),
+            ("required", ModelClassProvider.LITE_LLM, "required"),
+            ("required", ModelClassProvider.ANTHROPIC, "required"),
+            ("none", ModelClassProvider.LITE_LLM, "none"),
+            (None, ModelClassProvider.LITE_LLM, None),
+            (None, ModelClassProvider.ANTHROPIC, None),
         ],
     )
     def test_adjust_tool_choice_for_model(
         self,
         registry: LocalPromptRegistry,
         tool_choice: str | None,
-        model_identifier: str | None,
+        model_class_provider: ModelClassProvider,
         expected_tool_choice: str | None,
-        llm_definition: LLMDefinition,
     ):
-        """Test that tool_choice is adjusted correctly based on model identifier."""
-        model_metadata = None
-        if model_identifier:
-            model_metadata = ModelMetadata(
-                provider="custom",
-                name="test_model",
-                identifier=model_identifier,
-                llm_definition=llm_definition,
-            )
-
-        result = registry._adjust_tool_choice_for_model(tool_choice, model_metadata)
+        """The semantic "any" is translated to each client's wire value."""
+        result = registry._adjust_tool_choice_for_model(
+            tool_choice, model_class_provider
+        )
         assert result == expected_tool_choice
 
-    def test_adjust_tool_choice_for_model_without_metadata(
-        self,
-        registry: LocalPromptRegistry,
-    ):
-        """Test that tool_choice remains unchanged when model_metadata is None."""
-        result = registry._adjust_tool_choice_for_model("any", None)
-        assert result == "any"
-
     @pytest.mark.usefixtures("mock_fs")
-    def test_build_prompt_with_bedrock_model_adjusts_tool_choice(
+    def test_build_prompt_with_litellm_model_adjusts_tool_choice(
         self,
         registry: LocalPromptRegistry,
         prompt_config: PromptConfig,
         tools: list[BaseTool],
         llm_definition: LLMDefinition,
     ):
-        """Test that tool_choice is automatically adjusted when getting a prompt with a Bedrock model."""
-        bedrock_metadata = ModelMetadata(
+        """A LiteLLM-routed model gets the "required" wire value."""
+        litellm_metadata = ModelMetadata(
             provider="custom",
             name="bedrock_model",
             identifier="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+            llm_definition=llm_definition,
+        )
+
+        with patch("ai_gateway.prompts.registry.Prompt") as prompt_class:
+            registry._build_prompt(
+                model_class_provider=ModelClassProvider.LITE_LLM,
+                config=prompt_config,
+                prompt_id="test",
+                prompt_version="^1.0.0",
+                model_metadata=litellm_metadata,
+                tools=tools,
+                tool_choice="any",
+            )
+
+        kwargs = prompt_class.call_args.kwargs
+        assert kwargs.get("tool_choice") == "required"
+        assert kwargs.get("tools") == tools
+
+    def test_build_prompt_with_anthropic_model_keeps_any_tool_choice(
+        self,
+        registry: LocalPromptRegistry,
+        prompt_config: PromptConfig,
+        tools: list[BaseTool],
+        llm_definition: LLMDefinition,
+    ):
+        """Direct ChatAnthropic must keep "any".
+
+        `ChatAnthropic.bind_tools` maps a bare string that is not "any"/"auto" to
+        `{"type": "tool", "name": <string>}`, so sending "required" would ask Anthropic
+        for a tool literally named "required" and the request would fail.
+        """
+        anthropic_metadata = ModelMetadata(
+            provider="custom",
+            name="anthropic_model",
+            identifier="anthropic/claude-3-opus-20240229",
             llm_definition=llm_definition,
         )
 
@@ -1273,14 +1293,13 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 config=prompt_config,
                 prompt_id="test",
                 prompt_version="^1.0.0",
-                model_metadata=bedrock_metadata,
+                model_metadata=anthropic_metadata,
                 tools=tools,
                 tool_choice="any",
             )
 
         kwargs = prompt_class.call_args.kwargs
-        # tool_choice should be converted from 'any' to 'required'
-        assert kwargs.get("tool_choice") == "required"
+        assert kwargs.get("tool_choice") == "any"
         assert kwargs.get("tools") == tools
 
     def test_completion_prompt_uses_passthrough_template(
@@ -1314,15 +1333,21 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
         assert isinstance(prompt.prompt_tpl, RunnableLambda)
 
     @pytest.mark.usefixtures("mock_fs")
-    def test_build_prompt_with_azure_model_adjusts_tool_choice(
+    def test_build_prompt_ignores_model_identifier_when_adjusting_tool_choice(
         self,
         registry: LocalPromptRegistry,
         prompt_config: PromptConfig,
         tools: list[BaseTool],
         llm_definition: LLMDefinition,
     ):
-        """Test that tool_choice is automatically adjusted when getting a prompt with an Azure model."""
-        azure_metadata = ModelMetadata(
+        """The model identifier must not participate in the tool_choice decision.
+
+        `_adjust_tool_choice_for_model` used to string-match `bedrock/`, `bedrock_mantle/` and
+        `azure/` identifier prefixes. It now switches on the resolved `ModelClassProvider` only,
+        so an `azure/` identifier resolving through `ANTHROPIC` must keep "any" — this is the
+        guard against reintroducing identifier matching.
+        """
+        azure_identifier_metadata = ModelMetadata(
             provider="custom",
             name="azure_model",
             identifier="azure/gpt-4",
@@ -1335,14 +1360,13 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 config=prompt_config,
                 prompt_id="test",
                 prompt_version="^1.0.0",
-                model_metadata=azure_metadata,
+                model_metadata=azure_identifier_metadata,
                 tools=tools,
                 tool_choice="any",
             )
 
         kwargs = prompt_class.call_args.kwargs
-        # tool_choice should be converted from 'any' to 'required'
-        assert kwargs.get("tool_choice") == "required"
+        assert kwargs.get("tool_choice") == "any"
         assert kwargs.get("tools") == tools
 
     def test_build_prompt_calls_prompt_initializer_with_expected_params(
