@@ -158,7 +158,17 @@ export interface ActionResponse {
     | HttpResponse
     | undefined;
   /** scheduleNotificationResponse acknowledges a ScheduleNotification action. */
-  scheduleNotificationResponse?: ScheduleNotificationResponse | undefined;
+  scheduleNotificationResponse?:
+    | ScheduleNotificationResponse
+    | undefined;
+  /**
+   * imageResponse carries a successful image result from an image-capable
+   * executor action. Emitting it is gated on negotiated support: every hop
+   * (including the GitLab instance's Workhorse, which transcodes with its
+   * own compiled-in bindings) must know this field, or the response is
+   * dropped in transit.
+   */
+  imageResponse?: ImageResponse | undefined;
 }
 
 /** HeartbeatRequest is sent periodically by the client to keep the session alive. */
@@ -212,6 +222,30 @@ export interface ScheduleNotificationResponse {
    * timestamp. Empty when the notification was not accepted.
    */
   fires_at: string;
+}
+
+/**
+ * ImageResponse holds a successful image result from an executor action, so the
+ * service can build a model-visible image block without inferring the content
+ * type from a text response. Failed reads keep using PlainTextResponse.error.
+ * The whole ActionResponse must fit the 4 MiB message budget, and the service
+ * validates the payload (allowed formats, size cap, signature against the
+ * declared type) before anything reaches a model. No client emits this yet:
+ * tool-read images currently travel as a JSON envelope inside
+ * PlainTextResponse.response, and adoption of this message is coordinated
+ * work across the service, Workhorse bindings and the client.
+ */
+export interface ImageResponse {
+  /**
+   * mime_type is the declared image format (e.g. image/png); the service
+   * must validate it against its allowlist and the payload's actual bytes.
+   */
+  mime_type: string;
+  /**
+   * data is the encoded image file bytes, such as PNG or JPEG file content,
+   * not raw pixel data. Encoded as base64 on JSON transports (protojson).
+   */
+  data: Buffer;
 }
 
 /** Action is a server-initiated request for the executor to perform a specific operation. */
@@ -1559,6 +1593,7 @@ function createBaseActionResponse(): ActionResponse {
     plainTextResponse: undefined,
     httpResponse: undefined,
     scheduleNotificationResponse: undefined,
+    imageResponse: undefined,
   };
 }
 
@@ -1575,6 +1610,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.scheduleNotificationResponse !== undefined) {
       ScheduleNotificationResponse.encode(message.scheduleNotificationResponse, writer.uint32(42).fork()).join();
+    }
+    if (message.imageResponse !== undefined) {
+      ImageResponse.encode(message.imageResponse, writer.uint32(50).fork()).join();
     }
     return writer;
   },
@@ -1618,6 +1656,14 @@ export const ActionResponse: MessageFns<ActionResponse> = {
           message.scheduleNotificationResponse = ScheduleNotificationResponse.decode(reader, reader.uint32());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.imageResponse = ImageResponse.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1637,6 +1683,7 @@ export const ActionResponse: MessageFns<ActionResponse> = {
       scheduleNotificationResponse: isSet(object.scheduleNotificationResponse)
         ? ScheduleNotificationResponse.fromJSON(object.scheduleNotificationResponse)
         : undefined,
+      imageResponse: isSet(object.imageResponse) ? ImageResponse.fromJSON(object.imageResponse) : undefined,
     };
   },
 
@@ -1653,6 +1700,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.scheduleNotificationResponse !== undefined) {
       obj.scheduleNotificationResponse = ScheduleNotificationResponse.toJSON(message.scheduleNotificationResponse);
+    }
+    if (message.imageResponse !== undefined) {
+      obj.imageResponse = ImageResponse.toJSON(message.imageResponse);
     }
     return obj;
   },
@@ -1673,6 +1723,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
       (object.scheduleNotificationResponse !== undefined && object.scheduleNotificationResponse !== null)
         ? ScheduleNotificationResponse.fromPartial(object.scheduleNotificationResponse)
         : undefined;
+    message.imageResponse = (object.imageResponse !== undefined && object.imageResponse !== null)
+      ? ImageResponse.fromPartial(object.imageResponse)
+      : undefined;
     return message;
   },
 };
@@ -2160,6 +2213,82 @@ export const ScheduleNotificationResponse: MessageFns<ScheduleNotificationRespon
     message.accepted = object.accepted ?? false;
     message.reason = object.reason ?? "";
     message.fires_at = object.fires_at ?? "";
+    return message;
+  },
+};
+
+function createBaseImageResponse(): ImageResponse {
+  return { mime_type: "", data: Buffer.alloc(0) };
+}
+
+export const ImageResponse: MessageFns<ImageResponse> = {
+  encode(message: ImageResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.mime_type !== "") {
+      writer.uint32(10).string(message.mime_type);
+    }
+    if (message.data.length !== 0) {
+      writer.uint32(18).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ImageResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseImageResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.mime_type = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ImageResponse {
+    return {
+      mime_type: isSet(object.mime_type) ? globalThis.String(object.mime_type) : "",
+      data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0),
+    };
+  },
+
+  toJSON(message: ImageResponse): unknown {
+    const obj: any = {};
+    if (message.mime_type !== "") {
+      obj.mime_type = message.mime_type;
+    }
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ImageResponse>, I>>(base?: I): ImageResponse {
+    return ImageResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ImageResponse>, I>>(object: I): ImageResponse {
+    const message = createBaseImageResponse();
+    message.mime_type = object.mime_type ?? "";
+    message.data = object.data ?? Buffer.alloc(0);
     return message;
   },
 };
@@ -6428,6 +6557,14 @@ export const DuoWorkflowClient = makeGenericClientConstructor(DuoWorkflowService
   service: typeof DuoWorkflowService;
   serviceName: string;
 };
+
+function bytesFromBase64(b64: string): Uint8Array {
+  return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+}
+
+function base64FromBytes(arr: Uint8Array): string {
+  return globalThis.Buffer.from(arr).toString("base64");
+}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
