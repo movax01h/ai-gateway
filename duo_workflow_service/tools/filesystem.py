@@ -9,10 +9,13 @@ from langchain_core.tools.base import ToolException
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
+from duo_workflow_service.entities.image_response import image_response_to_blocks
 from duo_workflow_service.executor.action import (
     _execute_action,
+    _execute_action_accepting_image,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.image_result import ImageActionResult
 from duo_workflow_service.policies.file_exclusion_policy import (
     CONTEXT_EXCLUSION_MESSAGE,
     FileExclusionPolicy,
@@ -195,6 +198,9 @@ class ReadFile(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read the contents of a file.
 
+    Image files (PNG, JPEG, WebP) are supported: reading one returns the
+    actual image so you can see its contents.
+
     Batching:
     - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
     - Do not make separate turns for each file - group all related file reads together.
@@ -209,16 +215,19 @@ class ReadFile(DuoBaseTool):
         "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
     ]
 
-    async def _execute(self, file_path: str) -> str:
+    async def _execute(self, file_path: str) -> str | list:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        return await _execute_action(
+        response = await _execute_action_accepting_image(
             self.metadata,  # type: ignore
             contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=file_path)),
         )
+        if isinstance(response, ImageActionResult):
+            return image_response_to_blocks(response, file_path=file_path)
+        return response
 
     def format_display_message(
         self, args: ReadFileInput, _tool_response: Any = None
@@ -261,6 +270,8 @@ class ReadFileChunked(DuoBaseTool):
     - Only read files directly relevant to the current task. Do NOT speculatively read unrelated files or entire directories.
     - Returns up to 2000 lines from offset (0-indexed).
     - For large files (>100 lines), specify offset and limit to inspect only the relevant section.
+    - Image files (PNG, JPEG, WebP) are supported and return the actual image so you can see its contents.
+    - Offset/limit do not apply to images.
 
     {GITIGNORED_FILE_NOTE}
     """
@@ -274,13 +285,13 @@ class ReadFileChunked(DuoBaseTool):
         file_path: str,
         offset: int = DEFAULT_READ_FILE_OFFSET,
         limit: int = DEFAULT_READ_FILE_LIMIT,
-    ) -> str:
+    ) -> str | list:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        return await _execute_action(
+        response = await _execute_action_accepting_image(
             self.metadata,  # type: ignore
             contract_pb2.Action(
                 runReadFile=contract_pb2.ReadFile(
@@ -288,6 +299,9 @@ class ReadFileChunked(DuoBaseTool):
                 )
             ),
         )
+        if isinstance(response, ImageActionResult):
+            return image_response_to_blocks(response, file_path=file_path)
+        return response
 
     def format_display_message(
         self, args: ReadFileChunkedInput, _tool_response: Any = None
@@ -306,6 +320,8 @@ class ReadFilesInput(BaseModel):
 class ReadFiles(DuoBaseTool):
     name: str = "read_files"
     description: str = f"""Read one or more files in a single operation.
+
+    Image files are not supported here: read them individually with read_file.
 
     {GITIGNORED_FILE_NOTE}
     """
