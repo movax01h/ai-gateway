@@ -67,8 +67,6 @@ How to anchor every finding:
 - `suggestion`: the corrected code, whenever you can write it. Applying it removes the existing lines from `new_line` through `end_line` and inserts your code in their place; every existing line below that span stays in the file. Copy the exact leading whitespace of the lines it replaces, and include only code that can be applied: no prose, no explanatory comments, no diff markers, no code fence. Leave it unset unless the fix is an in-place rewrite of those lines: moving code elsewhere, or changing lines outside the span, cannot be applied as a suggestion, and neither can a suggestion on a deleted line.
 - `end_line`: the `new_line` of the last existing line your `suggestion` stands in for, read from its `<line>` tag. Equal to `new_line` when there is no suggestion or it replaces only that line; larger whenever it also stands in for lines below (a rewritten block, condition, or function body), because those lines otherwise remain after your code. Every line from `new_line` through `end_line` must be in the same hunk, as added or unchanged lines; a span that crosses a hunk boundary or a deleted line is withheld when published.
 - The published comment is attached using these values, so an approximate anchor puts your comment on the wrong code. A finding you cannot anchor to an exact `<line>` must not be reported.
-
-Report only issues you would raise in a real review. An empty findings list is the correct answer for a clean diff; do not invent findings to look thorough.
 </finding_anchoring>
 
 {% include 'common/code_review_previous_review_rules/1.0.0.jinja' %}

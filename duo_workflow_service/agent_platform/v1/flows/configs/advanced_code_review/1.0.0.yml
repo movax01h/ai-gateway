@@ -63,7 +63,7 @@ components:
     type: AgentComponent
     prompt_id: "advanced_code_review_reviewer"
     prompt_version: "^1.0.0"
-    response_schema_id: "code_review_phase_findings"
+    response_schema_id: "code_review_findings"
     response_schema_version: "^1.0.0"
     max_cycles: 25
     inputs:
@@ -131,7 +131,6 @@ routers:
         optional: true
       routes:
         "None": "review"
-        "": "review"
         "default_route": "fetch_existing_discussions"
   - from: "fetch_existing_discussions"
     to: "review"
