@@ -530,10 +530,22 @@ async def test_sentry_root_span_keeps_concurrent_rpcs_isolated(sentry_events):
     await asyncio.gather(first_rpc(), second_rpc())
     sentry_sdk.flush()
 
-    spans_by_transaction = {
-        event["transaction"]: [span["description"] for span in event["spans"]]
+    # sentry-sdk sends child spans as standalone envelope items (not nested in
+    # event["spans"]), so match them back to their transaction via trace_id.
+    transaction_by_trace_id = {
+        event["contexts"]["trace"]["trace_id"]: event["transaction"]
         for event in sentry_events
+        if event.get("type") == "transaction"
     }
+
+    spans_by_transaction: dict[str, list[str]] = {
+        name: [] for name in transaction_by_trace_id.values()
+    }
+
+    for event in sentry_events:
+        for span in event.get("items", []):
+            transaction = transaction_by_trace_id[span["trace_id"]]
+            spans_by_transaction[transaction].append(span["name"])
 
     assert spans_by_transaction == {
         "/DuoWorkflow/FirstFlow": ["child-of-first"],
