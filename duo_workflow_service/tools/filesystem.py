@@ -9,7 +9,10 @@ from langchain_core.tools.base import ToolException
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
-from duo_workflow_service.entities.image_response import image_response_to_blocks
+from duo_workflow_service.entities.image_response import (
+    image_response_to_blocks,
+    supported_image_formats_display,
+)
 from duo_workflow_service.executor.action import (
     _execute_action,
     _execute_action_accepting_image,
@@ -198,8 +201,8 @@ class ReadFile(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read the contents of a file.
 
-    Image files (PNG, JPEG, WebP) are supported: reading one returns the
-    actual image so you can see its contents.
+    Image files ({supported_image_formats_display()}) are supported: reading
+    one returns the actual image so you can see its contents.
 
     Batching:
     - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
@@ -270,7 +273,7 @@ class ReadFileChunked(DuoBaseTool):
     - Only read files directly relevant to the current task. Do NOT speculatively read unrelated files or entire directories.
     - Returns up to 2000 lines from offset (0-indexed).
     - For large files (>100 lines), specify offset and limit to inspect only the relevant section.
-    - Image files (PNG, JPEG, WebP) are supported and return the actual image so you can see its contents.
+    - Image files ({supported_image_formats_display()}) are supported and return the actual image so you can see its contents.
     - Offset/limit do not apply to images.
 
     {GITIGNORED_FILE_NOTE}

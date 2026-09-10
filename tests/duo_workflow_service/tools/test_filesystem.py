@@ -7,6 +7,9 @@ import pytest
 from langchain.tools import ToolException
 
 from contract import contract_pb2
+from duo_workflow_service.entities.image_response import (
+    supported_image_formats_display,
+)
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
@@ -1542,7 +1545,12 @@ class TestImageSupportAdvertised:
     # model sees is the instance's, after every model validator has run.
     @pytest.mark.parametrize("tool_class", [ReadFile, ReadFileChunked])
     def test_description_mentions_images(self, tool_class):
-        assert "Image files (PNG, JPEG, WebP) are supported" in tool_class().description
+        # Derived from the allowlist, so the advertised list cannot drift from
+        # what conversion actually accepts.
+        assert (
+            f"Image files ({supported_image_formats_display()}) are supported"
+            in tool_class().description
+        )
 
     def test_read_files_points_images_at_read_file(self):
         assert "read them individually with read_file" in ReadFiles().description

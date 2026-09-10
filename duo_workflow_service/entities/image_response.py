@@ -19,7 +19,7 @@ Validation notes:
 """
 
 import base64
-from typing import Union
+from typing import Any, Union
 
 from duo_workflow_service.entities.attachments import (
     ALLOWED_IMAGE_MIME_TYPES,
@@ -33,6 +33,28 @@ from duo_workflow_service.executor.image_result import ImageActionResult
 # and HEIC are out), and the client executor mirrors it when deciding whether
 # to emit an image response.
 SUPPORTED_IMAGE_MIME_TYPES = ALLOWED_IMAGE_MIME_TYPES
+
+# Human-readable names for the supported formats, in the order the tool
+# descriptions present them. Keyed by the same mime types as the allowlist and
+# asserted to cover it (test_supported_formats_display_covers_the_allowlist),
+# so adding a format without naming it fails loudly instead of silently
+# leaving the tool descriptions stale — the model only attempts image reads
+# the description advertises.
+_FORMAT_DISPLAY_NAMES = {
+    "image/png": "PNG",
+    "image/jpeg": "JPEG",
+    "image/webp": "WebP",
+}
+
+
+def supported_image_formats_display() -> str:
+    """The advertised format list (e.g. "PNG, JPEG, WebP"), derived from the allowlist."""
+    return ", ".join(
+        name
+        for mime_type, name in _FORMAT_DISPLAY_NAMES.items()
+        if mime_type in SUPPORTED_IMAGE_MIME_TYPES
+    )
+
 
 # Decoded-size ceiling for a single image. A tool result has to fit the 4 MiB
 # gRPC message budget, and 2 MiB decoded is ~2.7 MiB once base64 inflates it
@@ -55,16 +77,18 @@ def _invalid_image_response(reason: str) -> str:
 
 def image_response_to_blocks(
     image: ImageActionResult, *, file_path: str | None = None
-) -> Union[str, list]:
+) -> Union[str, list[dict[str, Any]]]:
     """Convert a typed executor image result into content blocks.
-
-    For a valid image, returns ``[text block, image block]`` where the text
-    block anchors the image in history (path, mime type, size). For an invalid
-    one, returns an error string the model can act on.
 
     Args:
         image: The typed result surfaced from ``ActionResponse.imageResponse``.
         file_path: The path the tool read, included in the text lead-in.
+
+    Returns:
+        ``[text block, image block]`` for a valid image, where the text block
+        anchors the image in history (path, mime type, size). An error string
+        the model can act on for an invalid one (unsupported or mismatched
+        type, empty payload, over the size cap).
     """
     if image.mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
         return _invalid_image_response(f"unsupported mime type {image.mime_type!r}")

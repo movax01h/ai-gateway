@@ -7,9 +7,11 @@ import pytest
 from duo_workflow_service.entities.attachments import ALLOWED_IMAGE_MIME_TYPES
 from duo_workflow_service.entities.image_blocks import is_image_content_block
 from duo_workflow_service.entities.image_response import (
+    _FORMAT_DISPLAY_NAMES,
     MAX_IMAGE_DECODED_BYTES,
     SUPPORTED_IMAGE_MIME_TYPES,
     image_response_to_blocks,
+    supported_image_formats_display,
 )
 from duo_workflow_service.executor.image_result import ImageActionResult
 
@@ -74,6 +76,12 @@ class TestValidImage:
 
         assert isinstance(result, list)
         assert result[1]["mime_type"] == mime_type
+
+    def test_supported_formats_display_covers_the_allowlist(self):
+        # The display map feeds the tool descriptions; a format the allowlist
+        # carries but the map cannot name would silently never be advertised.
+        assert set(_FORMAT_DISPLAY_NAMES) == set(SUPPORTED_IMAGE_MIME_TYPES)
+        assert supported_image_formats_display() == "PNG, JPEG, WebP"
 
     def test_supported_set_is_the_shared_attachment_policy(self):
         # One format policy for both image entry points; GIF and HEIC are out
