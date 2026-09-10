@@ -342,7 +342,7 @@ async def test_read_file_image_reaches_anthropic_as_image_block(
                 schema_version="v1",
                 version="2.0.0-interactive",
             ),
-            # Envelope conversion is feature-flagged (dap_tool_image_input);
+            # Image conversion is feature-flagged (dap_tool_image_input);
             # enable it the way production does — via the request header.
             extra_metadata=(
                 (
