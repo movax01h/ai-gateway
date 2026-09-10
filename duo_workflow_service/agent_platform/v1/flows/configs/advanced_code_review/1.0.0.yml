@@ -30,11 +30,35 @@ components:
       - from: "true"
         as: "include_changed_files_list"
         literal: true
+      # Marks the lines added since the previous review.
+      - from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        as: "baseline_sha"
+        optional: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
-  # Step 2: The reviewer, with read-only repository tools.
+  # Step 2: The inline threads this bot started on earlier reviews, with any human
+  # replies. Skipped by the router on a first review.
+  - name: "fetch_existing_discussions"
+    type: DeterministicStepComponent
+    tool_name: "list_mr_discussions"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:goal"
+        as: "merge_request_iid"
+      - from: "context:inputs.code_review_context.duo_code_review_bot_name"
+        as: "only_from_author"
+        optional: true
+      - from: "true"
+        as: "only_resolvable"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: The reviewer, with read-only repository tools.
   - name: "review"
     type: AgentComponent
     prompt_id: "advanced_code_review_reviewer"
@@ -49,6 +73,15 @@ components:
         as: "merge_request_iid"
       - from: "context:fetch_mr_data.tool_responses"
         as: "mr_data"
+      - from: "context:fetch_existing_discussions.tool_responses"
+        as: "existing_discussions"
+        optional: true
+      - from: "context:inputs.code_review_context.duo_code_review_bot_name"
+        as: "duo_code_review_bot_name"
+        optional: true
+      - from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        as: "last_reviewed_head_sha"
+        optional: true
     toolset:
       - "gitlab_blob_search"
       - "get_repository_file"
@@ -61,7 +94,7 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
-  # Step 3: Publish in pure code from the reviewer's schema-validated answer.
+  # Step 4: Publish in pure code from the reviewer's schema-validated answer.
   # `findings` is required so a missing answer fails the flow instead of posting
   # a clean review. min_confidence 0 publishes everything; the production value
   # comes from an offline threshold sweep.
@@ -78,6 +111,9 @@ components:
       - from: "context:review.final_answer.summary"
         as: "summary"
         optional: true
+      - from: "context:review.final_answer.previous_findings"
+        as: "previous_findings"
+        optional: true
       - from: "0"
         as: "min_confidence"
         literal: true
@@ -87,6 +123,17 @@ components:
 
 routers:
   - from: "fetch_mr_data"
+    condition:
+      # Absent exactly when the bot has never published a comment on this merge
+      # request, so there are no threads to fetch.
+      input:
+        from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        optional: true
+      routes:
+        "None": "review"
+        "": "review"
+        "default_route": "fetch_existing_discussions"
+  - from: "fetch_existing_discussions"
     to: "review"
   - from: "review"
     to: "publish_review"
@@ -95,3 +142,16 @@ routers:
 
 flow:
   entry_point: "fetch_mr_data"
+  inputs:
+    # Sent by the additional_context_resolver on the code_review/v1 catalog entry.
+    - category: code_review_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        duo_code_review_bot_name:
+          type: string
+          description: Username of the bot that authors Duo Code Review comments
+          optional: true
+        last_reviewed_head_sha:
+          type: string
+          description: Head commit SHA of the merge request at the previous review
+          optional: true
