@@ -288,7 +288,6 @@ graph TD;
     review(review<br>#91;AgentComponent#93;);
     publish_review(publish_review<br>#91;DeterministicStepComponent#93;);
     fetch_mr_data -.->|"None"| review;
-    fetch_mr_data -.->|"(empty)"| review;
     fetch_mr_data -.->|"default_route"| fetch_existing_discussions;
     fetch_existing_discussions --> review;
     review --> publish_review;

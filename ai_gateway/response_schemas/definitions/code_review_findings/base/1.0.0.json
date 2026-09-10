@@ -1,6 +1,6 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
-    "title": "code_review_phase_findings",
+    "title": "code_review_findings",
     "description": "Use this tool to submit your review as structured findings. Report every candidate issue you can anchor to an exact diff line, each with a calibrated confidence score: publishing decisions happen downstream at a configured confidence threshold, never in your head. An empty findings array is a valid and expected result for a clean diff.",
     "type": "object",
     "properties": {
@@ -9,7 +9,7 @@
             "description": "Every candidate issue you found, in the order you found them, including ones you consider minor or were unable to fully confirm — express doubt through the confidence score, never by omitting the finding. Anchor each one to an exact line of the diff: a finding you cannot anchor to a specific line, or that restates a design choice without identifying a concrete problem, does not belong here. Empty array when the diff is clean.",
             "items": {
                 "type": "object",
-                "title": "PhaseCodeReviewFinding",
+                "title": "CodeReviewFinding",
                 "properties": {
                     "file": {
                         "type": "string",
@@ -39,7 +39,7 @@
                     "severity": {
                         "type": "string",
                         "enum": ["critical", "major", "minor"],
-                        "description": "critical: a correctness, safety, or security defect that should block merge. major: a likely-correctness, convention, or design problem that should be fixed. minor: optional or stylistic, informational only."
+                        "description": "critical: a correctness, safety, or security defect that should block merge. major: a likely-correctness, convention, or design problem that should be fixed. minor: a genuine but lower-stakes problem, such as a misleading name or comment, a missing test for changed behavior, an undocumented invariant, or a maintainability trap."
                     },
                     "category": {
                         "type": "string",

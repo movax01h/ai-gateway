@@ -109,7 +109,6 @@ class TestAdvancedCodeReviewConfig:
         assert condition["input"]["optional"] is True
         assert condition["routes"] == {
             "None": "review",
-            "": "review",
             "default_route": "fetch_existing_discussions",
         }
 
@@ -130,7 +129,7 @@ class TestAdvancedCodeReviewConfig:
         components = self._components()
         review = components["review"]
 
-        assert review["response_schema_id"] == "code_review_phase_findings"
+        assert review["response_schema_id"] == "code_review_findings"
         assert review["toolset"] == self.INVESTIGATION_TOOLSET
 
     def test_reviewer_investigation_is_bounded(self):
