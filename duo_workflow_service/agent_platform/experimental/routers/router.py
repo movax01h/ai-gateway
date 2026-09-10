@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.components.base import (
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.ai_context import AIContext
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
@@ -30,6 +31,7 @@ class Router(BaseRouter):
     )
     flow_id: Optional[str] = None
     flow_type: Optional[GLReportingEventContext] = None
+    agent_name: Optional[str] = None
     internal_event_client: Optional[InternalEventsClient] = None
 
     _allowed_input_targets: ClassVar[tuple[str, ...]] = ("context", "status")
@@ -102,8 +104,14 @@ class Router(BaseRouter):
                 value=self.flow_id,
                 is_default_route=is_default_route,
             )
+            ai_context = AIContext(
+                workflow_id=self.flow_id,
+                flow_type=flow_type_value,
+                agent_name=self.agent_name,
+            )
             self.internal_event_client.track_event(
                 event_name=EventEnum.WORKFLOW_ROUTE_DECISION.value,
                 additional_properties=additional_properties,
                 category=flow_type_value,
+                ai_context=ai_context,
             )

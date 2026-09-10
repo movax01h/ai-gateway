@@ -374,6 +374,7 @@ class ModelRequestInstrumentator:
                     f"token_usage_{self.unit_primitive}",
                     category=__name__,
                     additional_properties=additional_properties,
+                    ai_context=None,
                     **token_usage_data,
                 )
 
