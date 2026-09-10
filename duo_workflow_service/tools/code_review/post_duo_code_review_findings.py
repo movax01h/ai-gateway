@@ -24,6 +24,7 @@ __all__ = [
     "PostDuoCodeReviewFindings",
     "PostDuoCodeReviewFindingsInput",
     "build_summary",
+    "render_previous_findings",
     "select_findings",
 ]
 
@@ -112,6 +113,48 @@ def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> s
     return "\n\n".join(sections)
 
 
+# Also the render order: what the author fixed first, what still needs them last.
+PREVIOUS_FINDING_ORDER: tuple[str, ...] = (
+    "fixed",
+    "verified",
+    "partially_fixed",
+    "still_outstanding",
+)
+PREVIOUS_FINDING_LABELS = {
+    "fixed": "Fixed",
+    "verified": "Verified",
+    "partially_fixed": "Partially fixed",
+    "still_outstanding": "Still outstanding",
+}
+NEEDS_ATTENTION = {"partially_fixed", "still_outstanding"}
+
+
+def _previous_finding_rank(status: Any) -> int:
+    try:
+        return PREVIOUS_FINDING_ORDER.index(status)
+    except ValueError:
+        return len(PREVIOUS_FINDING_ORDER)
+
+
+def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
+    """Render the reviewer's reconciliation of earlier threads as a status-first bullet list.
+
+    Returns ``None`` unless at least one thread still needs the author's attention: a list made only of fixed and
+    verified items reads as if there were something left to do, so a re-review that closed everything is published as
+    a clean review instead.
+    """
+    if not any(item.get("status") in NEEDS_ATTENTION for item in items):
+        return None
+
+    ordered = sorted(items, key=lambda item: _previous_finding_rank(item.get("status")))
+    lines = []
+    for item in ordered:
+        status = str(item.get("status"))
+        label = PREVIOUS_FINDING_LABELS.get(status, status)
+        lines.append(f"- **{label}:** `{item.get('file')}`: {item.get('note')}")
+    return "\n".join(lines)
+
+
 def _severity_section(title: str, members: List[Dict[str, Any]]) -> str:
     lines = [f"**{title}**"]
     lines.extend(
@@ -140,6 +183,14 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
             "The reviewer's own narrative recap, carried into the published summary "
             "verbatim. Counts and the per-severity breakdown are computed from the "
             "findings regardless of what it claims."
+        ),
+    )
+    previous_findings: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "The reviewer's `previous_findings` array from a re-review. Each item "
+            "has file, status (fixed, verified, partially_fixed, still_outstanding) "
+            "and note. Rendered as a list only when something still needs attention."
         ),
     )
     min_confidence: int = Field(
@@ -176,11 +227,13 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         merge_request_iid: int,
         findings: Optional[List[Dict[str, Any]]] = None,
         summary: Optional[str] = None,
+        previous_findings: Optional[List[Dict[str, Any]]] = None,
         min_confidence: int = 0,
         **kwargs: Any,
     ) -> str:
         published, suppressed = select_findings(findings or [], min_confidence)
         summary_text = build_summary(published, summary)
+        previous = render_previous_findings(previous_findings or [])
         counts = Counter(f.get("severity") for f in published)
         logger.info(
             "Publishing code review findings",
@@ -192,25 +245,38 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
             minor=counts["minor"],
         )
 
-        payload = self._build_payload(published, summary_text)
+        payload = self._build_payload(published, summary_text, previous)
         response = await self._post_review(project_id, merge_request_iid, payload)
         return self._format_response(
             response, merge_request_iid, len(published), suppressed
         )
 
     def _build_payload(
-        self, findings: List[Dict[str, Any]], summary: str
+        self,
+        findings: List[Dict[str, Any]],
+        summary: str,
+        previous_findings: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Shape the selected findings into the JSON document the review endpoint parses.
 
         Only the fields the endpoint anchors, renders or counts with are sent. The message is rendered here so the
         severity header and custom-instruction attribution are decided in one place; code travels verbatim. Severity
         travels as a field so the endpoint can count posted comments by severity.
+
+        A rendered previous-findings list joins the summary when there are comments to post. With none, it travels on
+        its own so the endpoint can introduce it as the outcome of a re-review rather than as a clean first review.
         """
-        return {
+        payload: Dict[str, Any] = {
             "findings": [self._render_finding(f) for f in findings],
             "summary": summary,
         }
+        if previous_findings and findings:
+            payload["summary"] = (
+                f"{summary}\n\n**Previous findings**\n{previous_findings}"
+            )
+        elif previous_findings:
+            payload["previous_findings"] = previous_findings
+        return payload
 
     def _render_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
         rendered: Dict[str, Any] = {

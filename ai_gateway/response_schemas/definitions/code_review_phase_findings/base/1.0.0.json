@@ -71,7 +71,33 @@
         },
         "summary": {
             "type": "string",
-            "description": "First-person recap of your review, 2-4 sentences: what you focused on, the kinds of issues you raised, and a rough estimate of the work needed to address them. When `findings` is empty, instead give 3-5 brief observation bullets (each starting with `- `) about the change: quality, tests, conventions. Do NOT include finding counts or per-severity tallies; those are computed and rendered separately."
+            "description": "First-person recap of your review, 2-4 sentences: what you focused on, the kinds of issues you raised, and a rough estimate of the work needed to address them. If there were existing discussions, open with one sentence on what has been addressed since your last review and what is still outstanding. When `findings` is empty, instead give 3-5 brief observation bullets (each starting with `- `) about the change: quality, tests, conventions. Do NOT include finding counts or per-severity tallies; those are computed and rendered separately."
+        },
+        "previous_findings": {
+            "type": "array",
+            "description": "On a re-review, one entry per existing discussion thread you reconciled: ADDRESSED, PARTIALLY ADDRESSED, NOT ADDRESSED, or RESOLVED. Skip DISPUTED, OBSOLETE and ADDRESSED INCORRECTLY threads; the last gets a new comment instead. Leave unset on a first review. The list is rendered, ordered and shown or withheld by the publishing step.",
+            "items": {
+                "type": "object",
+                "title": "PreviousFinding",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "File the thread is anchored to, as given in existing_discussions."
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["fixed", "verified", "partially_fixed", "still_outstanding"],
+                        "description": "fixed: ADDRESSED, every point resolved. verified: the thread was already resolved and your check of the changed code confirmed the fix. partially_fixed: PARTIALLY ADDRESSED. still_outstanding: NOT ADDRESSED, or RESOLVED with the code unchanged; resolving a thread is not a fix."
+                    },
+                    "note": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "One sentence on the finding and, when partially fixed, what still stands."
+                    }
+                },
+                "required": ["file", "status", "note"]
+            }
         }
     },
     "required": ["findings"]

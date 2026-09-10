@@ -10,6 +10,7 @@ from duo_workflow_service.tools.code_review.post_duo_code_review_findings import
     PostDuoCodeReviewFindings,
     PostDuoCodeReviewFindingsInput,
     build_summary,
+    render_previous_findings,
     select_findings,
 )
 
@@ -162,6 +163,46 @@ class TestBuildSummary:
         assert build_summary([], "   ") == "No issues were raised in this review."
 
 
+def previous(status, file="app/models/user.rb", note="Nil check on `user`."):
+    return {"file": file, "status": status, "note": note}
+
+
+class TestRenderPreviousFindings:
+    def test_nothing_to_render_without_items(self):
+        assert render_previous_findings([]) is None
+
+    @pytest.mark.parametrize(
+        "statuses", [["fixed"], ["verified"], ["fixed", "verified"]]
+    )
+    def test_withheld_when_nothing_needs_attention(self, statuses):
+        """A list of closed points reads as if there were something to act on, so the review is published as clean."""
+        assert render_previous_findings([previous(s) for s in statuses]) is None
+
+    def test_orders_closed_items_first_and_labels_each_status(self):
+        rendered = render_previous_findings(
+            [
+                previous("still_outstanding", file="c.rb", note="Still nil."),
+                previous("partially_fixed", file="b.rb", note="One branch left."),
+                previous("fixed", file="a.rb", note="Guard added."),
+                previous("verified", file="d.rb", note="Fix confirmed."),
+            ]
+        )
+
+        assert rendered == (
+            "- **Fixed:** `a.rb`: Guard added.\n"
+            "- **Verified:** `d.rb`: Fix confirmed.\n"
+            "- **Partially fixed:** `b.rb`: One branch left.\n"
+            "- **Still outstanding:** `c.rb`: Still nil."
+        )
+
+    def test_unknown_status_sorts_last_and_is_shown_as_is(self):
+        rendered = render_previous_findings(
+            [previous("mystery"), previous("still_outstanding")]
+        )
+
+        assert rendered.splitlines()[-1].startswith("- **mystery:**")
+
+
 class TestInputCoercion:
     @pytest.mark.parametrize(("raw", "expected"), [("0", 0), ("7", 7), (5, 5)])
     def test_min_confidence_accepts_flow_config_strings(self, raw, expected):
@@ -186,6 +227,28 @@ class TestBuildPayload:
         assert tool._build_payload([], "All clean.") == {
             "findings": [],
             "summary": "All clean.",
+        }
+
+    def test_previous_findings_join_the_summary_when_there_are_comments(self, tool):
+        payload = tool._build_payload(
+            [FINDING], "1 finding.", "- **Still outstanding:** `a.rb`: x"
+        )
+
+        assert payload["summary"] == (
+            "1 finding.\n\n**Previous findings**\n- **Still outstanding:** `a.rb`: x"
+        )
+        assert "previous_findings" not in payload
+
+    def test_previous_findings_travel_alone_when_there_are_no_comments(self, tool):
+        """The endpoint introduces the list as the outcome of a re-review, not as a clean first review."""
+        payload = tool._build_payload(
+            [], "- Looks fine", "- **Still outstanding:** `a.rb`: x"
+        )
+
+        assert payload == {
+            "findings": [],
+            "summary": "- Looks fine",
+            "previous_findings": "- **Still outstanding:** `a.rb`: x",
         }
 
     def test_finding_carries_only_what_the_endpoint_anchors_and_renders(self, tool):
@@ -346,6 +409,54 @@ async def test_post_duo_code_review_findings_clean_review_posts_summary_only(
 
     _, review = posted_review(gitlab_client_mock)
     assert review == {"findings": [], "summary": "- Well tested"}
+
+
+@pytest.mark.asyncio
+async def test_post_duo_code_review_findings_accepts_a_null_previous_findings(
+    gitlab_client_mock, metadata
+):
+    """A first review has no previous findings, and the optional flow input arrives as None."""
+    gitlab_client_mock.apost = AsyncMock(return_value=success_response())
+    tool = PostDuoCodeReviewFindings(metadata=metadata)
+
+    await tool.ainvoke(
+        {
+            "project_id": 123,
+            "merge_request_iid": 45,
+            "findings": [],
+            "summary": "- Well tested",
+            "previous_findings": None,
+        }
+    )
+
+    _, review = posted_review(gitlab_client_mock)
+    assert review == {"findings": [], "summary": "- Well tested"}
+
+
+@pytest.mark.asyncio
+async def test_post_duo_code_review_findings_re_review_with_outstanding_threads(
+    gitlab_client_mock, metadata
+):
+    gitlab_client_mock.apost = AsyncMock(return_value=success_response())
+    tool = PostDuoCodeReviewFindings(metadata=metadata)
+
+    await tool._arun(
+        project_id=123,
+        merge_request_iid=45,
+        findings=[],
+        summary="- Nothing new",
+        previous_findings=[
+            previous("fixed"),
+            previous("still_outstanding", file="b.rb"),
+        ],
+    )
+
+    _, review = posted_review(gitlab_client_mock)
+    assert review["findings"] == []
+    assert review["previous_findings"].splitlines() == [
+        "- **Fixed:** `app/models/user.rb`: Nil check on `user`.",
+        "- **Still outstanding:** `b.rb`: Nil check on `user`.",
+    ]
 
 
 @pytest.mark.asyncio

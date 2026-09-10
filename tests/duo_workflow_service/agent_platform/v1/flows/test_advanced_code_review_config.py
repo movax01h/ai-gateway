@@ -1,11 +1,12 @@
 """Guards for the shipped advanced_code_review flow config.
 
 These tests assert on the content of ``advanced_code_review/1.0.0.yml`` (the
-three-step pipeline, the reviewer's schema id, toolset and ``max_cycles``,
-the fetch step's pinned inputs, and the publish step's schema-validated
-answer and ``min_confidence`` literal), plus the reviewer response schema
-those inputs read from, rather than on ``FlowConfig`` machinery, which is
-covered in ``test_flow_config.py``.
+four-step pipeline and the router that skips the discussion fetch on a first
+review, the reviewer's schema id, toolset and ``max_cycles``, the fetch step's
+pinned inputs, and the publish step's schema-validated answer and
+``min_confidence`` literal), plus the reviewer response schema those inputs
+read from, rather than on ``FlowConfig`` machinery, which is covered in
+``test_flow_config.py``.
 """
 
 from typing import get_args
@@ -25,9 +26,12 @@ class TestAdvancedCodeReviewConfig:
     ]
 
     @classmethod
+    def _config(cls) -> FlowConfig:
+        return FlowConfig.from_yaml_config("advanced_code_review", "1.0.0")
+
+    @classmethod
     def _components(cls) -> dict:
-        config = FlowConfig.from_yaml_config("advanced_code_review", "1.0.0")
-        return {component["name"]: component for component in config.components}
+        return {component["name"]: component for component in cls._config().components}
 
     @staticmethod
     def _input(component: dict, name: str) -> dict:
@@ -37,14 +41,90 @@ class TestAdvancedCodeReviewConfig:
             if component_input["as"] == name
         )
 
-    def test_flow_is_fetch_review_publish(self):
+    def test_flow_is_fetch_discussions_review_publish(self):
         """The reviewer is the only model step; everything after its final answer is deterministic code."""
         components = self._components()
 
-        assert list(components) == ["fetch_mr_data", "review", "publish_review"]
+        assert list(components) == [
+            "fetch_mr_data",
+            "fetch_existing_discussions",
+            "review",
+            "publish_review",
+        ]
         assert components["fetch_mr_data"]["type"] == "DeterministicStepComponent"
+        assert (
+            components["fetch_existing_discussions"]["type"]
+            == "DeterministicStepComponent"
+        )
         assert components["review"]["type"] == "AgentComponent"
         assert components["publish_review"]["type"] == "DeterministicStepComponent"
+
+    def test_flow_declares_the_code_review_context_input(self):
+        """The service drops any additional-context category the flow does not declare, so without this the bot name and
+        the previous review's head SHA never reach the steps that read them."""
+        [flow_input] = self._config().flow.inputs
+
+        assert flow_input.category == "code_review_context"
+        assert set(flow_input.input_schema) == {
+            "duo_code_review_bot_name",
+            "last_reviewed_head_sha",
+        }
+        assert all(field.optional for field in flow_input.input_schema.values())
+
+    def test_fetch_marks_lines_added_since_the_previous_review(self):
+        components = self._components()
+        baseline = self._input(components["fetch_mr_data"], "baseline_sha")
+
+        assert (
+            baseline["from"]
+            == "context:inputs.code_review_context.last_reviewed_head_sha"
+        )
+        assert baseline["optional"] is True
+
+    def test_discussions_are_the_bots_own_resolvable_threads(self):
+        components = self._components()
+        fetch = components["fetch_existing_discussions"]
+
+        assert fetch["tool_name"] == "list_mr_discussions"
+        author = self._input(fetch, "only_from_author")
+        assert (
+            author["from"]
+            == "context:inputs.code_review_context.duo_code_review_bot_name"
+        )
+        assert author["optional"] is True
+        resolvable = self._input(fetch, "only_resolvable")
+        assert resolvable["from"] == "true"
+        assert resolvable["literal"] is True
+
+    def test_first_review_skips_the_discussion_fetch(self):
+        """last_reviewed_head_sha is absent exactly when the bot has never published a comment, so there is nothing to
+        fetch."""
+        router = next(r for r in self._config().routers if r["from"] == "fetch_mr_data")
+        condition = router["condition"]
+
+        assert (
+            condition["input"]["from"]
+            == "context:inputs.code_review_context.last_reviewed_head_sha"
+        )
+        assert condition["input"]["optional"] is True
+        assert condition["routes"] == {
+            "None": "review",
+            "": "review",
+            "default_route": "fetch_existing_discussions",
+        }
+
+    def test_reviewer_receives_the_re_review_inputs(self):
+        components = self._components()
+        review = components["review"]
+
+        for name, source in {
+            "existing_discussions": "context:fetch_existing_discussions.tool_responses",
+            "duo_code_review_bot_name": "context:inputs.code_review_context.duo_code_review_bot_name",
+            "last_reviewed_head_sha": "context:inputs.code_review_context.last_reviewed_head_sha",
+        }.items():
+            component_input = self._input(review, name)
+            assert component_input["from"] == source
+            assert component_input["optional"] is True
 
     def test_reviewer_emits_structured_findings_with_read_only_tools(self):
         components = self._components()
@@ -103,6 +183,9 @@ class TestAdvancedCodeReviewConfig:
         assert findings.get("optional") is not True
         assert summary["from"] == "context:review.final_answer.summary"
         assert summary["optional"] is True
+        previous = self._input(publish, "previous_findings")
+        assert previous["from"] == "context:review.final_answer.previous_findings"
+        assert previous["optional"] is True
 
     @classmethod
     def _finding_model(cls) -> type:
@@ -131,6 +214,15 @@ class TestAdvancedCodeReviewConfig:
         fields = self._finding_model().model_fields
 
         assert fields["end_line"].is_required() is True
+
+    def test_reviewer_schema_keeps_previous_findings_optional(self):
+        """A first review has no threads to reconcile, so the field must not be demanded of it."""
+        review = self._components()["review"]
+        schema = ResponseSchemaRegistry().get(
+            review["response_schema_id"], review["response_schema_version"]
+        )
+
+        assert schema.model_fields["previous_findings"].is_required() is False
 
     def test_publish_confidence_gate_is_a_literal(self):
         """The reviewer never self-censors; the volume/precision operating point lives in config, where it is logged and
