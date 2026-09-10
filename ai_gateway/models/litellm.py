@@ -1,5 +1,14 @@
 from enum import StrEnum
-from typing import Any, AsyncIterator, Callable, Optional, Sequence, Union, override
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+    override,
+)
 
 from litellm import CustomStreamWrapper, ModelResponse, acompletion
 from litellm.exceptions import APIConnectionError, InternalServerError
@@ -7,6 +16,7 @@ from openai import AsyncOpenAI
 
 from ai_gateway.config import ConfigBedrockGuardrail, get_config
 from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection.models import ChatLiteLLMParams, CompletionLiteLLMParams
 from ai_gateway.models.base import (
     KindModelProvider,
     ModelAPIError,
@@ -107,7 +117,7 @@ class ModelCompletionType(StrEnum):
     FIM = "fim"
 
 
-MODEL_STOP_TOKENS = {
+MODEL_STOP_TOKENS: dict[str, list[str]] = {
     KindLiteLlmModel.MISTRAL: ["</new_code>"],
     # Ref: https://huggingface.co/google/codegemma_2b-7b
     # The model returns the completion, followed by one of the FIM tokens or the EOS token.
@@ -138,10 +148,10 @@ MODEL_STOP_TOKENS = {
     ],
 }
 
-MODEL_SPECIFICATIONS = {
+MODEL_SPECIFICATIONS: dict[KindModelProvider, dict] = {
     KindModelProvider.VERTEX_AI: {
         KindVertexTextModel.CODESTRAL_2501: {
-            "timeout": 60,
+            "timeout": 60.0,
             "completion_type": ModelCompletionType.TEXT,
         },
     },
@@ -196,6 +206,8 @@ class LiteLlmChatModel(ChatModelBase):
 
     @property
     def specifications(self) -> dict[str, Any]:
+        if not self.provider:
+            return {}
         return MODEL_SPECIFICATIONS.get(self.provider, {}).get(self.model_name, {})
 
     def _request_timeout(self) -> float:
@@ -211,6 +223,7 @@ class LiteLlmChatModel(ChatModelBase):
         temperature: float = 0.2,
         max_output_tokens: int = 2048,
         top_p: float = 0.95,
+        top_k: int = 40,
         code_context: Optional[Sequence[str]] = None,  # pylint: disable=unused-argument
     ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
         should_stream = not self.disable_streaming and stream
@@ -301,14 +314,16 @@ class LiteLlmChatModel(ChatModelBase):
             custom_models_enabled, api_base=endpoint, api_key=api_key
         )
 
-        if provider == KindModelProvider.MISTRALAI:
-            api_key = provider_keys.get("mistral_api_key")
-
-        if provider == KindModelProvider.FIREWORKS:
-            api_key = provider_keys.get("fireworks_provider_api_key")
-
-            endpoint, identifier = _get_fireworks_config(name, fireworks_api_base_url)
-            identifier = f"fireworks_ai/{identifier}"
+        api_key, endpoint, identifier = _resolve_provider_api_key(
+            provider,
+            provider_keys,
+            api_key,
+            endpoint,
+            identifier,
+            name,
+            fireworks_api_base_url,
+            "fireworks_ai",
+        )
 
         try:
             kind_model = KindLiteLlmModel(name)
@@ -317,7 +332,7 @@ class LiteLlmChatModel(ChatModelBase):
 
         model_metadata = ModelMetadata(
             name=kind_model.chat_model(provider),
-            engine=provider,
+            engine=provider.value if provider else "",
             endpoint=endpoint,
             api_key=api_key,
             identifier=identifier,
@@ -338,12 +353,14 @@ class LiteLlmTextGenModel(TextGenModelBase):
     @property
     @override
     def input_token_limit(self) -> int:
-        return INPUT_TOKENS_LIMIT.get(self.model_name, DEFAULT_TOKEN_LIMIT)
+        if isinstance(self.model_name, KindLiteLlmModel):
+            return INPUT_TOKENS_LIMIT.get(self.model_name, DEFAULT_TOKEN_LIMIT)
+        return DEFAULT_TOKEN_LIMIT
 
     def __init__(
         self,
         using_cache: bool,
-        model_name: KindLiteLlmModel = KindLiteLlmModel.CODEGEMMA,
+        model_name: KindLiteLlmModel | KindVertexTextModel = KindLiteLlmModel.CODEGEMMA,
         vertex_model_location: str = "",
         provider: Optional[KindModelProvider] = KindModelProvider.LITELLM,
         metadata: Optional[ModelMetadata] = None,
@@ -354,7 +371,15 @@ class LiteLlmTextGenModel(TextGenModelBase):
     ):
         self.provider = provider
         self.model_name = model_name
-        self._metadata = _init_litellm_model_metadata(metadata, model_name, provider)
+        self._metadata = _init_litellm_model_metadata(
+            metadata,
+            (
+                model_name
+                if isinstance(model_name, KindLiteLlmModel)
+                else KindLiteLlmModel.GENERAL
+            ),
+            provider,
+        )
         self.user_id_header = user_id_header
         self.disable_streaming = disable_streaming
         self.vertex_model_location = vertex_model_location
@@ -371,6 +396,8 @@ class LiteLlmTextGenModel(TextGenModelBase):
 
     @property
     def specifications(self) -> dict[str, Any]:
+        if not self.provider:
+            return {}
         return MODEL_SPECIFICATIONS.get(self.provider, {}).get(self.model_name, {})
 
     def _request_timeout(self) -> float:
@@ -382,11 +409,12 @@ class LiteLlmTextGenModel(TextGenModelBase):
     async def generate(
         self,
         prefix: str,
-        suffix: Optional[str] = "",
+        suffix: str = "",
         stream: bool = False,
         temperature: float = 0.95,
         max_output_tokens: int = 16,
         top_p: float = 0.95,
+        top_k: int = 40,
         code_context: Optional[Sequence[str]] = None,  # pylint: disable=unused-argument
         snowplow_event_context: Optional[SnowplowEventContext] = None,
     ) -> Union[TextGenModelOutput, AsyncIterator[TextGenModelChunk]]:
@@ -410,16 +438,22 @@ class LiteLlmTextGenModel(TextGenModelBase):
 
             if should_stream:
                 return self._handle_stream(
-                    suggestion,
+                    cast(CustomStreamWrapper, suggestion),
                     watcher.finish,
                     watcher.register_error,
                 )
+
+        suggestion = cast(ModelResponse, suggestion)
 
         score = 10**5  # default high value if model doesn't provide score
 
         # For fireworks/qwen, use logprob of first token as score
         if self.provider == KindModelProvider.FIREWORKS:
-            score = suggestion.choices[0].logprobs.token_logprobs[0]
+            token_logprobs = getattr(
+                suggestion.choices[0].logprobs, "token_logprobs", None
+            )
+            if token_logprobs:
+                score = token_logprobs[0]
 
         return TextGenModelOutput(
             text=self._extract_suggestion_text(suggestion),
@@ -457,6 +491,11 @@ class LiteLlmTextGenModel(TextGenModelBase):
 
         if self._completion_type() == ModelCompletionType.FIM:
             fim_format = self.specifications.get("fim_format")
+            if not fim_format:
+                raise ValueError(
+                    f"fim_format is missing from specifications for model {self.model_name}"
+                )
+
             content = fim_format.format(prefix=prefix, suffix=suffix or "")
 
         completion_args = {
@@ -559,25 +598,28 @@ class LiteLlmTextGenModel(TextGenModelBase):
             custom_models_enabled, api_base=endpoint, api_key=api_key
         )
 
-        if provider == KindModelProvider.MISTRALAI:
-            api_key = provider_keys.get("mistral_api_key")
-
-        if provider == KindModelProvider.FIREWORKS:
-            api_key = provider_keys.get("fireworks_provider_api_key")
-
-            if not api_key:
-                raise ValueError("Fireworks API key is missing from configuration.")
-
-            endpoint, identifier = _get_fireworks_config(name, fireworks_api_base_url)
-            identifier = f"text-completion-openai/{identifier}"
+        api_key, endpoint, identifier = _resolve_provider_api_key(
+            provider,
+            provider_keys,
+            api_key,
+            endpoint,
+            identifier,
+            name,
+            fireworks_api_base_url,
+            "text-completion-openai",
+        )
 
         try:
+            kind_model: KindLiteLlmModel | KindVertexTextModel
             if provider == KindModelProvider.VERTEX_AI:
                 kind_model = KindVertexTextModel(name)
             else:
                 kind_model = KindLiteLlmModel(name)
         except ValueError:
             raise ValueError(f"no model found by the name '{name}'")
+
+        if provider is None:
+            raise ValueError("Provider is required")
 
         metadata = ModelMetadata(
             name=kind_model.text_model(provider),
@@ -600,6 +642,37 @@ class LiteLlmTextGenModel(TextGenModelBase):
         )
 
 
+def _resolve_provider_api_key(
+    provider: Optional[KindModelProvider],
+    provider_keys: Optional[dict],
+    api_key: Optional[str],
+    endpoint: Optional[str],
+    identifier: Optional[str],
+    name: Union[str, KindLiteLlmModel],
+    fireworks_api_base_url: str,
+    fireworks_identifier_prefix: str,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    if provider == KindModelProvider.MISTRALAI:
+        if provider_keys is None:
+            raise ValueError("provider_keys is required for MistralAI provider")
+
+        api_key = provider_keys.get("mistral_api_key")
+
+    if provider == KindModelProvider.FIREWORKS:
+        if provider_keys is None:
+            raise ValueError("provider_keys is required for Fireworks provider")
+
+        api_key = provider_keys.get("fireworks_provider_api_key")
+
+        if not api_key:
+            raise ValueError("Fireworks API key is missing from configuration.")
+
+        endpoint, identifier = _get_fireworks_config(name, fireworks_api_base_url)
+        identifier = f"{fireworks_identifier_prefix}/{identifier}"
+
+    return api_key, endpoint, identifier
+
+
 def _get_fireworks_config(
     model_name: str, fireworks_api_base_url: str
 ) -> tuple[str, str]:
@@ -618,8 +691,13 @@ def _get_fireworks_config(
     configs = ModelSelectionConfig.instance()
 
     for llm_def in configs.get_resolved_llm_definitions().values():
-        if llm_def.params.model == model_name and llm_def.params.identifier:
-            return fireworks_api_base_url, llm_def.params.identifier
+        params = llm_def.params
+        if (
+            isinstance(params, (ChatLiteLLMParams, CompletionLiteLLMParams))
+            and params.model == model_name
+            and params.identifier
+        ):
+            return fireworks_api_base_url, params.identifier
 
     raise ValueError(
         f"Fireworks model configuration is missing for model {model_name}."
@@ -636,8 +714,11 @@ def _init_litellm_model_metadata(
             **(metadata._asdict() | {"api_key": metadata.api_key or STUBBED_API_KEY})
         )
 
+    if provider is None:
+        raise ValueError("Provider is required")
+
     return ModelMetadata(
         name=model_name.chat_model(provider),
         api_key=STUBBED_API_KEY,
-        engine=provider.value(),
+        engine=provider.value,
     )

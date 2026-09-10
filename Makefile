@@ -20,8 +20,7 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${TESTS_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
-MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
-	--exclude "ai_gateway/api/v2/code/completions.py" \
+MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/api/v2/code/completions.py" \
 	--exclude "ai_gateway/code_suggestions/completions.py" \
 	--exclude "ai_gateway/code_suggestions/handler.py"
 
