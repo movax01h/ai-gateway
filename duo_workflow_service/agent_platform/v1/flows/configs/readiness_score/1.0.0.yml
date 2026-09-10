@@ -71,6 +71,80 @@ components:
     toolset: []
     ui_log_events:
       - on_agent_final_answer
+
+  # Round 2: cross-examination. Fresh agents re-score one evaluator against the
+  # other two round-1 results (no work item).
+  - name: xexam_rubric
+    type: AgentComponent
+    prompt_id: rs_xexam_scorer_prompt
+    response_schema_id: rs_crossexam_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:rubric.final_answer
+        as: own_result
+      - from: context:coverage.final_answer
+        as: other_result_1
+      - from: context:falsifier.final_answer
+        as: other_result_2
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
+
+  - name: xexam_coverage
+    type: AgentComponent
+    prompt_id: rs_xexam_scorer_prompt
+    response_schema_id: rs_crossexam_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:coverage.final_answer
+        as: own_result
+      - from: context:rubric.final_answer
+        as: other_result_1
+      - from: context:falsifier.final_answer
+        as: other_result_2
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
+
+  - name: xexam_falsifier
+    type: AgentComponent
+    prompt_id: rs_xexam_falsifier_prompt
+    response_schema_id: rs_crossexam_falsifier_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:falsifier.final_answer
+        as: own_result
+      - from: context:rubric.final_answer
+        as: other_result_1
+      - from: context:coverage.final_answer
+        as: other_result_2
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
+
+  # Verdict: applies gating/cap logic in-prompt and submits the capped score
+  # plus 3 ranked blocking/non-blocking recommendations as structured output.
+  - name: verdict
+    type: AgentComponent
+    prompt_id: rs_verdict_prompt
+    response_schema_id: rs_verdict_result
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: context:rubric.final_answer
+        as: rubric_result
+      - from: context:coverage.final_answer
+        as: coverage_result
+      - from: context:falsifier.final_answer
+        as: falsifier_result
+      - from: context:xexam_rubric.final_answer
+        as: rubric_xexam
+      - from: context:xexam_coverage.final_answer
+        as: coverage_xexam
+      - from: context:xexam_falsifier.final_answer
+        as: falsifier_xexam
+    toolset: []
+    ui_log_events:
+      - on_agent_final_answer
 routers:
   # context:goal is an unvalidated work item URL; a failed fetch means no SPEC
   # and no PLAN, so scoring would emit a misleading number instead of an error.
@@ -93,6 +167,14 @@ routers:
   - from: coverage
     to: falsifier
   - from: falsifier
+    to: xexam_rubric
+  - from: xexam_rubric
+    to: xexam_coverage
+  - from: xexam_coverage
+    to: xexam_falsifier
+  - from: xexam_falsifier
+    to: verdict
+  - from: verdict
     to: end
 flow:
   entry_point: fetch
@@ -244,4 +326,140 @@ prompts:
 
         Here are the work item notes (comments) as JSON:
         {{notes}}
+      placeholder: history
+  - prompt_id: rs_xexam_scorer_prompt
+    name: rs_xexam_scorer
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        You are a CROSS-EXAMINER in a plan-readiness scoring flow. Several evaluators
+        independently assessed the same work plan. Your job is to re-score ONE
+        evaluator's result in light of what the others found. You have no tools; reason
+        only over the results given, then submit the rs_crossexam_result structured
+        output.
+
+        YOUR result to re-score is `own_result`. The other results are given as
+        `other_result_1` and `other_result_2` — treat them as anonymous findings; do
+        not defer to any method just because it looks authoritative.
+
+        1. Which single finding across ALL results (including your own cons) is most
+          damaging to the plan if true? Quote it in most_damaging_finding.
+        2. Does that finding invalidate or materially weaken your original score? A con
+          your own result observed but did not weight is a red flag, not a footnote.
+          Record verdict_on_finding as confirmed | plausible | refuted.
+        3. Output a revised 0-100 score. Keeping it unchanged is allowed ONLY with an
+          explicit defense against the most damaging finding.
+        4. Set delta = revised_score minus own_result.score. List in discarded_pros any
+          of own_result's pros contradicted by its own cons (empty array if none). Set
+          evaluator to own_result's evaluator id.
+      user: |
+        own_result:
+        {{own_result}}
+
+        other_result_1:
+        {{other_result_1}}
+
+        other_result_2:
+        {{other_result_2}}
+      placeholder: history
+  - prompt_id: rs_xexam_falsifier_prompt
+    name: rs_xexam_falsifier
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        You are the CROSS-EXAMINER for the FALSIFIER in a plan-readiness scoring flow.
+        The falsifier claimed the single most damaging gating defect. Your job is to
+        judge whether that defect survives the other evaluators' evidence, and revise
+        the falsifier's confidence. You have no tools; reason only over the results
+        given, then submit the rs_crossexam_falsifier_result structured output.
+
+        YOUR result to re-judge is `own_result` (the falsifier's). The two scoring
+        evaluators' results are `other_result_1` and `other_result_2` — treat them as
+        anonymous evidence.
+
+        1. State the falsifier's claimed defect (or the most damaging finding across
+          the results) in most_damaging_finding.
+        2. Does the other evaluators' evidence support or undercut the defect? Record
+          verdict_on_finding as confirmed | plausible | refuted. A defect the scorers
+          also observed (in their cons) is corroboration; a defect their evidence
+          contradicts is weakened.
+        3. Set revised_confidence (0-100) that the defect is real, and
+          delta = revised_confidence minus own_result.confidence.
+        4. resolution_known = true ONLY if a concrete resolution (a known hook or a
+          one-line plan amendment) is derivable from the results; put it in
+          resolution, else set resolution to "". Set evaluator = "falsifier".
+      user: |
+        own_result (falsifier):
+        {{own_result}}
+
+        other_result_1:
+        {{other_result_1}}
+
+        other_result_2:
+        {{other_result_2}}
+      placeholder: history
+  - prompt_id: rs_verdict_prompt
+    name: rs_verdict
+    unit_primitives: []
+    params:
+      timeout: 120
+    prompt_template:
+      system: |
+        You are the VERDICT judge in a plan-readiness scoring flow. Apply the gating
+        rules deterministically, then submit the rs_verdict_result structured output.
+        You have no tools. Work the arithmetic through in your reasoning before you
+        submit, so the number stays auditable.
+
+        INPUTS (all are structured results from earlier stages):
+        - rubric_result, coverage_result: round-1 scorer results (score, pros, cons).
+        - falsifier_result: round-1 red-team result (defect_class, defect,
+          falsification, confidence).
+        - rubric_xexam, coverage_xexam: cross-exam revisions of the two scorers
+          (revised_score, delta, discarded_pros).
+        - falsifier_xexam: cross-exam of the falsifier (revised_confidence, delta,
+          verdict_on_finding, resolution_known, resolution).
+
+        COMPUTE, in order:
+        1. Trust weights for the two scorers: w_i = 1 / (1 + |delta_i| / 15), using
+          each scorer's cross-exam delta. An evaluator that moved a lot this run earns
+          less trust this run.
+        2. aggregate_uncapped = weighted mean of the two revised scores
+          (rubric_xexam.revised_score, coverage_xexam.revised_score) using w_i.
+        3. Gate: a gate fires ONLY IF falsifier_result.defect_class is NOT "none" AND
+          falsifier_xexam.verdict_on_finding is NOT "refuted". No gate otherwise.
+        4. Cap (only when a gate fires):
+          - verdict_on_finding == "confirmed" AND falsifier_xexam.resolution_known
+            false  -> cap 20, verdict "incomplete".
+          - verdict_on_finding == "confirmed" AND resolution_known true -> cap 50,
+            verdict "needs refinement" (the resolution is the blocking amendment).
+          - verdict_on_finding == "plausible" -> cap 55, verdict "needs refinement"
+            (the falsification experiment is blocking amendment #1).
+          aggregate = min(aggregate_uncapped, cap) when a gate fires, mark it CAPPED.
+        5. Bands (no gate): aggregate = aggregate_uncapped; >=80 "plan is ready",
+          40-79 "needs refinement", <40 "incomplete".
+
+        Then submit the rs_verdict_result structured output:
+        - score: the final aggregate from step 4 or step 5, rounded to the nearest
+          integer. When a gate fired this MUST be the capped value, never
+          aggregate_uncapped.
+        - feedback: exactly 3 recommendations, most impactful first. When a gate fired,
+          item 1 MUST be the blocking amendment — falsifier_xexam.resolution when
+          resolution_known is true, otherwise falsifier_result.falsification — with
+          impact "blocking". Fill the remaining slots from the deduped material cons of
+          rubric_result and coverage_result (excluding any prefixed "(minor)") and the
+          discarded_pros across the scorers. Mark an item "blocking" only when the plan
+          should not be handed off until it is addressed. If fewer than 3 genuine
+          recommendations exist, use real minor improvements marked "non-blocking" for
+          the rest — never fabricate an issue to reach the count.
+      user: |
+        rubric_result: {{rubric_result}}
+        coverage_result: {{coverage_result}}
+        falsifier_result: {{falsifier_result}}
+        rubric_xexam: {{rubric_xexam}}
+        coverage_xexam: {{coverage_xexam}}
+        falsifier_xexam: {{falsifier_xexam}}
       placeholder: history

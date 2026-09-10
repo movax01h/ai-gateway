@@ -1,0 +1,38 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "rs_verdict_result_response",
+    "description": "Structured output for the readiness-score verdict judge. Submit the final aggregate readiness score and the top 3 recommendations that would most raise it.",
+    "type": "object",
+    "properties": {
+        "score": {
+            "type": "integer",
+            "description": "The final 0-100 aggregate readiness score. This is the number persisted to the work item's agent plan, so it must be the CAPPED value when a gate fired, never aggregate_uncapped. Round to the nearest integer.",
+            "minimum": 0,
+            "maximum": 100
+        },
+        "feedback": {
+            "type": "array",
+            "description": "Exactly 3 recommendations that would most raise the score, most impactful first. When a gate fired, the blocking amendment must be the first item.",
+            "items": {
+                "title": "rs_verdict_feedback_item",
+                "type": "object",
+                "properties": {
+                    "recommendation": {
+                        "type": "string",
+                        "description": "One concrete, actionable amendment to the plan, <=140 chars. Name what to change, not merely that something is wrong.",
+                        "maxLength": 140
+                    },
+                    "impact": {
+                        "type": "string",
+                        "description": "'blocking' when the plan should not be handed off until this is addressed; 'non-blocking' when it improves the plan without gating hand-off.",
+                        "enum": ["blocking", "non-blocking"]
+                    }
+                },
+                "required": ["recommendation", "impact"]
+            },
+            "minItems": 3,
+            "maxItems": 3
+        }
+    },
+    "required": ["score", "feedback"]
+}
