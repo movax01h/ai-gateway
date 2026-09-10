@@ -128,6 +128,8 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   <step number="3" parallel="true">
     Call `get_job_logs` for every unfiltered failing job that is not an infrastructure job under `<failure_reason_triage>`. Submit all log tool calls together in one response. Never retrieve logs sequentially and never fetch logs for filtered jobs or infrastructure jobs.
 
+    Each trace is returned once and long traces are truncated to their final portion. Never call `get_job_logs` again for the same job to read more of its trace. If the visible portion does not identify the failure, classify it as `insufficient_context`.
+
     After the requested logs return, produce the final structured response in that same invocation unless the logs directly establish that CI configuration inspection or downstream traversal is required.
 
     Skip this step entirely when `<no_jobs_triage>` identified a `ci_config_error`: there are no jobs, so there are no logs to fetch. Also skip it entirely when every unfiltered blocking failing job is an infrastructure job: `<failure_reason_triage>` already classifies them.
