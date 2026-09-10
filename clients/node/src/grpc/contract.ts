@@ -411,7 +411,11 @@ export interface GenerateTokenRequest {
     | string
     | undefined;
   /** flow_config_id identifies the foundational flow authorized for this token. */
-  flow_config_id?: string | undefined;
+  flow_config_id?:
+    | string
+    | undefined;
+  /** flow_config is the authoritative inline catalog flow configuration to bind to the issued token. */
+  flow_config?: { [key: string]: any } | undefined;
 }
 
 /** GenerateTokenResponse returns the generated token and its expiry information. */
@@ -3406,7 +3410,7 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
 };
 
 function createBaseGenerateTokenRequest(): GenerateTokenRequest {
-  return { workflowDefinition: undefined, flow_config_id: undefined };
+  return { workflowDefinition: undefined, flow_config_id: undefined, flow_config: undefined };
 }
 
 export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
@@ -3416,6 +3420,9 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     }
     if (message.flow_config_id !== undefined) {
       writer.uint32(18).string(message.flow_config_id);
+    }
+    if (message.flow_config !== undefined) {
+      Struct.encode(Struct.wrap(message.flow_config), writer.uint32(26).fork()).join();
     }
     return writer;
   },
@@ -3443,6 +3450,14 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
           message.flow_config_id = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.flow_config = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3456,6 +3471,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     return {
       workflowDefinition: isSet(object.workflowDefinition) ? globalThis.String(object.workflowDefinition) : undefined,
       flow_config_id: isSet(object.flow_config_id) ? globalThis.String(object.flow_config_id) : undefined,
+      flow_config: isObject(object.flow_config) ? object.flow_config : undefined,
     };
   },
 
@@ -3467,6 +3483,9 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     if (message.flow_config_id !== undefined) {
       obj.flow_config_id = message.flow_config_id;
     }
+    if (message.flow_config !== undefined) {
+      obj.flow_config = message.flow_config;
+    }
     return obj;
   },
 
@@ -3477,6 +3496,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     const message = createBaseGenerateTokenRequest();
     message.workflowDefinition = object.workflowDefinition ?? undefined;
     message.flow_config_id = object.flow_config_id ?? undefined;
+    message.flow_config = object.flow_config ?? undefined;
     return message;
   },
 };

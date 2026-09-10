@@ -1955,6 +1955,8 @@ type GenerateTokenRequest struct {
 	WorkflowDefinition *string `protobuf:"bytes,1,opt,name=workflowDefinition,proto3,oneof" json:"workflowDefinition,omitempty"`
 	// flow_config_id identifies the foundational flow authorized for this token.
 	FlowConfigId *string `protobuf:"bytes,2,opt,name=flow_config_id,json=flowConfigId,proto3,oneof" json:"flow_config_id,omitempty"`
+	// flow_config is the authoritative inline catalog flow configuration to bind to the issued token.
+	FlowConfig *structpb.Struct `protobuf:"bytes,3,opt,name=flow_config,proto3,oneof" json:"flow_config,omitempty"`
 }
 
 func (x *GenerateTokenRequest) Reset() {
@@ -1999,6 +2001,13 @@ func (x *GenerateTokenRequest) GetFlowConfigId() string {
 		return *x.FlowConfigId
 	}
 	return ""
+}
+
+func (x *GenerateTokenRequest) GetFlowConfig() *structpb.Struct {
+	if x != nil {
+		return x.FlowConfig
+	}
+	return nil
 }
 
 // GenerateTokenResponse returns the generated token and its expiry information.
@@ -4187,7 +4196,7 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x74, 0x73, 0x88, 0x01, 0x01, 0x12, 0x26, 0x0a, 0x0e, 0x72, 0x65, 0x70, 0x6f, 0x73, 0x69, 0x74,
 	0x6f, 0x72, 0x79, 0x5f, 0x75, 0x72, 0x6c, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x72,
 	0x65, 0x70, 0x6f, 0x73, 0x69, 0x74, 0x6f, 0x72, 0x79, 0x5f, 0x75, 0x72, 0x6c, 0x42, 0x0c, 0x0a,
-	0x0a, 0x5f, 0x61, 0x72, 0x67, 0x75, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x22, 0xa0, 0x01, 0x0a, 0x14,
+	0x0a, 0x5f, 0x61, 0x72, 0x67, 0x75, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x22, 0xf0, 0x01, 0x0a, 0x14,
 	0x47, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x52, 0x65, 0x71,
 	0x75, 0x65, 0x73, 0x74, 0x12, 0x33, 0x0a, 0x12, 0x77, 0x6f, 0x72, 0x6b, 0x66, 0x6c, 0x6f, 0x77,
 	0x44, 0x65, 0x66, 0x69, 0x6e, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
@@ -4195,9 +4204,14 @@ var file_contract_contract_proto_rawDesc = []byte{
 	0x6e, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x88, 0x01, 0x01, 0x12, 0x29, 0x0a, 0x0e, 0x66, 0x6c, 0x6f,
 	0x77, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28,
 	0x09, 0x48, 0x01, 0x52, 0x0c, 0x66, 0x6c, 0x6f, 0x77, 0x43, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x49,
-	0x64, 0x88, 0x01, 0x01, 0x42, 0x15, 0x0a, 0x13, 0x5f, 0x77, 0x6f, 0x72, 0x6b, 0x66, 0x6c, 0x6f,
+	0x64, 0x88, 0x01, 0x01, 0x12, 0x3e, 0x0a, 0x0b, 0x66, 0x6c, 0x6f, 0x77, 0x5f, 0x63, 0x6f, 0x6e,
+	0x66, 0x69, 0x67, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x17, 0x2e, 0x67, 0x6f, 0x6f, 0x67,
+	0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x53, 0x74, 0x72, 0x75,
+	0x63, 0x74, 0x48, 0x02, 0x52, 0x0b, 0x66, 0x6c, 0x6f, 0x77, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69,
+	0x67, 0x88, 0x01, 0x01, 0x42, 0x15, 0x0a, 0x13, 0x5f, 0x77, 0x6f, 0x72, 0x6b, 0x66, 0x6c, 0x6f,
 	0x77, 0x44, 0x65, 0x66, 0x69, 0x6e, 0x69, 0x74, 0x69, 0x6f, 0x6e, 0x42, 0x11, 0x0a, 0x0f, 0x5f,
-	0x66, 0x6c, 0x6f, 0x77, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x5f, 0x69, 0x64, 0x22, 0x7c,
+	0x66, 0x6c, 0x6f, 0x77, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x5f, 0x69, 0x64, 0x42, 0x0e,
+	0x0a, 0x0c, 0x5f, 0x66, 0x6c, 0x6f, 0x77, 0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x22, 0x7c,
 	0x0a, 0x15, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x74, 0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x52,
 	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x74, 0x6f, 0x6b, 0x65, 0x6e,
 	0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x12, 0x1c, 0x0a,
@@ -4602,40 +4616,41 @@ var file_contract_contract_proto_depIdxs = []int32{
 	15, // 28: Action.runShellCommand:type_name -> RunShellCommand
 	14, // 29: Action.trackLlmCallForSelfHosted:type_name -> TrackLlmCallForSelfHosted
 	13, // 30: Action.scheduleNotification:type_name -> ScheduleNotification
-	25, // 31: ListCapabilitiesResponse.capabilities:type_name -> Capability
-	57, // 32: ListToolsResponse.tools:type_name -> google.protobuf.Struct
-	57, // 33: ListToolsResponse.eval_dataset:type_name -> google.protobuf.Struct
-	31, // 34: ListFlowsRequest.filters:type_name -> ListFlowsRequestFilter
-	57, // 35: ListFlowsResponse.configs:type_name -> google.protobuf.Struct
-	53, // 36: NewCheckpoint.agent_context_usage:type_name -> NewCheckpoint.AgentContextUsageEntry
-	41, // 37: McpTool.icons:type_name -> Icons
-	39, // 38: McpTool.annotations:type_name -> ToolAnnotations
-	38, // 39: Icons.items:type_name -> Icon
-	55, // 40: Approval.approval:type_name -> Approval.Approved
-	56, // 41: Approval.rejection:type_name -> Approval.Rejected
-	57, // 42: ValidateFlowConfigRequest.flow_config:type_name -> google.protobuf.Struct
-	33, // 43: NewCheckpoint.AgentContextUsageEntry.value:type_name -> TokenBreakdown
-	0,  // 44: Approval.Approved.approval_source:type_name -> Approval.ApprovalSource
-	54, // 45: Approval.Approved.policy_ref:type_name -> Approval.PolicyRef
-	1,  // 46: DuoWorkflow.ExecuteWorkflow:input_type -> ClientEvent
-	23, // 47: DuoWorkflow.GenerateToken:input_type -> GenerateTokenRequest
-	26, // 48: DuoWorkflow.ListCapabilities:input_type -> ListCapabilitiesRequest
-	28, // 49: DuoWorkflow.ListTools:input_type -> ListToolsRequest
-	30, // 50: DuoWorkflow.ListFlows:input_type -> ListFlowsRequest
-	48, // 51: DuoWorkflow.TrackSelfHostedExecuteWorkflow:input_type -> TrackSelfHostedClientEvent
-	50, // 52: DuoWorkflow.ValidateFlowConfig:input_type -> ValidateFlowConfigRequest
-	12, // 53: DuoWorkflow.ExecuteWorkflow:output_type -> Action
-	24, // 54: DuoWorkflow.GenerateToken:output_type -> GenerateTokenResponse
-	27, // 55: DuoWorkflow.ListCapabilities:output_type -> ListCapabilitiesResponse
-	29, // 56: DuoWorkflow.ListTools:output_type -> ListToolsResponse
-	32, // 57: DuoWorkflow.ListFlows:output_type -> ListFlowsResponse
-	49, // 58: DuoWorkflow.TrackSelfHostedExecuteWorkflow:output_type -> TrackSelfHostedAction
-	51, // 59: DuoWorkflow.ValidateFlowConfig:output_type -> ValidateFlowConfigResponse
-	53, // [53:60] is the sub-list for method output_type
-	46, // [46:53] is the sub-list for method input_type
-	46, // [46:46] is the sub-list for extension type_name
-	46, // [46:46] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	57, // 31: GenerateTokenRequest.flow_config:type_name -> google.protobuf.Struct
+	25, // 32: ListCapabilitiesResponse.capabilities:type_name -> Capability
+	57, // 33: ListToolsResponse.tools:type_name -> google.protobuf.Struct
+	57, // 34: ListToolsResponse.eval_dataset:type_name -> google.protobuf.Struct
+	31, // 35: ListFlowsRequest.filters:type_name -> ListFlowsRequestFilter
+	57, // 36: ListFlowsResponse.configs:type_name -> google.protobuf.Struct
+	53, // 37: NewCheckpoint.agent_context_usage:type_name -> NewCheckpoint.AgentContextUsageEntry
+	41, // 38: McpTool.icons:type_name -> Icons
+	39, // 39: McpTool.annotations:type_name -> ToolAnnotations
+	38, // 40: Icons.items:type_name -> Icon
+	55, // 41: Approval.approval:type_name -> Approval.Approved
+	56, // 42: Approval.rejection:type_name -> Approval.Rejected
+	57, // 43: ValidateFlowConfigRequest.flow_config:type_name -> google.protobuf.Struct
+	33, // 44: NewCheckpoint.AgentContextUsageEntry.value:type_name -> TokenBreakdown
+	0,  // 45: Approval.Approved.approval_source:type_name -> Approval.ApprovalSource
+	54, // 46: Approval.Approved.policy_ref:type_name -> Approval.PolicyRef
+	1,  // 47: DuoWorkflow.ExecuteWorkflow:input_type -> ClientEvent
+	23, // 48: DuoWorkflow.GenerateToken:input_type -> GenerateTokenRequest
+	26, // 49: DuoWorkflow.ListCapabilities:input_type -> ListCapabilitiesRequest
+	28, // 50: DuoWorkflow.ListTools:input_type -> ListToolsRequest
+	30, // 51: DuoWorkflow.ListFlows:input_type -> ListFlowsRequest
+	48, // 52: DuoWorkflow.TrackSelfHostedExecuteWorkflow:input_type -> TrackSelfHostedClientEvent
+	50, // 53: DuoWorkflow.ValidateFlowConfig:input_type -> ValidateFlowConfigRequest
+	12, // 54: DuoWorkflow.ExecuteWorkflow:output_type -> Action
+	24, // 55: DuoWorkflow.GenerateToken:output_type -> GenerateTokenResponse
+	27, // 56: DuoWorkflow.ListCapabilities:output_type -> ListCapabilitiesResponse
+	29, // 57: DuoWorkflow.ListTools:output_type -> ListToolsResponse
+	32, // 58: DuoWorkflow.ListFlows:output_type -> ListFlowsResponse
+	49, // 59: DuoWorkflow.TrackSelfHostedExecuteWorkflow:output_type -> TrackSelfHostedAction
+	51, // 60: DuoWorkflow.ValidateFlowConfig:output_type -> ValidateFlowConfigResponse
+	54, // [54:61] is the sub-list for method output_type
+	47, // [47:54] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_contract_contract_proto_init() }
