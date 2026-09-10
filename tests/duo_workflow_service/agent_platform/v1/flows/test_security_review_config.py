@@ -106,37 +106,30 @@ class TestSecurityReviewTriggerContext:
 
 
 class TestSecurityReviewToolNames:
-    """Guard that context-gathering stages declare the correct blob-search tool name.
+    """The context-gathering stages must actually declare repo-wide search.
 
-    Both ``build_review_context`` and ``prescan_codebase`` must use
-    ``gitlab_blob_search`` — the registered tool name — not the bare ``blob_search``
-    alias that has never existed in the registry.  A mismatch causes the tool to be
-    silently dropped at flow-build time, leaving the agent without repo-wide search.
-    See gitlab-org/gitlab#627166.
+    Kept deliberately narrow. The registry sweep in ``test_configs.py`` supersedes the other half
+    of what this used to assert — that the name is not the misspelled ``blob_search``
+    (gitlab-org/gitlab#627166) — because a misspelling resolves to nothing and the sweep fails on
+    it. What the sweep cannot see is the name being *removed*: a toolset that simply drops
+    ``gitlab_blob_search`` declares nothing unresolvable, so the sweep stays green while the agent
+    silently loses repo-wide search. That is the assertion below.
     """
 
     CONTEXT_STAGES = ("build_review_context", "prescan_codebase")
 
-    @staticmethod
-    def _toolset_names(config: FlowConfig, component_name: str) -> list[str]:
-        component = next(
-            c for c in config.components if c.get("name") == component_name
-        )
-        names = []
-        for entry in component["toolset"]:
-            if isinstance(entry, str):
-                names.append(entry)
-            elif isinstance(entry, dict):
-                names.extend(entry.keys())
-        return names
-
     @pytest.mark.parametrize("stage", CONTEXT_STAGES)
-    def test_context_stages_declare_gitlab_blob_search(self, stage):
+    def test_context_stages_declare_gitlab_blob_search(self, stage: str):
         config = FlowConfig.from_yaml_config("security_review", "1.0.0")
-        tool_names = self._toolset_names(config, stage)
-        assert "gitlab_blob_search" in tool_names, (
-            f"Component '{stage}' must declare 'gitlab_blob_search' in its toolset"
-        )
-        assert "blob_search" not in tool_names, (
-            f"Component '{stage}' must not declare the non-existent 'blob_search' tool"
+        component = next(c for c in config.components if c.get("name") == stage)
+        declared = [
+            name
+            for entry in component["toolset"]
+            for name in ([entry] if isinstance(entry, str) else entry)
+        ]
+
+        assert "gitlab_blob_search" in declared, (
+            f"{stage} no longer declares 'gitlab_blob_search', so the security-review agent runs "
+            f"without repo-wide search. The registry sweep cannot catch this — it only sees names "
+            f"that resolve to nothing, and a removed name resolves to nothing to check."
         )
