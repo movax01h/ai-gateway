@@ -204,13 +204,14 @@ def validate_duo_context_exclusions(
 # (ToolsRegistry.configure), so the description follows the request's flag
 # state.
 #
-# The description is therefore fixed for the life of a run while the behaviour
-# below re-reads the flag on every call. That asymmetry is deliberate: turning
-# the flag off has to take effect on runs already in flight, which is the whole
-# point of a kill switch. Flipping it mid-run leaves a stale description for
-# the rest of that run, and either direction is harmless: the model gets the
-# refusal below, or simply never asks for what the description no longer
-# advertises.
+# The description is fixed at configure time while the behaviour below
+# re-reads the flag on every call, but both read the same request-scoped
+# context, set once per run by the feature-flag interceptor. A flip therefore
+# lands at the NEXT run, never on one already in flight: the kill switch works
+# at run granularity, which is enough because runs are short-lived. The
+# per-call re-read still matters: it keeps the gate correct if the flag
+# context ever becomes finer-grained, and it stops anyone caching the decision
+# at import time.
 _READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
     actual image so you can see its contents.
 
