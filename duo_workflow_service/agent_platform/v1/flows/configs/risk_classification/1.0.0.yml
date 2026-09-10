@@ -10,7 +10,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:inputs.risk_classification.merge_request_iid"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "true"
         as: "only_diffs"
@@ -28,10 +28,10 @@ components:
     response_schema_id: "risk_classification_claims"
     response_schema_version: "^1.0.0"
     inputs:
-      - from: "context:inputs.risk_classification.merge_request_iid"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
-      - from: "context:inputs.risk_classification.domain_vocabulary"
-        as: "domain_vocabulary"
+      - from: "context:inputs.agent_platform_risk_classification_context.domains"
+        as: "domains"
       - from: "context:fetch_mr_diffs.tool_responses"
         as: "mr_diffs"
     toolset:
@@ -51,9 +51,9 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:inputs.risk_classification.merge_request_iid"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
-      - from: "context:inputs.risk_classification.diff_sha"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_diff_sha"
         as: "diff_sha"
       - from: "context:classify_risk.final_answer"
         as: "classification_result"
@@ -76,19 +76,22 @@ routers:
 flow:
   entry_point: "fetch_mr_diffs"
   inputs:
-    - category: risk_classification
-      version_constraint: "^1.0.0"
+    - category: agent_platform_resource_context
+      version_constraint: "^1.1.0"
       input_schema:
-        merge_request_iid:
-          type: integer
+        merge_request_id:
+          type: string
           description: IID of the merge request being classified.
-        diff_sha:
+        merge_request_diff_sha:
           type: string
           description: >
             The full SHA of the diff revision being classified. GitLab stores it
             with the claims so a score is always attributed to the revision it
             was computed from, and rejects a submission that names any other.
-        domain_vocabulary:
+    - category: agent_platform_risk_classification_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        domains:
           type: array
           description: >
             The risk domains to answer a claim about, each with a name and a description.
@@ -117,7 +120,7 @@ prompts:
         Do the following:
 
         1. Read the merge request diff.
-        2. For each domain in `domain_vocabulary`, answer whether the change touches that domain. The answer is exactly `"true"` or `"false"`, as a string. No other answer is valid.
+        2. For each domain in `domains`, answer whether the change touches that domain. The answer is exactly `"true"` or `"false"`, as a string. No other answer is valid.
         3. Use the domain's name exactly as given for the claim `name`. Do not invent, rename, translate, or merge domain names. Do not answer for a domain you did not receive.
         4. Cite evidence as a `path:line` reference into the diff. Omit evidence only when the answer is `"false"` and no line in the diff supports a negative answer.
         5. Write a short, plain-language summary of what the change does and where its risk lies. The summary is for a human reviewer. Do not use it for scoring.
@@ -131,7 +134,7 @@ prompts:
         Answer exactly one claim for every domain listed below. Use each domain's `name` value verbatim as the claim name.
 
         <risk_domains>
-        {{domain_vocabulary | tojson(indent=2)}}
+        {{domains | tojson(indent=2)}}
         </risk_domains>
 
         Here is the merge request diff.
