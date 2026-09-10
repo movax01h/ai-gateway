@@ -131,13 +131,14 @@ def main():
                         ].items():
                             # A route key can carry a newline (the executor's
                             # "Exit code: N\n<output>" envelope); mermaid edge labels
-                            # cannot, so show it escaped.
+                            # cannot, so show it escaped. Quoting the label keeps
+                            # mermaid parsing keys that hold parentheses.
                             label = (
                                 str(condition_output).replace("\n", "\\n")
                                 if condition_output != ""
                                 else "(empty)"
                             )
-                            diagram += f"    {edge_from} -.->|{label}| {clean_name(edge_to)};\n"
+                            diagram += f'    {edge_from} -.->|"{label}"| {clean_name(edge_to)};\n'
 
                 diagram += "    classDef default fill:#f2f0ff,line-height:1.2;\n"
                 diagram += "    classDef first fill-opacity:0;\n"
