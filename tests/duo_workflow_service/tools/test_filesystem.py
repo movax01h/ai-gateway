@@ -35,6 +35,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     _is_trusted_absolute_path,
     validate_duo_context_exclusions,
 )
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_image_response,
     create_mock_client_event_with_response,
@@ -1415,6 +1416,15 @@ class TestFileExclusionPolicy:
         assert result == ""
 
 
+@pytest.fixture(name="image_flag_enabled")
+def image_flag_enabled_fixture():
+    """Enable the tool-read image flag for the test (fail-closed otherwise)."""
+    token = current_feature_flag_context.set({FeatureFlag.DAP_TOOL_IMAGE_INPUT.value})
+    yield
+    current_feature_flag_context.reset(token)
+
+
+@pytest.mark.usefixtures("image_flag_enabled")
 class TestImageResponseConversion:
     """read_file tools convert typed executor image results into content blocks."""
 
@@ -1537,6 +1547,7 @@ class TestImageResponseConversion:
             await tool._arun(["./screenshot.png"])
 
 
+@pytest.mark.usefixtures("image_flag_enabled")
 class TestImageSupportAdvertised:
     """The model refuses to read images unless the tool says it can (observed live): the descriptions must advertise
     image support."""
@@ -1554,3 +1565,61 @@ class TestImageSupportAdvertised:
 
     def test_read_files_points_images_at_read_file(self):
         assert "read them individually with read_file" in ReadFiles().description
+
+
+class TestImageSupportGated:
+    """The flag is fail-closed: without it, tool-read image support must be invisible and inert."""
+
+    PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"not real pixels"
+
+    def metadata_with_image(self, mock_project) -> dict:
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_image_response(
+                "image/png", self.PNG_BYTES
+            )
+        )
+        return {"outbox": mock_outbox, "project": mock_project}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    async def test_image_becomes_a_refusal_when_flag_is_off(
+        self, tool_cls, mock_project
+    ):
+        # A new client emits image responses regardless of the server-side
+        # flag; the model must see a readable refusal, never a surprise.
+        tool = tool_cls()
+        tool.metadata = self.metadata_with_image(mock_project)
+
+        response = await tool._arun("./screenshot.png")
+
+        assert response == (
+            'Cannot read file: "./screenshot.png" is an image file, and image '
+            "support is not enabled on this instance."
+        )
+
+    @pytest.mark.asyncio
+    async def test_plain_text_passes_through_when_flag_is_off(self, mock_project):
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response("plain contents")
+        )
+        tool = ReadFile()
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        assert await tool._arun("./notes.txt") == "plain contents"
+
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked, ReadFiles])
+    def test_descriptions_carry_no_image_lines_when_flag_is_off(self, tool_cls):
+        assert "Image files" not in tool_cls().description
+
+    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.asyncio
+    async def test_image_converts_when_flag_is_on(self, mock_project):
+        tool = ReadFile()
+        tool.metadata = self.metadata_with_image(mock_project)
+
+        response = await tool._arun("./screenshot.png")
+
+        assert isinstance(response, list)
+        assert response[1]["type"] == "image"
