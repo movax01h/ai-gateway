@@ -1,11 +1,12 @@
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import structlog
 from langchain_core.tools import ToolException
 from prometheus_client import Histogram
 
 from contract import contract_pb2
+from duo_workflow_service.executor.image_result import ImageActionResult
 from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
@@ -94,7 +95,15 @@ async def _execute_action_and_get_action_response(
     return event.actionResponse
 
 
-async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action) -> str:
+async def _execute_action_accepting_image(
+    metadata: Dict[str, Any], action: contract_pb2.Action
+) -> Union[str, ImageActionResult]:
+    """Like ``_execute_action``, but an ``imageResponse`` is a valid result.
+
+    Only actions whose tools can turn an image into model-visible content
+    blocks (the ``read_file`` family) should call this; everything else uses
+    ``_execute_action`` so an unexpected image stays a protocol error.
+    """
     log = structlog.stdlib.get_logger("workflow")
 
     try:
@@ -124,9 +133,27 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
         return actionResponse.httpResponse.body
     elif response_type == "plainTextResponse":
         return actionResponse.plainTextResponse.response
+    elif response_type == "imageResponse":
+        return ImageActionResult(
+            mime_type=actionResponse.imageResponse.mime_type,
+            data=actionResponse.imageResponse.data,
+        )
     else:
         log.error(
             "Response error, missing plain text or http response",
             request_id=actionResponse.requestID,
         )
         raise ToolException("Executor doesn't return expected response fields")
+
+
+async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action) -> str:
+    result = await _execute_action_accepting_image(metadata, action)
+    if isinstance(result, ImageActionResult):
+        log = structlog.stdlib.get_logger("workflow")
+        log.error(
+            "Image response for an action whose tool cannot accept images",
+            request_id=action.requestID,
+            action_class=action.WhichOneof("action"),
+        )
+        raise ToolException("Executor doesn't return expected response fields")
+    return result
