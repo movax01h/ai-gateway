@@ -349,30 +349,37 @@ async def _read_upload_reference(
     if request_path is None:
         return None
 
-    # offset/limit are meaningless for a downloaded image and are not sent.
-    response = await _execute_action_accepting_image(
-        metadata,
-        contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=request_path)),
-    )
-    converted: str | list = (
-        _image_response_to_blocks_if_enabled(response, file_path)
-        if isinstance(response, ImageActionResult)
-        else response
-    )
-
-    # An agent pulling a project upload into model context is worth a trail.
-    # The download itself runs client-side under the user's own credential and
-    # is authenticated and logged by the Rails API; this records the service's
+    # An agent pulling a project upload into model context is worth a trail,
+    # and the trail must cover attempts, not just successes: a failed download
+    # is still credential spend the user may need to account for. The download
+    # itself runs client-side under the user's own credential and is
+    # authenticated and logged by the Rails API; this records the service's
     # part, which is deciding to ask for it. The upload secret is a bearer
     # token for the file, so it is deliberately not logged.
-    _security_log.info(
-        "Tool read resolved a GitLab upload reference",
-        project_id=project.get("id") if project else None,
-        # Not `filename`: stdlib LogRecord reserves that name and raises.
-        upload_filename=request_path.rsplit("/", 1)[-1],
-        outcome="image" if isinstance(converted, list) else "text",
-    )
-    return converted
+    outcome = "error"
+    try:
+        # offset/limit are meaningless for a downloaded image and are not sent.
+        response = await _execute_action_accepting_image(
+            metadata,
+            contract_pb2.Action(
+                runReadFile=contract_pb2.ReadFile(filepath=request_path)
+            ),
+        )
+        converted: str | list = (
+            _image_response_to_blocks_if_enabled(response, file_path)
+            if isinstance(response, ImageActionResult)
+            else response
+        )
+        outcome = "image" if isinstance(converted, list) else "text"
+        return converted
+    finally:
+        _security_log.info(
+            "Tool read resolved a GitLab upload reference",
+            project_id=project.get("id") if project else None,
+            # Not `filename`: stdlib LogRecord reserves that name and raises.
+            upload_filename=request_path.rsplit("/", 1)[-1],
+            outcome=outcome,
+        )
 
 
 class ReadFileInput(BaseModel):

@@ -523,6 +523,29 @@ class TestReadFile:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("image_flag_enabled")
+    async def test_failed_upload_download_is_still_logged(self, metadata_with_project):
+        # A failed download is still credential spend the user may need to
+        # account for, so the trail records the attempt, not just successes.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        metadata_with_project["outbox"].put_action_and_wait_for_response = AsyncMock(
+            side_effect=ToolException("download failed")
+        )
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            with pytest.raises(ToolException, match="download failed"):
+                await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+
+        security_log.info.assert_called_once()
+        _, fields = security_log.info.call_args
+        assert fields["outcome"] == "error"
+        assert fields["upload_filename"] == "screenshot.png"
+        assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_flag_enabled")
     async def test_read_file_denies_upload_reference_without_project(self):
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock()
