@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+import base64
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -32,6 +33,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     validate_duo_context_exclusions,
 )
 from tests.duo_workflow_service.tools.conftest import (
+    create_mock_client_event_with_image_response,
     create_mock_client_event_with_response,
 )
 from tests.duo_workflow_service.tools.constants import (
@@ -1408,3 +1410,139 @@ class TestFileExclusionPolicy:
         result = await tool._arun("temp/")
         # Should return empty string since all files in temp/ are excluded
         assert result == ""
+
+
+class TestImageResponseConversion:
+    """read_file tools convert typed executor image results into content blocks."""
+
+    FAKE_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"not real pixels" * 4
+    FAKE_PNG_BASE64 = base64.b64encode(FAKE_PNG_BYTES).decode()
+
+    def metadata_with_image_response(
+        self, mock_project, mime_type: str, data: bytes
+    ) -> dict:
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_image_response(mime_type, data)
+        )
+        return {"outbox": mock_outbox, "project": mock_project}
+
+    def metadata_with_response(self, mock_project, response: str) -> dict:
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response(response)
+        )
+        return {"outbox": mock_outbox, "project": mock_project}
+
+    @pytest.mark.asyncio
+    async def test_read_file_converts_image_response(self, mock_project):
+        tool = ReadFile(description="Read file content")
+        tool.metadata = self.metadata_with_image_response(
+            mock_project, "image/png", self.FAKE_PNG_BYTES
+        )
+
+        result = await tool._arun("./screenshot.png")
+
+        assert isinstance(result, list)
+        assert result[0]["type"] == "text"
+        assert "./screenshot.png" in result[0]["text"]
+        assert result[1]["type"] == "image"
+        assert result[1]["base64"] == self.FAKE_PNG_BASE64
+        assert result[1]["mime_type"] == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_read_file_chunked_converts_image_response(self, mock_project):
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = self.metadata_with_image_response(
+            mock_project, "image/png", self.FAKE_PNG_BYTES
+        )
+
+        result = await tool._arun("./screenshot.png")
+
+        assert isinstance(result, list)
+        assert result[1]["type"] == "image"
+        assert result[1]["base64"] == self.FAKE_PNG_BASE64
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("file_name", "magic", "mime_type"),
+        [
+            ("shot.png", b"\x89PNG\r\n\x1a\n", "image/png"),
+            ("photo.jpeg", b"\xff\xd8\xff\xe0", "image/jpeg"),
+            (
+                "pic.webp",
+                b"RIFF\x10\x00\x00\x00WEBP",
+                "image/webp",
+            ),
+        ],
+    )
+    async def test_every_supported_type_converts_through_the_tool(
+        self, mock_project, file_name, magic, mime_type
+    ):
+        payload = magic + b"not real pixels"
+        tool = ReadFile(description="Read file content")
+        tool.metadata = self.metadata_with_image_response(
+            mock_project, mime_type, payload
+        )
+
+        result = await tool._arun(f"./{file_name}")
+
+        assert isinstance(result, list)
+        assert result[1]["mime_type"] == mime_type
+        assert base64.b64decode(result[1]["base64"]) == payload
+
+    @pytest.mark.asyncio
+    async def test_invalid_image_response_becomes_readable_error(self, mock_project):
+        # PNG bytes declared as JPEG: caught at conversion, returned to the
+        # model as a string instead of an opaque provider failure.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = self.metadata_with_image_response(
+            mock_project, "image/jpeg", self.FAKE_PNG_BYTES
+        )
+
+        result = await tool._arun("./photo.jpeg")
+
+        assert isinstance(result, str)
+        assert "does not match the declared type" in result
+
+    @pytest.mark.asyncio
+    async def test_read_file_plain_text_stays_string(self, mock_project):
+        tool = ReadFile(description="Read file content")
+        tool.metadata = self.metadata_with_response(mock_project, "plain content")
+
+        result = await tool._arun("./notes.txt")
+
+        assert result == "plain content"
+
+    @pytest.mark.asyncio
+    async def test_read_files_is_not_image_capable(self, mock_project):
+        """ReadFiles unwraps plainTextResponse directly: an image response to
+        its action carries no JSON payload, so it surfaces the decode error
+        instead of silently converting."""
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_image_response(
+                "image/png", self.FAKE_PNG_BYTES
+            )
+        )
+        tool = ReadFiles(description="Read files content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        with pytest.raises(
+            ToolException, match="Could not parse file contents as JSON"
+        ):
+            await tool._arun(["./screenshot.png"])
+
+
+class TestImageSupportAdvertised:
+    """The model refuses to read images unless the tool says it can (observed live): the descriptions must advertise
+    image support."""
+
+    # Instantiate rather than reading the class default: the description a
+    # model sees is the instance's, after every model validator has run.
+    @pytest.mark.parametrize("tool_class", [ReadFile, ReadFileChunked])
+    def test_description_mentions_images(self, tool_class):
+        assert "Image files (PNG, JPEG, WebP) are supported" in tool_class().description
+
+    def test_read_files_points_images_at_read_file(self):
+        assert "read them individually with read_file" in ReadFiles().description
