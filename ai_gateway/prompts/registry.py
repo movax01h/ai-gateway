@@ -310,40 +310,36 @@ class LocalPromptRegistry(BasePromptRegistry):
         )
 
     def _adjust_tool_choice_for_model(
-        self, tool_choice: Optional[str], model_metadata: Optional[TypeModelMetadata]
+        self,
+        tool_choice: Optional[str],
+        model_class_provider: ModelClassProvider,
     ) -> Optional[str]:
-        """Adjust tool_choice based on model-specific requirements.
+        """Translate the semantic tool_choice "any" into each client's wire value.
 
-        Different model providers have different tool_choice requirements. Bedrock,
-        Bedrock Mantle and Azure models don't support 'any' as a tool_choice value,
-        so we convert it to 'required'.
+        Translates "any" to "required" for every model provider except Anthropic, so
+        flow authors write the semantic value and never a provider wire format.
+
+        Only `ChatAnthropic` takes "any" verbatim; it maps any other bare string to
+        `{"type": "tool", "name": <string>}`, so "required" would ask Anthropic for a
+        tool literally named "required". Every other client wants "required": LiteLLM
+        (self-hosted OpenAI-compatible, Bedrock, Azure, Vertex) drops or rejects a bare
+        "any", silently leaving the model free to answer in prose.
 
         Args:
-            tool_choice: The original tool_choice value
-            model_metadata: The model metadata
+            tool_choice: Value from the flow config ("auto" or "any").
+            model_class_provider: Provider class for the resolved model, e.g. ANTHROPIC.
 
         Returns:
-            The adjusted tool_choice value
+            tool_choice unchanged when it is not "any" or the provider is Anthropic,
+            otherwise "required".
         """
-        model_identifier = getattr(model_metadata, "identifier", None)
-        if model_identifier is None:
-            # GitLab-managed models don't have an identifier field
-            # use llm_definition.params.model which contains the provider-prefixed model path
-            llm_def = getattr(model_metadata, "llm_definition", None)
-            params = getattr(llm_def, "params", None)
-            model_identifier = getattr(params, "model", None) if params else None
+        if tool_choice != "any":
+            return tool_choice
 
-        if (
-            tool_choice == "any"
-            and model_identifier
-            and (
-                "bedrock/" in model_identifier
-                or "bedrock_mantle/" in model_identifier
-                or "azure/" in model_identifier
-            )
-        ):
-            return "required"
-        return tool_choice
+        if model_class_provider == ModelClassProvider.ANTHROPIC:
+            return tool_choice
+
+        return "required"
 
     # prompt_version is never None when called on LocalPromptRegistry
     # but it must be set to str | None to match the abstract signature
@@ -506,7 +502,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             )
 
         # Adjust tool_choice for model-specific requirements
-        tool_choice = self._adjust_tool_choice_for_model(tool_choice, model_metadata)
+        tool_choice = self._adjust_tool_choice_for_model(
+            tool_choice, model_class_provider
+        )
 
         return Prompt(
             model_class_provider,
