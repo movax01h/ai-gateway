@@ -52,6 +52,23 @@ You can view the HTML report by running:
 open htmlcov/index.html
 ```
 
+Coverage is measured through [`sys.monitoring`](https://docs.python.org/3/library/sys.monitoring.html)
+rather than coverage.py's default C trace function, set by `core = "sysmon"` under
+`[tool.coverage.run]` in `pyproject.toml`. It reports the same line numbers and costs far less:
+on `tests/api` the overhead of adding `--cov` drops from +98% to +18%. Because it lives in the
+config file, any invocation picks it up, including a bare `poetry run pytest --cov`.
+
+If you need the old behavior, for example to compare against a historical measurement, override
+it for a single run:
+
+```shell
+COVERAGE_CORE=ctrace poetry run pytest --cov --cov-report term
+```
+
+`sys.monitoring` cannot measure branches on Python 3.12. Coverage only measures lines here, but if
+`branch = true` is ever added to `[tool.coverage.run]`, coverage.py warns and falls back to the C
+tracer by itself.
+
 -**Important**: To prevent issues with `pytest-xdist` failing on `capture_logs` [requests](https://www.structlog.org/en/stable/testing.html) and leaking state in test environment, we've disabled `cache_logger_on_first_use=False` for testing purposes to preserve event state.
 
 ### Running a single test file
