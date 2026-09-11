@@ -10,10 +10,7 @@ from pydantic import Field, model_validator
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import TemplateNotFoundError
-from duo_workflow_service.agent_platform.constants import (
-    ABORT_FLOW_ENTRY_HOOK,
-    NODE_ROLE_SEPARATOR,
-)
+from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -102,7 +99,6 @@ class OneOffComponent(BaseComponent):
     toolset: Toolset
     compaction: Union[CompactionConfig, bool] = True
     max_correction_attempts: int = 3
-    tool_choice: str = "auto"
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -177,6 +173,7 @@ class OneOffComponent(BaseComponent):
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable
+        tool_choice = "auto"
 
         model_metadata = get_model_metadata(self.model_tags)
 
@@ -186,7 +183,7 @@ class OneOffComponent(BaseComponent):
             self.prompt_version,
             model_metadata=model_metadata,
             tools=tools,  # type: ignore[arg-type]
-            tool_choice=self.tool_choice,
+            tool_choice=tool_choice,
             is_graph_node=True,
             internal_event_extra={
                 "agent_name": self.name,
@@ -297,11 +294,9 @@ class OneOffComponent(BaseComponent):
         ):
             # Parse remaining attempts from the message
             if MAX_ATTEMPTS_SENTINEL in last_message.content:
-                # Max correction attempts exhausted — terminate the flow as a failure
-                # so the caller observes an error rather than a silent success.
-                # AbortComponent is always added to the graph by FlowGraphBuilder,
-                # so this node exists in every flow with no config change.
-                return ABORT_FLOW_ENTRY_HOOK
+                return outgoing_router.route(
+                    state
+                )  # Max attempts reached - exit component
 
             collector = get_audit_collector()
             if collector:

@@ -498,8 +498,7 @@ class TestOneOffComponentToolsRouter:
             "completed successfully" in msg.content for msg in final_conversation
         )
 
-    @pytest.mark.asyncio
-    async def test_max_attempts_reached_flow(
+    def test_max_attempts_reached_flow(
         self,
         component_name,
         flow_id,
@@ -517,28 +516,9 @@ class TestOneOffComponentToolsRouter:
         mock_tool_node_cls,
         base_flow_state,
     ):
-        """Test execution flow when max attempts are reached terminates as a failure.
-
-        When correction attempts are exhausted the router must route to the abort node (setting status=ERROR) rather
-        than calling the outgoing router and silently exiting as a success.
-        """
-        from duo_workflow_service.agent_platform.v1.components.base import (
-            AbortComponent,
-        )
-        from duo_workflow_service.entities.state import WorkflowStatusEnum
-
+        """Test execution flow when max attempts are reached."""
         # Mock agent node
         graph = StateGraph(FlowState)
-
-        # Add the abort component that FlowGraphBuilder always provides.
-        abort_component = AbortComponent(
-            name="abort",
-            flow_id=flow_id,
-            flow_type=flow_type,
-            user=user,
-        )
-        abort_component.attach(graph)
-
         mock_agent_node = mock_agent_node_cls.return_value
         mock_agent_node.run.return_value = {
             **base_flow_state,
@@ -565,6 +545,9 @@ class TestOneOffComponentToolsRouter:
             },
         }
 
+        # Mock router to return END (exit due to max attempts)
+        mock_router.route.return_value = END
+
         component = OneOffComponent(
             name=component_name,
             flow_id=flow_id,
@@ -584,18 +567,12 @@ class TestOneOffComponentToolsRouter:
         graph.set_entry_point(component.__entry_hook__())
         compiled_graph = graph.compile()
 
-        # Execute the graph (async because abort_flow is an async node)
-        result = await compiled_graph.ainvoke(base_flow_state)
+        # Execute the graph
+        result = compiled_graph.invoke(base_flow_state)
 
         # Verify execution occurred
         mock_agent_node.run.assert_called_once()
         mock_tool_node.run.assert_called_once()
-
-        # The outgoing router must NOT be called — the flow must abort, not succeed.
-        mock_router.route.assert_not_called()
-
-        # The abort node sets status=ERROR so the caller can detect the failure.
-        assert result["status"] == WorkflowStatusEnum.ERROR
 
         # Verify final state contains max attempts message
         final_conversation = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
@@ -798,101 +775,6 @@ class TestPromptVariableValidation:
                 mock_toolset,
                 strict_validation=True,
             )
-
-
-class TestOneOffComponentToolChoice:
-    """Test suite for OneOffComponent tool_choice configuration."""
-
-    def test_tool_choice_defaults_to_auto(
-        self,
-        component_name,
-        flow_id,
-        flow_type,
-        user,
-        prompt_id,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_internal_event_client,
-    ):
-        """tool_choice defaults to 'auto' when not specified."""
-        component = OneOffComponent(
-            name=component_name,
-            flow_id=flow_id,
-            flow_type=flow_type,
-            user=user,
-            prompt_id=prompt_id,
-            toolset=mock_toolset,
-            prompt_registry=mock_prompt_registry,
-            internal_event_client=mock_internal_event_client,
-        )
-        assert component.tool_choice == "auto"
-
-    @pytest.mark.parametrize("choice", ["auto", "any", "required"])
-    def test_tool_choice_accepts_valid_values(
-        self,
-        component_name,
-        flow_id,
-        flow_type,
-        user,
-        prompt_id,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_internal_event_client,
-        choice,
-    ):
-        """tool_choice accepts any string value."""
-        component = OneOffComponent(
-            name=component_name,
-            flow_id=flow_id,
-            flow_type=flow_type,
-            user=user,
-            prompt_id=prompt_id,
-            toolset=mock_toolset,
-            prompt_registry=mock_prompt_registry,
-            internal_event_client=mock_internal_event_client,
-            tool_choice=choice,
-        )
-        assert component.tool_choice == choice
-
-    @pytest.mark.parametrize("choice", ["auto", "any"])
-    @pytest.mark.usefixtures("mock_tool_node_cls")
-    def test_tool_choice_passed_to_prompt_registry(
-        self,
-        component_name,
-        flow_id,
-        flow_type,
-        user,
-        prompt_id,
-        prompt_version,
-        mock_toolset,
-        mock_prompt_registry,
-        mock_internal_event_client,
-        mock_state_graph,
-        mock_router,
-        choice,
-    ):
-        """tool_choice is forwarded to prompt_registry.get_on_behalf."""
-        component = OneOffComponent(
-            name=component_name,
-            flow_id=flow_id,
-            flow_type=flow_type,
-            user=user,
-            prompt_id=prompt_id,
-            prompt_version=prompt_version,
-            toolset=mock_toolset,
-            prompt_registry=mock_prompt_registry,
-            internal_event_client=mock_internal_event_client,
-            tool_choice=choice,
-        )
-
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
-        ):
-            component.attach(mock_state_graph, mock_router)
-
-        mock_prompt_registry.get_on_behalf.assert_called_once()
-        call_kwargs = mock_prompt_registry.get_on_behalf.call_args[1]
-        assert call_kwargs["tool_choice"] == choice
 
 
 class TestOneOffComponentCompaction:
