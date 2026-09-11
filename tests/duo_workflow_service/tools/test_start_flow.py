@@ -1,6 +1,6 @@
 # pylint: disable=too-many-lines
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.start_flow import (
+    CATALOG_FLOW_NAME,
     FLOW_IDENTIFIER_MAP,
     StartCodeReviewFlowInput,
     StartDeveloperFlowInput,
@@ -1320,3 +1321,244 @@ def test_args_schema_unrestricted_allows_all_flows(tool):
         },
     ):
         tool.args_schema.model_validate({"flow": payload})
+
+
+# ---------------------------------------------------------------------------
+# _execute: catalog_flow
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_input,expected_goal",
+    [
+        (
+            {"name": "catalog_flow", "ai_catalog_item_consumer_id": 7},
+            None,
+        ),
+        (
+            {
+                "name": "catalog_flow",
+                "ai_catalog_item_consumer_id": 7,
+                "goal": "check the auth module",
+            },
+            "check the auth module",
+        ),
+    ],
+)
+async def test_execute_catalog_flow_success(
+    tool, gitlab_client_mock, flow_input, expected_goal
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-777"})
+    )
+
+    result = await tool.arun({"flow": flow_input})
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+    assert data["workflow_id"] == "wf-777"
+    assert data["flow_name"] == "catalog_flow"
+    assert (
+        data["session_url"]
+        == "https://gitlab.com/group/project/-/automate/agent-sessions/wf-777"
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert posted_body["ai_catalog_item_consumer_id"] == 7
+    assert posted_body["project_id"] == 42
+    assert posted_body["environment"] == "ambient"
+    assert posted_body["start_workflow"] is True
+    # workflow_definition and ai_catalog_item_consumer_id are mutually exclusive
+    # branches in Rails, so the former must never be sent for a catalog flow.
+    assert "workflow_definition" not in posted_body
+    assert posted_body.get("goal") == expected_goal
+
+
+@pytest.mark.asyncio
+async def test_execute_catalog_flow_omits_absent_goal(tool, gitlab_client_mock):
+    """An absent goal is omitted so Rails falls back to the flow description."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-1"})
+    )
+
+    await tool.arun(
+        {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 3}}
+    )
+
+    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
+    assert "goal" not in posted_body
+
+
+@pytest.mark.asyncio
+async def test_execute_catalog_flow_without_project_raises(
+    tool_no_project, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock()
+
+    with pytest.raises(StartFlowError):
+        await tool_no_project._start_catalog_flow(
+            {"name": "catalog_flow", "ai_catalog_item_consumer_id": 3, "goal": None}
+        )
+
+    gitlab_client_mock.apost.assert_not_called()
+
+
+# A wrong consumer ID is the likeliest catalog-flow failure, since the ID is
+# supplied by hand, so each status Rails distinguishes gets its own wording.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,expected_detail",
+    [
+        (
+            400,
+            "This flow can't be started. Check that the ID is correct and that "
+            "the flow is still enabled in this project.",
+        ),
+        (
+            403,
+            "This flow isn't enabled in this project, or you don't have "
+            "sufficient permissions to start it.",
+        ),
+        (404, "No flow with that ID is enabled in this project."),
+    ],
+)
+async def test_execute_catalog_flow_http_failure_detail(
+    tool, gitlab_client_mock, status_code, expected_detail
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=status_code,
+            body={"message": "Agent or flow is not enabled for this project"},
+        )
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool.arun(
+            {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 755}}
+        )
+
+    assert exc_info.value.response == expected_detail
+    assert str(status_code) in str(exc_info.value)
+    # The Rails message can name records the user may not be able to see.
+    assert "Agent or flow is not enabled for this project" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [422, 500])
+async def test_execute_catalog_flow_http_failure_falls_back_to_generic_detail(
+    tool, gitlab_client_mock, status_code
+):
+    """Statuses Rails does not distinguish keep the generic wording."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=status_code, body={"message": "some internal detail"}
+        )
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool.arun(
+            {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 755}}
+        )
+
+    assert (
+        exc_info.value.response == "An internal error occurred while starting the flow."
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.start_flow.log")
+async def test_execute_catalog_flow_failure_logs_consumer_id(
+    mock_log, tool, gitlab_client_mock
+):
+    """flow_name is always "catalog_flow", so the ID is what identifies the flow."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=404, body={"message": "nope"})
+    )
+
+    with pytest.raises(StartFlowError):
+        await tool.arun(
+            {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 755}}
+        )
+
+    assert mock_log.error.call_args.kwargs["ai_catalog_item_consumer_id"] == 755
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.tools.start_flow.log")
+async def test_execute_foundational_flow_failure_logs_no_consumer_id(
+    mock_log, tool, gitlab_client_mock
+):
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=404, body={"message": "nope"})
+    )
+
+    with pytest.raises(StartFlowError):
+        await tool.arun(
+            {"flow": {"name": "developer", "goal": "do the thing"}},
+        )
+
+    assert mock_log.error.call_args.kwargs["ai_catalog_item_consumer_id"] is None
+
+
+@pytest.mark.parametrize(
+    "flow_input",
+    [
+        {"name": "catalog_flow"},
+        {"name": "catalog_flow", "ai_catalog_item_consumer_id": "not-an-int"},
+    ],
+)
+def test_catalog_flow_input_requires_valid_consumer_id(flow_input):
+    with pytest.raises(ValidationError):
+        StartFlowInput(flow=flow_input)
+
+
+def test_catalog_flow_available_when_foundational_flows_narrowed(metadata):
+    """Catalog flows are project-enabled, not gated by foundational settings."""
+    tool = _tool_with_enabled(metadata, ["code_review/v1"])
+
+    tool.args_schema.model_validate(
+        {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 5}}
+    )
+
+
+def test_catalog_flow_available_when_all_foundational_flows_disabled(metadata):
+    tool = StartFlow(
+        metadata={
+            **metadata,
+            "features": {
+                "foundational_flows": {"enabled": False, "enabled_flows": None}
+            },
+        }
+    )
+
+    tool.args_schema.model_validate(
+        {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 5}}
+    )
+
+
+def test_description_mentions_catalog_flow(tool):
+    assert f"- {CATALOG_FLOW_NAME}:" in tool.description
+
+
+def test_format_display_message_fallback_catalog_flow(tool):
+    args = StartFlowInput(
+        flow={
+            "name": "catalog_flow",
+            "ai_catalog_item_consumer_id": 9,
+            "goal": "scan the repo",
+        }
+    )
+
+    assert "scan the repo" in tool.format_display_message(args, None)
+
+
+def test_format_display_message_fallback_catalog_flow_without_goal(tool):
+    args = StartFlowInput(
+        flow={
+            "name": "catalog_flow",
+            "ai_catalog_item_consumer_id": 9,
+        }
+    )
+
+    assert "9" in tool.format_display_message(args, None)

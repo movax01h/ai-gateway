@@ -23,6 +23,11 @@ FLOW_IDENTIFIER_MAP = {
     "secrets_fp_detection": "secrets_fp_detection/v1",
 }
 
+# Custom AI Catalog flows are addressed by item consumer ID rather than by a
+# fixed identifier, so this name is deliberately absent from
+# FLOW_IDENTIFIER_MAP and handled on its own branch throughout.
+CATALOG_FLOW_NAME = "catalog_flow"
+
 _DESCRIPTION_PREFIX = (
     "Delegate a task to a specialist GitLab agent that works "
     "asynchronously over multiple steps. Always use this tool when the "
@@ -53,6 +58,12 @@ _FLOW_AGENT_DESCRIPTIONS = {
     "secrets_fp_detection": "- secrets_fp_detection: analyse a secret detection vulnerability for false positives. "
     "Requires a vulnerability_id.\n",
 }
+
+_CATALOG_FLOW_DESCRIPTION = (
+    "- catalog_flow: run a custom AI Catalog flow that a project has enabled. "
+    "Requires an ai_catalog_item_consumer_id, which cannot be looked up from "
+    "here — only use this agent when the user supplies that ID.\n"
+)
 
 _DESCRIPTION_SUFFIX = (
     "\n\nReturns a session URL the user can follow to track progress. The user "
@@ -89,7 +100,51 @@ def _build_description(enabled_names: list[str]) -> str:
         for name in FLOW_IDENTIFIER_MAP
         if name in enabled_names
     )
-    return _DESCRIPTION_PREFIX + agents + _DESCRIPTION_SUFFIX
+    return (
+        _DESCRIPTION_PREFIX + agents + _CATALOG_FLOW_DESCRIPTION + _DESCRIPTION_SUFFIX
+    )
+
+
+_GENERIC_FAILURE_DETAIL = "An internal error occurred while starting the flow."
+
+_FORBIDDEN_FAILURE_DETAIL = (
+    "This flow isn't available, or you don't have sufficient permissions to start it."
+)
+
+# Catalog flows are addressed by an ID the user supplies by hand, so a wrong
+# one is the likeliest failure and worth naming. Rails distinguishes the cases:
+# an unknown consumer ID is a 404, one belonging to another project or group is
+# a 403, and its service layer folds everything else — including permission
+# failures — into a 400.
+_CATALOG_FAILURE_DETAILS = {
+    400: (
+        "This flow can't be started. Check that the ID is correct and that the "
+        "flow is still enabled in this project."
+    ),
+    403: (
+        "This flow isn't enabled in this project, or you don't have sufficient "
+        "permissions to start it."
+    ),
+    404: "No flow with that ID is enabled in this project.",
+}
+
+
+def _failure_detail(status_code: int, flow_name: str) -> str:
+    """User-facing explanation for a failed start request.
+
+    Args:
+        status_code: HTTP status Rails returned.
+        flow_name: Flow the request was for, used to pick the catalog-specific
+            wording.
+
+    Returns:
+        A reason suitable for both the LLM-facing message and the UI chat log.
+    """
+    if flow_name == CATALOG_FLOW_NAME and status_code in _CATALOG_FAILURE_DETAILS:
+        return _CATALOG_FAILURE_DETAILS[status_code]
+    if status_code == 403:
+        return _FORBIDDEN_FAILURE_DETAIL
+    return _GENERIC_FAILURE_DETAIL
 
 
 class StartFlowError(ToolException):
@@ -187,6 +242,27 @@ class StartSecretsFpDetectionFlowInput(BaseModel):
     )
 
 
+class StartCatalogFlowInput(BaseModel):
+    """Input for a custom AI Catalog flow."""
+
+    name: Literal["catalog_flow"]
+    ai_catalog_item_consumer_id: int = Field(
+        description=(
+            "ID of the AI Catalog item consumer identifying which custom flow "
+            "to run. This is the record created when a flow is enabled in a "
+            "project."
+        ),
+    )
+    goal: Optional[str] = Field(
+        default=None,
+        description=(
+            "Task description for the flow. Omit to let the flow fall back to "
+            "its own description, which is the common case for flows that need "
+            "no per-run instruction."
+        ),
+    )
+
+
 class StartFlowInput(BaseModel):
     """Input schema for the start_flow tool."""
 
@@ -198,6 +274,7 @@ class StartFlowInput(BaseModel):
             StartSastFpDetectionFlowInput,
             StartResolveSastVulnerabilityFlowInput,
             StartSecretsFpDetectionFlowInput,
+            StartCatalogFlowInput,
         ],
         Field(discriminator="name"),
     ]
@@ -220,10 +297,12 @@ def _build_args_schema(enabled_names: list[str]) -> Type[BaseModel]:
         for name in FLOW_IDENTIFIER_MAP
         if name in enabled_names
     ]
-    # Full schema when all flows are enabled; the empty case is unreachable
-    # since start_flow is only registered when a flow is available.
-    if not enabled_flow_inputs or len(enabled_flow_inputs) == len(_FLOW_INPUT_SCHEMAS):
+    # Full schema when every foundational flow is enabled.
+    if len(enabled_flow_inputs) == len(_FLOW_INPUT_SCHEMAS):
         return StartFlowInput
+    # Catalog flows are enabled per project rather than by the foundational-flow
+    # settings, so the member stays available however those are narrowed.
+    enabled_flow_inputs.append(StartCatalogFlowInput)
     if len(enabled_flow_inputs) == 1:
         flow_annotation: Any = enabled_flow_inputs[0]
     else:
@@ -260,6 +339,7 @@ class StartFlow(DuoBaseTool):
             | StartSastFpDetectionFlowInput
             | StartResolveSastVulnerabilityFlowInput
             | StartSecretsFpDetectionFlowInput
+            | StartCatalogFlowInput
         ),
         **_kwargs: Any,
     ) -> str:
@@ -269,6 +349,10 @@ class StartFlow(DuoBaseTool):
             raise ToolException(f"Unexpected flow input type: {type(flow)}")
 
         flow_name = flow_data["name"]
+
+        if flow_name == CATALOG_FLOW_NAME:
+            return await self._start_catalog_flow(flow_data)
+
         backend_flow_id = FLOW_IDENTIFIER_MAP.get(flow_name)
         if not backend_flow_id:
             raise ToolException(f"Unknown flow: {flow_name!r}")
@@ -316,6 +400,55 @@ class StartFlow(DuoBaseTool):
                 },
             ]
 
+        return await self._post_flow(payload, flow_name)
+
+    async def _start_catalog_flow(self, flow_data: dict) -> str:
+        """Start a custom AI Catalog flow by item consumer ID.
+
+        Rails treats ``ai_catalog_item_consumer_id`` and ``workflow_definition``
+        as mutually exclusive branches, routing the former to
+        ``Ai::Catalog::Flows::ExecuteService``. That service falls back to the
+        flow's own description when no goal is given, so an absent goal is
+        omitted rather than sent as null.
+
+        Args:
+            flow_data: The validated ``StartCatalogFlowInput`` as a dict.
+
+        Returns:
+            The same JSON payload shape as the foundational flows.
+        """
+        project_id = self.project.get("id") if self.project else None
+        if not project_id:
+            raise StartFlowError(
+                "Custom catalog flows need a project, and this session has none.",
+                response="Custom flows can only be started from a project.",
+            )
+
+        payload: dict[str, Any] = {
+            "ai_catalog_item_consumer_id": flow_data["ai_catalog_item_consumer_id"],
+            "project_id": project_id,
+            "environment": "ambient",
+            "start_workflow": True,
+        }
+
+        goal = flow_data.get("goal")
+        if goal:
+            payload["goal"] = goal
+
+        return await self._post_flow(payload, CATALOG_FLOW_NAME)
+
+    async def _post_flow(self, payload: dict[str, Any], flow_name: str) -> str:
+        """POST a start request to Rails and format the tool response.
+
+        Args:
+            payload: The request body, already shaped for the target branch.
+            flow_name: Name reported back in the response, used by the chat UI
+                to label the session card.
+
+        Returns:
+            A JSON string carrying ``status``, ``workflow_id``, ``session_url``
+            and ``flow_name``.
+        """
         response = await self.gitlab_client.apost(
             path="/api/v4/ai/duo_workflows/agent_workflows",
             body=json.dumps(payload),
@@ -327,14 +460,11 @@ class StartFlow(DuoBaseTool):
                 status_code=response.status_code,
                 body=response.body,
                 workflow_definition=flow_name,
+                # flow_name is always "catalog_flow" for a catalog flow, so
+                # without this there is no way to tell which one failed.
+                ai_catalog_item_consumer_id=payload.get("ai_catalog_item_consumer_id"),
             )
-            if response.status_code == 403:
-                detail = (
-                    "This flow isn't available, or you don't have sufficient "
-                    "permissions to start it."
-                )
-            else:
-                detail = "An internal error occurred while starting the flow."
+            detail = _failure_detail(response.status_code, flow_name)
             raise StartFlowError(
                 f"Failed to start flow: HTTP {response.status_code}: {detail}",
                 response=detail,
@@ -547,6 +677,10 @@ class StartFlow(DuoBaseTool):
             "secrets_fp_detection",
         ):
             detail = str(flow_dict.get("vulnerability_id", ""))
+        elif flow_name == CATALOG_FLOW_NAME:
+            detail = flow_dict.get("goal") or str(
+                flow_dict.get("ai_catalog_item_consumer_id", "")
+            )
         else:
             detail = str(flow_dict)
 
