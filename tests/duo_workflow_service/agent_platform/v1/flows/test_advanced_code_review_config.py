@@ -229,5 +229,5 @@ class TestAdvancedCodeReviewConfig:
         components = self._components()
         gate = self._input(components["publish_review"], "min_confidence")
 
-        assert gate["from"] == "0"
+        assert gate["from"] == "4"
         assert gate["literal"] is True

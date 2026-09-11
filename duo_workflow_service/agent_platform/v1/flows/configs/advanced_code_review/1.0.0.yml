@@ -96,8 +96,7 @@ components:
 
   # Step 4: Publish in pure code from the reviewer's schema-validated answer.
   # `findings` is required so a missing answer fails the flow instead of posting
-  # a clean review. min_confidence 0 publishes everything; the production value
-  # comes from an offline threshold sweep.
+  # a clean review. min_confidence 4 comes from the benchmark sweep (gitlab#618672).
   - name: "publish_review"
     type: DeterministicStepComponent
     tool_name: "post_duo_code_review_findings"
@@ -114,7 +113,7 @@ components:
       - from: "context:review.final_answer.previous_findings"
         as: "previous_findings"
         optional: true
-      - from: "0"
+      - from: "4"
         as: "min_confidence"
         literal: true
     ui_log_events:
