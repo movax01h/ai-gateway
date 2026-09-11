@@ -45,6 +45,16 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
+    subagents:
+      - source: workspace
+        item_type: agent_template
+        item_id: "*"
+
+include:
+  - source: workspace
+    item_type: agent_template
+    item_id: "*"
+
 routers:
   - from: "developer_agent"
     to: "end"
