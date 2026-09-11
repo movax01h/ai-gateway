@@ -5,6 +5,9 @@ ignore: |
   node_modules/
   dist/
   docs/.vale/
+  # Generated, gitignored test output. The agent test suites cache the flow YAML
+  # the model produced, which is not ours to format.
+  .test-reports/
 
 rules:
   # Prompt definitions and CI script blocks are long by nature.

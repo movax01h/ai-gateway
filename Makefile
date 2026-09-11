@@ -293,9 +293,12 @@ test-integration: install-test-deps
 	@poetry run pytest integration_tests/ tests/duo_workflow_service/integration/ -n auto
 
 .PHONY: test-agents
+# --dist loadgroup keeps tests that score the same cached LLM response on one
+# worker; tests without an xdist group are distributed as they were before.
 test-agents: install-test-deps
 	@echo "Running agent tests..."
-	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 -v --tb=short --reruns 2 --reruns-delay 5 \
+	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 --dist loadgroup -v --tb=short --reruns 2 --reruns-delay 5 \
+		--junitxml=".test-reports/agent-tests.xml" \
 		$(if $(EXECUTION_MODEL),--execution-model=$(EXECUTION_MODEL)) \
 		$(if $(VALIDATION_MODEL),--validation-model=$(VALIDATION_MODEL))
 

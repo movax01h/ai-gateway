@@ -31,7 +31,7 @@ indent_size = unset
 # examples. YAML is 2-space indented by convention and these fixtures mirror real
 # flow configs; reindenting them to satisfy the Python rule would make them
 # unrepresentative of what they stand in for.
-[tests/duo_workflow_service/agent_platform/test_configs.py]
+[{agent_tests/flow_creator/test_debugging.py,tests/duo_workflow_service/agent_platform/test_configs.py}]
 indent_size = unset
 
 [{**/*.excalidraw,**/Gemfile.lock,**/go.mod,**/*.pyc,**/*.tmpl,contract/**,.venv/**,.mypy_cache/**,.pytest_cache/**,.cache/**,vendor/**}]

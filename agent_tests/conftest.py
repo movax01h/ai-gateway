@@ -13,10 +13,12 @@ Requires ANTHROPIC_API_KEY environment variable.
 
 from __future__ import annotations
 
+import datetime
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Type
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from langchain_anthropic import ChatAnthropic
@@ -26,7 +28,12 @@ from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from ai_gateway.model_selection.models import ChatAnthropicParams
+    from duo_workflow_service.conversation.history_optimizer.pipeline import (
+        HistoryOptimizerPipeline,
+    )
     from duo_workflow_service.entities.state import ChatWorkflowState
+
+REPORT_DIR = Path(__file__).resolve().parents[1] / ".test-reports" / "agent_tests"
 
 
 def pytest_addoption(parser):
@@ -41,6 +48,16 @@ def pytest_addoption(parser):
         default="claude-haiku-4-5-20251001",
         help="Anthropic model for LLM-as-judge validation (default: claude-haiku-4-5-20251001)",
     )
+    parser.addoption(
+        "--refresh-cache",
+        action="store_true",
+        default=False,
+        help=(
+            "Ignore cached agent responses and generate them again. Suites that "
+            "score the same response from several test files cache it on disk "
+            "under .test-reports/agent_tests/."
+        ),
+    )
 
 
 def pytest_configure(config):
@@ -49,14 +66,46 @@ def pytest_configure(config):
         "markers", "analytics: mark test as an analytics agent test"
     )
     config.addinivalue_line(
+        "markers", "flow_registry: mark test as a Flow Creator agent test"
+    )
+    config.addinivalue_line(
         "markers",
         "flow_versions(*versions): flow config versions this test runs against",
+    )
+    # Registered defensively: pytest-xdist owns this marker, but suites use it to
+    # keep every test that scores the same cached LLM response on one worker, and
+    # an unregistered marker would be an error under `filterwarnings`.
+    config.addinivalue_line(
+        "markers",
+        "xdist_group(name): run tests sharing a group on the same xdist worker",
     )
     validation_model = config.getoption("--validation-model", default=None)
     if validation_model:
         from agent_tests import helpers
 
         helpers.DEFAULT_VALIDATION_MODEL = validation_model
+
+
+def make_passthrough_optimizer_pipeline() -> HistoryOptimizerPipeline:
+    """Build a HistoryOptimizerPipeline mock that returns history unchanged.
+
+    Agent tests exercise prompt and tool behavior, so history optimization is disabled to keep the conversation the LLM
+    sees identical to the one the test built.
+    """
+    from duo_workflow_service.conversation.history_optimizer.pipeline import (
+        HistoryOptimizerPipeline,
+    )
+    from duo_workflow_service.conversation.history_optimizer.schema import (
+        OptimizationResult,
+    )
+
+    mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+
+    async def optimize(history):
+        return history, [OptimizationResult(messages=history, was_modified=False)]
+
+    mock_pipeline.optimize = AsyncMock(side_effect=optimize)
+    return mock_pipeline
 
 
 def _make_prompt_adapter_class():
@@ -83,7 +132,7 @@ def _make_prompt_adapter_class():
         async def get_response(
             self,
             input: ChatWorkflowState,
-            **kwargs,  # noqa: A002
+            **kwargs,
         ) -> AIMessage:
             from langchain_core.messages import BaseMessage, SystemMessage
 
@@ -191,6 +240,7 @@ def initial_state():
             namespace=None,
             approval=None,
             preapproved_tools=[],
+            denied_tools=[],
         )
 
     return _create_state
@@ -478,3 +528,218 @@ def orbit_list_commands_tool():
 def orbit_invoke_command_tool():
     """Mock orbit_invoke_command tool — reusable across agent test suites."""
     return MockOrbitInvokeCommand()
+
+
+# ===== Pass-rate summary =====
+# Agent tests are benchmarks as much as they are tests: a run is only useful if
+# its score can be compared against previous runs and against other agent
+# variants. These hooks record the final outcome of every test, grouped by test
+# file, and write a per-suite summary to .test-reports/agent_tests/.
+#
+# Retries from pytest-rerunfailures are ignored so a flaky-then-passing test
+# counts once. Skipped tests are reported but excluded from the pass rate
+# denominator, because suites skip rules that do not apply to a given case.
+
+_OUTCOMES: dict[str, str] = {}
+
+
+def pytest_runtest_logreport(report):
+    """Record the final outcome of each agent test, ignoring reruns."""
+    if report.outcome == "rerun" or not report.nodeid.startswith("agent_tests/"):
+        return
+
+    if report.when == "call":
+        _OUTCOMES[report.nodeid] = report.outcome
+    elif report.when == "setup" and report.outcome == "skipped":
+        # A module or fixture level skip never reaches the call phase.
+        _OUTCOMES[report.nodeid] = "skipped"
+    elif report.when == "setup" and report.outcome == "failed":
+        # A fixture that raises is an error, not a test-level failure.
+        _OUTCOMES[report.nodeid] = "error"
+    elif report.when == "teardown" and report.outcome == "failed":
+        _OUTCOMES.setdefault(report.nodeid, "error")
+
+
+def _suite_and_file(nodeid: str) -> tuple[str, str]:
+    """Split an agent test nodeid into its suite directory and test file name."""
+    path = nodeid.split("::", maxsplit=1)[0]
+    parts = Path(path).parts
+    # agent_tests/<suite>/<file>.py — fall back to the directory name for tests
+    # that live directly under agent_tests/.
+    suite = parts[1] if len(parts) > 2 else "agent_tests"
+    return suite, Path(path).name
+
+
+NO_CASE = "(no case)"
+
+
+def _case_id(nodeid: str) -> str:
+    """Return the parametrize id a row scores, or a placeholder when the test takes no parameters.
+
+    Agent suites parametrize one test per benchmark case, so the parametrize id names the case. pytest-xdist's
+    loadgroup scheduler appends "@<group>" after the closing bracket, which is dropped here.
+    """
+    name = nodeid.split("::", maxsplit=1)[-1]
+    if "]" in name:
+        name = name[: name.rindex("]") + 1]
+        if "[" in name:
+            return name[name.index("[") + 1 : -1]
+    return NO_CASE
+
+
+def _summarize() -> dict[str, dict[str, dict[str, int]]]:
+    """Aggregate recorded outcomes into {suite: {test_file: {outcome: count}}}."""
+    summary: dict[str, dict[str, dict[str, int]]] = {}
+    for nodeid, outcome in sorted(_OUTCOMES.items()):
+        suite, test_file = _suite_and_file(nodeid)
+        counts = summary.setdefault(suite, {}).setdefault(
+            test_file, {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+        )
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return summary
+
+
+def _summarize_cases() -> dict[str, dict[str, dict[str, int]]]:
+    """Aggregate recorded outcomes into {suite: {case: {outcome: count}}}."""
+    summary: dict[str, dict[str, dict[str, int]]] = {}
+    for nodeid, outcome in sorted(_OUTCOMES.items()):
+        suite, _ = _suite_and_file(nodeid)
+        counts = summary.setdefault(suite, {}).setdefault(
+            _case_id(nodeid), {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+        )
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return summary
+
+
+def _pass_rate(counts: dict[str, int]) -> tuple[int, int]:
+    """Return (passed, scored) where scored excludes skipped tests."""
+    passed = counts["passed"]
+    scored = passed + counts["failed"] + counts["error"]
+    return passed, scored
+
+
+def _format_rate(passed: int, scored: int) -> str:
+    """Render a pass rate, or "n/a" when nothing was scored."""
+    if scored == 0:
+        return "n/a"
+    return f"{100 * passed / scored:.0f}% ({passed}/{scored})"
+
+
+def _render_rows(header: str, rows: dict[str, dict[str, int]]) -> list[str]:
+    """Render one pass-rate table as Markdown lines, with a totals row."""
+    lines = [
+        f"| {header} | Passed | Failed | Errors | Skipped | Pass rate |",
+        "|---|---|---|---|---|---|",
+    ]
+    totals = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+    for label, counts in sorted(rows.items()):
+        for key in totals:
+            totals[key] += counts[key]
+        passed, scored = _pass_rate(counts)
+        lines.append(
+            f"| `{label}` | {counts['passed']} | {counts['failed']} | "
+            f"{counts['error']} | {counts['skipped']} | "
+            f"{_format_rate(passed, scored)} |"
+        )
+
+    passed, scored = _pass_rate(totals)
+    lines.append(
+        f"| **Total** | {totals['passed']} | {totals['failed']} | "
+        f"{totals['error']} | {totals['skipped']} | "
+        f"**{_format_rate(passed, scored)}** |"
+    )
+    return lines
+
+
+def _render_markdown(
+    suite: str,
+    files: dict[str, dict[str, int]],
+    cases: dict[str, dict[str, int]],
+    meta: dict,
+) -> str:
+    """Render one suite's pass rate as a Markdown report."""
+    lines = [
+        f"# Agent test pass rate — `{suite}`",
+        "",
+        f"- Run at: {meta['run_at']}",
+        f"- Execution model: `{meta['execution_model']}`",
+        f"- Validation model: `{meta['validation_model']}`",
+        "",
+        "## By test file",
+        "",
+    ]
+    lines.extend(_render_rows("Test file", files))
+    lines.extend(
+        [
+            "",
+            "## By case",
+            "",
+            "Which cases regressed is more stable than the headline rate, so compare "
+            "this table first when scoring a variant.",
+            "",
+        ]
+    )
+    lines.extend(_render_rows("Case", cases))
+    lines.extend(
+        [
+            "",
+            "Skipped tests are excluded from the pass rate denominator.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Print and persist a per-test-file pass rate for each agent test suite."""
+    del exitstatus
+
+    if hasattr(config, "workerinput") or not _OUTCOMES:
+        # Only the xdist controller (or a plain single-process run) reports.
+        return
+
+    meta = {
+        "run_at": datetime.datetime.now(datetime.timezone.utc).isoformat(
+            timespec="seconds"
+        ),
+        "execution_model": config.getoption("--execution-model"),
+        "validation_model": config.getoption("--validation-model"),
+    }
+
+    summary = _summarize()
+    case_summary = _summarize_cases()
+    terminalreporter.write_sep("=", "agent test pass rate")
+
+    for suite, files in sorted(summary.items()):
+        for test_file, counts in sorted(files.items()):
+            passed, scored = _pass_rate(counts)
+            terminalreporter.write_line(
+                f"{suite}/{test_file}: {_format_rate(passed, scored)} "
+                f"passed, {counts['skipped']} skipped"
+            )
+
+        cases = case_summary.get(suite, {})
+        # Only worth printing when the suite parametrizes by case; an
+        # unparametrized suite would just repeat the per-file numbers.
+        if set(cases) - {NO_CASE}:
+            terminalreporter.write_line(f"{suite} by case:")
+            for case_id, counts in sorted(cases.items()):
+                passed, scored = _pass_rate(counts)
+                terminalreporter.write_line(
+                    f"  {case_id}: {_format_rate(passed, scored)} "
+                    f"passed, {counts['skipped']} skipped"
+                )
+
+        report = {"suite": suite, **meta, "test_files": files, "cases": cases}
+        try:
+            REPORT_DIR.mkdir(parents=True, exist_ok=True)
+            (REPORT_DIR / f"{suite}-summary.json").write_text(
+                json.dumps(report, indent=2) + "\n"
+            )
+            (REPORT_DIR / f"{suite}-summary.md").write_text(
+                _render_markdown(suite, files, cases, meta)
+            )
+        except OSError as exc:  # pragma: no cover - reporting must never fail a run
+            terminalreporter.write_line(f"Could not write pass-rate summary: {exc}")
+        else:
+            terminalreporter.write_line(f"Wrote {REPORT_DIR / f'{suite}-summary.md'}")
