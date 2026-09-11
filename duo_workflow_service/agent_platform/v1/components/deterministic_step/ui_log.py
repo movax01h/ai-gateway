@@ -5,12 +5,12 @@ from typing import Any, Callable, Optional, override
 from uuid import uuid4
 
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel
 
 from duo_workflow_service.agent_platform.v1.ui_log import (
     BaseUILogEvents,
     BaseUILogWriter,
     UILogCallback,
+    format_tool_display_message,
 )
 from duo_workflow_service.entities import (
     MessageTypeEnum,
@@ -25,8 +25,6 @@ __all__ = [
     "UILogWriterDeterministicStep",
     "deterministic_step_ui_log_writer_class",
 ]
-
-from duo_workflow_service.tools import DuoBaseTool
 
 
 class UILogEventsDeterministicStep(BaseUILogEvents):
@@ -118,23 +116,7 @@ class UILogWriterDeterministicStep(BaseUILogWriter[UILogEventsDeterministicStep]
     def _format_message(
         tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
     ) -> str:
-        if not hasattr(tool, "format_display_message"):
-            args_str = ", ".join(f"{k}={v!s}" for k, v in tool_call_args.items())
-            return f"Using {tool.name}: {args_str}"
-
-        try:
-            schema = getattr(tool, "args_schema", None)
-            if isinstance(schema, type) and issubclass(schema, BaseModel):
-                parsed = schema(**tool_call_args)
-                return tool.format_display_message(parsed, tool_response)
-        except Exception:
-            return DuoBaseTool.format_display_message(
-                tool,  # type: ignore[arg-type]
-                tool_call_args,
-                tool_response,
-            )  # type: ignore[return-value]
-
-        return tool.format_display_message(tool_call_args, tool_response)
+        return format_tool_display_message(tool, tool_call_args, tool_response)
 
 
 def deterministic_step_ui_log_writer_class(

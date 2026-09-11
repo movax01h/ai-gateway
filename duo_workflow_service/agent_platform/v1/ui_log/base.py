@@ -2,10 +2,12 @@ from abc import ABC, abstractmethod
 from enum import StrEnum, auto
 from typing import Any, Callable, NamedTuple, Protocol, Self, override
 
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.entities import UiChatLog
+from duo_workflow_service.tools import DuoBaseTool
 
 __all__ = [
     "BaseUILogEvents",
@@ -13,6 +15,7 @@ __all__ = [
     "LogLevels",
     "UIHistory",
     "UILogCallback",
+    "format_tool_display_message",
 ]
 
 
@@ -190,6 +193,47 @@ class BaseUILogWriter[E: BaseUILogEvents](ABC):
         raise AttributeError(
             f"'{self.__class__.__name__}' has no log level method '{level}'"
         )
+
+
+def format_tool_display_message(
+    tool: BaseTool, tool_call_args: dict[str, Any], tool_response: Any = None
+) -> str:
+    """Format a human-readable display message for a tool invocation.
+
+    Attempts to use the tool's own ``format_display_message`` method when
+    available, falling back to a generic ``"Using <name>: <args>"`` string.
+
+    When the tool exposes an ``args_schema`` that is a Pydantic ``BaseModel``,
+    the raw *tool_call_args* dict is parsed into a model instance before being
+    forwarded to ``format_display_message`` so that the tool receives validated
+    typed input.
+
+    Args:
+        tool: The LangChain tool that was (or will be) invoked.
+        tool_call_args: Raw keyword arguments passed to the tool.
+        tool_response: Optional response returned by the tool (used by some
+            display formatters).
+
+    Returns:
+        A formatted string suitable for display in the UI log.
+    """
+    if not hasattr(tool, "format_display_message"):
+        args_str = ", ".join(f"{k}={v!s}" for k, v in tool_call_args.items())
+        return f"Using {tool.name}: {args_str}"
+
+    try:
+        schema = getattr(tool, "args_schema", None)
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            parsed = schema(**tool_call_args)
+            return tool.format_display_message(parsed, tool_response)
+    except Exception:
+        return DuoBaseTool.format_display_message(
+            tool,  # type: ignore[arg-type]
+            tool_call_args,
+            tool_response,
+        )  # type: ignore[return-value]
+
+    return tool.format_display_message(tool_call_args, tool_response)
 
 
 class UIHistory[W: BaseUILogWriter, E: BaseUILogEvents](BaseModel):
