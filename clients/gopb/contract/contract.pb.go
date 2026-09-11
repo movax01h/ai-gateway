@@ -719,11 +719,9 @@ type ActionResponse_ScheduleNotificationResponse struct {
 }
 
 type ActionResponse_ImageResponse struct {
-	// imageResponse carries a successful image result from an image-capable
-	// executor action. Emitting it is gated on negotiated support: every hop
-	// (including the GitLab instance's Workhorse, which transcodes with its
-	// own compiled-in bindings) must know this field, or the response is
-	// dropped in transit.
+	// imageResponse carries a successful image result from an image-capable executor action.
+	// Only emit it when the instance is known to support the field (a Workhorse without the
+	// bindings silently drops it in transit).
 	ImageResponse *ImageResponse `protobuf:"bytes,6,opt,name=imageResponse,proto3,oneof"`
 }
 
@@ -1026,25 +1024,19 @@ func (x *ScheduleNotificationResponse) GetFiresAt() string {
 	return ""
 }
 
-// ImageResponse holds a successful image result from an executor action, so the
-// service can build a model-visible image block without inferring the content
-// type from a text response. Failed reads keep using PlainTextResponse.error.
-// The whole ActionResponse must fit the 4 MiB message budget, and the service
-// validates the payload (allowed formats, size cap, signature against the
-// declared type) before anything reaches a model. No client emits this yet:
-// tool-read images currently travel as a JSON envelope inside
-// PlainTextResponse.response, and adoption of this message is coordinated
-// work across the service, Workhorse bindings and the client.
+// ImageResponse holds a successful image result from an executor action, so the service
+// can build an image block without inferring the type from text. Failed reads use
+// PlainTextResponse.error.
 type ImageResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// mime_type is the declared image format (e.g. image/png); the service
-	// must validate it against its allowlist and the payload's actual bytes.
+	// mime_type is the declared image format (e.g. image/png). The service validates it
+	// against its allowlist and the payload's actual bytes.
 	MimeType string `protobuf:"bytes,1,opt,name=mime_type,proto3" json:"mime_type,omitempty"`
-	// data is the encoded image file bytes, such as PNG or JPEG file content,
-	// not raw pixel data. Encoded as base64 on JSON transports (protojson).
+	// data is the encoded image file (e.g. PNG, JPEG), not raw pixel data. Base64-encoded
+	// on JSON transports.
 	Data []byte `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
 }
 
