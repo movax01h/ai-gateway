@@ -195,10 +195,10 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - claude_sonnet_5_vertex
+      - claude_sonnet_4_6_vertex
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
-      large: claude_sonnet_5_vertex
+      large: claude_sonnet_4_6_vertex
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
