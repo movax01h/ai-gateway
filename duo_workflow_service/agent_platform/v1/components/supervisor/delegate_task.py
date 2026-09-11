@@ -65,25 +65,33 @@ def build_delegate_task_model(
 
 
 class DelegateTask(BaseModel):
-    """Base class for delegate_task tool.
+    """Base class for the delegate_task tool.
 
-    Delegates a task to a specialist subagent.
+    The model actually used at runtime is built by ``build_delegate_task_model()`` with a
+    SubagentEnum generated from the subagents list.
 
-    **Important constraints — failure to follow these will result in an error:**
-
-    - You may only call this tool **once per turn**. Parallel delegation is not
-        supported. To involve multiple subagents, delegate to them sequentially
-        across separate turns.
-    - This must be the **only** tool call in the turn. Do not mix delegate_task
-        with any other tool calls in the same message.
-
-    The actual model used at runtime is built dynamically by build_delegate_task_model() with a SubagentEnum generated
-    from the subagents list.
+    What the LLM is sent is ``tool_description``, not this docstring: the description is
+    declared explicitly so that it is written for the model and this docstring stays
+    free to address the reader of this file.
     """
 
-    model_config = ConfigDict(title="delegate_task", frozen=True)
-
     tool_title: ClassVar[str] = "delegate_task"
+
+    tool_description: ClassVar[str] = """Delegate a task to a specialist subagent.
+
+**Important constraints — failure to follow these will result in an error:**
+
+- You may only call this tool **once per turn**. Parallel delegation is not
+    supported. To involve multiple subagents, delegate to them sequentially
+    across separate turns.
+- This must be the **only** tool call in the turn. Do not mix delegate_task
+    with any other tool calls in the same message."""
+
+    model_config = ConfigDict(
+        title=tool_title,
+        frozen=True,
+        json_schema_extra={"description": tool_description},
+    )
 
     subagent_name: str = Field(description="The specialist agent to delegate to.")
     subsession_id: Optional[int] = Field(
