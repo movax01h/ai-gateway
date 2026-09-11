@@ -17,6 +17,7 @@ from ai_gateway.models.v2.embedding_litellm import (
     EmbeddingAuthenticationError,
     EmbeddingBadRequestError,
     EmbeddingRateLimitError,
+    EmbeddingTimeoutError,
 )
 from ai_gateway.prompts.base import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
@@ -111,6 +112,11 @@ async def _generate_code_embeddings(
     except EmbeddingAuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+    except EmbeddingTimeoutError as e:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=str(e),
         )
 

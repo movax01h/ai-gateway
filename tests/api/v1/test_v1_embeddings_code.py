@@ -501,6 +501,24 @@ class BaseTestCodeEmbeddings:
             "detail": f"litellm.AuthenticationError: {error_message}"
         }
 
+    def test_gateway_timeout_error(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+    ):
+        error_message = "Request timed out"
+        mock_litellm_aembedding.side_effect = litellm.Timeout(
+            message=error_message, model="test-embedding-model", llm_provider="openai"
+        )
+
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 504
+        assert response.json() == {"detail": f"litellm.Timeout: {error_message}"}
+
 
 class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
     def _route(self):
