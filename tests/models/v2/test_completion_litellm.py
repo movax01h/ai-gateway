@@ -111,6 +111,20 @@ class TestCompletionLiteLLMProperties:
         assert "temperature" not in params
         assert "max_tokens" not in params
 
+    def test_request_timeout_emitted_as_timeout(self):
+        """Litellm ignores the deprecated `force_timeout` kwarg, so CompletionLiteLLM must surface request_timeout as
+        `timeout`."""
+        model = CompletionLiteLLM(
+            model="codestral-2501",
+            completion_type=CompletionType.TEXT,
+            request_timeout=42.0,
+        )
+
+        params = model._default_params
+
+        assert params["timeout"] == 42.0
+        assert "force_timeout" not in params
+
     def test_identifying_params(self, fim_model):
         params = fim_model._identifying_params
         assert params["model"] == "codestral-2501"

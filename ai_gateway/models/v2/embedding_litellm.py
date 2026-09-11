@@ -32,6 +32,10 @@ class EmbeddingAuthenticationError(Exception):
     pass
 
 
+class EmbeddingTimeoutError(Exception):
+    pass
+
+
 class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     """Runnable wrapper for embeddings endpoints via LiteLLM.
 
@@ -65,6 +69,10 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     @property
     def _default_params(self) -> Dict[str, Any]:
         params: Dict[str, Any] = {
+            # litellm.embedding() defaults timeout to 600s, so an omitted key silently widens
+            # the bound. Only `timeout` reaches the HTTP layer, not `request_timeout`.
+            "timeout": self.request_timeout,
+            "max_retries": self.max_retries,
             "custom_llm_provider": self.custom_llm_provider,
             "model": self.model,
         }
@@ -167,6 +175,8 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             raise EmbeddingRateLimitError(str(e)) from e
         except litellm.AuthenticationError as e:
             raise EmbeddingAuthenticationError(str(e)) from e
+        except litellm.Timeout as e:
+            raise EmbeddingTimeoutError(str(e)) from e
 
         predictions = self._extract_predictions(response)
         usage_metadata = self._extract_usage_metadata(response)

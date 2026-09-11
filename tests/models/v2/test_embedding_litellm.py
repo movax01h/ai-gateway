@@ -14,6 +14,7 @@ from ai_gateway.models.v2.embedding_litellm import (
     EmbeddingBadRequestError,
     EmbeddingLiteLLM,
     EmbeddingRateLimitError,
+    EmbeddingTimeoutError,
 )
 
 
@@ -169,6 +170,39 @@ class TestEmbeddingLiteLLMAsyncInvoke:
             "output_tokens": 0,
             "total_tokens": 0,
         }
+
+    @pytest.mark.asyncio
+    async def test_request_timeout_reaches_litellm_aembedding(
+        self, mock_litellm_aembedding
+    ):
+        """`litellm.aembedding` reads the per-attempt bound from `timeout`; an omitted key leaves its own 600s
+        default."""
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="openai",
+            request_timeout=42.0,
+        )
+
+        await model.ainvoke(input={"contents": ["test text"]})
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["timeout"] == 42.0
+
+    @pytest.mark.asyncio
+    async def test_max_retries_reaches_litellm_aembedding(
+        self, mock_litellm_aembedding
+    ):
+        """An omitted `max_retries` leaves the provider client on its own default, multiplying the wall bound."""
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="openai",
+            max_retries=3,
+        )
+
+        await model.ainvoke(input={"contents": ["test text"]})
+
+        call_kwargs = mock_litellm_aembedding.call_args[1]
+        assert call_kwargs["max_retries"] == 3
 
     @pytest.mark.asyncio
     async def test_async_invoke_with_dimensions(
@@ -377,6 +411,21 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         )
 
         with pytest.raises(EmbeddingAuthenticationError, match=error_message):
+            await model.ainvoke(input={"contents": ["test text"]})
+
+    @pytest.mark.asyncio
+    async def test_async_invoke_timeout_error(self, mock_litellm_aembedding):
+        error_message = "Request timed out"
+
+        mock_litellm_aembedding.side_effect = litellm.Timeout(
+            message=error_message, model="test-embedding-model", llm_provider="openai"
+        )
+
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+        with pytest.raises(EmbeddingTimeoutError, match=error_message):
             await model.ainvoke(input={"contents": ["test text"]})
 
 
