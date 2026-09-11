@@ -106,9 +106,6 @@ flow:
           description: Name of the service account that runs the flow
           optional: true
 prompts:
-  # Delegation guidance appears only when `has_workspace_agents` is truthy, a literal
-  # input injected by catalog binding. With zero items it is empty and this is
-  # byte-for-byte the original Duo Developer prompt.
   - name: "developer_agent_prompt"
     prompt_id: "developer_agent_prompt"
     params:
@@ -120,15 +117,6 @@ prompts:
         {% extends 'common/developer/system/1.0.0.jinja' %}
         {% block tool_instructions %}
         - Use `glab` for GitLab operations (it's authenticated for this instance).
-        {%- if has_workspace_agents %}
-
-        # Delegating to specialist subagents
-        You coordinate specialist subagents. Use `delegate_task` to hand off work, giving
-        each one complete, self-contained instructions: a subagent does NOT see this
-        conversation.
-
-        Delegate substantial work only when a subagent covers it. Do anything else yourself.
-        {%- endif %}
         {%- endblock %}
       user: |
         {{ goal }}
