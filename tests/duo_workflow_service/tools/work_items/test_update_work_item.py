@@ -76,6 +76,10 @@ def update_response_fixture_func():
     return_value=True,
 )
 @patch(
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness_score",
+    return_value=True,
+)
+@patch(
     "duo_workflow_service.tools.work_items.version_compatibility.supports_agent_plan_widget",
     return_value=True,
 )
@@ -172,6 +176,18 @@ def update_response_fixture_func():
             },
         ),
         (
+            {"readiness_score": 72},
+            {"agentPlanWidget": {"readinessScore": 72}},
+        ),
+        (
+            {"readiness_score": 0},
+            {"agentPlanWidget": {"readinessScore": 0}},
+        ),
+        (
+            {"agent_plan": "## Why", "readiness_score": 72},
+            {"agentPlanWidget": {"content": "## Why", "readinessScore": 72}},
+        ),
+        (
             {"status_id": "gid://gitlab/WorkItems::Statuses::SystemDefined::Status/2"},
             {
                 "statusWidget": {
@@ -195,11 +211,15 @@ def update_response_fixture_func():
         "weight_zero_literal",
         "weight_clear",
         "agent_plan",
+        "readiness_score_only",
+        "readiness_score_zero_literal",
+        "agent_plan_and_readiness_score",
         "status",
     ],
 )
 async def test_update_work_item_variants(
     _mock_vc,
+    _mock_rs,
     _mock_bt,
     gitlab_client_mock,
     metadata,
@@ -261,6 +281,70 @@ async def test_update_work_item_agent_plan_unsupported_version(
 
     _, variables = gitlab_client_mock.graphql.call_args[0]
     assert "agentPlanWidget" not in variables["input"]
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_widget",
+    return_value=True,
+)
+@patch(
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness_score",
+    return_value=False,
+)
+@patch(
+    "duo_workflow_service.tools.work_items.version_compatibility.supports_agent_plan_widget",
+    return_value=True,
+)
+@pytest.mark.parametrize(
+    "update_kwargs, expected_widget",
+    [
+        # 19.0-19.3 instance: the widget and content are supported, the score is
+        # not — content goes out alone and the score is dropped.
+        (
+            {"agent_plan": "## Why\n\nReason", "readiness_score": 72},
+            {"content": "## Why\n\nReason"},
+        ),
+        # Score only: nothing survives the gates, so no widget key is sent at all.
+        ({"readiness_score": 72}, None),
+    ],
+    ids=["content_sent_score_dropped", "score_only_drops_widget"],
+)
+async def test_update_work_item_readiness_score_unsupported_version(
+    _mock_vc,
+    _mock_rs,
+    _mock_bt,
+    gitlab_client_mock,
+    metadata,
+    resolved_work_item_fixture,
+    update_response_fixture,
+    update_kwargs,
+    expected_widget,
+):
+    """ReadinessScore needs GitLab >= 19.4, a higher floor than the widget itself."""
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response_fixture)
+
+    await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        **update_kwargs,
+    )
+
+    _, variables = gitlab_client_mock.graphql.call_args[0]
+    if expected_widget is None:
+        assert "agentPlanWidget" not in variables["input"]
+    else:
+        assert variables["input"]["agentPlanWidget"] == expected_widget
+        assert "readinessScore" not in variables["input"]["agentPlanWidget"]
+
+
+@pytest.mark.parametrize("score", [-1, 101])
+def test_update_work_item_input_rejects_out_of_range_readiness_score(score):
+    """0-100 is the score's contract; a nonsense value must fail before the mutation."""
+    with pytest.raises(ValidationError):
+        UpdateWorkItemInput(readiness_score=score)
 
 
 @pytest.mark.asyncio

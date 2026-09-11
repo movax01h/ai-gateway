@@ -145,6 +145,22 @@ components:
     toolset: []
     ui_log_events:
       - on_agent_final_answer
+
+  # Persist: writes the verdict's aggregate score back to the work item's
+  # agentPlan widget. Only readiness_score is bound — the flow scores a plan it
+  # did not author, so sending agent_plan as well would overwrite the drafted
+  # plan with whatever happened to be in state.
+  - name: persist
+    type: DeterministicStepComponent
+    tool_name: update_work_item
+    inputs:
+      - from: context:goal
+        as: url
+      - from: context:verdict.final_answer.score
+        as: readiness_score
+    ui_log_events:
+      - on_tool_execution_success
+      - on_tool_execution_failed
 routers:
   # context:goal is an unvalidated work item URL; a failed fetch means no SPEC
   # and no PLAN, so scoring would emit a misleading number instead of an error.
@@ -175,7 +191,13 @@ routers:
   - from: xexam_falsifier
     to: verdict
   - from: verdict
-    to: end
+    to: persist
+  - from: persist
+    condition:
+      input: context:persist.execution_result
+      routes:
+        success: end
+        default_route: abort
 flow:
   entry_point: fetch
 prompts:

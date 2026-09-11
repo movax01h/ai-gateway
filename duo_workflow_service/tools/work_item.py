@@ -679,6 +679,15 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         description="""A plan on how the work should be implemented.
         Expects markdown with ## Why, ## What, and ## How sections""",
     )
+    readiness_score: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="""Readiness score (0-100) for the work item's agent plan.
+        Independent of 'agent_plan': passing only a score leaves the existing plan
+        content untouched, which is how a scoring flow reports on a plan it did not
+        author.""",
+    )
 
 
 class UpdateWorkItem(WorkItemBaseTool):
@@ -688,7 +697,8 @@ class UpdateWorkItem(WorkItemBaseTool):
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     Supports updating title, description, assignees, labels, state, status, health
-    status, weight, dates, hierarchy, to-do items and agent plan.
+    status, weight, dates, hierarchy, to-do items, the agent plan and the agent
+    plan's readiness score.
 
     Note: 'state' (opened / closed) is different from 'status_id' (the status
     category widget, e.g. New / In Progress / Done). To set a status, first call
@@ -704,6 +714,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", title="Updated title")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="add")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="mark_as_done", todo_id="gid://gitlab/Todo/123")
+    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score=72)
     - update_work_item(project_id='namespace/project', work_item_iid=42, agent_plan="## Why\nFoo can't bar.\n## What\nMake Foo bar.\n## How\nAdd `Foo#bar` calling `Baz.qux`.")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput

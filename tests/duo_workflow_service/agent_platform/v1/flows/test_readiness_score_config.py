@@ -2,12 +2,15 @@
 
 Both fetch steps (``fetch`` → get_work_item, ``fetch_notes`` → get_work_item_notes)
 must abort the flow on failure rather than silently continuing into the evaluators
-with missing context and producing a misleading readiness score.
+with missing context and producing a misleading readiness score. The ``persist``
+step must likewise abort on failure rather than reaching end and reporting the
+flow completed while the score was never written.
 
-The scorer/cross-exam chain must also stay wired through the verdict judge
-(``xexam_falsifier`` → ``verdict`` → end) — verdict is the only node that
-terminates the flow and applies the gating/cap logic, so a regression in those
-edges must fail CI here rather than only in manual GDK validation.
+The scorer/cross-exam chain must also stay wired through the verdict judge and
+the persist step (``xexam_falsifier`` → ``verdict`` → ``persist``, then end on
+success or abort on failure): verdict applies the gating/cap logic and persist
+is the only node that writes the score back to the work item, so a regression
+in those edges must fail CI here rather than only in manual GDK validation.
 
 See the review comment on !6678 and the Flow Registry contribution guidelines
 (docs/flow_registry/contribution_guidelines.md).
@@ -18,8 +21,13 @@ import pytest
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 
-class TestReadinessScoreAbortsOnFailedFetch:
-    """A failed work-item or notes fetch must route to abort, not into the evaluators."""
+class TestReadinessScoreAbortsOnFailedStep:
+    """A failed fetch or persist must route to abort, not silently continue.
+
+    A failed work-item or notes fetch must not reach the evaluators with missing context, and a failed persist must not
+    reach end — persisting is the whole point of the step, so its failure must surface instead of reporting the flow
+    completed with the score silently dropped.
+    """
 
     @staticmethod
     def _router_for(config: FlowConfig, from_component: str) -> dict:
@@ -30,17 +38,17 @@ class TestReadinessScoreAbortsOnFailedFetch:
         [
             ("fetch", "context:fetch.execution_result"),
             ("fetch_notes", "context:fetch_notes.execution_result"),
+            ("persist", "context:persist.execution_result"),
         ],
     )
-    def test_fetch_routes_on_execution_result_not_unconditionally(
+    def test_step_routes_on_execution_result_not_unconditionally(
         self, from_component, expected_input
     ):
         config = FlowConfig.from_yaml_config("readiness_score", "1.0.0")
         router = self._router_for(config, from_component)
         assert "to" not in router, (
-            f"{from_component} must not route unconditionally — a failed fetch "
-            "would otherwise reach the evaluators with missing context and emit "
-            "a misleading readiness score"
+            f"{from_component} must not route unconditionally — a failure "
+            "would otherwise go unsurfaced"
         )
         assert router["condition"]["input"] == expected_input
 
@@ -49,6 +57,7 @@ class TestReadinessScoreAbortsOnFailedFetch:
         [
             ("fetch", "fetch_notes"),
             ("fetch_notes", "rubric"),
+            ("persist", "end"),
         ],
     )
     def test_success_continues_and_failure_aborts(self, from_component, success_target):
@@ -57,7 +66,7 @@ class TestReadinessScoreAbortsOnFailedFetch:
         assert routes["success"] == success_target
         assert routes["default_route"] == "abort"
 
-    def test_unconditional_routers_wire_scorers_through_xexam_and_verdict_to_end(self):
+    def test_unconditional_routers_wire_scorers_through_verdict_and_persist(self):
         config = FlowConfig.from_yaml_config("readiness_score", "1.0.0")
 
         assert self._router_for(config, "rubric").get("to") == "coverage"
@@ -66,7 +75,7 @@ class TestReadinessScoreAbortsOnFailedFetch:
         assert self._router_for(config, "xexam_rubric").get("to") == "xexam_coverage"
         assert self._router_for(config, "xexam_coverage").get("to") == "xexam_falsifier"
         assert self._router_for(config, "xexam_falsifier").get("to") == "verdict"
-        assert self._router_for(config, "verdict").get("to") == "end"
+        assert self._router_for(config, "verdict").get("to") == "persist"
 
     @staticmethod
     def _inputs_for(config: FlowConfig, component_name: str) -> dict:
@@ -129,3 +138,32 @@ class TestReadinessScoreVerdictOutput:
 
         assert verdict["response_schema_id"] == "rs_verdict_result"
         assert verdict["response_schema_version"] == "^1.0.0"
+
+
+class TestReadinessScorePersistsVerdict:
+    """The score must reach the work item, not only the session log.
+
+    ``persist`` binds ``readiness_score`` and nothing else: the flow scores a plan
+    it did not author, so binding ``agent_plan`` as well would overwrite the
+    drafted plan.
+    """
+
+    @staticmethod
+    def _persist(config: FlowConfig) -> dict:
+        return next(c for c in config.components if c["name"] == "persist")
+
+    def test_persist_runs_update_work_item_deterministically(self):
+        config = FlowConfig.from_yaml_config("readiness_score", "1.0.0")
+        persist = self._persist(config)
+
+        assert persist["type"] == "DeterministicStepComponent"
+        assert persist["tool_name"] == "update_work_item"
+
+    def test_persist_binds_the_verdict_score_and_nothing_else(self):
+        config = FlowConfig.from_yaml_config("readiness_score", "1.0.0")
+        inputs = {i["as"]: i["from"] for i in self._persist(config)["inputs"]}
+
+        assert inputs == {
+            "url": "context:goal",
+            "readiness_score": "context:verdict.final_answer.score",
+        }
