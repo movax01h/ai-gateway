@@ -156,6 +156,15 @@ async def test_how_many_open_issues(analytics_agent, initial_state, mock_gitlab_
 - Agent tests require the `ANTHROPIC_API_KEY` environment variable.
 - The execution and validation models are configurable via `--execution-model` and `--validation-model` CLI options
   (Anthropic models only).
+- A pass rate per test file is printed at the end of each run and written to
+  `.test-reports/agent_tests/<suite>-summary.md` and `.json`, so results are comparable across runs
+  and across agent variants. Skipped tests are excluded from the denominator, and `--reruns` retries
+  are counted once.
+- Some suites cache the agent responses they score on disk, so that several test files can score the
+  same response without generating it twice. Pass `--refresh-cache` to regenerate.
+- `agent_tests/flow_creator/` is the benchmark baseline for the Flow Creation
+  foundational agent. See its
+  [README](../agent_tests/flow_creator/README.md) before interpreting its scores.
 
 ### Run agent tests locally
 
@@ -183,6 +192,8 @@ EXECUTION_MODEL=claude-haiku-4-5-20251001 VALIDATION_MODEL=claude-haiku-4-5-2025
 Agent tests run as manual jobs in CI (for example, `tests:agents:analytics`).
 Each agent has its own CI job extending the `.tests:agents` base template.
 The jobs require the `ANTHROPIC_API_KEY` CI variable to be configured.
+A job runs automatically on merge request pipelines that change the agent's flow config or its tests.
+Pass-rate summaries, generated artifacts, and a JUnit report are published as job artifacts.
 
 ## Sanity test
 

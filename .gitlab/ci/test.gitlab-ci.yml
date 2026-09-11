@@ -81,6 +81,15 @@ tests:integration:
       fi
     - make test-agents
   when: manual
+  artifacts:
+    when: always
+    expire_in: 1 weeks
+    paths:
+      # Pass-rate summaries, generated flow YAML, and agent transcripts.
+      - .test-reports/agent_tests/
+    reports:
+      junit:
+        - .test-reports/agent-tests.xml
 
 tests:agents:analytics:
   extends: .tests:agents
@@ -99,6 +108,23 @@ tests:agents:analytics:
     matrix:
       - EXECUTION_MODEL: "claude-sonnet-4-6"
       - EXECUTION_MODEL: "claude-opus-4-7"
+
+# Benchmark baseline for the Flow Creation foundational agent. Runs a single
+# execution model: the baseline is defined against one model so that scores stay
+# comparable across runs, and every case costs a multi-turn conversation.
+# See agent_tests/flow_creator/README.md.
+tests:agents:flow-creator:
+  extends: .tests:agents
+  variables:
+    AGENT_TEST_DIR: flow_creator/
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - duo_workflow_service/agent_platform/v1/flows/configs/flow_creator/**/*
+        - agent_tests/flow_creator/**/*
+      when: on_success
+    - when: manual
 
 .test-base: &test-base
   stage: test
