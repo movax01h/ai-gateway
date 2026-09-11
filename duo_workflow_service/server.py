@@ -30,6 +30,9 @@ from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+from litellm.exceptions import (
+    ContextWindowExceededError as LiteLLMContextWindowExceededError,
+)
 from pydantic import ValidationError as PydanticValidationError
 
 import duo_workflow_service.workflows.registry as flow_registry
@@ -259,7 +262,18 @@ def _extract_error_message(error: BaseException) -> str:
     Parses structured error bodies from LiteLLM and Anthropic exceptions to surface only the human-readable message.
     Also normalizes dynamic token counts (e.g. '205531 tokens') to '<N> tokens' for consistent log grouping.
     """
-    if isinstance(error, LiteLLMBadRequestError):
+    if isinstance(error, LiteLLMContextWindowExceededError):
+        # The provider wrappers and JSON payload vary per provider/model, e.g.
+        # "litellm.ContextWindowExceededError: litellm.BadRequestError:
+        # BedrockException: Context Window Error - {"message":"The model returned
+        # the following errors: Input is too long for requested model."}", which
+        # fragments log/SLO grouping. Collapse the details to a stable message.
+        # This branch MUST come before LiteLLMBadRequestError:
+        # ContextWindowExceededError is a subclass of BadRequestError (verified
+        # via ContextWindowExceededError.__mro__), so it would otherwise be
+        # captured by the more general branch.
+        message = "Context window exceeded"
+    elif isinstance(error, LiteLLMBadRequestError):
         raw = (error.message or "").removeprefix("litellm.BadRequestError: ")
         # Bedrock validation errors embed a per-request, position-dependent payload,
         # e.g. "BedrockException - {\"message\":\"1 validation error detected: Value at

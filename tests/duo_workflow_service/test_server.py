@@ -28,6 +28,9 @@ from grpc_health.v1 import health, health_pb2
 from jose import jwt
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+from litellm.exceptions import (
+    ContextWindowExceededError as LiteLLMContextWindowExceededError,
+)
 from packaging.version import Version
 from pydantic import BaseModel, model_validator
 from pydantic import ValidationError as PydanticValidationError
@@ -2625,6 +2628,52 @@ async def test_execute_workflow_missing_workflow_metadata(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_context_window_exceeded_error_is_collapsed(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    # The extracted message is collapsed to a stable "Context window exceeded"
+    # detail instead of the provider-specific payload.
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = LiteLLMContextWindowExceededError(
+        message=(
+            "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+            'BedrockException: Context Window Error - {"message":"The model '
+            'returned the following errors: Input is too long for requested model."}'
+        ),
+        model="claude-sonnet-4-6",
+        llm_provider="bedrock",
+    )
+    mock_workflow.successful_execution = MagicMock(return_value=False)
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+    mock_context.set_details.assert_called_once_with(
+        "workflow execution failure: ContextWindowExceededError: "
+        "Context window exceeded"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_valid_workflow_metadata(
     mock_resolve_flow, mock_abstract_workflow_class, auth_user, mock_context, servicer
 ):
@@ -4519,6 +4568,30 @@ def test_extract_error_message_litellm_bad_request(message, expected):
         assert isinstance(result, str) and result
     else:
         assert result == expected
+
+
+def test_extract_error_message_context_window_exceeded_error_is_collapsed():
+    # The provider wrappers and JSON payload vary per provider/model, so the
+    # details are collapsed to a stable "Context window exceeded" message.
+    error = LiteLLMContextWindowExceededError(
+        message=(
+            "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+            'BedrockException: Context Window Error - {"message":"The model '
+            'returned the following errors: Input is too long for requested model."}'
+        ),
+        model="claude-sonnet-4-6",
+        llm_provider="bedrock",
+    )
+    assert _extract_error_message(error) == "Context window exceeded"
+
+    # ContextWindowExceededError is a subclass of BadRequestError; a plain
+    # BadRequestError must still go through the BadRequestError branch.
+    bad_request_error = LiteLLMBadRequestError(
+        message="some bad request",
+        model="claude-sonnet-4-6",
+        llm_provider="vertex_ai",
+    )
+    assert _extract_error_message(bad_request_error) == "some bad request"
 
 
 @pytest.mark.parametrize(
