@@ -898,7 +898,7 @@ async def test_execute_workflow_emits_billing_event(
             "llm_operations": [
                 {
                     "token_count": 15,
-                    "model_id": "claude-sonnet-4-6",
+                    "model_id": "claude-sonnet-5",
                     "model_engine": "litellm",
                     "model_provider": "litellm",
                     "prompt_tokens": 10,
