@@ -1,13 +1,15 @@
 from enum import StrEnum, auto
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import BaseModel
 
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.agent_platform.v1.ui_log.base import (
     BaseUILogEvents,
     BaseUILogWriter,
     UIHistory,
+    format_tool_display_message,
 )
 from duo_workflow_service.entities import UiChatLog
 
@@ -138,6 +140,75 @@ class TestBaseUILogWriter:
 
         with pytest.raises(NotImplementedError):
             writer.success("Test message", event=MockUILogEvents.ON_TEST)
+
+
+class TestFormatToolDisplayMessage:
+    """Tests for the shared format_tool_display_message function."""
+
+    @pytest.fixture(name="mock_tool")
+    def mock_tool_fixture(self):
+        tool = MagicMock()
+        tool.name = "test_tool"
+        # By default the tool does NOT have format_display_message
+        del tool.format_display_message
+        return tool
+
+    def test_tool_without_format_display_message(self, mock_tool):
+        """Falls back to generic 'Using <name>: <args>' string."""
+        result = format_tool_display_message(mock_tool, {"key": "value", "num": 42})
+        assert result == "Using test_tool: key=value, num=42"
+
+    def test_tool_with_format_display_message_no_schema(self, mock_tool):
+        """Calls tool.format_display_message directly when no args_schema."""
+        mock_tool.format_display_message = MagicMock(return_value="custom msg")
+        mock_tool.args_schema = None
+
+        result = format_tool_display_message(mock_tool, {"k": "v"}, "response")
+
+        assert result == "custom msg"
+        mock_tool.format_display_message.assert_called_once_with({"k": "v"}, "response")
+
+    def test_tool_with_pydantic_args_schema(self, mock_tool):
+        """Parses args through the schema before calling format_display_message."""
+
+        class ToolSchema(BaseModel):
+            key: str
+
+        mock_tool.format_display_message = MagicMock(return_value="parsed msg")
+        mock_tool.args_schema = ToolSchema
+
+        result = format_tool_display_message(mock_tool, {"key": "hello"}, "resp")
+
+        assert result == "parsed msg"
+        call_args = mock_tool.format_display_message.call_args
+        assert isinstance(call_args[0][0], ToolSchema)
+        assert call_args[0][0].key == "hello"
+
+    def test_tool_schema_parse_error_falls_back_to_duo_base_tool(self, mock_tool):
+        """Falls back to DuoBaseTool.format_display_message on schema error."""
+
+        class BadSchema(BaseModel):
+            required_field: str
+
+        mock_tool.format_display_message = MagicMock()
+        mock_tool.args_schema = BadSchema
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.ui_log.base"
+            ".DuoBaseTool.format_display_message",
+            return_value="fallback msg",
+        ) as mock_fallback:
+            result = format_tool_display_message(
+                mock_tool, {"wrong_field": "val"}, "resp"
+            )
+
+        assert result == "fallback msg"
+        mock_fallback.assert_called_once_with(mock_tool, {"wrong_field": "val"}, "resp")
+
+    def test_tool_with_empty_args(self, mock_tool):
+        """Handles empty args dict."""
+        result = format_tool_display_message(mock_tool, {})
+        assert result == "Using test_tool: "
 
 
 class TestUIHistory:
