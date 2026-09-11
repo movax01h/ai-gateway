@@ -9,6 +9,7 @@ import pytest
 from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Overwrite
 
@@ -40,6 +41,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.chat.commands import CHAT_COMMAND_CATEGORY
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_FLOW_TOOLS,
     CHAT_GITLAB_MUTATION_TOOLS,
@@ -646,55 +648,28 @@ def test_tools_registry_interaction(
 
 
 @pytest.mark.parametrize(
-    ("config_overrides", "expect_start_flow"),
+    "config_overrides",
     [
-        ({}, True),
-        (
-            {
-                "features": {
-                    "foundational_flows": {"enabled": True, "enabled_flows": None}
+        {},
+        {"features": {"foundational_flows": {"enabled": True, "enabled_flows": None}}},
+        {"features": {"foundational_flows": {"enabled": False, "enabled_flows": None}}},
+        {
+            "features": {
+                "foundational_flows": {
+                    "enabled": True,
+                    "enabled_flows": ["code_review/v1"],
                 }
-            },
-            True,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {"enabled": False, "enabled_flows": None}
+            }
+        },
+        {"features": {"foundational_flows": {"enabled": True, "enabled_flows": []}}},
+        {
+            "features": {
+                "foundational_flows": {
+                    "enabled": True,
+                    "enabled_flows": ["unsupported/v1"],
                 }
-            },
-            False,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {
-                        "enabled": True,
-                        "enabled_flows": ["code_review/v1"],
-                    }
-                }
-            },
-            True,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {"enabled": True, "enabled_flows": []}
-                }
-            },
-            False,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {
-                        "enabled": True,
-                        "enabled_flows": ["unsupported/v1"],
-                    }
-                }
-            },
-            False,
-        ),
+            }
+        },
     ],
     ids=[
         "defaults_to_available",
@@ -705,18 +680,26 @@ def test_tools_registry_interaction(
         "only_unsupported_flows_enabled",
     ],
 )
-def test_start_flow_tool_gated_by_enablement(
-    config_overrides, expect_start_flow, workflow_with_project
+def test_start_flow_tool_offered_whatever_the_foundational_flow_config(
+    config_overrides, workflow_with_project
 ):
-    """start_flow is only offered when foundational flows can run for the project."""
+    """Custom AI Catalog flows are enabled per project, not by these settings.
+
+    The tool's own schema narrows to the enabled members, so offering it here costs nothing when no foundational flow is
+    available.
+    """
     current_feature_flag_context.set({"agentic_foundational_flow_tool"})
 
     workflow = workflow_with_project
     workflow._workflow_config = {**workflow._workflow_config, **config_overrides}
 
-    tools = workflow._get_tools()
+    assert "start_flow" in workflow._get_tools()
 
-    assert ("start_flow" in tools) is expect_start_flow
+
+def test_start_flow_tool_gated_by_feature_flag(workflow_with_project):
+    current_feature_flag_context.set(set())
+
+    assert "start_flow" not in workflow_with_project._get_tools()
 
 
 @pytest.mark.parametrize(
@@ -2657,3 +2640,345 @@ class TestChatAttachments:
             item for item in (ui_context or []) if item.category == "attachments"
         ]
         assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]
+
+
+FLOW_COMMAND_CONTEXT = AdditionalContext(
+    category=CHAT_COMMAND_CATEGORY,
+    content=json.dumps(
+        {
+            "command": "flow",
+            "ai_catalog_item_consumer_id": 42,
+            "goal": "check the auth module",
+        }
+    ),
+    metadata={},
+)
+
+USER_FILE_CONTEXT = AdditionalContext(
+    category="file", id="f", content="test content", metadata={}
+)
+
+
+@pytest.fixture(name="workflow_with_flow_command")
+def workflow_with_flow_command_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container: containers.Container,
+    mock_chat_agent: ChatAgent,
+    user: CloudConnectorUser,
+    mock_tools_registry: Mock,
+    workflow_id: str,
+    flow_type: GLReportingEventContext,
+):
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        additional_context=[FLOW_COMMAND_CONTEXT, USER_FILE_CONTEXT],
+    )
+    workflow._project = None
+    workflow._namespace = None
+    workflow._http_client = MagicMock()
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
+    return workflow
+
+
+EXPECTED_FLOW_TOOL_ARGS = {
+    "flow": {
+        "name": "catalog_flow",
+        "ai_catalog_item_consumer_id": 42,
+        "goal": "check the auth module",
+    }
+}
+
+
+def assert_forces_the_flow_tool(messages):
+    """The turn is a user message answered by a fixed, client-chosen tool call."""
+    human, ai = messages
+
+    assert isinstance(human, HumanMessage)
+    # Ordering matters: reversed, ChatAgent cancels the call as abandoned.
+    assert isinstance(ai, AIMessage)
+
+    (tool_call,) = ai.tool_calls
+    assert tool_call["name"] == "start_flow"
+    assert tool_call["args"] == EXPECTED_FLOW_TOOL_ARGS
+    assert tool_call["id"]
+
+
+@pytest.mark.asyncio
+async def test_flow_command_forces_a_tool_call_on_a_new_thread(
+    workflow_with_flow_command,
+):
+    result = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module", WorkflowStatusEventEnum.START, None
+    )
+
+    assert_forces_the_flow_tool(result["conversation_history"]["test_prompt"])
+
+
+@pytest.mark.asyncio
+async def test_flow_command_forces_a_tool_call_on_a_later_turn(
+    workflow_with_flow_command,
+):
+    result = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module",
+        WorkflowStatusEventEnum.RESUME,
+        EXISTING_CHECKPOINT,
+    )
+
+    assert result.goto == "run_tools"
+    assert_forces_the_flow_tool(result.update["conversation_history"]["test_prompt"])
+
+
+@pytest.mark.asyncio
+async def test_flow_command_with_no_message_text_still_forces_the_tool_on_a_later_turn(
+    workflow_with_flow_command,
+):
+    """A bare ``/flow:<name>`` has nothing to say beyond the tool call it forces."""
+    result = await workflow_with_flow_command.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+
+    assert result.goto == "run_tools"
+    assert_forces_the_flow_tool(result.update["conversation_history"]["test_prompt"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_event",
+    [WorkflowStatusEventEnum.START, WorkflowStatusEventEnum.RESUME],
+    ids=["new_thread", "later_turn"],
+)
+async def test_flow_command_envelope_is_kept_out_of_the_prompt_and_transcript(
+    status_event, workflow_with_flow_command
+):
+    """The envelope is machine addressing, not something the user supplied."""
+    later_turn = status_event == WorkflowStatusEventEnum.RESUME
+    result = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module",
+        status_event,
+        EXISTING_CHECKPOINT if later_turn else None,
+    )
+    update = result.update if later_turn else result
+
+    human = update["conversation_history"]["test_prompt"][0]
+    assert human.additional_kwargs["additional_context"] == [USER_FILE_CONTEXT]
+    assert update["ui_chat_log"][-1]["additional_context"] == [USER_FILE_CONTEXT]
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_flow_command_envelope_is_still_kept_out_of_the_transcript(
+    mock_duo_workflow_service_container,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_chat_agent,
+    user,
+    mock_tools_registry,
+    workflow_id,
+    flow_type,
+):
+    """Rails cannot serialise the category, so a persisted envelope breaks reading the session back.
+
+    A malformed one is the case that most needs removing, because there is no forced tool call to signal that a command
+    was involved at all.
+    """
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        additional_context=[
+            AdditionalContext(
+                category=CHAT_COMMAND_CATEGORY, content="not json at all", metadata={}
+            ),
+            USER_FILE_CONTEXT,
+        ],
+    )
+    workflow._project = None
+    workflow._namespace = None
+    workflow._http_client = MagicMock()
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
+
+    assert workflow._forced_tool_call is None
+
+    result = await workflow.get_graph_input(
+        "/flow:security-scan go", WorkflowStatusEventEnum.START, None
+    )
+
+    assert result["ui_chat_log"][-1]["additional_context"] == [USER_FILE_CONTEXT]
+    assert result["conversation_history"]["test_prompt"][0].additional_kwargs[
+        "additional_context"
+    ] == [USER_FILE_CONTEXT]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "additional_context",
+    [None, [], [FLOW_COMMAND_CONTEXT]],
+    ids=["null", "empty", "envelope-only"],
+)
+async def test_absent_additional_context_stays_absent(
+    mock_duo_workflow_service_container,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_chat_agent,
+    user,
+    mock_tools_registry,
+    workflow_id,
+    flow_type,
+    additional_context,
+):
+    """Stripping the envelope must not turn absence into an empty list.
+
+    ``with_attachment_references`` distinguishes ``None`` from ``[]``, and ``_turn_context`` normalises an emptied list
+    back to ``None``, so reporting ``[]`` here would change what every workflow puts in its transcript and chat log —
+    not just one carrying a flow command.
+    """
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        additional_context=additional_context,
+    )
+    workflow._project = None
+    workflow._namespace = None
+    workflow._http_client = MagicMock()
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
+
+    assert workflow._additional_context is None
+
+    result = await workflow.get_graph_input(
+        "/flow:security-scan go", WorkflowStatusEventEnum.START, None
+    )
+
+    assert result["ui_chat_log"][-1]["additional_context"] is None
+    assert (
+        result["conversation_history"]["test_prompt"][0].additional_kwargs[
+            "additional_context"
+        ]
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_turn_still_goes_to_the_agent(workflow_with_project):
+    result = await workflow_with_project.get_graph_input(
+        "what does this do?", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+
+    assert result.goto == "agent"
+    (message,) = result.update["conversation_history"]["test_prompt"]
+    assert isinstance(message, HumanMessage)
+
+
+@pytest.mark.parametrize(
+    ("history", "expected"),
+    [
+        ([HumanMessage(content="hi")], Routes.CONTINUE),
+        ([AIMessage(content="hello")], Routes.CONTINUE),
+        ([], Routes.CONTINUE),
+        (
+            [
+                HumanMessage(content="hi"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "start_flow",
+                            "args": {},
+                            "id": "c1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+            ],
+            Routes.TOOL_USE,
+        ),
+    ],
+    ids=["user_turn", "agent_reply", "no_history", "forced_tool_call"],
+)
+def test_entry_route(history, expected, workflow_with_project):
+    state = ChatWorkflowState(conversation_history={"test_prompt": history})
+
+    assert workflow_with_project._entry_route(state) == expected
+
+
+def compile_graph_recording_visited_nodes(
+    workflow, mock_tools_executor, mock_create_agent
+):
+    """Compile the real graph with both nodes replaced by recorders.
+
+    _compile builds its own agent, so the recorder has to be installed at create_agent rather than on the fixture's
+    agent.
+    """
+    visited = []
+
+    async def run_agent(state):
+        visited.append("agent")
+        # A reply with no tool calls ends the turn.
+        return {"conversation_history": {"test_prompt": [AIMessage(content="done")]}}
+
+    async def run_tools(state):
+        visited.append("run_tools")
+        return {"status": WorkflowStatusEnum.EXECUTION}
+
+    agent = MagicMock()
+    agent.name = "test_prompt"
+    agent.run = run_agent
+    mock_create_agent.return_value = agent
+    mock_tools_executor.return_value.run = run_tools
+
+    tools_registry = MagicMock()
+    tools_registry.toolset.return_value = MagicMock(bindable=[])
+
+    return workflow._compile("goal", tools_registry, MemorySaver()), visited
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_compiled_graph_enters_at_the_tools_node_for_a_flow_command(
+    mock_tools_executor, mock_create_agent, workflow_with_flow_command
+):
+    """A new thread cannot be entered with a Command, so entry routes on state.
+
+    LangGraph only treats a Command as input when a prior checkpoint exists, so the forced call is seeded into the
+    conversation and the entry router picks it up instead.
+    """
+    graph, visited = compile_graph_recording_visited_nodes(
+        workflow_with_flow_command, mock_tools_executor, mock_create_agent
+    )
+    graph_input = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module", WorkflowStatusEventEnum.START, None
+    )
+
+    async for _ in graph.astream(
+        graph_input,
+        config={"configurable": {"thread_id": "t1"}, "recursion_limit": 5},
+    ):
+        pass
+
+    # The tool runs first, then the agent gets a turn to narrate the result.
+    assert visited == ["run_tools", "agent"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_compiled_graph_enters_at_the_agent_for_an_ordinary_turn(
+    mock_tools_executor, mock_create_agent, workflow_with_project
+):
+    graph, visited = compile_graph_recording_visited_nodes(
+        workflow_with_project, mock_tools_executor, mock_create_agent
+    )
+    graph_input = await workflow_with_project.get_graph_input(
+        "what does this do?", WorkflowStatusEventEnum.START, None
+    )
+
+    async for _ in graph.astream(
+        graph_input,
+        config={"configurable": {"thread_id": "t2"}, "recursion_limit": 5},
+    ):
+        pass
+
+    assert visited == ["agent"]

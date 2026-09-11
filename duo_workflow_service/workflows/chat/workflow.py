@@ -54,12 +54,13 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
-from duo_workflow_service.tools.start_flow import (
-    enabled_flow_identifiers,
-    enabled_flow_names,
-)
 from duo_workflow_service.tracking.errors import log_exception
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+from duo_workflow_service.workflows.chat.commands import (
+    ForcedToolCall,
+    parse_forced_tool_call,
+    strip_command_context,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -226,6 +227,7 @@ class Workflow(AbstractWorkflow):
     _workflow_id: str
     _workflow_type: GLReportingEventContext
     _agent_name_override: Optional[str] = None
+    _forced_tool_call: Optional[ForcedToolCall] = None
 
     # pylint: disable=dangerous-default-value
     @inject
@@ -284,6 +286,49 @@ class Workflow(AbstractWorkflow):
             flow_type=workflow_type,
             internal_event_client=self._internal_event_client,
         )
+
+        self._forced_tool_call = parse_forced_tool_call(self._additional_context)
+        # The envelope is machine addressing rather than user-supplied context, so keep
+        # it out of both the prompt and the transcript. Stripped whether or not it
+        # parsed: a malformed one is the case that most needs removing, since Rails
+        # cannot serialise the category and a persisted one breaks reading the session
+        # back.
+        self._additional_context = strip_command_context(self._additional_context)
+
+    def _forced_tool_call_message(self, forced: ForcedToolCall) -> AIMessage:
+        """An assistant turn carrying the tool call the client chose.
+
+        Append this after the message it answers. Reversed, ChatAgent reads it as a call the user interrupted and
+        cancels it before the tools node runs.
+        """
+        return AIMessage(
+            content="",
+            id=f"forced-{uuid4()!s}",
+            tool_calls=[
+                {
+                    "name": forced.name,
+                    "args": forced.args,
+                    "id": f"call_{uuid4().hex}",
+                    "type": "tool_call",
+                }
+            ],
+        )
+
+    def _entry_route(self, state: ChatWorkflowState) -> Routes:
+        """Route the first step of a turn.
+
+        A client-forced tool call is seeded into the conversation as an assistant turn, so entry goes straight to the
+        tools node and the model never gets to choose which tool runs.
+        """
+        history: List[BaseMessage] = state["conversation_history"].get(
+            self._agent.name, []
+        )
+        last_message = history[-1] if history else None
+
+        if isinstance(last_message, AIMessage) and last_message.tool_calls:
+            return Routes.TOOL_USE
+
+        return Routes.CONTINUE
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
@@ -371,6 +416,11 @@ class Workflow(AbstractWorkflow):
                 self._attachment_blocks(attachments, rejection),
             ),
         )
+
+        if self._forced_tool_call:
+            conversation_history.append(
+                self._forced_tool_call_message(self._forced_tool_call)
+            )
 
         ui_chat_log: list[UiChatLog] = []
         if not self._user_entry_would_be_blank(goal, attachments, rejection):
@@ -471,16 +521,27 @@ class Workflow(AbstractWorkflow):
                         # say, so an empty goal is no longer reason to skip it.
                         # A rejection counts too: the user sent files and is owed
                         # an answer about them, even if it is only "those failed".
-                        if goal or attachments or rejection:
+                        # So does a forced tool call: the client chose it.
+                        if goal or attachments or rejection or self._forced_tool_call:
                             sent_attachments = attachments
-                            state_update["conversation_history"] = {
-                                self._agent.name: [
-                                    assemble_user_message(
-                                        goal,
-                                        additional_context,
-                                        self._attachment_blocks(attachments, rejection),
+                            new_messages: List[BaseMessage] = [
+                                assemble_user_message(
+                                    goal,
+                                    additional_context,
+                                    self._attachment_blocks(attachments, rejection),
+                                )
+                            ]
+
+                            if self._forced_tool_call:
+                                new_messages.append(
+                                    self._forced_tool_call_message(
+                                        self._forced_tool_call
                                     )
-                                ]
+                                )
+                                next_step = "run_tools"
+
+                            state_update["conversation_history"] = {
+                                self._agent.name: new_messages
                             }
 
                 discarded_log: list[UiChatLog] = []
@@ -679,7 +740,13 @@ class Workflow(AbstractWorkflow):
         graph.add_node("agent", self._agent.run)
         graph.add_node("run_tools", tools_runner)
 
-        graph.set_entry_point("agent")
+        graph.set_conditional_entry_point(
+            self._entry_route,
+            {
+                Routes.TOOL_USE: "run_tools",
+                Routes.CONTINUE: "agent",
+            },
+        )
 
         graph.add_conditional_edges(
             "agent",
@@ -716,16 +783,13 @@ class Workflow(AbstractWorkflow):
                 tool for tool in read_only_tools if tool not in _SEARCH_TOOLS
             ]
 
-        # Only offer start_flow when foundational flows are enabled for the
-        # project and at least one supported flow is available.
-        flow_identifiers = enabled_flow_identifiers(
-            self._workflow_config.get("features")
-        )
-        flows_available = bool(enabled_flow_names(flow_identifiers))
+        # Custom AI Catalog flows are enabled per project rather than by the
+        # foundational-flow settings, so start_flow stays available however
+        # those are narrowed. The tool's own schema drops the members that are
+        # not enabled.
         flow_tools = (
             CHAT_FLOW_TOOLS
             if is_feature_enabled(FeatureFlag.AGENTIC_FOUNDATIONAL_FLOW_TOOL)
-            and flows_available
             else []
         )
 

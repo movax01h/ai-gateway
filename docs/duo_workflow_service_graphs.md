@@ -118,7 +118,8 @@ graph TD;
     agent(agent)
     run_tools(run_tools)
     __end__([<p>__end__</p>]):::last
-    __start__ --> agent;
+    __start__ -. &nbsp;continue&nbsp; .-> agent;
+    __start__ -. &nbsp;tool_use&nbsp; .-> run_tools;
     agent -. &nbsp;stop&nbsp; .-> __end__;
     agent -. &nbsp;tool_use&nbsp; .-> run_tools;
     run_tools --> agent;
