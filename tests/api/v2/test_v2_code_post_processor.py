@@ -17,7 +17,7 @@ from ai_gateway.models import KindModelProvider
 def mock_config_fixture():
     """Create a mock config with feature flags."""
     config = Config()
-    config.feature_flags.excl_post_process = []
+    config.feature_flags.excl_post_process = lambda: []
     config.feature_flags.fireworks_score_threshold = lambda: {
         "codestral-2501": 0.5,
         "qwen2p5-coder-7b": 0.3,
@@ -43,7 +43,7 @@ class TestCreatePostProcessorForModel:
         instance = result(code_context="test context")
         assert isinstance(instance, PostProcessor)
         assert PostProcessorOperation.STRIP_ASTERISKS in instance.extras
-        assert instance.exclude == mock_config.feature_flags.excl_post_process
+        assert instance.exclude == mock_config.feature_flags.excl_post_process()
 
     def test_fireworks_creates_post_processor_with_filter_score_and_fix_truncation(
         self, mock_config
@@ -62,7 +62,7 @@ class TestCreatePostProcessorForModel:
         assert isinstance(instance, PostProcessor)
         assert PostProcessorOperation.FILTER_SCORE in instance.extras
         assert PostProcessorOperation.FIX_TRUNCATION in instance.extras
-        assert instance.exclude == mock_config.feature_flags.excl_post_process
+        assert instance.exclude == mock_config.feature_flags.excl_post_process()
         # Verify score_threshold is set correctly as a float, not a dict
         assert "score_threshold" in result.kwargs
         assert result.kwargs["score_threshold"] == 0.5

@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from time import time
-from typing import Annotated, Any, AsyncIterator, Dict, Optional, Tuple
+from typing import Annotated, Any, AsyncIterator, Optional, Tuple
 
-from dependency_injector.providers import Factory
+from dependency_injector.providers import Configuration, Factory
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -51,7 +51,6 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor,
     PostProcessorOperation,
 )
-from ai_gateway.config import Config
 from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
@@ -78,7 +77,7 @@ class CompletionConfig:
 
     handler_class: Optional[type] = None
     requires_prompt_registry: bool = False
-    extra_kwargs: Optional[Dict[str, Any]] = None
+    extra_kwargs: Optional[dict[str, Any]] = None
     unit_primitive: Optional[GitLabUnitPrimitive] = None
 
     def __post_init__(self):
@@ -121,7 +120,7 @@ async def completions(
     payload: CompletionsRequestWithVersion,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    config: Annotated[Config, Depends(get_config)],
+    config: Annotated[Configuration, Depends(get_config)],
     completions_amazon_q_factory: Annotated[
         Factory[CodeCompletions],
         Depends(get_code_suggestions_completions_amazon_q_factory_provider),
@@ -202,7 +201,7 @@ async def completions(
             region=region,
         ),
         metadata=SuggestionsResponse.MetadataBase(
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
         ),
         choices=choices,
     )
@@ -220,7 +219,7 @@ async def generations(
     payload: GenerationsRequestWithVersion,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    config: Annotated[Config, Depends(get_config)],
+    config: Annotated[Configuration, Depends(get_config)],
     generations_vertex_factory: Annotated[
         Factory[CodeGenerations],
         Depends(get_code_suggestions_generations_vertex_provider),
@@ -301,7 +300,7 @@ async def generations(
         file_name=payload.current_file.file_name,
         editor_lang=payload.current_file.language_identifier,
         model_provider=payload.model_provider,
-        stream=payload.stream,
+        stream=payload.stream or False,
         user=current_user.cloud_connector_user,
     )
 
@@ -325,7 +324,7 @@ async def generations(
             region=config.google_cloud_platform.location(),
         ),
         metadata=SuggestionsResponse.MetadataBase(
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
         ),
         choices=_generation_suggestion_choices(suggestion.text),
     )
@@ -346,8 +345,10 @@ def _resolve_prompt_code_generations(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
     generations_agent_factory: Factory[CodeGenerations],
-    config: Config,
+    config: Configuration,
 ) -> CodeGenerations:
+    assert payload.prompt_id is not None
+
     has_model_info = (
         payload.model_name is not None and payload.model_provider is not None
     )
@@ -361,7 +362,7 @@ def _resolve_prompt_code_generations(
                 "provider": "custom_openai",
                 "identifier": payload.model_identifier,
             },
-            mock_model_responses=config.mock_model_responses,
+            mock_model_responses=config.mock_model_responses(),
         )
         prompt = prompt_registry.get_on_behalf(
             current_user,
@@ -389,7 +390,7 @@ def _build_code_generations(
     generations_litellm_factory: Factory[CodeGenerations],
     generations_agent_factory: Factory[CodeGenerations],
     internal_event_client: InternalEventsClient,
-    config: Config,
+    config: Configuration,
 ) -> CodeGenerations:
     if payload.prompt_id:
         return _resolve_prompt_code_generations(
@@ -428,15 +429,14 @@ def _resolve_agent_code_completions(
     completions_agent_factory: Factory[CodeCompletions],
     model_keys: dict,
     using_cache: bool,
-    config: Config,
+    config: Configuration,
     gitlab_identifier: Optional[str] = None,
 ) -> CodeCompletions:
     # Use the GitLab identifier if provided (from model_provider: "gitlab")
     # Otherwise, try to map legacy provider/model_name to GitLab identifier
-    if gitlab_identifier:
-        name = gitlab_identifier
-    else:
-        name = _get_gitlab_identifier(payload.model_provider, payload.model_name)
+    name = gitlab_identifier or _get_gitlab_identifier(
+        payload.model_provider, payload.model_name
+    )
 
     model_metadata = create_model_metadata(
         {
@@ -450,7 +450,7 @@ def _resolve_agent_code_completions(
             "using_cache": using_cache,
             "session_id": current_user.global_user_id,
         },
-        mock_model_responses=config.mock_model_responses,
+        mock_model_responses=config.mock_model_responses(),
     )
 
     # Create post processor based on model provider and name
@@ -481,7 +481,9 @@ def _resolve_agent_code_completions(
     )
 
 
-def _get_gitlab_identifier(model_provider: str, model_name: str) -> str:
+def _get_gitlab_identifier(
+    model_provider: Optional[KindModelProvider], model_name: Optional[str]
+) -> Optional[str]:
     legacy_identifier = f"{model_provider}/{model_name}"
 
     return LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER.get(
@@ -490,9 +492,9 @@ def _get_gitlab_identifier(model_provider: str, model_name: str) -> str:
 
 
 def _create_post_processor_for_model(
-    model_provider: str,
-    model_name: str,
-    config: Config,
+    model_provider: Optional[KindModelProvider],
+    model_name: Optional[str],
+    config: Configuration,
 ) -> Optional[Factory]:
     """Create the appropriate post processor factory based on model provider and name."""
 
@@ -508,14 +510,14 @@ def _create_post_processor_for_model(
         return Factory(
             PostProcessor,
             extras=[PostProcessorOperation.STRIP_ASTERISKS],
-            exclude=config.feature_flags.excl_post_process,
+            exclude=config.feature_flags.excl_post_process(),
         )
 
     # Fireworks: apply FILTER_SCORE and FIX_TRUNCATION
     if model_provider == KindModelProvider.FIREWORKS:
         return Factory(
             PostProcessor,
-            exclude=config.feature_flags.excl_post_process,
+            exclude=config.feature_flags.excl_post_process(),
             extras=[
                 PostProcessorOperation.FILTER_SCORE,
                 PostProcessorOperation.FIX_TRUNCATION,
@@ -529,18 +531,18 @@ def _create_post_processor_for_model(
 
 
 def _get_provider_config(
-    provider: KindModelProvider,
+    provider: Optional[KindModelProvider],
     region: str,
     payload: CompletionsRequestWithVersion,
 ) -> CompletionConfig:
     """Get the appropriate completion configuration for the given provider."""
 
-    def _should_include_context(provider: KindModelProvider) -> bool:
+    def _should_include_context(provider: Optional[KindModelProvider]) -> bool:
         """Determine if this provider should include context."""
 
         return provider not in [KindModelProvider.ANTHROPIC, KindModelProvider.AMAZON_Q]
 
-    def _get_context_kwargs(provider: KindModelProvider) -> Dict[str, Any]:
+    def _get_context_kwargs(provider: Optional[KindModelProvider]) -> dict[str, Any]:
         """Get context kwargs if needed for this provider."""
 
         if _should_include_context(provider) and payload.context:
@@ -591,7 +593,7 @@ def _build_code_completions(
     internal_event_client: InternalEventsClient,
     region: str,
     model_keys: dict,
-    config: Config,
+    config: Configuration,
 ) -> tuple[CodeCompletions, dict]:
     unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
     tracking_event = f"request_{unit_primitive}"
@@ -611,7 +613,7 @@ def _build_code_completions(
                 "feature_setting": "code_completions",
                 "provider_keys": model_keys,
             },
-            mock_model_responses=config.mock_model_responses,
+            mock_model_responses=config.mock_model_responses(),
         )
 
         actual_provider = KindModelProvider.from_definition_provider(
@@ -624,16 +626,16 @@ def _build_code_completions(
         provider_model_name = (
             model_metadata.llm_definition.params.model or payload.model_name
         )
-        kwargs = {}
 
+        # Result dict is discarded; only the payload mutations these handlers make matter here.
         if actual_provider == KindModelProvider.ANTHROPIC:
-            AnthropicHandler(payload, request, kwargs).update_completion_params()
+            AnthropicHandler(payload, request, {}).update_completion_params()
         elif actual_provider == KindModelProvider.FIREWORKS:
             payload.model_name = provider_model_name
-            FireworksHandler(payload, request, kwargs).update_completion_params()
+            FireworksHandler(payload, request, {}).update_completion_params()
         elif actual_provider == KindModelProvider.VERTEX_AI:
             payload.model_name = provider_model_name
-            VertexHandler(payload, request, kwargs).update_completion_params()
+            VertexHandler(payload, request, {}).update_completion_params()
 
     provider_config = _get_provider_config(
         payload.model_provider,
@@ -641,7 +643,7 @@ def _build_code_completions(
         payload,
     )
 
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     if provider_config.handler_class:
         provider_config.handler_class(
@@ -669,7 +671,7 @@ def _build_code_completions(
         model__role_arn=payload.role_arn,
     )
 
-    kwargs.update(provider_config.extra_kwargs)
+    kwargs.update(provider_config.extra_kwargs or {})
 
     unit_primitive = provider_config.unit_primitive or GitLabUnitPrimitive.COMPLETE_CODE
     tracking_event = f"request_{unit_primitive}"
@@ -744,8 +746,8 @@ async def _execute_code_completion(
     payload: CompletionsRequestWithVersion,
     code_completions: CodeCompletions,
     current_user: StarletteUser,
-    **kwargs: dict,
-) -> any:
+    **kwargs: Any,
+) -> Any:
     output = await code_completions.execute(
         prefix=payload.current_file.content_above_cursor,
         suffix=payload.current_file.content_below_cursor,
