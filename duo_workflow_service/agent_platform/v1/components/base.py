@@ -5,7 +5,6 @@ from gitlab_cloud_connector import CloudConnectorUser
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from duo_workflow_service.agent_platform.constants import ABORT_FLOW_ENTRY_HOOK
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
     FlowStateKeys,
@@ -17,7 +16,6 @@ from duo_workflow_service.entities.state import WorkflowStatusEnum
 from lib.events import GLReportingEventContext
 
 __all__ = [
-    "ABORT_FLOW_ENTRY_HOOK",
     "AbortComponent",
     "BaseComponent",
     "EndComponent",
@@ -134,7 +132,7 @@ class EndComponent(BaseComponent):
 
 class AbortComponent(BaseComponent):
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
-        return ABORT_FLOW_ENTRY_HOOK
+        return "abort_flow"
 
     def attach(
         self, graph: StateGraph, router: Optional[RouterProtocol] = None
